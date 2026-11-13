@@ -1633,6 +1633,14 @@ available_node_types:
                   # only two PIDs should be accessing the file
                   # the log appender and log tailer
                   if [ $(mylsof "$file" | wc -l) -lt 2 ]; then
+                    # The writer has closed the file, but tail may not have
+                    # read its final writes yet: on filesystems without
+                    # inotify support (e.g. overlayfs, the usual container
+                    # rootfs) `tail -f` polls once per second. Give it more
+                    # than one poll interval to drain before killing it,
+                    # otherwise the last lines of the job never reach the
+                    # container log.
+                    sleep 2
                     kill $TAIL_PID
                     break
                   fi
