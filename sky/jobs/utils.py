@@ -1196,10 +1196,12 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             raise
 
 
-# The jobs controller records the server-level setting once at start, before
-# it enters any job's context: inside a job's context, the config is that job's
-# snapshot from submission time, which would keep an old `true` alive after an
-# administrator turned callbacks off. The controller restarts with the server.
+# The jobs controller records the setting once at start, before it enters any
+# job's context: inside a job's context, the config is that job's snapshot from
+# submission time, which would keep an old `true` alive after an administrator
+# turned callbacks off. A consolidation-mode controller restarts with the
+# server; a controller on its own cluster always allows callbacks (see
+# event_callbacks_allowed).
 _controller_event_callbacks_allowed: Optional[bool] = None
 
 _EVENT_CALLBACK_DEPRECATION_MESSAGE = (
@@ -1222,19 +1224,23 @@ def event_callbacks_allowed() -> bool:
     administrator can opt in with `jobs.allow_event_callback: true` in the
     server config.
 
-    Resolution order:
-    1. ``jobs.allow_event_callback`` in the SkyPilot config, if set.
-    2. In the API server, or a controller it runs (consolidation mode): off.
-    3. In a jobs controller on its own cluster: allowed. Its jobs were already
-       checked by the API server when they were submitted, and the server's
-       config is not available there.
+    In the API server, and in the jobs controllers it runs (consolidation
+    mode), this is ``jobs.allow_event_callback`` from the server config
+    (default: off). Those controllers restart with the server, so they always
+    see its current setting.
+
+    A jobs controller on its own cluster always allows callbacks. The API
+    server already checked each of its jobs when it was submitted, and the
+    controller's own copy of the config is from when the controller was
+    created, so it may not match the server's current setting.
     """
-    allowed = skypilot_config.get_nested(('jobs', 'allow_event_callback'), None)
-    if allowed is not None:
-        return bool(allowed)
-    # pylint: disable=import-outside-toplevel
-    from sky.server import common as server_common
-    return not server_common.is_running_in_api_server()
+    # Same check as sky.server.common.is_running_in_api_server: the API server
+    # and the controllers it spawns have this variable; a controller on its
+    # own cluster does not.
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    return bool(
+        skypilot_config.get_nested(('jobs', 'allow_event_callback'), False))
 
 
 def check_event_callbacks_allowed(dag: 'sky.Dag') -> None:

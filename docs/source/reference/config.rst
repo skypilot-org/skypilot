@@ -548,7 +548,7 @@ Example:
 
 Allow managed jobs to set the deprecated ``event_callback`` field (optional).
 
-``event_callback`` is a shell script that the jobs controller runs whenever a managed job changes status. It is deprecated and will be removed in a future release. It is disabled by default: ``sky jobs launch`` rejects a job that sets it, and jobs that were submitted before it was disabled skip their callbacks.
+``event_callback`` is a shell script that the jobs controller runs whenever a managed job changes status. It is deprecated and will be removed in a future release. It is disabled by default: ``sky jobs launch`` rejects a job that sets it. When the jobs controller runs in the API server (:ref:`consolidation mode <jobs-consolidation-mode>`), jobs that were submitted before it was disabled skip their callbacks.
 
 Set this to ``true`` in the API server's config to keep using ``event_callback``. It cannot be set from a client's config.
 
