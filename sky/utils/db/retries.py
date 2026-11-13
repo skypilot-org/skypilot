@@ -24,10 +24,31 @@ from typing import Awaitable, Callable, Optional, Set, Tuple, Type, TypeVar
 import sqlalchemy.exc
 
 from sky.utils import common_utils
+from sky.utils.db import deadline as db_deadline
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
+
+
+def _stop_for_deadline(e: BaseException, delay: float) -> bool:
+    """Whether the caller's thread-local auth deadline says a retry cannot help.
+
+    This is the deadline `sky.utils.db.deadline` holds for the bounded auth
+    path (set by `db_lookup.call_with_deadline` on its worker thread), not the
+    ``deadline`` argument of the retry helpers. Only when it is set: either
+    ``e`` *is* that deadline (a server-side bound sized from it fired;
+    replaying would hold the thread past the deadline the bound exists to
+    enforce), or the backoff sleep alone would run past it (the retry could
+    not even start in budget). Everywhere else (no auth deadline set), this
+    is False and retry behaviour is unchanged.
+    """
+    deadline = db_deadline.get_deadline()
+    if deadline is None:
+        return False
+    if db_deadline.is_deadline_error(e):
+        return True
+    return time.monotonic() + delay >= deadline
 
 
 def _build_driver_exceptions() -> Tuple[Type[BaseException], ...]:
@@ -244,6 +265,10 @@ def with_db_retries(fn: Callable[[int], T],
                              f'{attempt} attempts; {summarize(e)}')
                 raise
             delay = _next_delay(backoff, deadline)
+            if _stop_for_deadline(e, delay):
+                logger.debug(f'Not retrying under the caller\'s auth '
+                             f'deadline: {summarize(e)}')
+                raise
             _log_retry(attempt, max_retries, delay, e)
             time.sleep(delay)
 
@@ -275,6 +300,10 @@ async def with_db_retries_async(
                              f'{attempt} attempts; {summarize(e)}')
                 raise
             delay = _next_delay(backoff, deadline)
+            if _stop_for_deadline(e, delay):
+                logger.debug(f'Not retrying under the caller\'s auth '
+                             f'deadline: {summarize(e)}')
+                raise
             _log_retry(attempt, max_retries, delay, e)
             await asyncio.sleep(delay)
 

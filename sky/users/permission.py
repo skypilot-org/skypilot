@@ -23,6 +23,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
+from sky.utils.db import deadline as db_deadline
 from sky.utils.db import kv_cache
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import utils as workspaces_utils
@@ -969,6 +970,8 @@ class PermissionService:
         seeded", so pay for one load -- bounded per principal by TTL and per
         worker by `_PROBE_DUTY_CYCLE`. A failed reload answers "no roles" (the
         caller denies): raising would leave the middleware with a bare 500.
+        The exception is a reload cut off by the auth-path deadline, which is
+        re-raised for the auth-path wrapper to answer with a retryable 503.
         """
         roles = lambda: self._ensure_enforcer().get_roles_for_user(user_id)
         if not _take_ttl_permit(self._no_role_probe_cache, user_id,
@@ -985,6 +988,20 @@ class PermissionService:
         try:
             self._load_policy_no_lock()
         except Exception as e:  # pylint: disable=broad-except
+            if (db_deadline.get_deadline() is not None and
+                    db_deadline.is_deadline_error(e)):
+                # The reload hit the caller's auth-path deadline (a slow DB or a
+                # held lock). Do NOT swallow it into "no roles" -- that denies
+                # the principal with a non-retryable 403. Re-raise so the
+                # auth-path wrapper (`db_lookup.call_with_deadline`, the only
+                # setter of the deadline) maps it to the retryable 503 it maps
+                # every other auth deadline to. casbin keeps the old policy on
+                # a failed reload (it swaps only on success), so nothing is
+                # lost. Without an auth deadline (the request executor, the
+                # role-repair worker) nothing would map it, and a timeout from
+                # another bound (a server default, a bound on the policy load
+                # itself) keeps the "no roles" answer below.
+                raise
             logger.warning(f'Policy reload for unrecognized principal '
                            f'{user_id} failed; treating them as role-less: '
                            f'{common_utils.format_exception(e)}')
