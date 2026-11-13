@@ -122,7 +122,7 @@ function UserName({ name, className = '' }) {
     return (
       <NonCapitalizedTooltip content={name}>
         <span
-          className={`border-b border-dotted border-gray-400 cursor-help ${className}`}
+          className={`border-b border-dotted border-line-stronger cursor-help ${className}`}
         >
           {displayName}
         </span>
@@ -149,25 +149,25 @@ function RecipeCard({ recipe, onPin }) {
           trackRecipeAction('view', { recipe_type: recipe.recipe_type })
         }
       >
-        <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
+        <Card className="h-full hover:bg-surface-subtle transition-colors cursor-pointer group">
           <CardContent className="p-3">
             {/* Header with icon and name */}
             <div className="flex items-start gap-2 mb-1.5">
               <TypeIcon
                 className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
                   typeInfo.color === 'sky'
-                    ? 'text-sky-600'
+                    ? 'text-sky-fg'
                     : typeInfo.color === 'purple'
-                      ? 'text-purple-600'
+                      ? 'text-purple-fg'
                       : typeInfo.color === 'green'
-                        ? 'text-green-600'
+                        ? 'text-green-fg'
                         : typeInfo.color === 'orange'
-                          ? 'text-orange-600'
-                          : 'text-gray-600'
+                          ? 'text-orange-fg'
+                          : 'text-content-secondary'
                 }`}
               />
               <div className="flex-1 min-w-0">
-                <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
+                <h3 className="text-base font-medium text-blue-fg truncate group-hover:text-blue-fg-stronger transition-colors">
                   {recipe.name}
                 </h3>
               </div>
@@ -176,18 +176,20 @@ function RecipeCard({ recipe, onPin }) {
             {/* Bottom info section with even spacing - always render all 5 lines for consistent height */}
             <div className="space-y-1.5">
               {/* Type */}
-              <div className="text-sm text-gray-500">{typeInfo.label}</div>
+              <div className="text-sm text-content-tertiary">
+                {typeInfo.label}
+              </div>
 
               {/* Description - always render line, use invisible placeholder if empty */}
               <p
-                className={`text-sm truncate ${recipe.description ? 'text-gray-600' : 'invisible'}`}
+                className={`text-sm truncate ${recipe.description ? 'text-content-secondary' : 'invisible'}`}
                 title={recipe.description || ''}
               >
                 {recipe.description || '\u00A0'}
               </p>
 
               {/* Authored by */}
-              <div className="flex items-center gap-1 text-sm text-gray-500 truncate">
+              <div className="flex items-center gap-1 text-sm text-content-tertiary truncate">
                 Authored by{' '}
                 {isGitSourced(recipe) ? (
                   <GitAuthor />
@@ -198,7 +200,7 @@ function RecipeCard({ recipe, onPin }) {
 
               {/* Last updated info - always render line for consistent height */}
               <div
-                className={`text-sm text-gray-500 truncate ${!((recipe.is_editable || isGitSourced(recipe)) && recipe.user_name !== 'local') ? 'invisible' : ''}`}
+                className={`text-sm text-content-tertiary truncate ${!((recipe.is_editable || isGitSourced(recipe)) && recipe.user_name !== 'local') ? 'invisible' : ''}`}
               >
                 Updated by{' '}
                 <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
@@ -221,7 +223,7 @@ function RecipeCard({ recipe, onPin }) {
             e.stopPropagation();
             onPin(recipe.name, false);
           }}
-          className="absolute top-2 right-2 p-1 rounded transition-colors text-amber-500 hover:text-amber-700 hover:bg-amber-100"
+          className="absolute top-2 right-2 p-1 rounded transition-colors text-amber-fg-soft hover:text-amber-fg-strong hover:bg-amber-tint-strong"
           title="Unpin recipe"
         >
           <PinOffIcon className="h-4 w-4" />
@@ -245,11 +247,13 @@ function TemplateRow({
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-3">
           <Icon className={`w-4 h-4 ${iconColor}`} />
-          <h2 className="text-base text-gray-700">{title}</h2>
-          <span className="text-sm text-gray-500">({recipes.length})</span>
+          <h2 className="text-base text-content">{title}</h2>
+          <span className="text-sm text-content-tertiary">
+            ({recipes.length})
+          </span>
         </div>
-        <div className="text-center py-6 bg-white rounded-lg border border-gray-200 shadow-sm">
-          <p className="text-gray-500">{emptyMessage}</p>
+        <div className="text-center py-6 bg-surface rounded-lg border border-line shadow-sm">
+          <p className="text-content-tertiary">{emptyMessage}</p>
         </div>
       </div>
     );
@@ -259,8 +263,10 @@ function TemplateRow({
     <div className="mb-6">
       <div className="flex items-center gap-2 mb-3">
         <Icon className={`w-4 h-4 ${iconColor}`} />
-        <h2 className="text-base text-gray-700">{title}</h2>
-        <span className="text-sm text-gray-500">({recipes.length})</span>
+        <h2 className="text-base text-content">{title}</h2>
+        <span className="text-sm text-content-tertiary">
+          ({recipes.length})
+        </span>
       </div>
       <div className="flex flex-wrap gap-3">
         {recipes.map((recipe) => (
@@ -356,7 +362,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
     <div className="mb-6">
       {/* Filter Bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <span className="text-base text-gray-700">All Recipes</span>
+        <span className="text-base text-content">All Recipes</span>
         <div className="w-full sm:w-auto max-w-xl">
           <RecipeFilterDropdown
             propertyList={RECIPE_PROPERTY_OPTIONS}
@@ -366,7 +372,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
             filters={filters}
           />
         </div>
-        <span className="text-sm text-gray-500 ml-auto">
+        <span className="text-sm text-content-tertiary ml-auto">
           {sortedAndFilteredTemplates.length} of {recipes.length}
         </span>
       </div>
@@ -383,37 +389,37 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
             <TableHeader>
               <TableRow>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                   onClick={() => requestSort('recipe_type')}
                 >
                   Type{getSortDirection('recipe_type')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                   onClick={() => requestSort('name')}
                 >
                   Name{getSortDirection('name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                   onClick={() => requestSort('description')}
                 >
                   Description{getSortDirection('description')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                   onClick={() => requestSort('user_name')}
                 >
                   Owner{getSortDirection('user_name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                   onClick={() => requestSort('updated_by_name')}
                 >
                   Last Updated By{getSortDirection('updated_by_name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                   onClick={() => requestSort('updated_at')}
                 >
                   Updated{getSortDirection('updated_at')}
@@ -453,20 +459,23 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                       : recipe.description
                     : '-';
                   return (
-                    <TableRow key={recipe.name} className="hover:bg-gray-50">
+                    <TableRow
+                      key={recipe.name}
+                      className="hover:bg-surface-subtle"
+                    >
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <TypeIcon
                             className={`w-4 h-4 ${
                               typeInfo.color === 'sky'
-                                ? 'text-sky-600'
+                                ? 'text-sky-fg'
                                 : typeInfo.color === 'purple'
-                                  ? 'text-purple-600'
+                                  ? 'text-purple-fg'
                                   : typeInfo.color === 'green'
-                                    ? 'text-green-600'
+                                    ? 'text-green-fg'
                                     : typeInfo.color === 'orange'
-                                      ? 'text-orange-600'
-                                      : 'text-gray-600'
+                                      ? 'text-orange-fg'
+                                      : 'text-content-secondary'
                             }`}
                           />
                           <span>{typeInfo.label}</span>
@@ -476,26 +485,26 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                         <div className="flex items-center gap-2">
                           <Link
                             href={`/recipes/${slug}`}
-                            className="text-blue-600 hover:text-blue-800 hover:underline"
+                            className="text-blue-fg hover:text-blue-fg-stronger hover:underline"
                           >
                             {recipe.name}
                           </Link>
                         </div>
                       </TableCell>
                       <TableCell
-                        className="text-gray-600 max-w-[400px]"
+                        className="text-content-secondary max-w-[400px]"
                         title={recipe.description || ''}
                       >
                         <span className="cursor-default">{truncatedDesc}</span>
                       </TableCell>
-                      <TableCell className="text-gray-600">
+                      <TableCell className="text-content-secondary">
                         {isGitSourced(recipe) ? (
                           <GitAuthor />
                         ) : (
                           <UserName name={recipe.user_name || recipe.user_id} />
                         )}
                       </TableCell>
-                      <TableCell className="text-gray-600">
+                      <TableCell className="text-content-secondary">
                         {recipe.updated_by_name || recipe.user_name ? (
                           <UserName
                             name={recipe.updated_by_name || recipe.user_name}
@@ -504,7 +513,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                           '-'
                         )}
                       </TableCell>
-                      <TableCell className="text-gray-500">
+                      <TableCell className="text-content-tertiary">
                         <TimestampWithTooltip
                           date={
                             recipe.updated_at
@@ -525,10 +534,10 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                             disabled={recipe.is_pinnable === false}
                             className={`p-1 rounded transition-colors ${
                               recipe.is_pinnable === false
-                                ? 'text-gray-300 cursor-not-allowed'
+                                ? 'text-content-faintest cursor-not-allowed'
                                 : recipe.pinned
-                                  ? 'text-amber-500 hover:text-amber-700 hover:bg-amber-100'
-                                  : 'text-amber-400 hover:text-amber-600 hover:bg-amber-100'
+                                  ? 'text-amber-fg-soft hover:text-amber-fg-strong hover:bg-amber-tint-strong'
+                                  : 'text-amber-fg-faint hover:text-amber-fg hover:bg-amber-tint-strong'
                             }`}
                             title={
                               recipe.is_pinnable === false
@@ -554,8 +563,8 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                             disabled={recipe.is_editable === false}
                             className={`p-1 rounded transition-colors ${
                               recipe.is_editable === false
-                                ? 'text-gray-300 cursor-not-allowed'
-                                : 'text-red-400 hover:text-red-700 hover:bg-red-100'
+                                ? 'text-content-faintest cursor-not-allowed'
+                                : 'text-red-fg-faint hover:text-red-fg-strong hover:bg-red-tint-strong'
                             }`}
                             title={
                               recipe.is_editable === false
@@ -610,7 +619,7 @@ function DeleteConfirmDialog({ recipe, onClose, onDelete }) {
     <Dialog open={!!recipe} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-xl text-red-600">
+          <DialogTitle className="text-xl text-red-fg">
             Delete Recipe
           </DialogTitle>
           <DialogDescription>
@@ -625,7 +634,7 @@ function DeleteConfirmDialog({ recipe, onClose, onDelete }) {
           <Button
             onClick={handleDelete}
             disabled={isDeleting}
-            className="bg-red-600 hover:bg-red-700 text-white"
+            className="bg-red-solid hover:bg-red-solid-hover text-white"
           >
             {isDeleting ? (
               <>
@@ -759,8 +768,8 @@ const RecipeFilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
-      <div className="border-r border-gray-300 flex-shrink-0">
+    <div className="flex flex-row border border-line-strong rounded-md overflow-visible">
+      <div className="border-r border-line-strong flex-shrink-0">
         <Select onValueChange={setPropertyValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
@@ -795,7 +804,7 @@ const RecipeFilterDropdown = ({
               setValue('');
               setIsOpen(false);
             }}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-content-faint hover:text-content-secondary"
             title="Clear filter"
             tabIndex={-1}
           >
@@ -817,20 +826,20 @@ const RecipeFilterDropdown = ({
         {isOpen && valueOptions.length > 0 && (
           <div
             ref={dropdownRef}
-            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            className="absolute z-50 mt-1 w-full bg-surface border border-line rounded-md shadow-lg max-h-60 overflow-y-auto"
             style={{ zIndex: 9999 }}
           >
             {valueOptions.map((option, index) => (
               <div
                 key={`${option}-${index}`}
-                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                className={`px-3 py-2 cursor-pointer hover:bg-surface-subtle text-sm ${
                   index !== valueOptions.length - 1
-                    ? 'border-b border-gray-100'
+                    ? 'border-b border-line-subtle'
                     : ''
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700">{option}</span>
+                <span className="text-sm text-content">{option}</span>
               </div>
             ))}
           </div>
@@ -863,7 +872,7 @@ const RecipeFilters = ({ filters = [], setFilters }) => {
         {filters.length > 0 && (
           <button
             onClick={clearFilters}
-            className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
+            className="rounded-full px-4 py-1 text-sm text-content bg-surface-strong hover:bg-surface-stronger"
           >
             Clear filters
           </button>
@@ -876,7 +885,7 @@ const RecipeFilters = ({ filters = [], setFilters }) => {
 // Filter Item Component (same pattern as clusters page)
 const RecipeFilterItem = ({ filter, onRemove }) => {
   return (
-    <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+    <div className="flex items-center text-blue-fg bg-blue-tint-strong px-1 py-1 rounded-full text-sm">
       <div className="flex items-center gap-1 px-2">
         <span>{filter.property}</span>
         <span>{filter.operator}</span>
@@ -884,7 +893,7 @@ const RecipeFilterItem = ({ filter, onRemove }) => {
       </div>
       <button
         onClick={onRemove}
-        className="p-0.5 ml-1 text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center"
+        className="p-0.5 ml-1 text-content-faint hover:text-content-secondary bg-blue-solid-soft hover:bg-blue-solid rounded-full flex items-center"
         title="Remove filter"
       >
         <svg className="h-3 w-3" fill="none" stroke="white" viewBox="0 0 24 24">
@@ -1029,7 +1038,7 @@ function CreateRecipeModal({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto px-8">
         <DialogHeader>
-          <DialogTitle className="text-xl text-gray-900">
+          <DialogTitle className="text-xl text-content-strong">
             Create New Recipe
           </DialogTitle>
           <DialogDescription>
@@ -1037,9 +1046,9 @@ function CreateRecipeModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="bg-amber-50 border border-amber-200 rounded-md p-3 flex items-start gap-2 mt-4">
-          <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-          <p className="text-sm text-amber-800">
+        <div className="bg-amber-tint border border-amber-line rounded-md p-3 flex items-start gap-2 mt-4">
+          <AlertTriangleIcon className="w-4 h-4 text-amber-fg mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-amber-fg-stronger">
             This recipe will be visible to everyone with access to this
             dashboard.
           </p>
@@ -1057,7 +1066,7 @@ function CreateRecipeModal({
                   setFormError(null);
                 }}
                 placeholder="my-gpu-training"
-                className="placeholder:text-gray-400"
+                className="placeholder:text-content-faint"
                 required
               />
             </div>
@@ -1095,9 +1104,9 @@ function CreateRecipeModal({
                 value={ownerName}
                 onChange={(e) => setOwnerName(e.target.value)}
                 placeholder="Enter your name (optional)"
-                className="placeholder:text-gray-400"
+                className="placeholder:text-content-faint"
               />
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-content-tertiary">
                 This name will be shown as the template owner.
               </p>
             </div>
@@ -1110,7 +1119,7 @@ function CreateRecipeModal({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="A brief description of what this recipe does..."
-              className="placeholder:text-gray-400"
+              className="placeholder:text-content-faint"
             />
           </div>
 
@@ -1127,9 +1136,9 @@ function CreateRecipeModal({
           </div>
 
           {formError && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 flex items-start gap-2">
-              <AlertTriangleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-800">{formError}</p>
+            <div className="rounded-md border border-red-line bg-red-tint p-3 flex items-start gap-2">
+              <AlertTriangleIcon className="w-4 h-4 text-red-fg mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-red-fg-stronger">{formError}</p>
             </div>
           )}
 
@@ -1297,7 +1306,7 @@ export function RecipeHub() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress size={20} className="mr-2" />
-        <span className="text-gray-500">Loading...</span>
+        <span className="text-content-tertiary">Loading...</span>
       </div>
     );
   }
@@ -1307,14 +1316,16 @@ export function RecipeHub() {
       {/* Header */}
       <div className="flex flex-wrap items-center gap-2 mb-4 min-h-[20px]">
         <div className="text-base flex items-center">
-          <span className="text-sky-blue leading-none text-base">Recipes</span>
+          <span className="text-brand leading-none text-base">Recipes</span>
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={16} />
-              <span className="ml-2 text-gray-500 text-sm">Refreshing...</span>
+              <span className="ml-2 text-content-tertiary text-sm">
+                Refreshing...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
@@ -1366,7 +1377,7 @@ export function RecipeHub() {
           <TemplateRow
             title="Pinned Recipes"
             icon={PinIcon}
-            iconColor="text-amber-500"
+            iconColor="text-amber-fg-soft"
             recipes={pinnedRecipes}
             emptyMessage="No pinned recipes. Pin important recipes for quick access."
             onPin={handlePin}
@@ -1377,7 +1388,7 @@ export function RecipeHub() {
             <TemplateRow
               title="My Recipes"
               icon={FileCode}
-              iconColor="text-sky-500"
+              iconColor="text-sky-fg-soft"
               recipes={myRecipes}
               emptyMessage="You haven't created any recipes yet."
             />

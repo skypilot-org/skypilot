@@ -547,7 +547,7 @@ def _xfail_baseline(parametrize, reason: str):
         Twist('dom-create-error-hidden',
               'dom',
               expect=r'the dialog must say why the recipe was not created',
-              apply=remove_element('p.text-red-800')),
+              apply=remove_element('p.text-red-fg-stronger')),
         Twist(
             'src-recipes_settings_nav-viewer-can-create-recipes',
             'src',
@@ -571,7 +571,7 @@ def test_viewer_create_recipe_shows_permission_error(make_user, open_as,
     assert status == 403, (
         f'the server must refuse a viewer with 403, got {status}')
     dialog = page.get_by_role('dialog')
-    error = dialog.locator('p.text-red-800')
+    error = dialog.locator('p.text-red-fg-stronger')
     expect(
         error,
         'the dialog must say why the recipe was not created').to_be_visible()

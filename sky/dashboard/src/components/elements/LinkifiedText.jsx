@@ -54,7 +54,7 @@ export function LinkifiedText({ text, className }) {
             title={part}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 underline"
+            className="text-blue-fg hover:text-blue-fg-stronger underline"
           >
             {displayUrl(part)}
           </a>

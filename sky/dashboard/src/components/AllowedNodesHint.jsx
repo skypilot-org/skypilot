@@ -56,12 +56,12 @@ export function AllowedNodesHint({ contextName, isSlurm = false }) {
   return (
     <div
       role="note"
-      className="flex items-start gap-2 mb-4 px-3 py-2.5 rounded-md border border-blue-200 bg-blue-50 text-sm leading-normal text-blue-900"
+      className="flex items-start gap-2 mb-4 px-3 py-2.5 rounded-md border border-blue-line bg-blue-tint text-sm leading-normal text-blue-fg-strongest"
     >
       <InfoIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
       <span>
         This context has{' '}
-        <code className="px-1 py-0.5 rounded bg-blue-100 text-xs font-mono">
+        <code className="px-1 py-0.5 rounded bg-blue-tint-strong text-xs font-mono">
           allowed_nodes
         </code>{' '}
         configured, so only matching nodes are shown here — other nodes in this
@@ -95,7 +95,7 @@ export function AllowedNodesRowBadge({ id, kind }) {
       <span
         role="img"
         aria-label="allowed_nodes filter active"
-        className="inline-flex items-center flex-shrink-0 text-blue-600"
+        className="inline-flex items-center flex-shrink-0 text-blue-fg"
       >
         <InfoIcon className="w-3.5 h-3.5" />
       </span>
