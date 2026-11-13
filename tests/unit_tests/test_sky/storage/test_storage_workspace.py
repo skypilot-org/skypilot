@@ -907,7 +907,7 @@ class TestWorkspaceDeletion:
 
     def test_storage_blocks_deletion(self, isolated_database):
         _add('st-a', _ALICE, 'ws-a')
-        with mock.patch(self._ACTIVE, return_value=([], [])):
+        with mock.patch(self._ACTIVE, return_value=([], [], [])):
             with pytest.raises(ValueError, match='st-a'):
                 resource_checker.check_no_active_resources_for_workspaces([
                     ('ws-a', 'delete')
@@ -915,7 +915,7 @@ class TestWorkspaceDeletion:
 
     def test_update_and_other_workspaces_pass(self, isolated_database):
         _add('st-a', _ALICE, 'ws-a')
-        with mock.patch(self._ACTIVE, return_value=([], [])):
+        with mock.patch(self._ACTIVE, return_value=([], [], [])):
             resource_checker.check_no_active_resources_for_workspaces([
                 ('ws-a', 'update'), ('ws-b', 'delete')
             ])

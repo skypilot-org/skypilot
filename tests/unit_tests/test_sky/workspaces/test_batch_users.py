@@ -5,6 +5,7 @@ from unittest import mock
 import pytest
 
 from sky import models
+from sky.server.requests import payloads
 from sky.workspaces import core
 
 
@@ -223,7 +224,7 @@ class TestBatchRemoveUsersFromWorkspaces:
     def _stub_active_resources(self):
         with mock.patch(
                 'sky.utils.resource_checker._get_active_resources_for_workspaces',
-                return_value=([], [])):
+                return_value=([], [], [])):
             yield
 
     @staticmethod
@@ -236,6 +237,239 @@ class TestBatchRemoveUsersFromWorkspaces:
         """
         return mock.patch('sky.skypilot_config.to_dict',
                           return_value={'workspaces': workspaces})
+
+    @pytest.mark.parametrize('check_resources', [True, False])
+    @mock.patch(
+        'sky.users.permission.permission_service.update_workspace_policy')
+    @mock.patch('sky.workspaces.utils.get_workspace_users', return_value=[])
+    @mock.patch('sky.workspaces.core._update_workspaces_config')
+    @mock.patch(
+        'sky.workspaces.core._validate_workspace_config_changes_with_lock',
+        side_effect=ValueError('user has 1 active sandbox(s): s1'))
+    @mock.patch('sky.workspaces.core._validate_workspace_config')
+    @mock.patch('sky.global_user_state.get_all_users',
+                return_value=[_mk_user('u1', 'alice')])
+    def test_check_resources_false_removes_owner_of_live_resources(
+            self, mock_get_all_users, mock_validate_config,
+            mock_validate_changes, mock_update_config, mock_get_ws_users,
+            mock_update_policy, check_resources):
+        initial = {'p1': {'private': True, 'allowed_users': ['u1', 'bob']}}
+        captured = {}
+
+        def fake_update(modifier):
+            workspaces = {k: dict(v) for k, v in initial.items()}
+            modifier(workspaces)()
+            captured['workspaces'] = workspaces
+
+        mock_update_config.side_effect = fake_update
+
+        with self._patch_initial_workspaces(initial), mock.patch(
+                'sky.utils.resource_checker.'
+                '_get_active_resources_for_workspaces') as mock_fetch:
+            result = core.batch_remove_users_from_workspaces(
+                ['p1'], ['u1'], check_resources=check_resources)
+        if check_resources:
+            assert result['succeeded'] == []
+            assert 'active sandbox' in result['failed'][0]['error']
+        else:
+            assert result == {'succeeded': ['p1'], 'failed': []}
+            assert captured['workspaces']['p1']['allowed_users'] == ['bob']
+            mock_validate_changes.assert_not_called()
+            mock_fetch.assert_not_called()
+
+    @mock.patch(
+        'sky.users.permission.permission_service.update_workspace_policy')
+    @mock.patch('sky.workspaces.utils.get_workspace_users', return_value=[])
+    @mock.patch('sky.workspaces.core._update_workspaces_config')
+    @mock.patch('sky.workspaces.core.locks.get_lock')
+    @mock.patch('sky.workspaces.core._validate_workspace_config')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    @mock.patch('sky.global_user_state.get_all_users',
+                return_value=[_mk_user('u1', 'alice')])
+    def test_failed_resource_fetch_fails_every_workspace(
+            self, mock_get_all_users, mock_compare, mock_validate_config,
+            mock_lock, mock_update_config, mock_get_ws_users,
+            mock_update_policy):
+        mock_compare.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_changed=True,
+            allowed_users_old=['u1', 'bob'],
+            allowed_users_new=['bob'],
+            removed_users=['u1'],
+            added_users=[],
+            additive_allowed_contexts=False)
+        initial = {
+            'p1': {
+                'private': True,
+                'allowed_users': ['u1', 'bob']
+            },
+            'p2': {
+                'private': True,
+                'allowed_users': ['u1', 'bob']
+            },
+        }
+        written = []
+
+        def fake_update(modifier):
+            workspaces = {k: dict(v) for k, v in initial.items()}
+            modifier(workspaces)
+            written.append(workspaces)
+
+        mock_update_config.side_effect = fake_update
+
+        with self._patch_initial_workspaces(initial), mock.patch(
+                'sky.utils.resource_checker.'
+                '_get_active_resources_for_workspaces',
+                side_effect=ValueError(
+                    'Could not check for active sandbox(s)')):
+            result = core.batch_remove_users_from_workspaces(['p1', 'p2'],
+                                                             ['u1'])
+        assert result['succeeded'] == []
+        assert sorted(
+            f['workspace_name'] for f in result['failed']) == ['p1', 'p2']
+        assert all('Could not check' in f['error'] for f in result['failed'])
+        # Nobody was stripped from either workspace.
+        assert all(ws == initial for ws in written)
+
+    @staticmethod
+    def _remove_u1(mock_compare, mock_update_config, initial, resources):
+        """Remove u1 from every workspace in ``initial``; return the result.
+
+        ``resources`` are (clusters, jobs, others), filtered by the requested
+        workspaces like the real fetch.
+        """
+        mock_compare.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_changed=True,
+            allowed_users_old=['u1', 'bob'],
+            allowed_users_new=['bob'],
+            removed_users=['u1'],
+            added_users=[],
+            additive_allowed_contexts=False)
+        written = {}
+
+        def fake_update(modifier):
+            workspaces = {k: dict(v) for k, v in initial.items()}
+            modifier(workspaces)()
+            written.update(workspaces)
+
+        mock_update_config.side_effect = fake_update
+
+        def fetch(workspace_names):
+            return tuple([r
+                          for r in rows
+                          if r['workspace'] in workspace_names]
+                         for rows in resources)
+
+        with mock.patch(
+                'sky.utils.resource_checker.'
+                '_get_active_resources_for_workspaces',
+                side_effect=fetch):
+            result = core.batch_remove_users_from_workspaces(
+                list(initial), ['u1'])
+        return result, written
+
+    _BOTH_PRIVATE = {
+        'p1': {
+            'private': True,
+            'allowed_users': ['u1', 'bob']
+        },
+        'p2': {
+            'private': True,
+            'allowed_users': ['u1', 'bob']
+        },
+    }
+
+    @mock.patch(
+        'sky.users.permission.permission_service.update_workspace_policy')
+    @mock.patch('sky.workspaces.utils.get_workspace_users', return_value=[])
+    @mock.patch('sky.workspaces.core._update_workspaces_config')
+    @mock.patch('sky.workspaces.core.locks.get_lock')
+    @mock.patch('sky.workspaces.core._validate_workspace_config')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    @mock.patch('sky.global_user_state.get_all_users',
+                return_value=[_mk_user('u1', 'alice')])
+    def test_only_the_workspace_with_the_resource_fails(
+            self, mock_get_all_users, mock_compare, mock_validate_config,
+            mock_lock, mock_update_config, mock_get_ws_users,
+            mock_update_policy):
+        sandbox = {
+            'kind': 'sandbox',
+            'name': 's2',
+            'workspace': 'p2',
+            'user_hash': 'u1'
+        }
+        with self._patch_initial_workspaces(self._BOTH_PRIVATE):
+            result, written = self._remove_u1(mock_compare, mock_update_config,
+                                              self._BOTH_PRIVATE,
+                                              ([], [], [sandbox]))
+        assert result['succeeded'] == ['p1']
+        assert [f['workspace_name'] for f in result['failed']] == ['p2']
+        assert 'active sandbox(s): s2' in result['failed'][0]['error']
+        assert written['p1']['allowed_users'] == ['bob']
+        assert written['p2']['allowed_users'] == ['u1', 'bob']
+
+    @mock.patch(
+        'sky.users.permission.permission_service.update_workspace_policy')
+    @mock.patch('sky.workspaces.utils.get_workspace_users', return_value=[])
+    @mock.patch('sky.workspaces.core._update_workspaces_config')
+    @mock.patch('sky.workspaces.core.locks.get_lock')
+    @mock.patch('sky.workspaces.core._validate_workspace_config')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    @mock.patch(
+        'sky.global_user_state.get_all_users',
+        return_value=[_mk_user('u1', 'alice'),
+                      _mk_user('carol', 'carol')])
+    def test_resources_of_other_non_members_do_not_block(
+            self, mock_get_all_users, mock_compare, mock_validate_config,
+            mock_lock, mock_update_config, mock_get_ws_users,
+            mock_update_policy):
+        # carol left the workspace earlier but still owns resources in it.
+        carol = [{
+            'name': 'carol-c',
+            'workspace': 'p1',
+            'user_hash': 'carol'
+        }], [], [{
+            'kind': 'volume',
+            'name': 'carol-vol',
+            'workspace': 'p2',
+            'user_hash': 'carol'
+        }]
+        with self._patch_initial_workspaces(self._BOTH_PRIVATE):
+            result, written = self._remove_u1(mock_compare, mock_update_config,
+                                              self._BOTH_PRIVATE, carol)
+        assert sorted(result['succeeded']) == ['p1', 'p2']
+        assert result['failed'] == []
+        assert written['p1']['allowed_users'] == ['bob']
+
+        # When u1 owns something too, only u1's resource is named.
+        clusters, jobs, others = carol
+        others = others + [{
+            'kind': 'volume',
+            'name': 'u1-vol',
+            'workspace': 'p2',
+            'user_hash': 'u1'
+        }]
+        with self._patch_initial_workspaces(self._BOTH_PRIVATE):
+            result, _ = self._remove_u1(mock_compare, mock_update_config,
+                                        self._BOTH_PRIVATE,
+                                        (clusters, jobs, others))
+        assert result['succeeded'] == ['p1']
+        error = result['failed'][0]['error']
+        assert "remove user 'alice'" in error
+        assert '1 active volume(s): u1-vol' in error
+        assert 'carol' not in error
+
+    def test_check_resources_is_not_settable_over_the_api(self):
+        # The bypass is for in-process identity-provider sync only.
+        assert 'check_resources' not in (
+            payloads.WorkspaceBatchRemoveUsersBody.model_fields)
 
     @mock.patch(
         'sky.users.permission.permission_service.update_workspace_policy')
@@ -478,7 +712,7 @@ def test_vetoed_save_leaves_access_unchanged(batch_fn, user_id):
                        return_value={'workspaces': initial}), \
             mock.patch('sky.utils.resource_checker.'
                        '_get_active_resources_for_workspaces',
-                       return_value=([], [])):
+                       return_value=([], [], [])):
         with pytest.raises(ValueError, match='vetoed'):
             batch_fn(['p1'], [user_id])
     update_policy.assert_not_called()

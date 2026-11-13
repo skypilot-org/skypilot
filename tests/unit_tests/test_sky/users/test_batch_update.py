@@ -127,7 +127,7 @@ class TestUserBatchUpdate:
             server.user_batch_update(admin_request, body)
         assert exc_info.value.status_code == 400
 
-    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
+    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_for_users',
                 return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})
@@ -165,6 +165,8 @@ class TestUserBatchUpdate:
         assert sorted(result['succeeded']) == ['u1', 'u3']
         assert len(result['failed']) == 1
         assert result['failed'][0]['user_id'] == 'u2'
+        # One fetch, scoped to the users being demoted.
+        mock_get_active_resources.assert_called_once_with(['u1', 'u2', 'u3'])
         # Only the two that passed the check are written.
         mock_update_roles.assert_called_once_with({
             'u1': 'user',
@@ -172,7 +174,7 @@ class TestUserBatchUpdate:
         },
                                                   existing_users_only=True)
 
-    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
+    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_for_users',
                 return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})

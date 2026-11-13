@@ -1,7 +1,6 @@
 """Resource checking utilities for finding active clusters and managed jobs."""
 
 import collections
-import concurrent.futures
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import exceptions
@@ -9,9 +8,76 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.serve import serve_state
+from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.utils import common_utils
+from sky.utils import context_utils
 
 logger = sky_logging.init_logger(__name__)
+
+_Rows = List[Dict[str, Any]]
+
+# Lists live resources of one kind in the given workspace ids, owned by the
+# given user hashes (no filter when None), as dicts with 'name', 'workspace'
+# (an id) and 'user_hash'.
+ActiveResourceLister = Callable[[Optional[List[str]], Optional[List[str]]],
+                                List[Dict[str, Any]]]
+# Kind shown in messages ('volume', 'endpoint', ...) -> lister.
+_ACTIVE_RESOURCE_LISTERS: Dict[str, ActiveResourceLister] = {}
+# Serve replicas, pool workers and managed-job clusters.
+_CONTROLLER_LAUNCHED_CLUSTER = 'service/pool/job cluster'
+# A controller relaunches a replica or worker that is torn down by hand.
+_CONTROLLER_LAUNCHED_HINT = (
+    f' A {_CONTROLLER_LAUNCHED_CLUSTER} goes away when its service, pool or '
+    'managed job is terminated.')
+_MAX_NAMES_PER_KIND = 10
+
+
+def register_active_resource_lister(kind: str,
+                                    fn: ActiveResourceLister) -> None:
+    """Register a lister of live resources that block workspace changes.
+
+    Its resources then block deleting a workspace, narrowing it, and removing
+    or demoting their owner, like clusters and managed jobs do. Called during
+    server startup (plugin loading, single-threaded), so no lock is needed.
+
+    The lister runs on each such change, so it must be cheap: one DB query, no
+    cloud or Kubernetes calls. It should filter by both arguments in that
+    query: user delete and role demotion pass the user hashes with every
+    workspace. The filter only saves work, since callers filter the rows
+    again. If it raises, the change is refused.
+    """
+    _ACTIVE_RESOURCE_LISTERS[kind] = fn
+
+
+def _workspace_of(resource: Dict[str, Any]) -> Optional[str]:
+    return resource.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+
+
+def _format_names(names: List[str]) -> str:
+    if len(names) <= _MAX_NAMES_PER_KIND:
+        return ', '.join(names)
+    shown = ', '.join(names[:_MAX_NAMES_PER_KIND])
+    return f'{shown} and {len(names) - _MAX_NAMES_PER_KIND} more'
+
+
+def _describe_resources(clusters: _Rows, jobs: _Rows,
+                        others: _Rows) -> List[str]:
+    """One 'N active <kind>(s): names' part per kind with resources."""
+    parts = []
+    if clusters:
+        parts.append(f'{len(clusters)} active cluster(s): ' +
+                     _format_names([c['name'] for c in clusters]))
+    if jobs:
+        parts.append(f'{len(jobs)} active managed job(s): ' +
+                     _format_names([str(j['job_id']) for j in jobs]))
+    by_kind: Dict[str, List[str]] = {}
+    for resource in others:
+        by_kind.setdefault(resource['kind'], []).append(resource['name'])
+    for kind, names in by_kind.items():
+        parts.append(f'{len(names)} active {kind}(s): {_format_names(names)}')
+    return parts
 
 
 def check_no_active_resources_for_users(
@@ -32,16 +98,21 @@ def check_no_active_resources_for_users(
     def filter_by_user(user_id: str):
         return lambda resource: resource.get('user_hash') == user_id
 
-    _check_active_resources(user_operations, filter_by_user, 'user')
+    _check_active_resources(
+        user_operations, filter_by_user, 'user',
+        ResourceSnapshot.fetch_for_users([u for u, _ in user_operations]))
 
 
 def check_no_active_resources_for_workspaces(
-        workspace_operations: List[Tuple[str, str]]) -> None:
+        workspace_operations: List[Tuple[str, str]],
+        resources: Optional['ResourceSnapshot'] = None) -> None:
     """Check if workspaces have active clusters or managed jobs.
 
     Args:
         workspace_operations: List of tuples (workspace_name, operation) where
             operation is 'update' or 'delete'.
+        resources: Optional shared ``ResourceSnapshot`` covering at least
+            these workspaces. Fetched for them when not provided.
 
     Raises:
         ValueError: If any workspace has active clusters or managed jobs.
@@ -51,12 +122,13 @@ def check_no_active_resources_for_workspaces(
         return
 
     def filter_by_workspace(workspace_name: str):
-        return lambda resource: (resource.get(
-            'workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) == workspace_name
-                                )
+        return lambda resource: _workspace_of(resource) == workspace_name
 
+    if resources is None:
+        resources = ResourceSnapshot.fetch_for_workspaces(
+            [name for name, _ in workspace_operations])
     _check_active_resources(workspace_operations, filter_by_workspace,
-                            'workspace')
+                            'workspace', resources)
     _check_no_storage_in_deleted_workspaces(workspace_operations)
 
 
@@ -91,56 +163,31 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
                             filter_factory: Callable[[str],
                                                      Callable[[Dict[str, Any]],
                                                               bool]],
-                            resource_type: str) -> None:
-    """Check if resource entities have active clusters or managed jobs.
+                            resource_type: str,
+                            resources: 'ResourceSnapshot') -> None:
+    """Check if resource entities have active resources.
 
     Args:
         resource_operations: List of tuples (resource_name, operation) where
             operation is 'update' or 'delete'.
         filter_factory: Function that takes a resource_name and returns a filter
-            function for clusters/jobs.
+            function for resources.
         resource_type: Type of resource being checked ('user' or 'workspace').
+        resources: The active resources to check against.
 
     Raises:
-        ValueError: If any resource has active clusters or managed jobs.
+        ValueError: If any resource has active resources.
     """
-
-    all_clusters, all_managed_jobs = _get_active_resources()
-
     # Collect all error messages instead of raising immediately
     error_messages = []
 
     # Check each resource against the fetched data
     for resource_name, operation in resource_operations:
         resource_filter = filter_factory(resource_name)
-
-        # Filter clusters for this resource
-        resource_clusters = [
-            cluster for cluster in all_clusters if resource_filter(cluster)
-        ]
-
-        # Filter managed jobs for this resource
-        resource_active_jobs = [
-            job for job in all_managed_jobs if resource_filter(job)
-        ]
-
-        # Collect error messages for this resource
-        resource_errors = []
-
-        if resource_clusters:
-            active_cluster_names = [
-                cluster['name'] for cluster in resource_clusters
-            ]
-            cluster_list = ', '.join(active_cluster_names)
-            resource_errors.append(
-                f'{len(resource_clusters)} active cluster(s): {cluster_list}')
-
-        if resource_active_jobs:
-            job_names = [str(job['job_id']) for job in resource_active_jobs]
-            job_list = ', '.join(job_names)
-            resource_errors.append(
-                f'{len(resource_active_jobs)} active managed job(s): '
-                f'{job_list}')
+        resource_errors = _describe_resources(
+            [c for c in resources.clusters if resource_filter(c)],
+            [j for j in resources.managed_jobs if resource_filter(j)],
+            [o for o in resources.others if resource_filter(o)])
 
         # If this resource has issues, add to overall error messages
         if resource_errors:
@@ -169,6 +216,8 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
                             f'{len(error_messages)} {resource_type}(s):\n' +
                             '\n'.join(f'• {msg}' for msg in error_messages) +
                             '\nPlease terminate these resources first.')
+        if _CONTROLLER_LAUNCHED_CLUSTER in full_message:
+            full_message += _CONTROLLER_LAUNCHED_HINT
         raise ValueError(full_message)
 
 
@@ -176,9 +225,10 @@ def check_users_workspaces_active_resources(
     user_ids: List[str],
     workspace_names: List[str],
     resources: Optional['ResourceSnapshot'] = None,
+    owners: Optional[List[str]] = None,
 ) -> Tuple[str, List[str], Dict[str, str]]:
-    """Check if all the active clusters or managed jobs in workspaces
-       belong to the user_ids. If not, return the error message.
+    """Check if all the active resources in workspaces belong to the user_ids.
+       If not, return the error message.
 
     Args:
         user_ids: List of user_id.
@@ -190,6 +240,8 @@ def check_users_workspaces_active_resources(
             snapshot's workspace index. When not provided, a transient
             snapshot scoped to ``workspace_names`` is fetched
             internally.
+        owners: If given, only resources owned by these users count, e.g.
+            the users being removed.
 
     Returns:
         resource_error_summary: str
@@ -197,58 +249,28 @@ def check_users_workspaces_active_resources(
         missed_user_dict: Dict[str, str]
     """
     if resources is None:
-        # Fetch already filters to the given workspaces, so we can use
-        # the raw lists directly (and preserve their original order).
         resources = ResourceSnapshot.fetch_for_workspaces(workspace_names)
-        all_clusters = resources.clusters
-        all_managed_jobs = resources.managed_jobs
-    else:
-        # Caller-supplied snapshot may cover a superset of workspaces; do
-        # a single linear filter so the relative order of the source
-        # lists is preserved.
-        workspace_set = set(workspace_names)
-        all_clusters = [
-            c for c in resources.clusters
-            if c.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
-            workspace_set
-        ]
-        all_managed_jobs = [
-            j for j in resources.managed_jobs
-            if j.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
-            workspace_set
-        ]
-    resource_errors = []
+    # The snapshot may cover a superset of workspaces; a single linear filter
+    # keeps the relative order of the source lists.
+    workspace_set = set(workspace_names)
     missed_users = set()
-    active_cluster_names = []
-    active_job_names = []
-    # Check clusters
-    if all_clusters:
-        for cluster in all_clusters:
-            user_hash = cluster.get('user_hash')
-            if user_hash and user_hash not in user_ids:
-                missed_users.add(user_hash)
-                active_cluster_names.append(cluster['name'])
-        if active_cluster_names:
-            cluster_list = ', '.join(active_cluster_names)
-            resource_errors.append(
-                f'{len(active_cluster_names)} active cluster(s):'
-                f' {cluster_list}')
 
-    # Check managed jobs
-    if all_managed_jobs:
-        for job in all_managed_jobs:
-            user_hash = job.get('user_hash')
-            if user_hash and user_hash not in user_ids:
+    def missed(resource_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        result = []
+        for resource in resource_list:
+            if _workspace_of(resource) not in workspace_set:
+                continue
+            user_hash = resource.get('user_hash')
+            if (user_hash and user_hash not in user_ids and
+                (owners is None or user_hash in owners)):
                 missed_users.add(user_hash)
-                active_job_names.append(str(job['job_id']))
-        if active_job_names:
-            job_list = ', '.join(active_job_names)
-            resource_errors.append(f'{len(active_job_names)} active'
-                                   f' managed job(s): {job_list}')
+                result.append(resource)
+        return result
 
-    resource_error_summary = ''
-    if resource_errors:
-        resource_error_summary = ' and '.join(resource_errors)
+    resource_errors = _describe_resources(missed(resources.clusters),
+                                          missed(resources.managed_jobs),
+                                          missed(resources.others))
+    resource_error_summary = ' and '.join(resource_errors)
     missed_users_names = []
     missed_user_dict = {}
     if missed_users:
@@ -262,8 +284,8 @@ def check_users_workspaces_active_resources(
 
 def _get_active_resources_for_workspaces(
     workspace_names: List[str]
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Get active clusters or managed jobs for workspaces.
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Get active clusters, managed jobs and other resources for workspaces.
 
     Args:
         workspace_names: List of workspace_name.
@@ -271,86 +293,77 @@ def _get_active_resources_for_workspaces(
     Returns:
         all_clusters: List[Dict[str, Any]]
         all_managed_jobs: List[Dict[str, Any]]
+        all_others: List[Dict[str, Any]]
     """
     if not workspace_names:
-        return [], []
+        return [], [], []
 
     def filter_by_workspaces(workspace_names: List[str]):
-        return lambda resource: (resource.get(
-            'workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
-                                 workspace_names)
+        return lambda resource: _workspace_of(resource) in workspace_names
 
-    return _get_active_resources_by_names(workspace_names, filter_by_workspaces)
+    return _get_active_resources_by_names(workspace_names, filter_by_workspaces,
+                                          workspace_names)
 
 
 def _get_active_resources_by_names(
     resource_names: List[str],
-    filter_factory: Callable[[List[str]], Callable[[Dict[str, Any]], bool]]
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Get active clusters or managed jobs.
+    filter_factory: Callable[[List[str]], Callable[[Dict[str, Any]], bool]],
+    workspace_names: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Get active resources matching ``filter_factory(resource_names)``.
 
     Args:
         resource_names: List of resource_name.
         filter_factory: Function that takes a resource_name and returns a filter
-            function for clusters/jobs.
+            function for resources.
+        workspace_names: If given, only these workspaces are fetched.
 
     Returns:
         all_clusters: List[Dict[str, Any]]
         all_managed_jobs: List[Dict[str, Any]]
+        all_others: List[Dict[str, Any]]
     """
-
-    all_clusters, all_managed_jobs = _get_active_resources()
-
-    resource_clusters = []
-    resource_active_jobs = []
-
-    # Check each resource against the fetched data,
-    # return the active resources by names
+    all_clusters, all_managed_jobs, all_others = _get_active_resources(
+        workspace_names)
     resource_filter = filter_factory(resource_names)
-
-    # Filter clusters for this resource
-    if all_clusters:
-        resource_clusters = [
-            cluster for cluster in all_clusters if resource_filter(cluster)
-        ]
-
-    # Filter managed jobs for this resource
-    if all_managed_jobs:
-        resource_active_jobs = [
-            job for job in all_managed_jobs if resource_filter(job)
-        ]
-
-    return resource_clusters, resource_active_jobs
+    return ([c for c in all_clusters if resource_filter(c)
+            ], [j for j in all_managed_jobs if resource_filter(j)],
+            [o for o in all_others if resource_filter(o)])
 
 
 class ResourceSnapshot:
-    """A point-in-time view of active clusters and managed jobs.
+    """A point-in-time view of active resources.
 
-    Holds the raw ``(clusters, managed_jobs)`` lists fetched from the
-    cluster / managed-jobs sources, and builds per-user and per-workspace
-    indices lazily on first access. Batch callers should construct one
-    snapshot at the top of the operation and pass it through helpers;
-    each ``for_user`` / ``for_workspace`` lookup is then O(1) instead of
-    re-filtering the full lists per call.
+    Holds the raw ``(clusters, managed_jobs, others)`` lists fetched from the
+    cluster / managed-jobs sources and the registered listers, and builds
+    per-user and per-workspace indices lazily on first access. Batch callers
+    should construct one snapshot at the top of the operation and pass it
+    through helpers; each ``for_user`` / ``for_workspace`` lookup is then O(1)
+    instead of re-filtering the full lists per call.
     """
 
     def __init__(
         self,
         clusters: List[Dict[str, Any]],
         managed_jobs: List[Dict[str, Any]],
+        others: Optional[List[Dict[str, Any]]] = None,
+        loader: Optional[Callable[[], 'ResourceSnapshot']] = None,
     ):
         self._clusters = clusters
         self._managed_jobs = managed_jobs
+        self._others = others or []
+        # Fetches the three lists on first use (see deferred_for_workspaces).
+        self._loader = loader
+        self._load_error: Optional[Exception] = None
         self._by_workspace: Optional[Dict[str, Tuple[List[Dict[str, Any]],
-                                                     List[Dict[str,
-                                                               Any]]]]] = None
-        self._by_user: Optional[Tuple[Dict[str, List[Dict[str, Any]]],
-                                      Dict[str, List[Dict[str, Any]]]]] = None
+                                                     ...]]] = None
+        self._by_user: Optional[Dict[str, Tuple[List[Dict[str, Any]],
+                                                ...]]] = None
 
     @classmethod
-    def fetch_all(cls) -> 'ResourceSnapshot':
-        """Fetch all active clusters + managed jobs from the DB / controller."""
-        return cls(*_get_active_resources())
+    def fetch_for_users(cls, user_ids: List[str]) -> 'ResourceSnapshot':
+        """Fetch active resources; the listers return only these users'."""
+        return cls(*_get_active_resources(user_hashes=user_ids))
 
     @classmethod
     def fetch_for_workspaces(cls,
@@ -358,64 +371,80 @@ class ResourceSnapshot:
         """Fetch active resources filtered to the given workspaces."""
         return cls(*_get_active_resources_for_workspaces(workspace_names))
 
+    @classmethod
+    def deferred_for_workspaces(
+            cls, workspace_names: List[str]) -> 'ResourceSnapshot':
+        """Like ``fetch_for_workspaces``, but fetched on first use.
+
+        For batch callers where most changes may need no check at all.
+        """
+        return cls([], [],
+                   loader=lambda: cls.fetch_for_workspaces(workspace_names))
+
+    def _load(self) -> None:
+        # A failed fetch fails every later use too, so a batch caller that
+        # catches it per workspace never checks against empty lists.
+        if self._load_error is not None:
+            raise self._load_error
+        if self._loader is None:
+            return
+        try:
+            loaded = self._loader()
+        except Exception as e:  # pylint: disable=broad-except
+            self._load_error = e
+            raise
+        self._loader = None
+        self._clusters = loaded.clusters
+        self._managed_jobs = loaded.managed_jobs
+        self._others = loaded.others
+
     @property
     def clusters(self) -> List[Dict[str, Any]]:
+        self._load()
         return self._clusters
 
     @property
     def managed_jobs(self) -> List[Dict[str, Any]]:
+        self._load()
         return self._managed_jobs
 
-    def for_user(
-            self,
-            user_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Return ``(clusters, jobs)`` owned by ``user_id``.
+    @property
+    def others(self) -> List[Dict[str, Any]]:
+        """Resources from the registered listers, each with a 'kind'."""
+        self._load()
+        return self._others
+
+    def _index(
+        self, key: Callable[[Dict[str, Any]], Optional[str]]
+    ) -> Dict[str, Tuple[List[Dict[str, Any]], ...]]:
+        index: Dict[str, Tuple[List[Dict[str, Any]], ...]] = (
+            collections.defaultdict(lambda: ([], [], [])))
+        for i, resources in enumerate(
+            (self.clusters, self.managed_jobs, self.others)):
+            for resource in resources:
+                k = key(resource)
+                if k:
+                    index[k][i].append(resource)
+        return dict(index)
+
+    def for_user(self, user_id: str) -> Tuple[List[Dict[str, Any]], ...]:
+        """Return ``(clusters, jobs, others)`` owned by ``user_id``.
 
         Index is built lazily on first call.
         """
         if self._by_user is None:
-            clusters_by_user: Dict[str, List[Dict[
-                str, Any]]] = collections.defaultdict(list)
-            jobs_by_user: Dict[str,
-                               List[Dict[str,
-                                         Any]]] = collections.defaultdict(list)
-            for cluster in self._clusters:
-                uh = cluster.get('user_hash')
-                if uh:
-                    clusters_by_user[uh].append(cluster)
-            for job in self._managed_jobs:
-                uh = job.get('user_hash')
-                if uh:
-                    jobs_by_user[uh].append(job)
-            self._by_user = (dict(clusters_by_user), dict(jobs_by_user))
-        return (self._by_user[0].get(user_id,
-                                     []), self._by_user[1].get(user_id, []))
+            self._by_user = self._index(lambda r: r.get('user_hash'))
+        return self._by_user.get(user_id, ([], [], []))
 
-    def for_workspace(
-        self, workspace_name: str
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Return ``(clusters, jobs)`` in the given workspace.
+    def for_workspace(self,
+                      workspace_name: str) -> Tuple[List[Dict[str, Any]], ...]:
+        """Return ``(clusters, jobs, others)`` in the given workspace.
 
         Index is built lazily on first call.
         """
         if self._by_workspace is None:
-            clusters_by_ws: Dict[str, List[Dict[
-                str, Any]]] = collections.defaultdict(list)
-            jobs_by_ws: Dict[str,
-                             List[Dict[str,
-                                       Any]]] = collections.defaultdict(list)
-            for cluster in self._clusters:
-                ws = cluster.get('workspace',
-                                 constants.SKYPILOT_DEFAULT_WORKSPACE)
-                clusters_by_ws[ws].append(cluster)
-            for job in self._managed_jobs:
-                ws = job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-                jobs_by_ws[ws].append(job)
-            self._by_workspace = {
-                name: (clusters_by_ws.get(name, []), jobs_by_ws.get(name, []))
-                for name in set(clusters_by_ws) | set(jobs_by_ws)
-            }
-        return self._by_workspace.get(workspace_name, ([], []))
+            self._by_workspace = self._index(_workspace_of)
+        return self._by_workspace.get(workspace_name, ([], [], []))
 
 
 def load_fresh_workspaces() -> Dict[str, Any]:
@@ -452,7 +481,7 @@ def check_user_role_demotion(
             caller should fetch this once and pass it in to avoid the
             per-call ``safe_reload_config`` + YAML read overhead.
         resources: Optional shared ``ResourceSnapshot``. Batch callers
-            should build one ``ResourceSnapshot.fetch_all()`` at the top
+            should build one ``ResourceSnapshot.fetch_for_users()`` at the top
             of the operation and pass it through, so the per-user lookup
             is O(1) (via the snapshot's user index) instead of an
             O(C+J) scan per user. When not provided, a transient
@@ -510,39 +539,25 @@ def check_user_role_demotion(
     # per-user index. Build a transient snapshot for the single-user
     # path; batch callers pass a shared one.
     if resources is None:
-        resources = ResourceSnapshot.fetch_all()
-    user_clusters, user_jobs = resources.for_user(user_id)
+        resources = ResourceSnapshot.fetch_for_users([user_id])
+    user_resources = resources.for_user(user_id)
 
     workspace_set = set(inaccessible_workspaces)
-    workspace_resources: Dict[str, Dict[str, List[str]]] = {}
-    for cluster in user_clusters:
-        ws = cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if ws not in workspace_set:
-            continue
-        workspace_resources.setdefault(ws, {'clusters': [], 'jobs': []})
-        workspace_resources[ws]['clusters'].append(cluster['name'])
-    for job in user_jobs:
-        ws = job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if ws not in workspace_set:
-            continue
-        workspace_resources.setdefault(ws, {'clusters': [], 'jobs': []})
-        workspace_resources[ws]['jobs'].append(str(job['job_id']))
+    # workspace -> (clusters, jobs, others), in first-seen order.
+    workspace_resources: Dict[str, Tuple[List[Dict[str, Any]], ...]] = {}
+    for i, resource_list in enumerate(user_resources):
+        for resource in resource_list:
+            ws = _workspace_of(resource)
+            if ws not in workspace_set:
+                continue
+            workspace_resources.setdefault(ws, ([], [], []))[i].append(resource)
 
     if not workspace_resources:
         return
 
     error_lines = []
     for ws, res in workspace_resources.items():
-        parts = []
-        if res['clusters']:
-            n_clusters = len(res['clusters'])
-            cluster_list = ', '.join(res['clusters'])
-            parts.append(f'{n_clusters} active cluster(s): {cluster_list}')
-        if res['jobs']:
-            n_jobs = len(res['jobs'])
-            job_list = ', '.join(res['jobs'])
-            parts.append(f'{n_jobs} active managed job(s): {job_list}')
-        joined = ' and '.join(parts)
+        joined = ' and '.join(_describe_resources(*res))
         error_lines.append(
             f'  - workspace {skypilot_config.get_workspace_name(ws)!r}: '
             f'{joined}')
@@ -556,20 +571,70 @@ def check_user_role_demotion(
         'to the allowed_users of those workspaces first.')
 
 
+def _list_volumes(workspace_names: Optional[List[str]],
+                  user_hashes: Optional[List[str]]) -> List[Dict[str, Any]]:
+    # Ephemeral volumes belong to a cluster, which is counted already.
+    volumes = global_user_state.get_volume_owners(
+        is_ephemeral=False,
+        workspaces_filter=(set(workspace_names)
+                           if workspace_names is not None else None))
+    if user_hashes is None:
+        return volumes
+    return [v for v in volumes if v['user_hash'] in user_hashes]
+
+
+def _service_lister(pool: bool) -> ActiveResourceLister:
+
+    def lister(workspace_names: Optional[List[str]],
+               user_hashes: Optional[List[str]]) -> List[Dict[str, Any]]:
+        # Only a consolidated controller's services table is local. Elsewhere
+        # the services, and their replica and worker clusters, live in the
+        # controller's own DB and are not checked.
+        if not serve_utils.is_consolidation_mode(pool=pool):
+            return []
+        services = serve_state.get_live_services_in_workspaces(
+            set(workspace_names) if workspace_names is not None else None)
+        return [
+            s for s in services if s['pool'] == pool and
+            (user_hashes is None or s['user_hash'] in user_hashes)
+        ]
+
+    return lister
+
+
+register_active_resource_lister('volume', _list_volumes)
+register_active_resource_lister('service', _service_lister(pool=False))
+register_active_resource_lister('pool', _service_lister(pool=True))
+
+
 def _get_active_resources(
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Get all active clusters and managed jobs.
+    workspace_names: Optional[List[str]] = None,
+    user_hashes: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Get all active clusters, managed jobs and other resources.
+
+    Args:
+        workspace_names: If given, clusters and the registered listers are
+            limited to these workspaces. Managed jobs are always fetched
+            whole.
+        user_hashes: If given, only these users' resources are returned.
+            The listers filter in their query; clusters and managed jobs are
+            fetched whole and filtered here.
 
     Returns:
-        all_clusters: List[Dict[str, Any]]
+        all_clusters: List[Dict[str, Any]], clusters not launched by a
+            controller.
         all_managed_jobs: List[Dict[str, Any]]
+        all_others: List[Dict[str, Any]], each with a 'kind': clusters
+            launched by a controller (serve replicas, pool workers) and the
+            resources of every registered lister.
     """
 
     def get_all_clusters() -> List[Dict[str, Any]]:
-        # Exclude is_managed=True clusters: those are the clusters that
-        # back managed jobs and are already represented (and labeled) by
-        # the managed-jobs queue below.
-        return global_user_state.get_clusters(exclude_managed_clusters=True)
+        return global_user_state.get_clusters(
+            workspaces_filter=(set(workspace_names)
+                               if workspace_names is not None else None),
+            summary_response=True)
 
     def get_all_managed_jobs() -> List[Dict[str, Any]]:
         # pylint: disable=import-outside-toplevel
@@ -585,12 +650,49 @@ def _get_active_resources(
             logger.warning('All jobs should be finished.')
             return []
 
-    # Fetch both clusters and jobs in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    def list_kind(kind: str,
+                  lister: ActiveResourceLister) -> List[Dict[str, Any]]:
+        # Unlike the jobs fetch, a lister failure says nothing about whether
+        # resources exist, so it refuses the change.
+        try:
+            resources = lister(workspace_names, user_hashes)
+        except Exception as e:  # pylint: disable=broad-except
+            raise ValueError(f'Could not check for active {kind}(s): '
+                             f'{common_utils.format_exception(e)}') from e
+        return [dict(r, kind=kind) for r in resources]
+
+    # Each lister gets its own worker: in sequence they would outlast the jobs
+    # fetch on a remote DB. Leave one of the default DB connections free.
+    with context_utils.ContextPropagatingThreadPool(
+            max_workers=constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY -
+            1) as executor:
         clusters_future = executor.submit(get_all_clusters)
         jobs_future = executor.submit(get_all_managed_jobs)
+        lister_futures = [
+            executor.submit(list_kind, kind, lister)
+            for kind, lister in list(_ACTIVE_RESOURCE_LISTERS.items())
+        ]
 
         all_clusters = clusters_future.result()
         all_managed_jobs = jobs_future.result()
+        all_others = [r for f in lister_futures for r in f.result()]
 
-    return all_clusters, all_managed_jobs
+    # Clusters launched by a controller: a managed job's cluster is also
+    # listed as its job; serve replicas and pool workers only here.
+    controller_launched = [{
+        'name': c['name'],
+        'workspace': c.get('workspace'),
+        'user_hash': c.get('user_hash'),
+        'kind': _CONTROLLER_LAUNCHED_CLUSTER,
+    } for c in all_clusters if c.get('is_managed')]
+    all_clusters = [c for c in all_clusters if not c.get('is_managed')]
+    if user_hashes is not None:
+        users = set(user_hashes)
+        all_clusters = [c for c in all_clusters if c.get('user_hash') in users]
+        all_managed_jobs = [
+            j for j in all_managed_jobs if j.get('user_hash') in users
+        ]
+        controller_launched = [
+            c for c in controller_launched if c['user_hash'] in users
+        ]
+    return all_clusters, all_managed_jobs, controller_launched + all_others

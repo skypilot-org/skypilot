@@ -79,6 +79,9 @@ services_table = sqlalchemy.Table(
     sqlalchemy.Column('file_mounts_blob_id',
                       sqlalchemy.Text,
                       server_default=None),
+    # Workspace id the service/pool runs in. NULL for rows created before the
+    # column existed.
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
 )
 
 replicas_table = sqlalchemy.Table(
@@ -320,7 +323,8 @@ def add_service(name: str,
                 entrypoint: str,
                 controller_ip: Optional[str] = None,
                 user_hash: Optional[str] = None,
-                file_mounts_blob_id: Optional[str] = None) -> bool:
+                file_mounts_blob_id: Optional[str] = None,
+                workspace: Optional[str] = None) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -352,7 +356,8 @@ def add_service(name: str,
                 hash=str(uuid.uuid4()),
                 entrypoint=entrypoint,
                 user_hash=user_hash,
-                file_mounts_blob_id=file_mounts_blob_id)
+                file_mounts_blob_id=file_mounts_blob_id,
+                workspace=workspace)
             session.execute(insert_stmt)
             session.commit()
 
@@ -591,6 +596,30 @@ def get_services() -> List[Dict[str, Any]]:
     for row in rows:
         records.append(_get_service_from_row(row._mapping))  # pylint: disable=protected-access
     return records
+
+
+def get_live_services_in_workspaces(
+        workspaces: Optional[Set[str]]) -> List[Dict[str, Any]]:
+    """Services and pools in the given workspaces (all when None).
+
+    Skips rows being torn down and rows with no recorded workspace.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = session.query(
+            services_table.c.name, services_table.c.pool,
+            services_table.c.workspace, services_table.c.user_hash).filter(
+                services_table.c.workspace.isnot(None),
+                services_table.c.status != ServiceStatus.SHUTTING_DOWN.value)
+        if workspaces is not None:
+            query = query.filter(services_table.c.workspace.in_(workspaces))
+        rows = query.all()
+    return [{
+        'name': row.name,
+        'pool': bool(row.pool),
+        'workspace': row.workspace,
+        'user_hash': row.user_hash,
+    } for row in rows]
 
 
 def get_num_services() -> int:
