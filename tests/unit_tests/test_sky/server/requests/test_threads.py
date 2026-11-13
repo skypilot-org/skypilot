@@ -1,16 +1,20 @@
 """Unit tests for sky/server/requests/threads.py."""
+# pylint: disable=protected-access
 
+import asyncio
 import concurrent.futures
 import os
 import queue
 import threading
 import time
+from unittest import mock
 
 import prometheus_client
 import pytest
 
 from sky import exceptions
 from sky.metrics import utils as metrics_utils
+from sky.server.requests import threads
 from sky.server.requests.threads import OnDemandThreadExecutor
 
 
@@ -125,15 +129,196 @@ def test_on_demand_executor_thread_naming():
         executor.shutdown()
 
 
-def test_on_demand_executor_threads_dict_cleanup():
-    executor = OnDemandThreadExecutor(name='test', max_workers=1)
+def test_on_demand_executor_reuses_threads():
+    executor = OnDemandThreadExecutor(name='test', max_workers=4)
     try:
-        fut = executor.submit(dummy_task)
-        assert fut.result(timeout=5) is True
-        assert len(executor._threads) == 0
+        q = queue.Queue()
+        for _ in range(100):
+            assert executor.submit(thread_name_task, q).result(timeout=5)
+        names = {q.get(timeout=5) for _ in range(100)}
+        assert len(names) == 1
+        assert len(executor._threads) == 1
         assert executor.running.get() == 0
     finally:
         executor.shutdown()
+
+
+def test_on_demand_executor_prestart():
+    executor = OnDemandThreadExecutor(name='test', max_workers=4)
+    try:
+        executor.prestart(2)
+        assert len(executor._threads) == 2
+        executor.prestart(10)
+        assert len(executor._threads) == 4
+        started = threading.Thread.start
+        with mock.patch.object(threading.Thread,
+                               'start',
+                               autospec=True,
+                               side_effect=started) as start:
+            release_event = threading.Event()
+            futs = [
+                executor.submit(blocking_task, release_event) for _ in range(4)
+            ]
+            release_event.set()
+            assert all(f.result(timeout=5) for f in futs)
+            for _ in range(100):
+                assert executor.submit(dummy_task, 0).result(timeout=5)
+        start.assert_not_called()
+        assert len(executor._threads) == 4
+    finally:
+        executor.shutdown()
+
+
+def test_on_demand_executor_max_queued():
+    executor = OnDemandThreadExecutor(name='test', max_workers=2, max_queued=3)
+    release_event = threading.Event()
+    try:
+        futs = [executor.submit(blocking_task, release_event) for _ in range(5)]
+        assert len(executor._threads) == 2
+        assert not any(f.done() for f in futs)
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            executor.submit(blocking_task, release_event)
+        release_event.set()
+        assert all(f.result(timeout=5) for f in futs)
+        assert len(executor._threads) == 2
+        assert executor.running.get() == 0
+    finally:
+        release_event.set()
+        executor.shutdown()
+
+
+def test_on_demand_executor_skips_cancelled_queued_task():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1, max_queued=1)
+    release_event = threading.Event()
+    ran = threading.Event()
+    try:
+        first = executor.submit(blocking_task, release_event)
+        queued = executor.submit(ran.set)
+        assert queued.cancel()
+        release_event.set()
+        assert first.result(timeout=5) is True
+        # Runs after the cancelled task in FIFO order.
+        assert executor.submit(dummy_task, 0).result(timeout=5) is True
+        assert not ran.is_set()
+        assert executor.running.get() == 0
+    finally:
+        release_event.set()
+        executor.shutdown()
+
+
+def test_on_demand_executor_asyncio_cancel_while_running():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1)
+    started = threading.Event()
+    release_event = threading.Event()
+
+    def task():
+        started.set()
+        return blocking_task(release_event)
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        fut = loop.run_in_executor(executor, task)
+        await loop.run_in_executor(None, started.wait, 5)
+        fut.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await fut
+        # The thread still runs the task and holds its slot.
+        assert executor.running.get() == 1
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            executor.submit(dummy_task)
+
+    try:
+        asyncio.run(main())
+        release_event.set()
+        deadline = time.time() + 5
+        while executor.running.get() and time.time() < deadline:
+            time.sleep(0.01)
+        assert executor.running.get() == 0
+        assert executor.submit(dummy_task, 0).result(timeout=5)
+    finally:
+        release_event.set()
+        executor.shutdown()
+
+
+def test_on_demand_executor_shutdown_waits_and_stops_threads():
+    executor = OnDemandThreadExecutor(name='test', max_workers=3)
+    executor.prestart(3)
+    release_event = threading.Event()
+    fut = executor.submit(blocking_task, release_event)
+    threading.Timer(0.2, release_event.set).start()
+    executor.shutdown(wait=True)
+    assert fut.done() and fut.result() is True
+    assert not any(t.is_alive() for t in executor._threads)
+    executor.prestart(1)
+    assert not any(t.is_alive() for t in executor._threads)
+
+
+def test_on_demand_executor_shutdown_cancels_queued_tasks():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1, max_queued=1)
+    release_event = threading.Event()
+    started = threading.Event()
+    ran = threading.Event()
+
+    def first_task():
+        started.set()
+        return blocking_task(release_event)
+
+    first = executor.submit(first_task)
+    queued = executor.submit(ran.set)
+    assert started.wait(timeout=5)
+    executor.shutdown(wait=False, cancel_futures=True)
+    assert queued.cancelled()
+    release_event.set()
+    assert first.result(timeout=5) is True
+    for t in executor._threads:
+        t.join(timeout=5)
+    assert not ran.is_set()
+    assert executor.running.get() == 0
+
+
+def test_on_demand_executor_threads_are_daemons():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1)
+    try:
+        executor.prestart(1)
+        assert all(t.daemon for t in executor._threads)
+    finally:
+        executor.shutdown()
+
+
+def test_count_thread_starts(monkeypatch):
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(threads, '_thread_start_counter_installed', False)
+    monkeypatch.setattr(threading.Thread, 'start', threading.Thread.start)
+
+    def sample(on_loop: str) -> float:
+        return prometheus_client.REGISTRY.get_sample_value(
+            'sky_apiserver_threads_started_total', {'on_loop': on_loop}) or 0
+
+    threads.count_thread_starts()
+    threads.count_thread_starts()
+    before_on, before_off = sample('true'), sample('false')
+
+    t = threading.Thread(target=lambda: None)
+    t.start()
+    t.join()
+
+    async def start_on_loop():
+        t = threading.Thread(target=lambda: None)
+        t.start()
+        t.join()
+
+    asyncio.run(start_on_loop())
+    assert sample('false') >= before_off + 1
+    assert sample('true') == before_on + 1
+
+
+def test_keep_anyio_worker_threads(monkeypatch):
+    # pylint: disable=import-outside-toplevel
+    from anyio._backends import _asyncio as anyio_asyncio
+    monkeypatch.setattr(anyio_asyncio.WorkerThread, 'MAX_IDLE_TIME', 10)
+    threads.keep_anyio_worker_threads()
+    assert anyio_asyncio.WorkerThread.MAX_IDLE_TIME == (
+        threads._ANYIO_WORKER_MAX_IDLE_SECONDS)
 
 
 def _gauge_value(name: str, executor_name: str) -> float:
@@ -169,6 +354,11 @@ def test_on_demand_executor_metrics(monkeypatch):
 
         f1 = executor.submit(blocking_task, release_event)
         f2 = executor.submit(blocking_task, release_event)
+        # Counted once a thread starts running the task.
+        deadline = time.time() + 5
+        while (_gauge_value('sky_apiserver_threads_active', name) < 2 and
+               time.time() < deadline):
+            time.sleep(0.01)
         assert _gauge_value('sky_apiserver_threads_active', name) == 2
 
         with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
@@ -182,13 +372,6 @@ def test_on_demand_executor_metrics(monkeypatch):
         concurrent.futures.wait([f1, f2], timeout=5)
         assert f1.result() is True
         assert f2.result() is True
-        # The gauge is decremented in the worker thread after the future
-        # resolves; poll briefly to avoid racing that final decrement.
-        deadline = time.time() + 5
-        while time.time() < deadline:
-            if _gauge_value('sky_apiserver_threads_active', name) == 0:
-                break
-            time.sleep(0.01)
         assert _gauge_value('sky_apiserver_threads_active', name) == 0
     finally:
         executor.shutdown()

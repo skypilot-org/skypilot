@@ -780,25 +780,12 @@ def make_mock_volume_config(name='vol1',
 
 def make_mock_resource(cloud=None, region=None, zone=None):
 
-    class MockResource:
-
-        def __init__(self, cloud, region, zone):
-            self.cloud = cloud
-            self.region = region
-            self.zone = zone
-            self.priority = 0
-            self.num_nodes = None
-
-        def copy(self, **override):
-            # Return a new instance with overridden attributes
-            new = make_mock_resource(
-                override.get('cloud', self.cloud),
-                override.get('region', self.region),
-                override.get('zone', self.zone),
-            )
-            return new
-
-    return MockResource(cloud, region, zone)
+    if isinstance(cloud, str):
+        cloud = registry.CLOUD_REGISTRY.from_str(cloud)
+    return resources_lib.Resources(cloud=cloud,
+                                   region=region,
+                                   zone=zone,
+                                   priority=0)
 
 
 def test_resolve_volumes_no_volumes():

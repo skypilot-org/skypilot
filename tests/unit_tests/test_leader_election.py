@@ -15,6 +15,7 @@ import sqlalchemy
 from sky import global_user_state
 from sky.utils import leader_election
 from sky.utils import locks
+from sky.utils.db import db_utils
 
 
 @pytest.mark.parametrize('env_value,expected', [
@@ -185,6 +186,54 @@ def test_lease_statements_test_the_advisory_key_of_their_lock_id(
 _PG_URL = os.environ.get('SKYPILOT_TEST_PG_URL')
 pg_only = pytest.mark.skipif(not _PG_URL,
                              reason='SKYPILOT_TEST_PG_URL is not set')
+
+
+@pytest.fixture()
+def advisory_db(monkeypatch):
+    """Use real unpooled lock sessions with a five-connection state budget."""
+    engine = sqlalchemy.create_engine(_PG_URL, poolclass=sqlalchemy.NullPool)
+    global_user_state.leader_leases_table.create(engine, checkfirst=True)
+    monkeypatch.setattr(db_utils, 'get_engine', lambda *args, **kwargs: engine)
+    monkeypatch.setattr(db_utils, 'get_lock_engine', lambda: engine)
+    monkeypatch.setattr(locks, '_detect_lock_type', lambda: 'postgres')
+    monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE', '1')
+    monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW', '4')
+    yield
+    engine.dispose()
+
+
+@pg_only
+def test_pg_independent_advisory_leaders_exceed_state_pool_capacity(
+        advisory_db):
+    electors = [
+        leader_election.AdvisoryLockElector(f'independent-leader-{index}')
+        for index in range(6)
+    ]
+    try:
+        for elector in electors:
+            assert elector.try_acquire() is True
+        assert all(elector.renew() for elector in electors)
+    finally:
+        for elector in electors:
+            elector.release()
+
+
+@pg_only
+def test_pg_nested_advisory_locks_exceed_state_pool_capacity(advisory_db):
+    held = []
+    try:
+        for index in range(4):
+            lock = locks.PostgresLock(f'unrelated-outer-{index}')
+            lock.acquire(blocking=False)
+            held.append(lock)
+        with locks.PostgresLock('nested-outer'):
+            with locks.PostgresLock('nested-inner',
+                                    timeout=0.2,
+                                    poll_interval=0.01) as inner:
+                assert inner.is_locked()
+    finally:
+        for lock in held:
+            lock.release()
 
 
 def _expire_now(engine, lock_id):

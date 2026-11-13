@@ -286,7 +286,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  task: 'task_lib.Task',
                  dryrun: bool = False) -> None:
         """ Launches the container."""
-        if task.num_nodes > 1:
+        if any(r.num_nodes > 1 for r in task.resources):
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '
                 'LocalDockerBackend.')

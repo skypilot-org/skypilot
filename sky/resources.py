@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 37  # add _num_nodes.
+    _VERSION = 38  # add _num_nodes_specified.
 
     def __init__(
         self,
@@ -167,7 +167,6 @@ class Resources:
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         infra: Optional[str] = None,
-        num_nodes: Optional[int] = None,
         use_spot: Optional[bool] = None,
         job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
                                      str]] = None,
@@ -194,6 +193,8 @@ class Resources:
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
         _no_missing_accel_warnings: Optional[bool] = None,
+        *,
+        num_nodes: Optional[int] = None,
     ):
         """Initialize a Resources object.
 
@@ -237,7 +238,8 @@ class Resources:
             specifying cloud, region, and zone separately. If provided, it
             takes precedence over cloud, region, and zone parameters.
           num_nodes: the number of nodes to launch when these resources are
-            chosen. If None, the task's ``num_nodes`` is used. Setting it on
+            chosen. Defaults to one unless the Task supplies a legacy count.
+            Setting it on
             each candidate of ``any_of``/``ordered`` lets candidates differ in
             node count (e.g., 1x H200:8 vs 2x H100:8); the optimizer then
             compares the total cost of each candidate. Cannot be combined
@@ -511,6 +513,7 @@ class Resources:
         self._try_validate_labels()
         self._try_validate_local_disk()
         self._try_validate_max_hourly_cost()
+        self._try_validate_tpu_multi_host()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -600,7 +603,7 @@ class Resources:
             ports = f', ports={self.ports}'
 
         num_nodes = ''
-        if self._num_nodes is not None:
+        if self._num_nodes_specified:
             num_nodes = f', num_nodes={self._num_nodes}'
 
         if self._instance_type is not None:
@@ -668,12 +671,22 @@ class Resources:
         return self._instance_type
 
     @property
-    def num_nodes(self) -> Optional[int]:
+    def num_nodes(self) -> int:
         """Number of nodes to launch with these resources.
 
-        None means the task's ``num_nodes`` applies.
+        Defaults to one node. A Task lowers its legacy node-count input into
+        its resource candidates before they are used.
         """
-        return self._num_nodes
+        return self._num_nodes if self._num_nodes is not None else 1
+
+    @property
+    def num_nodes_specified(self) -> bool:
+        """Whether the count was explicitly supplied on these resources.
+
+        Counts lowered from legacy Task input do not require the new resource
+        field on the wire. Generic resource filters also keep an unset count.
+        """
+        return self._num_nodes_specified
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -1005,7 +1018,12 @@ class Resources:
                 # Fix the logic such that GCP TPU names can failover between
                 # GCP and kubernetes.
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
+                    # accelerator_args.multi_host only exists on Kubernetes,
+                    # so it also resolves a GCP TPU name (tpu-v6e-8) to
+                    # Kubernetes (and never gets a GCP runtime_version).
+                    if (kubernetes_utils.is_tpu_on_gke(acc, normalize=False) or
+                            kubernetes_utils.multi_host_requested(
+                                accelerator_args)):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -1061,6 +1079,7 @@ class Resources:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes!r}')
         self._num_nodes = num_nodes
+        self._num_nodes_specified = num_nodes is not None
 
     def _set_autostop_config(
         self,
@@ -1870,6 +1889,41 @@ class Resources:
                         f'Specified instance type {self._instance_type} does '
                         f'not have specified local disk {self._local_disk}.')
 
+    def _try_validate_tpu_multi_host(self) -> None:
+        """``accelerator_args.multi_host`` is only accepted as True, for an
+        8-chip TPU v6e slice on Kubernetes (the one size that exists both as
+        one VM and as a multi-host slice)."""
+        if (self._accelerator_args is None or
+                'multi_host' not in self._accelerator_args):
+            return
+        multi_host = self._accelerator_args['multi_host']
+        usage = ('`accelerator_args.multi_host` is only supported as `true` '
+                 'with `accelerators: tpu-v6e-8` (or `tpu-v6e-slice:8`) on '
+                 'Kubernetes.')
+        with ux_utils.print_exception_no_traceback():
+            if multi_host is not True:
+                raise ValueError(
+                    f'{usage} Got multi_host={multi_host!r}; remove the field '
+                    'instead of setting it to false.')
+            accelerators = self._accelerators or {}
+            shape = None
+            if len(accelerators) == 1:
+                acc, count = next(iter(accelerators.items()))
+                if kubernetes_utils.is_tpu_on_gke(acc):
+                    acc_type, chips = (
+                        kubernetes_utils.normalize_tpu_accelerator(acc, count))
+                    # A GCP name carries its count in the name, so an extra
+                    # count (tpu-v6e-8:2) is ambiguous here.
+                    if (acc_type, chips) in (
+                            kubernetes_utils.OPT_IN_MULTI_HOST_SHAPES) and (
+                                acc == acc_type or count in (None, 1)):
+                        shape = (acc_type, chips)
+            if shape is None:
+                raise ValueError(f'{usage} Got accelerators={accelerators!r}.')
+            if self._cloud is not None and not isinstance(
+                    self._cloud, clouds.Kubernetes):
+                raise ValueError(f'{usage} Got cloud {self._cloud}.')
+
     def _try_validate_max_hourly_cost(self):
         if self._max_hourly_cost is not None:
             if not isinstance(self._max_hourly_cost, (int, float)):
@@ -2111,6 +2165,9 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
+        # This also tells a multi-host TPU slice (accelerator_args.multi_host)
+        # from a single VM of the same chip count. A CPU-only request has no
+        # accelerator_args, so it fits either cluster.
         if (self.accelerator_args is not None and
                 self.accelerator_args != other.accelerator_args):
             return False
@@ -2171,6 +2228,7 @@ class Resources:
         If a field in `blocked` is None, it should be considered as a wildcard
         for that field.
         """
+        # pylint: disable=protected-access
         assert self.cloud is not None, 'Cloud must be specified'
         is_matched = True
         if (blocked.cloud is not None and
@@ -2191,7 +2249,7 @@ class Resources:
         # A failure to get N nodes does not rule out getting fewer nodes of the
         # same type in the same place, so a blocked entry with a node count
         # only blocks candidates asking for at least as many nodes.
-        if (blocked.num_nodes is not None and self.num_nodes is not None and
+        if (blocked._num_nodes is not None and self._num_nodes is not None and
                 self.num_nodes < blocked.num_nodes):
             is_matched = False
         return is_matched
@@ -2213,7 +2271,7 @@ class Resources:
             self._docker_image is None,
             self._ports is None,
             self._docker_login_config is None,
-            self._num_nodes is None,
+            not self._num_nodes_specified,
         ])
 
     def __add__(self, other: Optional['Resources']) -> Optional['Resources']:
@@ -2314,6 +2372,10 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
+        num_nodes_specified = override.pop(
+            '_num_nodes_specified',
+            (override['num_nodes'] is not None
+             if 'num_nodes' in override else self._num_nodes_specified))
 
         current_override_configs = self._cluster_config_overrides
         if current_override_configs is None:
@@ -2409,6 +2471,7 @@ class Resources:
         )
         resources.set_kubernetes_identity(self._kubernetes_identity)
         resources.set_remote_identity_none_at_launch(self._remote_identity_none)
+        resources._num_nodes_specified = num_nodes_specified  # pylint: disable=protected-access
         assert not override
         return resources
 
@@ -3116,6 +3179,8 @@ class Resources:
             state['_hooks'] = hooks or None
 
         self.__dict__.update(state)
+        if version < 38:
+            self._num_nodes_specified = self._num_nodes is not None
 
 
 class LaunchableResources(Resources):

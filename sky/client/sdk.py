@@ -96,6 +96,9 @@ else:
     time = adaptors_common.LazyImport('time')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
+    # only used in the --resize confirmation prompt
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -469,7 +472,7 @@ def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
 
 
 def _check_resources_num_nodes_api_version(dag: 'sky.Dag') -> None:
-    if not any(r.num_nodes is not None
+    if not any(r.num_nodes_specified
                for task in dag.tasks
                for r in task.resources):
         return
@@ -483,6 +486,28 @@ def _check_resources_num_nodes_api_version(dag: 'sky.Dag') -> None:
                 'supports API_VERSION >= '
                 f'{server_constants.MIN_RESOURCES_NUM_NODES_API_VERSION}, or '
                 'set `num_nodes` at the task level instead.')
+
+
+def _check_tpu_multi_host_api_version(dag: 'sky.Dag') -> None:
+    """Raises if a task asks for accelerator_args.multi_host and the API
+    server is too old to know it.
+
+    The field cannot be dropped silently: without it the server would pick
+    different hardware.
+    """
+    if not any('multi_host' in (resources.accelerator_args or {})
+               for task in dag.tasks
+               for resources in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_TPU_MULTI_HOST_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'The API server does not support '
+                '`accelerator_args.multi_host`; upgrade it to a version that '
+                'supports API_VERSION >= '
+                f'{server_constants.MIN_TPU_MULTI_HOST_API_VERSION}.')
 
 
 @usage_lib.entrypoint
@@ -515,6 +540,7 @@ def optimize(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_resources_num_nodes_api_version(dag)
+    _check_tpu_multi_host_api_version(dag)
     _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -657,6 +683,7 @@ def validate(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_resources_num_nodes_api_version(dag)
+    _check_tpu_multi_host_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
@@ -1038,7 +1065,16 @@ def _launch(
             # should show a resize-aware prompt (and note the restart), not
             # the generic "Restarting the stopped cluster" message.
             current_nodes = cluster_record.get('nodes')
-            target_nodes = dag.tasks[0].num_nodes
+            counts = {r.num_nodes for r in dag.tasks[0].resources}
+            target_nodes = next(iter(counts)) if len(counts) == 1 else None
+            # The record counts cluster nodes. On a multi-host TPU slice one
+            # task node (one slice) is one cluster node per VM of the slice,
+            # so convert to task nodes, the unit of num_nodes.
+            vms_per_slice = max(
+                kubernetes_utils.tpu_vms_per_slice(r)
+                for r in dag.tasks[0].resources)
+            if current_nodes is not None and vms_per_slice > 1:
+                current_nodes //= vms_per_slice
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
                 user_name_str = (f' (created by another user '
@@ -1051,8 +1087,8 @@ def _launch(
             # Resources candidates may set their own node counts. The
             # cluster is resized to the count of the candidate that matches
             # its hardware, which only the server works out.
-            candidate_num_nodes = sorted(set(
-                dag.tasks[0].candidate_num_nodes()))
+            candidate_num_nodes = sorted(
+                set([r.num_nodes for r in dag.tasks[0].resources]))
             if len(candidate_num_nodes) > 1:
                 from_str = (f'from {current_nodes} node(s) '
                             if current_nodes is not None else '')
@@ -2814,9 +2850,11 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
-    # Backward compatibility check for the new flag cluster_name
+    # Backward compatibility check for the new flag cluster_name. An unknown
+    # version (None, e.g. no health check has run in this context yet) is not
+    # an old one: do not warn then, since the flag is sent either way.
     version = versions.get_remote_api_version()
-    if (cluster_name is not None) and (version is None or version < 38):
+    if (cluster_name is not None) and (version is not None and version < 38):
         logger.warning(
             'The flag is ignored because the server does not support it yet.')
 

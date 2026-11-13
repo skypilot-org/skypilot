@@ -27,7 +27,6 @@ from sky.backends import cloud_vm_ray_backend
 from sky.backends import task_codegen
 from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
-from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server.requests import request_names
@@ -519,8 +518,11 @@ def cost_report(days: Optional[int] = None,
 
         def get_total_cost(cluster_report: dict) -> float:
             duration = cluster_report['duration']
-            launched_nodes = cluster_report['num_nodes']
             launched_resources = cluster_report['resources']
+            # launched_resources describes one task node (one slice for a
+            # multi-host TPU slice on Kubernetes, which has a pod per VM).
+            launched_nodes = kubernetes_utils.num_task_nodes(
+                cluster_report['num_nodes'], launched_resources)
 
             cost = (launched_resources.get_cost(duration) * launched_nodes)
             return cost
@@ -727,7 +729,8 @@ def _start(
     # carries it (unless launched before resources had a `num_nodes`), and a
     # task cannot also set its own.
     launched_resources = handle.launched_resources.copy(
-        num_nodes=handle.launched_nodes)
+        num_nodes=kubernetes_utils.num_task_nodes(handle.launched_nodes,
+                                                  handle.launched_resources))
     with dag_lib.Dag():
         dummy_task = task_lib.Task().set_resources(launched_resources)
     (handle, _) = backend.provision(dummy_task,
@@ -1730,12 +1733,25 @@ def storage_ls() -> List[responses.StorageRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the storages.
 
+    Only storage in workspaces the calling user can read is returned, the
+    same as for clusters, managed jobs and volumes.
+
     Returns:
         List[responses.StorageRecord]: A list of storage records.
     """
-    storages = global_user_state.get_storage()
+    # Visibility, not usability: a read-only workspace's storage is listed.
+    # None (an admin) lists everything, storage in a workspace since removed
+    # from the config included.
+    storages = global_user_state.get_storage(
+        workspaces_filter=workspaces_core.get_readable_workspace_names())
+    users = global_user_state.get_users({
+        storage['user_hash']
+        for storage in storages
+        if storage['user_hash'] is not None
+    })
     storage_records = []
     for storage in storages:
+        user = users.get(storage['user_hash'])
         storage_records.append(
             responses.StorageRecord(
                 name=storage['name'],
@@ -1743,6 +1759,11 @@ def storage_ls() -> List[responses.StorageRecord]:
                 store=list(storage.pop('handle').sky_stores.keys()),
                 last_use=storage['last_use'],
                 status=storage['status'],
+                user_hash=storage['user_hash'],
+                user_name=user.name if user is not None else None,
+                workspace=storage['workspace'],
+                workspace_name=skypilot_config.get_workspace_name(
+                    storage['workspace']),
             ))
     return storage_records
 
@@ -1752,16 +1773,24 @@ def storage_delete(name: str) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Deletes a storage.
 
+    The workspace is the authorization boundary, as for clusters: storage in
+    a workspace the caller cannot read is reported as missing, and storage
+    in one the caller can only read cannot be deleted.
+
     Raises:
         ValueError: If the storage does not exist.
+        exceptions.PermissionDeniedError: If the caller cannot write to the
+            storage's workspace.
     """
-    # TODO(zhwu): check the storage owner matches the current user
-    handle = global_user_state.get_handle_from_storage_name(name)
-    if handle is None:
+    record = global_user_state.get_storage_by_name(name)
+    readable_workspaces = workspaces_core.get_readable_workspace_names()
+    if record is None or (readable_workspaces is not None and
+                          record['workspace'] not in readable_workspaces):
         raise ValueError(f'Storage name {name!r} not found.')
-    else:
-        storage_object = data.Storage.from_handle(handle)
-        storage_object.delete()
+    workspaces_core.check_workspace_permission(common_utils.get_current_user(),
+                                               record['workspace'])
+    storage_object = data.Storage.from_handle(record['handle'])
+    storage_object.delete()
 
 
 # ===================
@@ -1864,6 +1893,11 @@ def realtime_kubernetes_gpu_availability(
         - context (str): The Kubernetes context.
         - availability_list (List[models.RealtimeGpuAvailability]): A list
             of RealtimeGpuAvailability objects for that context.
+        Contexts without matching GPUs are left out, so the list is empty
+        when no queried context has one.
+
+    Raises:
+        ValueError: If every queried context is known to be unreachable.
     """
     if context is None:
         # Include contexts from both Kubernetes and SSH clouds
@@ -1877,6 +1911,20 @@ def realtime_kubernetes_gpu_availability(
             context_list = kubernetes_contexts
     else:
         context_list = [context]
+    unreachable: Dict[Optional[str], str] = {}
+    for ctx in context_list:
+        reason = kubernetes_utils.known_unreachable_reason(ctx)
+        if reason is not None:
+            unreachable[ctx] = reason
+    context_list = [ctx for ctx in context_list if ctx not in unreachable]
+    if unreachable:
+        skipped = ', '.join(
+            f'{ctx!r} ({reason})' for ctx, reason in unreachable.items())
+        logger.debug(f'Skipping unreachable Kubernetes contexts: {skipped}')
+    if not context_list and unreachable:
+        raise ValueError(' '.join(
+            f'Kubernetes context {ctx!r} is unreachable: {reason}.'
+            for ctx, reason in unreachable.items()))
 
     def _realtime_kubernetes_gpu_availability_single(
         context: Optional[str] = None,
@@ -1912,7 +1960,6 @@ def realtime_kubernetes_gpu_availability(
 
     availability_lists: List[Tuple[str,
                                    List[models.RealtimeGpuAvailability]]] = []
-    cumulative_count = 0
     parallel_queried = subprocess_utils.run_in_parallel(
         lambda ctx: _realtime_kubernetes_gpu_availability_single(
             context=ctx,
@@ -1920,31 +1967,12 @@ def realtime_kubernetes_gpu_availability(
             quantity_filter=quantity_filter), context_list)
 
     cloud_identity = 'ssh' if is_ssh else 'kubernetes'
-    cloud_identity_capital = 'SSH' if is_ssh else 'Kubernetes'
-
     for ctx, queried in zip(context_list, parallel_queried):
-        cumulative_count += len(queried)
         if len(queried) == 0:
             # don't add gpu results for clusters that don't have any
             logger.debug(f'No gpus found in {cloud_identity} cluster {ctx}')
             continue
         availability_lists.append((ctx, queried))
-
-    if cumulative_count == 0:
-        err_msg = f'No GPUs found in any {cloud_identity_capital} clusters. '
-        debug_msg = 'To further debug, run: sky check '
-        if name_filter is not None:
-            gpu_info_msg = f' {name_filter!r}'
-            if quantity_filter is not None:
-                gpu_info_msg += (' with requested quantity'
-                                 f' {quantity_filter}')
-            err_msg = (f'Resources{gpu_info_msg} not found '
-                       f'in {cloud_identity_capital} clusters. ')
-            debug_msg = (f'To show available accelerators on {cloud_identity}, '
-                         f' run: sky gpus list --cloud {cloud_identity} ')
-        full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
-                        debug_msg)
-        raise ValueError(full_err_msg)
     return availability_lists
 
 

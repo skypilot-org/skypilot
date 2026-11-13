@@ -494,7 +494,7 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
     mock_refresh.return_value = record
 
     task = _make_mock_task(num_nodes=5)
-    mock_resource = mock.MagicMock()
+    mock_resource = mock.MagicMock(num_nodes=5)
     mock_resource.ports = None
     mock_resource.docker_login_config = None
     mock_resource.cluster_config_overrides = None
@@ -507,7 +507,8 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
     observed = []
 
     def _capture(_handle, _task, **kwargs):
-        observed.append((_task.num_nodes, kwargs))
+        observed.append((next(iter(_task.resources)).num_nodes, kwargs))
+        return mock_resource
 
     mock_check_fit.side_effect = _capture
 
@@ -561,7 +562,7 @@ def test_check_existing_cluster_no_resize_uses_handle_nodes(
     mock_refresh.return_value = record
 
     task = _make_mock_task(num_nodes=2)
-    mock_resource = mock.MagicMock()
+    mock_resource = mock.MagicMock(num_nodes=2)
     mock_resource.ports = None
     mock_resource.docker_login_config = None
     mock_resource.cluster_config_overrides = None
@@ -753,6 +754,53 @@ def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
         sdk.validate(dag)
 
 
+def _tpu_multi_host_dag():
+    import sky
+    task = sky.Task(resources=sky.Resources(
+        accelerators='tpu-v6e-8', accelerator_args={'multi_host': True}))
+    with sky.Dag() as dag:
+        dag.add(task)
+    return dag
+
+
+@pytest.mark.parametrize('api_version', [None, 24, 68])
+def test_sdk_validate_tpu_multi_host_errors_on_old_server(
+        api_version, monkeypatch):
+    """sdk.validate and sdk.optimize should error for
+    accelerator_args.multi_host if the remote API version < 69."""
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=RuntimeError('reached server request')))
+    dag = _tpu_multi_host_dag()
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='accelerator_args.multi_host'):
+        sdk.validate(dag)
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='accelerator_args.multi_host'):
+        sdk.optimize(dag)
+
+
+def test_sdk_validate_tpu_multi_host_allowed_on_new_server(monkeypatch):
+    """With API version >= 69 the guard passes and the request is sent."""
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 69)
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=RuntimeError('reached server request')))
+    with pytest.raises(RuntimeError, match='reached server request'):
+        sdk.validate(_tpu_multi_host_dag())
+
+
 def test_launch_body_accepts_resize_field():
     """New server should accept resize=True in the request body."""
     from sky.server.requests import payloads
@@ -843,11 +891,14 @@ def _run_launch_confirm(sdk_mod,
                         sky_mod,
                         cluster_name='my-cluster',
                         num_nodes=3,
-                        resize=True):
+                        resize=True,
+                        resources=None):
     dag = sky_mod.Dag()
     with dag:
         task = sky_mod.Task(run='echo hi')
         task.num_nodes = num_nodes
+        if resources is not None:
+            task.set_resources(resources)
     request_options = sky_admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=None,
@@ -944,6 +995,51 @@ def test_launch_confirm_resize_noop(monkeypatch):
     assert len(calls) == 1
     msg = calls[0]
     assert 'already has 3 node' in msg
+    assert 'no-op' in msg
+
+
+def _multi_host_slice(sky_mod):
+    # tpu-v6e-8 as a 2x4 slice: two cluster nodes (pods) per task node.
+    return sky_mod.Resources(infra='k8s/ctx',
+                             accelerators='tpu-v6e-8',
+                             accelerator_args={'multi_host': True})
+
+
+def test_launch_confirm_resize_multi_host_counts_slices(monkeypatch):
+    """The record counts pods; the prompt shows task nodes (slices), the unit
+    of num_nodes."""
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 2,  # One 2x4 slice.
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod,
+                        sky_mod,
+                        num_nodes=2,
+                        resources=_multi_host_slice(sky_mod))
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'from 1 to 2 node' in msg
+    assert 'scale up' in msg
+
+
+def test_launch_confirm_resize_multi_host_same_size_is_noop(monkeypatch):
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 2,  # One 2x4 slice.
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod,
+                        sky_mod,
+                        num_nodes=1,
+                        resources=_multi_host_slice(sky_mod))
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'already has 1 node' in msg
     assert 'no-op' in msg
 
 

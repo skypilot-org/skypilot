@@ -4886,8 +4886,8 @@ def get_task_num_nodes_str(task: 'task_lib.Task',
     if all_candidates is set), the range is shown (e.g., '2-4').
     """
     if task.best_resources is not None and not all_candidates:
-        return str(task.num_nodes)
-    counts = task.candidate_num_nodes()
+        return str(task.best_resources.num_nodes)
+    counts = [r.num_nodes for r in task.resources]
     if min(counts) == max(counts):
         return str(counts[0])
     return f'{min(counts)}-{max(counts)}'

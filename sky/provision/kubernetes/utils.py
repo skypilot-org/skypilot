@@ -15,8 +15,8 @@ import subprocess
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional, Set,
+                    Tuple, Union)
 
 import ijson
 
@@ -30,6 +30,7 @@ from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
@@ -292,6 +293,8 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
 }
+# Phases of the pods whose requests count as allocated on their node.
+_ALLOCATING_POD_PHASES = ('Running', 'Pending')
 AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
 IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
     'skypilot.co/idle_minutes_to_autostop')
@@ -370,53 +373,200 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
-def _is_cloudflare_403_error(exception: Exception) -> bool:
-    """Check if an exception is a transient CloudFlare 403 error.
+def normalize_tpu_accelerator(accelerator: str,
+                              count: Optional[float]) -> Tuple[str, int]:
+    """Normalize a TPU request to the GKE label value and its chip count.
 
-    CloudFlare proxy 403 errors with CF-specific headers are transient and
-    should be retried, unlike real RBAC 403 errors.
-
-    Args:
-        exception: The exception to check
-
-    Returns:
-        True if this is a CloudFlare 403 error that should be retried
+    A GCP TPU name carries the chip count in the name, and that count wins
+    (``tpu-v6e-8`` -> ``('tpu-v6e-slice', 8)``). A GKE label value such as
+    ``tpu-v6e-slice`` has no count in the name, so the requested count is
+    kept (``tpu-v6e-slice:4`` -> ``('tpu-v6e-slice', 4)``).
     """
-    if not isinstance(exception, kubernetes.api_exception()):
+    normalized, count_in_name = normalize_tpu_accelerator_name(accelerator)
+    if normalized != accelerator or count is None:
+        return normalized, count_in_name
+    return normalized, int(count)
+
+
+# Multi-host TPU slices on GKE: chips in the slice -> slice topology. A
+# multi-host slice is one GKE node pool whose VMs each carry
+# ``chips_per_vm`` chips and the whole slice's topology label.
+GKE_TPU_MULTI_HOST_TOPOLOGIES: Dict[str, Dict[int, str]] = {
+    'tpu-v6e-slice': {
+        8: '2x4',
+        16: '4x4',
+        32: '4x8',
+        64: '8x8',
+        128: '8x16',
+        256: '16x16',
+    },
+}
+GKE_TPU_MULTI_HOST_CHIPS_PER_VM: Dict[str, int] = {'tpu-v6e-slice': 4}
+# The only slice that exists both as one VM and as a multi-host slice:
+# TPU v6e with 8 chips is one ct6e-standard-8t VM, or two ct6e-standard-4t
+# VMs on one 2x4 slice. ``accelerator_args: {multi_host: true}`` selects the
+# latter.
+OPT_IN_MULTI_HOST_SHAPES: Set[Tuple[str, int]] = {('tpu-v6e-slice', 8)}
+
+
+def multi_host_requested(accelerator_args: Optional[Dict[str, Any]]) -> bool:
+    """Whether ``accelerator_args`` asks for a multi-host TPU slice."""
+    if not accelerator_args:
         return False
-
-    # Only check for 403 errors
-    if exception.status != 403:
-        return False
-
-    # Check for CloudFlare-specific headers
-    headers = exception.headers if hasattr(exception, 'headers') else {}
-    if not headers:
-        return False
-
-    # CloudFlare errors have CF-RAY header and/or Server: cloudflare
-    for k, v in headers.items():
-        if 'cf-ray' in k.lower():
-            return True
-        if 'server' in k.lower() and 'cloudflare' in str(v).lower():
-            return True
-
-    return False
+    return accelerator_args.get('multi_host') is True
 
 
-def is_transient_api_error(exception: Optional[BaseException]) -> bool:
-    """Whether a failed Kubernetes API call may succeed if retried later.
-
-    True for connection errors and timeouts, 429, 5xx and a CloudFlare 403.
-    False for other 4xx responses and kubeconfig errors.
+@dataclasses.dataclass(frozen=True)
+class TPUMultiHostShape:
+    """A multi-host GKE TPU slice: one pod per VM, each taking its VM's chips.
     """
-    if isinstance(exception, kubernetes.max_retry_error()):
-        return True
-    if isinstance(exception, kubernetes.api_exception()):
-        status = exception.status or 0
-        return (status == 429 or status >= 500 or
-                _is_cloudflare_403_error(exception))
-    return False
+    accelerator: str  # GKE label value, e.g. 'tpu-v6e-slice'.
+    chips_in_slice: int
+    topology: str
+    chips_per_vm: int
+
+    @property
+    def vms_per_slice(self) -> int:
+        return self.chips_in_slice // self.chips_per_vm
+
+
+def get_tpu_multi_host_shape(
+        accelerator: Optional[str], count: Optional[float],
+        multi_host: Optional[bool]) -> Optional[TPUMultiHostShape]:
+    """Return the multi-host slice a GKE TPU request maps to, or None.
+
+    The request names a slice by its chip count (``tpu-v6e-16`` or
+    ``tpu-v6e-slice:16``). Sizes with a single-host VM (1, 4 and 8 chips on
+    v6e) stay single-host unless ``multi_host`` (from
+    ``accelerator_args.multi_host``) is True; larger sizes
+    exist only as multi-host slices.
+    """
+    if not accelerator or not is_tpu_on_gke(accelerator):
+        return None
+    acc_type, chips = normalize_tpu_accelerator(accelerator, count)
+    topologies = GKE_TPU_MULTI_HOST_TOPOLOGIES.get(acc_type, {})
+    if chips not in topologies:
+        return None
+    has_single_host = chips in GKELabelFormatter.GKE_TPU_TOPOLOGIES.get(
+        acc_type, {})
+    if has_single_host and multi_host is not True:
+        return None
+    return TPUMultiHostShape(
+        accelerator=acc_type,
+        chips_in_slice=chips,
+        topology=topologies[chips],
+        chips_per_vm=GKE_TPU_MULTI_HOST_CHIPS_PER_VM[acc_type])
+
+
+# Tags the Kubernetes provisioner puts on the pods of a multi-host TPU slice
+# (see instance._tag_tpu_multi_host_workers()).
+TPU_WORKER_ID_TAG = 'skypilot-tpu-worker-id'
+TPU_WORKER_HOSTNAMES_TAG = 'skypilot-tpu-worker-hostnames'
+TPU_SLICE_NAME_TAG = 'skypilot-tpu-slice-name'
+
+# Pod label naming the multi-host TPU slice a pod belongs to,
+# `<cluster name on cloud>-<slice index>`. Set only on clusters launched
+# without a queue (see instance._create_pods()).
+TPU_SLICE_LABEL = 'skypilot-tpu-slice'
+
+
+def tpu_worker_env_vars(tags: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """TPU runtime env vars for one VM of a multi-host TPU slice.
+
+    The TPU runtime on GKE reads the slice shape from env vars GKE injects
+    (TPU_TOPOLOGY, TPU_HOST_BOUNDS, ...), but GKE injects the worker's
+    identity only into JobSet and Indexed Job pods. These are set from the
+    node's provisioner tags; empty for any other node.
+    """
+    if not tags or TPU_WORKER_ID_TAG not in tags:
+        return {}
+    return {
+        'TPU_WORKER_ID': tags[TPU_WORKER_ID_TAG],
+        'TPU_WORKER_HOSTNAMES': tags.get(TPU_WORKER_HOSTNAMES_TAG, ''),
+        'TPU_NAME': tags.get(TPU_SLICE_NAME_TAG, ''),
+    }
+
+
+def tpu_vms_per_slice(resources: Optional['resources_lib.Resources']) -> int:
+    """Cluster nodes per task node for ``resources``.
+
+    1 unless ``resources`` is a multi-host GKE TPU slice on Kubernetes. There
+    each node of the task (``num_nodes``) is one slice, and the cluster gets
+    one node (pod) per VM of the slice, so a task with ``num_nodes: K`` runs
+    on K x vms_per_slice cluster nodes.
+    """
+    if resources is None or not resources.accelerators:
+        return 1
+    if not isinstance(resources.cloud, clouds.Kubernetes):
+        return 1
+    if len(resources.accelerators) != 1:
+        return 1
+    acc, count = next(iter(resources.accelerators.items()))
+    shape = get_tpu_multi_host_shape(
+        acc, count, multi_host_requested(resources.accelerator_args))
+    return shape.vms_per_slice if shape is not None else 1
+
+
+def num_task_nodes(
+        launched_nodes: int,
+        launched_resources: Optional['resources_lib.Resources']) -> int:
+    """Task nodes of a cluster with ``launched_nodes`` cluster nodes.
+
+    ``launched_nodes`` counts cluster nodes (pods), while
+    ``launched_resources`` describes one task node. They differ only for a
+    multi-host GKE TPU slice on Kubernetes, where one task node (one slice)
+    has one pod per VM. Use this wherever the node count is shown next to or
+    multiplied with ``launched_resources``.
+    """
+    vms_per_slice = tpu_vms_per_slice(launched_resources)
+    if vms_per_slice <= 1:
+        return launched_nodes
+    return launched_nodes // vms_per_slice
+
+
+# Kept under their old names: callers inside and outside this repo use them.
+# The definitions live in api_errors, with the other API-error classifiers.
+_is_cloudflare_403_error = api_errors.is_cloudflare_403
+is_transient_api_error = api_errors.is_transient
+
+# Checks for contexts whose API server is known to be unreachable, e.g. one
+# reached through a proxy hop that is known to be down. Each is called with a
+# context name and returns why that context is unreachable, or None. Calls
+# wrapped by `_retry_on_error` on such a context fail at once instead of
+# retrying with backoff. Empty by default -- nothing in core registers one.
+ContextUnreachableCheck = Callable[[Optional[str]], Optional[str]]
+_CONTEXT_UNREACHABLE_CHECKS: List[ContextUnreachableCheck] = []
+
+
+def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
+    """Register a check that names contexts known to be unreachable.
+
+    The check runs before every `_retry_on_error`-wrapped call on a named
+    context, so it must be cheap and must not block (no network calls).
+
+    Idempotent, so a module that registers on import keeps one registration
+    across the several process contexts that may import it.
+    """
+    if check not in _CONTEXT_UNREACHABLE_CHECKS:
+        _CONTEXT_UNREACHABLE_CHECKS.append(check)
+
+
+def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
+    """Why `context` is known to be unreachable, or None.
+
+    Never raises: a check that fails is skipped, as if it were not
+    registered.
+    """
+    for check in _CONTEXT_UNREACHABLE_CHECKS:
+        try:
+            reason = check(context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Context unreachable check failed for '
+                         f'{context!r}: {e}')
+            continue
+        if reason:
+            return reason
+    return None
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
@@ -445,6 +595,15 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
             assert 'context' in kwargs, 'context is required'
             context = kwargs.get('context')
+
+            # Only a named context: which API server a call without one
+            # reaches depends on the function and on in-cluster config loading.
+            if context is not None:
+                reason = known_unreachable_reason(context)
+                if reason is not None:
+                    raise exceptions.KubeAPIUnreachableError(
+                        f'Kubernetes context {context!r} is unreachable: '
+                        f'{reason}')
 
             for attempt in range(max_retries):
                 try:
@@ -1030,9 +1189,19 @@ def detect_gpu_label_formatter(
         Dict[str, List[Tuple[str, str]]]: A mapping of nodes and the list of
              labels on each node. E.g., {'node1': [('label1', 'value1')]}
     """
+    return detect_gpu_label_formatter_from_nodes(
+        get_kubernetes_nodes(context=context))
+
+
+def detect_gpu_label_formatter_from_nodes(
+    nodes: List['V1Node']
+) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
+    """Detects the GPU label formatter for a cluster with the given nodes.
+
+    See detect_gpu_label_formatter() for the return values.
+    """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -1087,13 +1256,18 @@ class Autoscaler:
 
     @classmethod
     # pylint: disable=unused-argument
-    def can_create_new_instance_of_type(cls, context: str,
-                                        instance_type: str) -> bool:
+    def can_create_new_instance_of_type(
+            cls,
+            context: str,
+            instance_type: str,
+            tpu_multi_host_shape: Optional['TPUMultiHostShape'] = None) -> bool:
         """Returns if the Kubernetes context has an autoscaler
         that can create a new node that satisfies the instance type.
         Args:
             context: The Kubernetes context to check.
             instance_type: The instance type to check.
+            tpu_multi_host_shape: Set when the request is a multi-host GKE
+                TPU slice; the instance type then describes one VM of it.
         Returns:
             bool: True if the Kubernetes context has an autoscaler that can
                 create a new node satisfying the instance type,
@@ -1123,8 +1297,11 @@ class GKEAutoscaler(Autoscaler):
 
     @classmethod
     @annotations.lru_cache(scope='request', maxsize=10)
-    def can_create_new_instance_of_type(cls, context: str,
-                                        instance_type: str) -> bool:
+    def can_create_new_instance_of_type(
+            cls,
+            context: str,
+            instance_type: str,
+            tpu_multi_host_shape: Optional['TPUMultiHostShape'] = None) -> bool:
         """Looks at each node pool in the cluster and checks if
         it can create a new node that satisfies the instance type.
         If the context does not match standard GKE context naming convention,
@@ -1203,7 +1380,7 @@ class GKEAutoscaler(Autoscaler):
                              f'satisfying {instance_type}')
                 try:
                     if cls._check_instance_fits_gke_autoscaler_node_pool(
-                            instance_type, node_pool):
+                            instance_type, node_pool, tpu_multi_host_shape):
                         return True
                 except KeyError:
                     logger.debug('encountered KeyError while checking if '
@@ -1303,7 +1480,10 @@ class GKEAutoscaler(Autoscaler):
 
     @classmethod
     def _check_instance_fits_gke_autoscaler_node_pool(
-        cls, instance_type: str, node_pool: dict
+        cls,
+        instance_type: str,
+        node_pool: dict,
+        tpu_multi_host_shape: Optional['TPUMultiHostShape'] = None
     ) -> bool:  # check if there are any spare capacity in the autoscaler.
         node_pool_name = node_pool['name']
         logger.debug(
@@ -1328,9 +1508,13 @@ class GKEAutoscaler(Autoscaler):
                 logger.debug(
                     f'checking {node_pool_name} for TPU {requested_acc_type}:'
                     f'{requested_acc_count}')
-                if 'resourceLabels' in node_config:
-                    requested_acc_type, requested_acc_count = normalize_tpu_accelerator_name(
-                        requested_acc_type)
+                if tpu_multi_host_shape is not None:
+                    accelerator_exists = cls._node_pool_is_tpu_slice(
+                        node_pool, tpu_multi_host_shape)
+                elif 'resourceLabels' in node_config:
+                    requested_acc_type, requested_acc_count = (
+                        normalize_tpu_accelerator(requested_acc_type,
+                                                  requested_acc_count))
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
                         node_config['resourceLabels'], machine_type,
                         requested_acc_type, requested_acc_count)
@@ -1427,6 +1611,28 @@ class GKEAutoscaler(Autoscaler):
         # must exactly match the TPU count in the instance.
         return (node_tpu_type == requested_tpu_type and
                 tpu_chip_count == requested_tpu_count)
+
+    @classmethod
+    def _node_pool_is_tpu_slice(cls, node_pool: dict,
+                                shape: 'TPUMultiHostShape') -> bool:
+        """Whether a node pool is one multi-host TPU slice of ``shape``.
+
+        A multi-host GKE TPU node pool is exactly one slice: its placement
+        policy carries the slice topology, and its machine type the chips on
+        each VM.
+        """
+        node_config = node_pool.get('config', {})
+        resource_labels = node_config.get('resourceLabels', {})
+        if not cls._is_node_multi_host_tpu(resource_labels):
+            return False
+        if resource_labels.get('goog-gke-accelerator-type') != (
+                shape.accelerator):
+            return False
+        topology = node_pool.get('placementPolicy', {}).get('tpuTopology')
+        chips_per_vm = cls._tpu_chip_count_from_instance_type(
+            node_config.get('machineType', ''))
+        return (topology == shape.topology and
+                chips_per_vm == shape.chips_per_vm)
 
     @classmethod
     def _tpu_chip_count_from_instance_type(cls, machine_type: str) -> int:
@@ -2512,6 +2718,22 @@ def _with_failure_hint(message: str, reason: str) -> str:
     return message
 
 
+def _kai_eviction_reason(context: Optional[str], namespace: str, pod_name: str,
+                         pod: Optional[Any]) -> Optional[str]:
+    """Why KAI evicted the pod, or None; ``pod`` is its object, if it exists."""
+    # In-function import: kai imports this module.
+    # pylint: disable-next=import-outside-toplevel
+    from sky.provision.kubernetes import kai
+    if pod is None:
+        return kai.eviction_reason(context, namespace, pod_name, since=None)
+    if kai.POD_GROUP_ANNOTATION not in (pod.metadata.annotations or {}):
+        return None
+    return kai.eviction_reason(context,
+                               namespace,
+                               pod_name,
+                               since=pod.metadata.creation_timestamp)
+
+
 def _diagnose_deleted_pod(context: Optional[str], namespace: str,
                           pod_name: str) -> Optional[str]:
     """Why a pod that no longer exists was deleted; None when nothing says.
@@ -2532,6 +2754,8 @@ def _diagnose_deleted_pod(context: Optional[str], namespace: str,
     except Exception:  # pylint: disable=broad-except
         return None
     reason = reason_from_pod_events(events)
+    if reason is None:
+        reason = _kai_eviction_reason(context, namespace, pod_name, pod=None)
     if reason is None:
         # A pod that is merely absent is not news: every `sky down` leaves
         # one, and the caller asks about all of them.
@@ -2608,6 +2832,11 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
         return _diagnose_deleted_pod(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
+    # Checked first: a pod KAI is deleting may not show as terminated yet, and
+    # once it does, the exit status KAI caused reads as the workload failing.
+    eviction = _kai_eviction_reason(context, namespace, pod_name, pod)
+    if eviction is not None:
+        return f'Pod {pod_name} terminated: {eviction}.'
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)
@@ -2683,7 +2912,7 @@ def get_allocated_resources_by_node(
     if context is None:
         context = get_current_kube_config_context_name()
     non_included_pod_statuses = POD_STATUSES.copy()
-    status_filters = ['Running', 'Pending']
+    status_filters = list(_ALLOCATING_POD_PHASES)
     if status_filters is not None:
         non_included_pod_statuses -= set(status_filters)
         field_selector = ','.join(
@@ -2696,51 +2925,65 @@ def get_allocated_resources_by_node(
         _preload_content=False,
         field_selector=field_selector)
     try:
-        allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-        allocated_cpu_memory_by_node: Dict[str, Tuple[
-            float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
-        for item_dict in ijson.items(response,
-                                     'items.item',
-                                     buf_size=IJSON_BUFFER_SIZE):
-            pod = V1Pod.from_dict(item_dict)
-            if should_exclude_pod_from_gpu_allocation(pod):
-                logger.debug(
-                    f'Excluding pod {pod.metadata.name} from resource count '
-                    f'calculations on node {pod.spec.node_name}')
-                continue
-            if not pod.spec.node_name:
-                continue
-
-            # Iterate over all the containers in the pod and sum the resources
-            pod_allocated_qty = 0
-            pod_allocated_cpu = 0.0
-            pod_allocated_memory_gb = 0.0
-            for container in pod.spec.containers:
-                if container.resources.requests:
-                    requests = container.resources.requests
-                    # Parse GPU
-                    pod_allocated_qty += get_node_accelerator_count(
-                        context, requests)
-                    # Parse CPU
-                    if 'cpu' in requests:
-                        pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
-                            requests['cpu'])
-                    # Parse memory
-                    if 'memory' in requests:
-                        pod_allocated_memory_gb += parse_memory_resource(
-                            requests['memory'], unit='G')
-
-            if pod_allocated_qty > 0:
-                allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
-            if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
-                current_cpu, current_memory = allocated_cpu_memory_by_node[
-                    pod.spec.node_name]
-                allocated_cpu_memory_by_node[pod.spec.node_name] = (
-                    current_cpu + pod_allocated_cpu,
-                    current_memory + pod_allocated_memory_gb)
-        return allocated_qty_by_node, allocated_cpu_memory_by_node
+        return _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(item_dict) for item_dict in ijson.items(
+                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)), context)
     finally:
         response.release_conn()
+
+
+def _sum_allocated_resources_by_node(
+    pods: Iterable[V1Pod],
+    context: Optional[str],
+    gpu_resource_key: Optional[str] = None,
+) -> Tuple[Dict[str, int], Dict[str, Tuple[float, float]]]:
+    """Sums the accelerators, CPU and memory that Running and Pending pods
+    request on each node.
+
+    See get_allocated_resources_by_node() for the return values.
+    """
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    allocated_cpu_memory_by_node: Dict[str, Tuple[
+        float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
+    for pod in pods:
+        if pod.status.phase not in _ALLOCATING_POD_PHASES:
+            continue
+        if should_exclude_pod_from_gpu_allocation(pod):
+            logger.debug(
+                f'Excluding pod {pod.metadata.name} from resource count '
+                f'calculations on node {pod.spec.node_name}')
+            continue
+        if not pod.spec.node_name:
+            continue
+
+        # Iterate over all the containers in the pod and sum the resources
+        pod_allocated_qty = 0
+        pod_allocated_cpu = 0.0
+        pod_allocated_memory_gb = 0.0
+        for container in pod.spec.containers:
+            if container.resources.requests:
+                requests = container.resources.requests
+                # Parse GPU
+                pod_allocated_qty += get_node_accelerator_count(
+                    context, requests, gpu_resource_key=gpu_resource_key)
+                # Parse CPU
+                if 'cpu' in requests:
+                    pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
+                        requests['cpu'])
+                # Parse memory
+                if 'memory' in requests:
+                    pod_allocated_memory_gb += parse_memory_resource(
+                        requests['memory'], unit='G')
+
+        if pod_allocated_qty > 0:
+            allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
+        if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
+            current_cpu, current_memory = allocated_cpu_memory_by_node[
+                pod.spec.node_name]
+            allocated_cpu_memory_by_node[pod.spec.node_name] = (
+                current_cpu + pod_allocated_cpu,
+                current_memory + pod_allocated_memory_gb)
+    return allocated_qty_by_node, allocated_cpu_memory_by_node
 
 
 @_retry_on_error(resource_type='pod')
@@ -2756,6 +2999,51 @@ def get_allocated_gpu_qty_by_node(
     """
     allocated_qty_by_node, _ = get_allocated_resources_by_node(context=context)
     return allocated_qty_by_node
+
+
+def read_node_snapshot(
+    context: str, snapshot: plugin_extensions.KubernetesNodeSnapshot
+) -> Optional[Tuple[List[V1Node], str, Dict[str, int]]]:
+    """Reads the accelerator availability inputs from a node snapshot.
+
+    Returns:
+        The same values as get_kubernetes_nodes(), get_gpu_resource_key() and
+        get_allocated_gpu_qty_by_node() for the context, computed from the
+        snapshot without calling the Kubernetes API, or None if the snapshot
+        is malformed.
+    """
+    try:
+        nodes = [V1Node.from_dict(node) for node in snapshot.nodes]
+        gpu_resource_key = get_gpu_resource_key_from_nodes(nodes)
+        allocated_qty_by_node, _ = _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(pod) for pod in snapshot.pods),
+            context,
+            gpu_resource_key=gpu_resource_key)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Ignoring a malformed node snapshot for context '
+                       f'{context}: {common_utils.format_exception(e)}')
+        return None
+    return (_filter_allowed_nodes(nodes, context), gpu_resource_key,
+            allocated_qty_by_node)
+
+
+def get_node_snapshot_label_keys(context: str) -> List[str]:
+    """Returns the node label keys that accelerator availability reads.
+
+    These are the GPU label formatters' keys, the GKE TPU keys that
+    is_multi_host_tpu() reads, and the allowed_nodes label_selector keys.
+    Formatters match label keys exactly, so nodes with only these labels give
+    the same result as the full node objects.
+    """
+    keys = {
+        key for formatter in LABEL_FORMATTER_REGISTRY
+        for key in formatter.get_label_keys()
+    }
+    keys.update((GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY,
+                 GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY))
+    allowed_nodes = get_allowed_nodes_config(context) or {}
+    keys.update(allowed_nodes.get('label_selector') or {})
+    return sorted(keys)
 
 
 def adjust_resources_to_allocatable(
@@ -2842,9 +3130,10 @@ def adjust_resources_to_allocatable(
 
 
 def check_instance_fits(
-        context: Optional[str],
-        instance: str,
-        ephemeral_storage_gb: Optional[float] = None
+    context: Optional[str],
+    instance: str,
+    ephemeral_storage_gb: Optional[float] = None,
+    tpu_multi_host_shape: Optional[TPUMultiHostShape] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
@@ -2933,11 +3222,38 @@ def check_instance_fits(
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
     acc_count = k8s_instance_type.accelerator_count
-    if acc_type is not None:
+    if tpu_multi_host_shape is not None:
+        # A multi-host slice request runs one pod per VM of the slice, so
+        # look for ready VMs of a slice of that shape.
+        shape = tpu_multi_host_shape
+        candidate_nodes = [
+            node for node in nodes
+            if node.is_ready() and node.metadata.labels.get(
+                GKELabelFormatter.TPU_LABEL_KEY) == shape.accelerator and
+            node.metadata.labels.get(GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY)
+            == shape.topology and node.metadata.labels.get(
+                GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY) == str(
+                    shape.chips_per_vm)
+        ]
+        if not candidate_nodes:
+            return False, (
+                f'No ready nodes of a multi-host {shape.accelerator} '
+                f'{shape.topology} slice ({shape.chips_per_vm} '
+                'chips per VM) found in the cluster.')
+        not_fit_reason_prefix = (
+            f'Nodes of the {shape.topology} {shape.accelerator} slice do not '
+            f'have enough CPU (>= {k8s_instance_type.cpus} CPUs) and/or '
+            f'memory (>= {k8s_instance_type.memory} G). ')
+    elif acc_type is not None:
         # If GPU/TPUs are requested, check if GPU/TPU type is available, and
         # if so, check if CPU and memory requirements on the specific node are
         # met.
         assert acc_count is not None, (acc_type, acc_count)
+        if is_tpu_on_gke(acc_type):
+            # Nodes carry the GKE label value (e.g. tpu-v6e-slice), so a GCP
+            # TPU name (e.g. tpu-v6e-4) must be normalized before the label
+            # lookup below, or no node matches.
+            acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
         try:
             gpu_label_key, gpu_label_values, _, _ = (
                 get_accelerator_label_key_values(context, acc_type, acc_count))
@@ -2959,7 +3275,6 @@ def check_instance_fits(
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
-            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
             fits, reason = check_tpu_fits(acc_type, acc_count, gpu_nodes)
             if reason is not None:
                 return fits, reason
@@ -3059,6 +3374,7 @@ def get_node_selector(
     spot_label_key: Optional[str],
     spot_label_value: Optional[str],
     enable_flex_start: bool,
+    tpu_chips_per_vm: Optional[int] = None,
 ) -> Optional[Dict[str, str]]:
     """Builds the pod ``nodeSelector``.
 
@@ -3080,6 +3396,9 @@ def get_node_selector(
         spot_label_value: Value ``spot_label_key`` carries on preemptible
             nodes, or None.
         enable_flex_start: Whether the pod schedules onto flex-start nodes.
+        tpu_chips_per_vm: For a multi-host GKE TPU slice, the chips on each
+            VM. Pins the pod to the slice's VMs, since the topology label
+            alone also matches a single-host VM of the same shape.
 
     Returns:
         A ``nodeSelector`` dict, or None when no entry applies.
@@ -3091,6 +3410,9 @@ def get_node_selector(
         node_selector[spot_label_key] = spot_label_value
     if enable_flex_start:
         node_selector['cloud.google.com/gke-flex-start'] = 'true'
+    if tpu_chips_per_vm is not None:
+        node_selector[GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY] = str(
+            tpu_chips_per_vm)
     return node_selector or None
 
 
@@ -3127,6 +3449,7 @@ def get_pod_fields(
     spot_label_key: Optional[str],
     spot_label_value: Optional[str],
     enable_flex_start: bool,
+    tpu_chips_per_vm: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Builds the pod fields that SkyPilot computes in Python.
 
@@ -3142,6 +3465,7 @@ def get_pod_fields(
         spot_label_key: See get_node_selector() and get_spot_toleration().
         spot_label_value: See get_node_selector() and get_spot_toleration().
         enable_flex_start: See get_node_selector().
+        tpu_chips_per_vm: See get_node_selector().
 
     Returns:
         A partial pod manifest, empty when no field applies.
@@ -3149,7 +3473,7 @@ def get_pod_fields(
     spec: Dict[str, Any] = {}
     node_selector = get_node_selector(topology_label_key, topology_label_value,
                                       spot_label_key, spot_label_value,
-                                      enable_flex_start)
+                                      enable_flex_start, tpu_chips_per_vm)
     if node_selector is not None:
         spec['nodeSelector'] = node_selector
     node_affinity = get_node_affinity(acc_label_key, acc_label_values,
@@ -3861,10 +4185,6 @@ def is_incluster_config_available() -> bool:
     return os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
 
 
-# (kubeconfig fingerprint, context names parsed from those files).
-_kubeconfig_context_names: Optional[Tuple[Tuple[Any, ...], List[str]]] = None
-
-
 def get_all_kube_context_names() -> List[str]:
     """Get all kubernetes context names available in the environment.
 
@@ -3873,33 +4193,20 @@ def get_all_kube_context_names() -> List[str]:
     If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
     returns the default in-cluster kubernetes context name.
 
-    The kubeconfig is parsed again only when a file on KUBECONFIG (or the
-    variable itself) changes, so an admin policy or an upload that rewrites
-    it is seen on the next call.
-
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
             available, an empty list otherwise.
     """
-    global _kubeconfig_context_names
     k8s = kubernetes.kubernetes
-    # Taken before the parse: a write during it changes the next fingerprint.
-    fingerprint = kubernetes.kubeconfig_fingerprint()
-    cached = _kubeconfig_context_names
-    if cached is not None and cached[0] == fingerprint:
-        context_names = list(cached[1])
-    else:
-        context_names = []
-        try:
-            all_contexts, _ = kubernetes.list_kube_config_contexts()
-            # all_contexts will always have at least one context. If
-            # kubeconfig does not have any contexts defined, it will raise
-            # ConfigException.
-            context_names = [context['name'] for context in all_contexts]
-        except k8s.config.config_exception.ConfigException:
-            # If no config found, continue
-            pass
-        _kubeconfig_context_names = (fingerprint, list(context_names))
+    context_names = []
+    try:
+        all_contexts, _ = kubernetes.list_kube_config_contexts()
+        # all_contexts will always have at least one context. If kubeconfig
+        # does not have any contexts defined, it will raise ConfigException.
+        context_names = [context['name'] for context in all_contexts]
+    except k8s.config.config_exception.ConfigException:
+        # If no config found, continue
+        pass
     if is_incluster_config_available():
         context_names.append(kubernetes.in_cluster_context_name())
     return context_names
@@ -5665,7 +5972,8 @@ def is_neuron_accelerator(accelerator: Optional[str]) -> bool:
 
 
 def get_node_accelerator_count(context: Optional[str],
-                               attribute_dict: dict) -> int:
+                               attribute_dict: dict,
+                               gpu_resource_key: Optional[str] = None) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
 
     This method checks the node's allocatable resources or the accelerators
@@ -5675,12 +5983,15 @@ def get_node_accelerator_count(context: Optional[str],
     Args:
         attribute_dict: Containing resource information from a node, such as
             allocatable or requested resources.
+        gpu_resource_key: The context's GPU resource key. Defaults to
+            get_gpu_resource_key(context).
 
     Returns:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    gpu_resource_name = get_gpu_resource_key(context)
+    gpu_resource_name = (gpu_resource_key if gpu_resource_key is not None else
+                         get_gpu_resource_key(context))
     # A node is expected to advertise at most one accelerator family (GPU, TPU,
     # or Neuron). Rather than assert on external cluster state (which would crash
     # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
@@ -5911,9 +6222,19 @@ def process_skypilot_pods(
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 
+def _select_gpu_resource_key(capacity_keys: Set[str]) -> str:
+    """Picks the GPU resource key from the capacity keys of all nodes.
+
+    The CUSTOM_GPU_RESOURCE_KEY environment variable overrides the pick.
+    """
+    detected = next(
+        (gpu_key for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values()
+         if gpu_key in capacity_keys), SUPPORTED_GPU_RESOURCE_KEYS['nvidia'])
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=detected)
+
+
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
-    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
     try:
         response = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
@@ -5927,15 +6248,25 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
                     supported_gpu_keys.intersection(capacity.keys()))
                 if len(capacity_keys) == len(supported_gpu_keys):
                     break
-            for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-                if gpu_key in capacity_keys:
-                    return gpu_key
+            return _select_gpu_resource_key(capacity_keys)
         finally:
             response.release_conn()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
-    return gpu_resource_key
+    return _select_gpu_resource_key(set())
+
+
+def get_gpu_resource_key_from_nodes(nodes: List[V1Node]) -> str:
+    """Gets the GPU resource key for a cluster with the given nodes.
+
+    Same as get_gpu_resource_key(), for all nodes of the cluster, before
+    allowed_nodes filtering.
+    """
+    capacity_keys: Set[str] = set()
+    for node in nodes:
+        capacity_keys.update(node.status.capacity.keys())
+    return _select_gpu_resource_key(capacity_keys)
 
 
 @annotations.lru_cache(scope='request')
@@ -5949,8 +6280,7 @@ def get_gpu_resource_key(context: Optional[str] = None) -> str:
     Returns:
         str: The selected GPU resource name.
     """
-    gpu_resource_key = _gpu_resource_key_helper(context)
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=gpu_resource_key)
+    return _gpu_resource_key_helper(context)
 
 
 def get_kubeconfig_paths() -> List[str]:

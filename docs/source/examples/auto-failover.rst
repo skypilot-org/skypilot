@@ -324,8 +324,11 @@ How :code:`num_nodes` settings combine:
   a :code:`num_nodes` runs on 1 node.
 - :code:`sky launch --num-nodes N` overrides the node count wherever the task sets it, so with counts in
   :code:`resources`, every candidate uses ``N`` nodes.
-- On an existing cluster (e.g., :code:`sky exec`), the first candidate that fits the cluster runs, preferring one whose
-  :code:`num_nodes` equals the cluster's node count.
+- On an existing cluster (e.g., :code:`sky exec`), :code:`ordered` uses the first candidate that fits, in the
+  specified order. :code:`any_of` prefers the largest candidate that fits the existing capacity. When resizing,
+  :code:`ordered` keeps its order and :code:`any_of` chooses the smallest count matching the cluster's hardware.
+- Task-level :code:`num_nodes` remains supported for backward compatibility, but is deprecated. Runtime candidates
+  carry the effective count. Prefer setting it in :code:`resources` for new YAMLs and SDK tasks.
 
 .. note::
 

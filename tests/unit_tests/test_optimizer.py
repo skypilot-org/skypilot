@@ -343,7 +343,7 @@ def test_per_candidate_num_nodes_default_is_one_node():
     # 1x A100 ($25/hr) vs 3x H100 ($30/hr).
     _optimize_with_fake_costs(dag, {'A100': 25.0, 'H100': 10.0})
     assert task.best_resources.accelerators == {'A100': 8}
-    assert task.best_resources.num_nodes is None
+    assert task.best_resources.num_nodes == 1
     assert task.num_nodes == 1
 
 
@@ -401,4 +401,4 @@ def test_fill_in_launchable_resources_uses_candidate_num_nodes():
     assert requested_num_nodes == [2, 1]
     h100, a100 = task.resources
     assert [r.num_nodes for r in launchable[h100]] == [2]
-    assert [r.num_nodes for r in launchable[a100]] == [None]
+    assert [r.num_nodes for r in launchable[a100]] == [1]
