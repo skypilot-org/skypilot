@@ -22,7 +22,7 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 
 import jsonschema
@@ -642,45 +642,46 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
     try:
         if not argv:
             return argv or []
-
-        result = []
-        i = 0
-
-        while i < len(argv):
-            arg = argv[i]
-
-            # Ensure arg is a string
-            if not isinstance(arg, str):
-                result.append(arg)
-                i += 1
-                continue
-
-            if arg == '--secret' and i + 1 < len(argv):
-                result.append(arg)
-                next_arg = argv[i + 1]
-                # Ensure next_arg is a string and handle redaction safely
-                if isinstance(next_arg, str):
-                    redacted = re.sub(r'^([^=]+)=.*', r'\1=<redacted>',
-                                      next_arg)
-                    result.append(redacted)
-                else:
-                    result.append(next_arg)
-                i += 2
-            elif arg.startswith('--secret='):
-                # Redact only if there's a value after the key
-                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
-                                  arg)
-                result.append(redacted)
-                i += 1
-            else:
-                result.append(arg)
-                i += 1
-
-        return result
+        return redact_flag_values(argv, ('--secret',))
     except Exception:  # pylint: disable=broad-except
         # If anything goes wrong with redaction, return original argv
         # This ensures the command can still execute
         return argv or []
+
+
+def redact_flag_values(argv: List[str], flags: Tuple[str, ...]) -> List[str]:
+    """``argv`` with the value of every ``FLAG K=V`` or ``FLAG=K=V`` replaced
+    by ``<redacted>``, for each flag in ``flags``. The key is kept, and so is
+    a bare ``FLAG K`` (the value comes from the caller's environment).
+
+    Works per token, so a value with spaces or quotes is redacted whole.
+    """
+    result: List[Any] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if not isinstance(arg, str):
+            result.append(arg)
+            i += 1
+            continue
+        if arg in flags and i + 1 < len(argv):
+            result.append(arg)
+            value = argv[i + 1]
+            if isinstance(value, str):
+                value = re.sub(r'^([^=]+)=.*',
+                               r'\1=<redacted>',
+                               value,
+                               flags=re.DOTALL)
+            result.append(value)
+            i += 2
+            continue
+        flag, sep, value = arg.partition('=')
+        if sep and flag in flags:
+            arg = flag + '=' + re.sub(
+                r'^([^=]+)=.*', r'\1=<redacted>', value, flags=re.DOTALL)
+        result.append(arg)
+        i += 1
+    return result
 
 
 def user_and_hostname_hash() -> str:

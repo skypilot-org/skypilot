@@ -349,6 +349,10 @@ class BasePlugin(abc.ABC):
 
         Only for that ordering need. Everything else belongs in `install`.
 
+        A middleware that sets `request.state.auth_user` must first ensure the
+        user's row in the users table and its role: requests from an
+        authenticated user run without upserting either.
+
         Raising here aborts the load, exactly as raising from `install` does:
         plugins are infrastructure, and a half-installed one is not something
         to serve requests with. "Second pass" does not mean optional.
@@ -587,6 +591,9 @@ def get_plugins() -> List[BasePlugin]:
 
 
 _PLUGIN_RBAC_RULES: Dict[str, List[Dict[str, str]]] = {}
+# True once a load has read the rules of every configured plugin. Until then
+# the collected rules may be missing some.
+_PLUGIN_RBAC_RULES_COMPLETE = False
 
 
 def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
@@ -600,13 +607,15 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
     Returns:
         Dictionary mapping role names to lists of blocklist rules.
     """
-    global _PLUGIN_RBAC_RULES
+    global _PLUGIN_RBAC_RULES, _PLUGIN_RBAC_RULES_COMPLETE
 
     config = _load_plugin_config()
     if not config:
+        _PLUGIN_RBAC_RULES_COMPLETE = True
         return {}
 
     rules_by_role: Dict[str, List[Dict[str, str]]] = {}
+    complete = True
 
     for plugin_config in config.get('plugins', []):
         class_path = plugin_config['class']
@@ -634,9 +643,16 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
                              f'{role} {rule.method} {rule.path}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to load RBAC rules from {class_path}: {e}')
+            complete = False
 
     _PLUGIN_RBAC_RULES = rules_by_role
+    _PLUGIN_RBAC_RULES_COMPLETE = complete
     return rules_by_role
+
+
+def plugin_rbac_rules_complete() -> bool:
+    """Whether the last load read the rules of every configured plugin."""
+    return _PLUGIN_RBAC_RULES_COMPLETE
 
 
 def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:

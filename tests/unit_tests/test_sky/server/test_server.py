@@ -8,10 +8,12 @@ import os
 import pathlib
 import threading
 import time
+from typing import List
 from unittest import mock
 import zipfile
 
 import fastapi
+from fastapi import testclient
 import prometheus_client as prom
 import pytest
 import uvicorn
@@ -114,6 +116,37 @@ def test_no_deploy_flag_uses_default_workers(mock_executor_start,
     assert call_args['workers'] is None
     assert call_args['host'] == '127.0.0.1'
     assert call_args['port'] == 46580
+
+
+@pytest.mark.asyncio
+async def test_validate_keeps_the_shared_log_handler():
+    """`/validate` runs in a thread of the API server process.
+
+    That process serves other requests, so the env/config override must not
+    rebuild the process-wide log handler at this client's log level
+    (sync_refresh=True); otherwise a `SKYPILOT_DEBUG=1` validate leaves the
+    handler at DEBUG and later requests in the process, such as the
+    in-process `sky jobs logs` stream, carry the server's debug lines.
+    """
+    mock_dag = mock.MagicMock()
+    mock_validate_body = mock.MagicMock()
+    mock_validate_body.dag = 'test_dag_yaml'
+    mock_validate_body.request_options = {}
+    mock_validate_body.env_vars = {'SKYPILOT_DEBUG': '1'}
+    mock_request = mock.MagicMock()
+    mock_request.state.auth_user = models.User(id='alice', name='alice')
+
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()) as mock_override, \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+                   return_value=mock_dag), \
+         mock.patch('sky.server.server.admin_policy_utils.apply',
+                   return_value=(mock_dag, config_utils.Config())), \
+         mock.patch.object(mock_dag, 'validate'):
+        await server.validate(mock_validate_body, mock_request)
+
+    mock_override.assert_called_once()
+    assert mock_override.call_args.kwargs.get('sync_refresh') is True
 
 
 @pytest.mark.asyncio
@@ -1693,19 +1726,18 @@ def test_api_status_does_not_read_stored_results(_request_authz_env,
     _scope_as(monkeypatch, None)
 
     requested_fields = []
-    list_tasks = server.requests_lib.get_request_tasks_async
+    list_tasks = server.requests_lib.get_request_tasks
     prefix_tasks = server.requests_lib.get_requests_async_with_prefix
 
-    async def _list_tasks(req_filter):
+    def _list_tasks(req_filter):
         requested_fields.append(req_filter.fields)
-        return await list_tasks(req_filter)
+        return list_tasks(req_filter)
 
     async def _prefix_tasks(request_id_prefix, fields=None):
         requested_fields.append(fields)
         return await prefix_tasks(request_id_prefix, fields)
 
-    monkeypatch.setattr(server.requests_lib, 'get_request_tasks_async',
-                        _list_tasks)
+    monkeypatch.setattr(server.requests_lib, 'get_request_tasks', _list_tasks)
     monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
                         _prefix_tasks)
 
@@ -1721,6 +1753,82 @@ def test_api_status_does_not_read_stored_results(_request_authz_env,
         assert 'return_value' not in fields
         assert 'error' not in fields
         assert 'request_body' in fields
+
+
+def test_api_status_listing_matches_model_encoding(_request_authz_env,
+                                                   monkeypatch):
+    requests_lib = server.requests_lib
+    running = _seed_request('carol-req-1', 'carol',
+                            requests_lib.RequestStatus.RUNNING)
+    running.cluster_name = 'c1'
+    running.status_msg = 'Provisioning ✓'
+    asyncio.new_event_loop().run_until_complete(
+        requests_lib.create_if_not_exists_async(running))
+    _scope_as(monkeypatch, None)
+
+    fetched = []
+    list_tasks = server.requests_lib.get_request_tasks
+
+    def _list_tasks(req_filter):
+        fetched[:] = list_tasks(req_filter)
+        return list(fetched)
+
+    monkeypatch.setattr(server.requests_lib, 'get_request_tasks', _list_tasks)
+
+    reference = fastapi.FastAPI()
+
+    @reference.get('/list', response_model=List[payloads.RequestPayload])
+    def _list():
+        return requests_lib.encode_requests(fetched)
+
+    client = testclient.TestClient(server.app)
+    reference_client = testclient.TestClient(reference)
+    for params in (
+        {},
+        {
+            'all_status': True
+        },
+        {
+            'all_status': True,
+            'cluster_name': 'c1'
+        },
+        {
+            'all_status': True,
+            'limit': 1
+        },
+        {
+            'all_status': True,
+            'fields': ['request_id', 'name', 'status', 'cluster_name']
+        },
+    ):
+        listed = client.get('/api/status', params=params)
+        assert listed.status_code == 200, params
+        assert listed.headers['content-type'] == 'application/json'
+        assert fetched, params
+        assert listed.json() == reference_client.get('/list').json(), params
+
+
+def test_api_status_lists_off_event_loop(_request_authz_env, monkeypatch):
+    client = testclient.TestClient(server.app)
+    _scope_as(monkeypatch, None)
+
+    on_loop = []
+    encode = server.requests_lib.encode_requests
+
+    def _encode(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return encode(*args, **kwargs)
+
+    monkeypatch.setattr(server.requests_lib, 'encode_requests', _encode)
+
+    listed = client.get('/api/status', params={'all_status': True})
+
+    assert listed.status_code == 200
+    assert on_loop == [False]
 
 
 def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):

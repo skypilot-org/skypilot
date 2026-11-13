@@ -1,5 +1,6 @@
 """Utility functions for subprocesses."""
 import collections
+import contextvars
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -216,9 +217,8 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
     Args:
         cloud_str: The cloud
     """
-    cpu_count = os.cpu_count()
-    if cpu_count is None:
-        cpu_count = 1
+    # os.cpu_count() reports the host's cores, not the container's CPU limit.
+    cpu_count = common_utils.get_cpu_count()
     return max(4, cpu_count - 1) * _get_thread_multiplier(cloud_str)
 
 
@@ -250,8 +250,15 @@ def run_in_parallel(func: Callable,
                  if num_threads is not None else get_parallel_threads())
     # len(args) is guaranteed to be greater than 1.
     processes = min(processes, len(args))
+    # Run each call in a copy of the caller's context, so that a request
+    # running in a thread of the API server keeps its env, config and user.
+    caller_ctx = contextvars.copy_context()
+
+    def run_in_caller_ctx(arg: Any) -> Any:
+        return caller_ctx.copy().run(func, arg)
+
     with pool.ThreadPool(processes=processes) as p:
-        ordered_iterators = p.imap(func, args)
+        ordered_iterators = p.imap(run_in_caller_ctx, args)
         return list(ordered_iterators)
 
 

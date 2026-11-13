@@ -112,17 +112,25 @@ _NETWORK_EXCEPTIONS: Tuple[Type[BaseException], ...] = (
     asyncio.TimeoutError,
 )
 
+_POOL_EXCEPTIONS: Tuple[Type[BaseException],
+                        ...] = (sqlalchemy.exc.TimeoutError,)
+
 RETRYABLE_EXCEPTIONS = _DRIVER_EXCEPTIONS + _NETWORK_EXCEPTIONS
 
 
-def is_transient(error: BaseException) -> bool:
+def _is_transient(error: BaseException, include_pool_timeout: bool) -> bool:
     """Whether `error` is a transient DB error, directly or by `__cause__`.
 
     Along the cause chain only driver errors count: the bare network
-    builtins are retryable only when raised at the top level.
+    builtins are retryable only when raised at the top level. A pool checkout
+    timeout is transient for controller bookkeeping but excluded from bounded
+    operation retries, where it must fail fast.
     """
     driver_excs = _DRIVER_EXCEPTIONS + _asyncpg_exceptions()
-    if isinstance(error, driver_excs + _NETWORK_EXCEPTIONS):
+    exceptions = driver_excs + _NETWORK_EXCEPTIONS
+    if include_pool_timeout:
+        exceptions += _POOL_EXCEPTIONS
+    if isinstance(error, exceptions):
         return True
     seen: Set[int] = set()
     current = error.__cause__
@@ -132,6 +140,11 @@ def is_transient(error: BaseException) -> bool:
         seen.add(id(current))
         current = current.__cause__
     return False
+
+
+def is_transient(error: BaseException) -> bool:
+    """Whether ``error`` is a transient database error."""
+    return _is_transient(error, include_pool_timeout=True)
 
 
 # 5 attempts × exp backoff capped at 5s ≈ ~10s of backoff sleeps — covers
@@ -210,6 +223,7 @@ def with_db_retries(fn: Callable[[int], T],
     `deadline`, whichever comes first; pass `max_retries=None` to bound the
     loop by the deadline alone. Backoff sleeps never run past the deadline,
     so the last attempt starts no later than the deadline.
+
     """
     _check_bounds(max_retries, deadline, initial_backoff, max_backoff)
     backoff = _new_backoff(initial_backoff, max_backoff)
@@ -222,7 +236,7 @@ def with_db_retries(fn: Callable[[int], T],
                     f'Transient DB error recovered after {attempt} retries.')
             return result
         except Exception as e:  # pylint: disable=broad-except
-            if not is_transient(e):
+            if not _is_transient(e, include_pool_timeout=False):
                 raise
             attempt += 1
             if _budget_spent(attempt, max_retries, deadline):
@@ -253,7 +267,7 @@ async def with_db_retries_async(
                     f'Transient DB error recovered after {attempt} retries.')
             return result
         except Exception as e:  # pylint: disable=broad-except
-            if not is_transient(e):
+            if not _is_transient(e, include_pool_timeout=False):
                 raise
             attempt += 1
             if _budget_spent(attempt, max_retries, deadline):

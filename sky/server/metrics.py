@@ -26,6 +26,7 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import constants as server_constants
 from sky.server import container_memory
 from sky.server import local_disk
@@ -1526,6 +1527,12 @@ class WorkspaceUsageCollector:
             if launched_resources is None:
                 continue
             num_nodes = max(1, int(getattr(handle, 'launched_nodes', 1) or 1))
+            # launched_resources describes one task node; a multi-host TPU
+            # slice on Kubernetes has several cluster nodes (pods) per task
+            # node.
+            num_nodes = max(
+                1, kubernetes_utils.num_task_nodes(num_nodes,
+                                                   launched_resources))
 
             accelerators = (launched_resources.accelerators or {})
             for acc_name, acc_count in accelerators.items():
@@ -1790,11 +1797,16 @@ class _FederationTargets:
         central Prometheus scrapes the local cluster's exporters directly, so
         federating them again would only duplicate the raw series under a
         stamped copy. The dashboard matches the local cluster with cluster=""
-        (see /dashboard_config local_contexts).
+        (see /dashboard_config local_contexts). Contexts known to be
+        unreachable are dropped too, before the local-cluster check probes
+        them.
         """
         skypilot_config.reload_config()
         annotations.clear_request_level_cache()
-        contexts = core.get_all_contexts()
+        contexts = [
+            ctx for ctx in core.get_all_contexts()
+            if kubernetes_utils.known_unreachable_reason(ctx) is None
+        ]
         _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
         # Slurm clusters federate through their login node; only clusters
         # with a configured prometheus_url participate. Enumeration reads

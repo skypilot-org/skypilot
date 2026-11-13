@@ -1561,7 +1561,7 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
         # Server workers are resident too, and the parent process with them.
         used += ((config.num_server_workers + 1) *
-                 server_config.SERVER_WORKER_MEM_GB * 1024)
+                 server_config.server_worker_mem_gb() * 1024)
     return total_memory_mb - used
 
 

@@ -36,6 +36,8 @@ class TaskCodeGen:
         self._has_setup: bool = False
         # Job ID is used to identify the job (also this generated code).
         self.job_id: Optional[int] = None
+        # Node internal IP -> extra env vars for the task on that node.
+        self._per_ip_env_vars: Dict[str, Dict[str, str]] = {}
 
     def _add_common_imports(self) -> None:
         """Add common imports for both Ray and Slurm execution."""
@@ -248,6 +250,15 @@ class TaskCodeGen:
     ) -> None:
         """Generates code to run the bash command on all num_nodes nodes."""
         raise NotImplementedError
+
+    def set_per_ip_env_vars(self,
+                            per_ip_env_vars: Dict[str, Dict[str, str]]) -> None:
+        """Sets extra env vars for the task on specific nodes.
+
+        ``per_ip_env_vars`` maps a node's internal IP to env vars added on
+        top of the task's env vars on that node. Call before add_task().
+        """
+        self._per_ip_env_vars = dict(per_ip_env_vars)
 
     def add_epilogue(self) -> None:
         """Generate code that checks return codes and updates job status."""
@@ -638,6 +649,11 @@ class RayCodeGen(TaskCodeGen):
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         options_str = ', '.join(options)
+        # Only emitted when some node has extra env vars, so the generated
+        # code is unchanged otherwise.
+        per_ip_env_vars_str = ('\n            sky_env_vars_dict.update('
+                               f'{self._per_ip_env_vars!r}.get(ip, {{}}))'
+                               if self._per_ip_env_vars else '')
         logger.debug('Added Task with options: '
                      f'{options_str}')
         unset_ray_env_vars = ' && '.join(
@@ -654,7 +670,7 @@ class RayCodeGen(TaskCodeGen):
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
 
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
-            rank = job_ip_rank_map[ip]
+            rank = job_ip_rank_map[ip]{per_ip_env_vars_str}
 
             if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
                 name_str = '{task_name},' if {task_name!r} != None else 'task,'
