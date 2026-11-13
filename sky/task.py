@@ -1074,6 +1074,21 @@ class Task:
         config['_user_specified_yaml'] = yaml_str
         return Task.from_yaml_config(config)
 
+    def named_volumes(self) -> List[str]:
+        """Names of the existing volumes the task's `volumes` refer to.
+
+        Follows resolve_and_validate_volumes: a dict with `size` is an
+        ephemeral volume even if it also has a `name`.
+        """
+        names = []
+        for vol in self._volumes.values():
+            if isinstance(vol, str):
+                names.append(vol)
+            elif (isinstance(vol, dict) and 'size' not in vol and
+                  'name' in vol):
+                names.append(vol['name'])
+        return names
+
     def resolve_and_validate_volumes(self) -> None:
         """Resolve volumes config to volume mounts and validate them.
 

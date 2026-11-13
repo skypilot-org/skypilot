@@ -84,6 +84,27 @@ You can also check the volumes in the SkyPilot dashboard.
     :align: center
     :width: 80%
 
+.. _volumes-workspaces:
+
+Volumes and workspaces
+~~~~~~~~~~~~~~~~~~~~~~
+
+A volume belongs to the :ref:`workspace <workspaces>` that was active when it was created.
+
+- A volume can only be created on infra that the active workspace can launch on: an enabled cloud, and for Kubernetes, a context in the workspace's ``allowed_contexts``.
+- Deleting a volume, or naming it in a task's ``volumes`` or in ``kubernetes.enable_docker.cache_volume``, requires access to the volume's workspace. You can still see the volumes of a workspace that you can only read, but you cannot delete or mount them.
+- ``sky volumes delete --all`` and glob patterns skip the volumes that you cannot delete.
+- ``kubernetes.auto_mounts``, including the per-context entries under ``context_configs``, is read only from the API server's config: a remote API server ignores the entries in a client's local config. Volumes that the server's config or admin policy adds are not checked.
+
+.. note::
+
+   These checks apply to volumes referenced by name. They do not isolate the
+   underlying storage: a task that mounts a PVC directly through
+   ``kubernetes.pod_config``, a task YAML that carries already-resolved
+   ``volume_mounts``, a ``hostPath`` volume, or direct access to the
+   Kubernetes cluster is not checked. To isolate workspaces' storage, give each
+   workspace its own Kubernetes namespace.
+
 
 .. _volumes-on-kubernetes:
 

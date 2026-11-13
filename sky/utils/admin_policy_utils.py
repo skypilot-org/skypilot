@@ -4,17 +4,19 @@ import copy
 import dataclasses
 import importlib
 import typing
-from typing import Iterator, Optional, Tuple, Union
+from typing import Any, Iterator, Optional, Set, Tuple, Union
 from urllib import parse as urlparse
 
 import colorama
 
 from sky import admin_policy
+from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.server import plugin_hooks
 from sky.server import versions
 from sky.server.requests import request_names
@@ -26,6 +28,23 @@ logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
     from sky import models
+    from sky.workspaces import core as workspaces_core
+else:
+    # Server-only, and heavy for the clients that import this module.
+    workspaces_core = adaptors_common.LazyImport('sky.workspaces.core')
+
+# Requests whose named volumes are not checked. Controller tasks carry no user
+# volumes and run as the server user; controllers relaunch tasks whose volumes
+# were checked at submit. Exec and validate mount nothing: the launch that
+# follows a validate is checked itself.
+_VOLUME_CHECK_EXEMPT_REQUESTS = frozenset({
+    request_names.AdminPolicyRequestName.VALIDATE,
+    request_names.AdminPolicyRequestName.JOBS_LAUNCH_CONTROLLER,
+    request_names.AdminPolicyRequestName.JOBS_LAUNCH_CLUSTER,
+    request_names.AdminPolicyRequestName.SERVE_LAUNCH_CONTROLLER,
+    request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA,
+    request_names.AdminPolicyRequestName.CLUSTER_EXEC,
+})
 
 
 def _is_url(policy_string: str) -> bool:
@@ -108,6 +127,78 @@ def apply_and_use_config_in_current_request(
         yield dag
 
 
+def _cache_volume(docker_config: Any) -> Optional[str]:
+    if isinstance(docker_config, dict):
+        return docker_config.get('cache_volume')
+    return None
+
+
+def _user_set_cache_volumes(task: 'task_lib.Task') -> Set[str]:
+    """Docker cache volumes the requester set, in a task override or their
+    own client config, rather than the server's config.
+
+    Resolved per context the way provisioning resolves `enable_docker`, since a
+    context's value wins over the top-level one.
+    """
+    configured: Set[Optional[str]] = {None}
+    configured.update(
+        skypilot_config.get_nested(('kubernetes', 'context_configs'), {}))
+    names: Set[str] = set()
+    for resources in task.resources:
+        # isinstance: SSH node pools read the Kubernetes config too.
+        if (resources.cloud is not None and
+                not isinstance(resources.cloud, clouds.Kubernetes)):
+            continue
+        overrides = resources.cluster_config_overrides
+        # A resource pinned to a context provisions only there.
+        if resources.region is not None:
+            contexts: Set[Optional[str]] = {resources.region}
+        else:
+            contexts = configured | set(
+                overrides.get('kubernetes', {}).get('context_configs', {}))
+        for context in contexts:
+            name = _cache_volume(
+                skypilot_config.get_effective_region_config(
+                    cloud='kubernetes',
+                    keys=('enable_docker',),
+                    region=context,
+                    override_configs=overrides))
+            server_name = _cache_volume(
+                skypilot_config.get_server_region_config(
+                    cloud='kubernetes', keys=('enable_docker',),
+                    region=context))
+            if name is not None and name != server_name:
+                names.add(name)
+    return names
+
+
+def _check_user_named_volumes(
+        entrypoint: Union['dag_lib.Dag', 'task_lib.Task']) -> None:
+    """Refuses a request naming a volume the user cannot write to.
+
+    Runs before the policy: volumes an admin adds, through a policy or the
+    server config, are the admin's choice and are not checked.
+
+    Raises:
+        PermissionDeniedError: If the user cannot write to the workspace of a
+            volume they named.
+    """
+    tasks = ([entrypoint]
+             if isinstance(entrypoint, task_lib.Task) else entrypoint.tasks)
+    names: Set[str] = set()
+    for task in tasks:
+        # Already-resolved mounts skip name resolution entirely, so their
+        # names are not looked up either.
+        if task.volume_mounts is None:
+            names.update(task.named_volumes())
+        names.update(_user_set_cache_volumes(task))
+    if not names:
+        return
+    user = common_utils.get_current_user()
+    for name in sorted(names):
+        workspaces_core.check_volume_write_permission(user, name)
+
+
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     request_name: request_names.AdminPolicyRequestName,
@@ -130,6 +221,8 @@ def apply(
         - The new copy of dag after applying the policy
         - The new copy of skypilot config after applying the policy.
     """
+    if not at_client_side and request_name not in _VOLUME_CHECK_EXEMPT_REQUESTS:
+        _check_user_named_volumes(entrypoint)
     dag, config = _apply(entrypoint, request_name, request_options,
                          at_client_side)
     if not at_client_side:
