@@ -9,6 +9,7 @@ from sky import exceptions
 from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_lib
+from sky.utils import resources_utils
 
 
 def _optimize_ordered_task_with_mock_launchable(dag,
@@ -256,3 +257,148 @@ def test_ordered_resources_unreachable_then_launchable_uses_later_choice():
 
     assert len(fill_calls) == 2
     assert task.best_resources.accelerators == {'L4': 4}
+
+
+# Per-resources `num_nodes`: hourly cost per node of each accelerator, used by
+# the tests below in place of the catalog.
+_HOURLY_COST_PER_NODE = {'H200': 50.0, 'H100': 30.0, 'A100': 10.0}
+
+
+def _optimize_with_fake_costs(dag, hourly_cost_per_node, launchable=None):
+    """Runs the real cost estimation and DP with a fake catalog.
+
+    Each requested resources is its own launchable resources unless
+    `launchable(resources)` says it is unavailable.
+    """
+
+    def fake_fill_in_launchable_resources(task, blocked_resources, quiet):
+        del blocked_resources, quiet
+        result = {}
+        for r in task.resources:
+            ok = launchable is None or launchable(r)
+            result[r] = [r] if ok else []
+        return result, {}, [], {}, []
+
+    def fake_get_cost(self, seconds):
+        acc = next(iter(self.accelerators))
+        return hourly_cost_per_node[acc] * seconds / 3600
+
+    with mock.patch('sky.optimizer._fill_in_launchable_resources',
+                    side_effect=fake_fill_in_launchable_resources), \
+            mock.patch('sky.optimizer._check_specified_clouds'), \
+            mock.patch.object(optimizer.resources_utils,
+                              'need_to_query_reservations',
+                              return_value=False), \
+            mock.patch.object(resources_lib.Resources, 'get_cost',
+                              fake_get_cost):
+        optimizer.Optimizer.optimize(dag, quiet=True)
+
+
+def _make_task(resources):
+    with dag_lib.Dag() as dag:
+        task = task_lib.Task(name='per-candidate-nodes')
+        task.set_resources(resources)
+    return dag, task
+
+
+def test_per_candidate_num_nodes_cheaper_single_node_wins():
+    # 1x H200 ($50/hr) vs 2x H100 ($60/hr).
+    dag, task = _make_task({
+        resources_lib.Resources(accelerators='H200:8', num_nodes=1),
+        resources_lib.Resources(accelerators='H100:8', num_nodes=2),
+    })
+    _optimize_with_fake_costs(dag, _HOURLY_COST_PER_NODE)
+    assert task.best_resources.accelerators == {'H200': 8}
+    assert task.num_nodes == 1
+
+
+def test_per_candidate_num_nodes_cheaper_multi_node_wins():
+    # 1x H200 ($50/hr) vs 2x H100 ($40/hr): the multi-node candidate wins,
+    # and its node count reaches the task.
+    dag, task = _make_task({
+        resources_lib.Resources(accelerators='H200:8', num_nodes=1),
+        resources_lib.Resources(accelerators='H100:8', num_nodes=2),
+    })
+    _optimize_with_fake_costs(dag, {'H200': 50.0, 'H100': 20.0})
+    assert task.best_resources.accelerators == {'H100': 8}
+    assert task.best_resources.num_nodes == 2
+    assert task.num_nodes == 2
+
+
+def test_per_candidate_num_nodes_default_is_one_node():
+    # Candidates without `num_nodes` run on 1 node.
+    # 1x A100 ($40/hr) vs 3x H100 ($30/hr).
+    dag, task = _make_task({
+        resources_lib.Resources(accelerators='A100:8'),
+        resources_lib.Resources(accelerators='H100:8', num_nodes=3),
+    })
+    _optimize_with_fake_costs(dag, {'A100': 40.0, 'H100': 10.0})
+    assert task.best_resources.accelerators == {'H100': 8}
+    assert task.num_nodes == 3
+
+    dag, task = _make_task({
+        resources_lib.Resources(accelerators='A100:8'),
+        resources_lib.Resources(accelerators='H100:8', num_nodes=3),
+    })
+    # 1x A100 ($25/hr) vs 3x H100 ($30/hr).
+    _optimize_with_fake_costs(dag, {'A100': 25.0, 'H100': 10.0})
+    assert task.best_resources.accelerators == {'A100': 8}
+    assert task.best_resources.num_nodes == 1
+    assert task.num_nodes == 1
+
+
+def test_ordered_per_candidate_num_nodes_falls_back_to_smaller():
+    # ordered: 4x H100, then 2x H100. If the 4-node candidate is unavailable,
+    # the 2-node one is chosen and the task runs on 2 nodes.
+    dag, task = _make_task([
+        resources_lib.Resources(accelerators='H100:8', num_nodes=4),
+        resources_lib.Resources(accelerators='H100:8', num_nodes=2),
+    ])
+    _optimize_with_fake_costs(dag,
+                              _HOURLY_COST_PER_NODE,
+                              launchable=lambda r: r.num_nodes != 4)
+    assert task.best_resources.num_nodes == 2
+    assert task.num_nodes == 2
+
+    # Re-optimizing (e.g., on failover) chooses among all candidates
+    # again, so a different-size candidate can be chosen.
+    task.best_resources = None
+    _optimize_with_fake_costs(dag, _HOURLY_COST_PER_NODE)
+    assert task.best_resources.num_nodes == 4
+    assert task.num_nodes == 4
+
+
+def test_fill_in_launchable_resources_uses_candidate_num_nodes():
+    """Feasibility is checked with, and launchables carry, each count."""
+    requested_num_nodes = []
+
+    class FakeCloud:
+
+        def get_feasible_launchable_resources(self, resources, num_nodes):
+            requested_num_nodes.append(num_nodes)
+            # Clouds may build launchables without copying num_nodes.
+            launchable = resources_lib.Resources(
+                accelerators=resources.accelerators)
+            return resources_utils.FeasibleResources([launchable], [], None)
+
+    task = task_lib.Task()
+    task.set_resources([
+        resources_lib.Resources(accelerators='H100:8', num_nodes=2),
+        resources_lib.Resources(accelerators='A100:8'),
+    ])
+    with mock.patch.object(optimizer.sky_check,
+                           'get_cached_enabled_clouds_or_refresh',
+                           return_value=[FakeCloud()]), \
+            mock.patch.object(optimizer.resources_utils,
+                              'make_launchables_for_valid_region_zones',
+                              side_effect=lambda r: [r]), \
+            mock.patch.object(resources_lib.Resources, 'validate'):
+        launchable, _, _, _, _ = optimizer._fill_in_launchable_resources(  # pylint: disable=protected-access
+            task,
+            blocked_resources=None,
+            quiet=True)
+
+    assert requested_num_nodes == [2, 1]
+    h100, a100 = task.resources
+    assert [r.num_nodes for r in launchable[h100]] == [2]
+    assert [r.num_nodes for r in launchable[a100]] == [1]

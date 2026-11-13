@@ -275,3 +275,62 @@ This will generate the following output:
   ---------------------------------------------------------------------------------------------
 
   Launching a new cluster 'mycluster'. Proceed? [Y/n]:
+
+.. _multiple-resources-num-nodes:
+
+Different node counts per candidate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each candidate in :code:`ordered` or :code:`any_of` can set its own :code:`num_nodes`. This is useful when the
+same job fits on, e.g., either one node with 8x H200 or two nodes with 8x H100 each:
+
+.. code-block:: yaml
+
+  resources:
+    any_of:
+      - accelerators: H200:8
+        num_nodes: 1
+      - accelerators: H100:8
+        num_nodes: 2
+
+  run: |
+    echo "Running on $SKYPILOT_NUM_NODES node(s)"
+
+The optimizer compares the total cost of each candidate (the per-node cost times the candidate's node count), and the
+cluster is launched with the node count of the chosen candidate. :code:`SKYPILOT_NUM_NODES` and
+:code:`SKYPILOT_NODE_IPS` reflect that node count.
+
+With :code:`ordered`, the candidates are tried in the listed order, so a job can prefer a larger cluster and fall back
+to a smaller one when capacity is short:
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: H100:8
+    ordered:
+      - num_nodes: 4
+      - num_nodes: 2
+      - num_nodes: 1
+
+For :ref:`managed jobs <managed-jobs>`, the candidates are re-evaluated on each recovery, so a recovered job may run on a
+different number of nodes than before. Make sure the job can resume from its checkpoints on any of the node counts.
+
+How :code:`num_nodes` settings combine:
+
+- Set :code:`num_nodes` either at the top level of the task or inside :code:`resources`, not both; setting it in both
+  places is an error.
+- Inside :code:`resources`, a :code:`num_nodes` set directly under :code:`resources` (next to :code:`ordered` /
+  :code:`any_of`) applies to all candidates, and a candidate's own :code:`num_nodes` overrides it. A candidate without
+  a :code:`num_nodes` runs on 1 node.
+- :code:`sky launch --num-nodes N` overrides the node count wherever the task sets it, so with counts in
+  :code:`resources`, every candidate uses ``N`` nodes.
+- On an existing cluster (e.g., :code:`sky exec`), :code:`ordered` uses the first candidate that fits, in the
+  specified order. :code:`any_of` prefers the largest candidate that fits the existing capacity. When resizing,
+  :code:`ordered` keeps its order and :code:`any_of` chooses the smallest count matching the cluster's hardware.
+- Task-level :code:`num_nodes` remains supported for backward compatibility, but is deprecated. Runtime candidates
+  carry the effective count. Prefer setting it in :code:`resources` for new YAMLs and SDK tasks.
+
+.. note::
+
+  :code:`num_nodes` inside :code:`resources` requires an API server that supports it; an older API server rejects the
+  task with an error asking to upgrade it.

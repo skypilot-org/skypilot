@@ -136,8 +136,9 @@ def _get_possible_location_from_task(task: 'task_lib.Task') -> List[Location]:
     possible_locations = set()
     for cloud in clouds_list:
         feasible_resources: resources_utils.FeasibleResources = (
-            cloud.get_feasible_launchable_resources(empty_location_resources,
-                                                    num_nodes=task.num_nodes))
+            cloud.get_feasible_launchable_resources(
+                empty_location_resources,
+                num_nodes=empty_location_resources.num_nodes))
         for feasible in feasible_resources.resources_list:
             # We set override_optimize_by_zone=True to force the provisioner
             # to use zone-level provisioning. This is to get accurate location
@@ -181,7 +182,7 @@ class SpotPlacer:
         self.location2cost: Dict[Location, float] = {}
         # Already checked there is only one resource in the task.
         self.resources = list(task.resources)[0]
-        self.num_nodes = task.num_nodes
+        self.num_nodes = self.resources.num_nodes
 
     def __init_subclass__(cls, name: str, default: bool = False):
         SPOT_PLACERS[name] = cls

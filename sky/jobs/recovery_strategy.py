@@ -2121,6 +2121,15 @@ class FailoverStrategyExecutor(StrategyExecutor):
             assert isinstance(handle, backends.CloudVmRayResourceHandle), (
                 'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
+            if launched_resources is not None:
+                # A reused cluster may have more capacity than this task runs
+                # on. Recovery retries the matched request, not that capacity.
+                matched = await asyncio.to_thread(
+                    backends.CloudVmRayBackend().check_resources_fit_cluster,
+                    handle, self.dag.tasks[0])
+                launched_resources = launched_resources.copy(
+                    num_nodes=matched.num_nodes,
+                    _num_nodes_specified=matched.num_nodes_specified)
             self._launched_resources = launched_resources
 
             # Persist infra info to database for sorting/filtering
@@ -2162,8 +2171,16 @@ class FailoverStrategyExecutor(StrategyExecutor):
                 original_resources = task.resources
                 launched_cloud = self._launched_resources.cloud
                 launched_region = self._launched_resources.region
+                # The launched resource retains its requested count and the
+                # provenance of any legacy task-level input.
                 new_resources = self._launched_resources.copy(
-                    cloud=launched_cloud, region=launched_region, zone=None)
+                    cloud=launched_cloud,
+                    region=launched_region,
+                    zone=None,
+                    _num_nodes_specified=any(
+                        r.num_nodes_specified
+                        for r in task.resources
+                        if r.num_nodes == self._launched_resources.num_nodes))
                 task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = await self._launch(raise_on_failure=False,

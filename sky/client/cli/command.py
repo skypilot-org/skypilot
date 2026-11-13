@@ -1125,7 +1125,12 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     task.set_resources_override(override_params)
 
     if num_nodes is not None:
-        task.num_nodes = num_nodes
+        # `num_nodes` is set either on the task or in its resources; override
+        # it where the task sets it.
+        if any(r.num_nodes_specified for r in task.resources):
+            task.set_resources_override({'num_nodes': num_nodes})
+        else:
+            task.num_nodes = num_nodes
     if name is not None:
         task.name = name
     return task

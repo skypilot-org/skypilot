@@ -136,11 +136,12 @@ def test_resize_multi_host_counts_pods_per_slice(slices):
     # is not a scale-down, so no worker is terminated.
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
     backend.run_on_head = mock.MagicMock()
-    task = mock.MagicMock()
-    task.num_nodes = slices
+    handle = _multi_host_handle(4)
+    physical_nodes = slices * kubernetes_utils.tpu_vms_per_slice(
+        handle.launched_resources)
     with mock.patch.object(cloud_vm_ray_backend.provision_lib,
                            'terminate_instances') as terminate:
-        backend._handle_resize_pre_provision(_multi_host_handle(4), task, 'c')
+        backend._handle_resize_pre_provision(handle, physical_nodes, 'c')
     backend.run_on_head.assert_not_called()
     terminate.assert_not_called()
 

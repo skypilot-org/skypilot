@@ -177,6 +177,7 @@ def _make_mock_handle(cluster_name='test-cluster',
 def _make_mock_task(num_nodes=1):
     task = mock.MagicMock()
     task.num_nodes = num_nodes
+    task.num_nodes_for.return_value = num_nodes
     return task
 
 
@@ -190,7 +191,7 @@ def test_resize_scale_up_is_noop_pre_provision():
     handle = _make_mock_handle(launched_nodes=2)
     task = _make_mock_task(num_nodes=4)
     # Should not raise — scale-up is handled by provisioning.
-    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    backend._handle_resize_pre_provision(handle, task.num_nodes, 'test-cluster')
 
 
 def test_resize_same_size_is_noop_pre_provision():
@@ -198,7 +199,7 @@ def test_resize_same_size_is_noop_pre_provision():
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=3)
     task = _make_mock_task(num_nodes=3)
-    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    backend._handle_resize_pre_provision(handle, task.num_nodes, 'test-cluster')
 
 
 # --- Scale-down: rejection cases ---
@@ -218,7 +219,8 @@ def test_resize_scale_down_running_jobs_rejected(mock_load_queue):
     }]
 
     with pytest.raises(ValueError, match=r'Cannot scale down.*running'):
-        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+        backend._handle_resize_pre_provision(handle, task.num_nodes,
+                                             'test-cluster')
 
 
 @mock.patch('sky.skylet.job_lib.load_job_queue')
@@ -235,7 +237,8 @@ def test_resize_scale_down_setting_up_jobs_rejected(mock_load_queue):
     }]
 
     with pytest.raises(ValueError, match=r'Cannot scale down'):
-        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+        backend._handle_resize_pre_provision(handle, task.num_nodes,
+                                             'test-cluster')
 
 
 @mock.patch('sky.skylet.job_lib.load_job_queue')
@@ -252,7 +255,8 @@ def test_resize_scale_down_pending_jobs_rejected(mock_load_queue):
     }]
 
     with pytest.raises(ValueError, match=r'Cannot scale down'):
-        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+        backend._handle_resize_pre_provision(handle, task.num_nodes,
+                                             'test-cluster')
 
 
 @mock.patch('sky.skylet.job_lib.load_job_queue')
@@ -279,7 +283,8 @@ def test_resize_scale_down_multiple_in_progress_shows_all_ids(mock_load_queue):
     ]
 
     with pytest.raises(ValueError, match=r'3 job\(s\)') as exc_info:
-        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+        backend._handle_resize_pre_provision(handle, task.num_nodes,
+                                             'test-cluster')
     err = str(exc_info.value)
     assert '1' in err and '2' in err and '3' in err
 
@@ -294,7 +299,8 @@ def test_resize_scale_down_ssh_failure_aborts():
                                                        'Connection refused'))
 
     with pytest.raises(RuntimeError, match=r'Failed to check job queue'):
-        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+        backend._handle_resize_pre_provision(handle, task.num_nodes,
+                                             'test-cluster')
 
 
 @mock.patch('sky.provision.terminate_instances')
@@ -317,7 +323,7 @@ def test_resize_scale_down_on_stopped_cluster_skips_ssh_and_terminates(
 
     backend._handle_resize_pre_provision(
         handle,
-        task,
+        task.num_nodes,
         'test-cluster',
         cluster_status=status_lib.ClusterStatus.STOPPED)
 
@@ -342,7 +348,7 @@ def test_resize_scale_down_on_init_cluster_rejected():
     with pytest.raises(ValueError, match=r"Cannot scale down.*'INIT'"):
         backend._handle_resize_pre_provision(
             handle,
-            task,
+            task.num_nodes,
             'test-cluster',
             cluster_status=status_lib.ClusterStatus.INIT)
 
@@ -363,7 +369,7 @@ def test_resize_scale_down_handles_missing_cluster_yaml(mock_load_queue,
     mock_load_queue.return_value = []
     mock_get_yaml.return_value = None  # <- yaml missing
 
-    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    backend._handle_resize_pre_provision(handle, task.num_nodes, 'test-cluster')
 
     # terminate_instances still called, with provider_config=None.
     mock_terminate.assert_called_once_with(
@@ -392,7 +398,7 @@ def test_resize_scale_down_idle_cluster_terminates_workers(
     mock_load_queue.return_value = []
     mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
 
-    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    backend._handle_resize_pre_provision(handle, task.num_nodes, 'test-cluster')
 
     mock_terminate.assert_called_once_with(
         mock.ANY,  # cloud_name
@@ -431,7 +437,7 @@ def test_resize_scale_down_completed_jobs_allowed(mock_load_queue,
     mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
 
     # Should not raise — all jobs are terminal.
-    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    backend._handle_resize_pre_provision(handle, task.num_nodes, 'test-cluster')
     mock_terminate.assert_called_once()
 
 
@@ -449,7 +455,7 @@ def test_resize_scale_down_to_one_node(mock_load_queue, mock_get_yaml,
     mock_load_queue.return_value = []
     mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
 
-    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    backend._handle_resize_pre_provision(handle, task.num_nodes, 'test-cluster')
     mock_terminate.assert_called_once()
 
 
@@ -488,7 +494,7 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
     mock_refresh.return_value = record
 
     task = _make_mock_task(num_nodes=5)
-    mock_resource = mock.MagicMock()
+    mock_resource = mock.MagicMock(num_nodes=5)
     mock_resource.ports = None
     mock_resource.docker_login_config = None
     mock_resource.cluster_config_overrides = None
@@ -501,7 +507,8 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
     observed = []
 
     def _capture(_handle, _task, **kwargs):
-        observed.append((_task.num_nodes, kwargs))
+        observed.append((next(iter(_task.resources)).num_nodes, kwargs))
+        return mock_resource
 
     mock_check_fit.side_effect = _capture
 
@@ -555,7 +562,7 @@ def test_check_existing_cluster_no_resize_uses_handle_nodes(
     mock_refresh.return_value = record
 
     task = _make_mock_task(num_nodes=2)
-    mock_resource = mock.MagicMock()
+    mock_resource = mock.MagicMock(num_nodes=2)
     mock_resource.ports = None
     mock_resource.docker_login_config = None
     mock_resource.cluster_config_overrides = None
@@ -938,6 +945,42 @@ def test_launch_confirm_resize_scale_down(monkeypatch):
     assert '-3 worker' in msg
     assert 'scale down' in msg
     assert 'terminated' in msg
+
+
+def test_launch_confirm_resize_candidates_differ_in_num_nodes(monkeypatch):
+    # The smallest candidate count (1) is not the resize target: the server
+    # picks the candidate matching the cluster's hardware. The prompt must not
+    # claim a no-op or a specific scale-down.
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 1,
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    dag = sky_mod.Dag()
+    with dag:
+        task = sky_mod.Task(run='echo hi')
+        task.set_resources([
+            sky_mod.Resources(accelerators='H200:8', num_nodes=1),
+            sky_mod.Resources(accelerators='H100:8', num_nodes=2),
+        ])
+    request_options = sky_admin_policy.RequestOptions(
+        cluster_name='my-cluster',
+        idle_minutes_to_autostop=None,
+        down=False,
+        dryrun=False)
+    with pytest.raises(RuntimeError, match='stop-after-confirm'):
+        sdk_mod._launch(dag,
+                        'my-cluster',
+                        request_options,
+                        resize=True,
+                        _need_confirmation=True)
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'from 1 node(s) to the node count' in msg
+    assert 'one of 1, 2' in msg
+    assert 'no-op' not in msg
 
 
 def test_launch_confirm_resize_noop(monkeypatch):

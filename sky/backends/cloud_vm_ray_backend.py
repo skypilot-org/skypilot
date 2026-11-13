@@ -1206,6 +1206,15 @@ class RetryingVmProvisioner(object):
                 cluster_config_file = config_dict['ray']
 
                 launched_resources = to_provision.copy(region=region.name)
+                requested_nodes = kubernetes_utils.num_task_nodes(
+                    num_nodes, launched_resources)
+                if launched_resources.num_nodes != requested_nodes:
+                    # Keep a per-resources node count consistent with
+                    # launched_nodes (e.g., after a resize), as it is reused
+                    # when relaunching on the same placement.
+                    launched_resources = launched_resources.copy(
+                        num_nodes=requested_nodes,
+                        _num_nodes_specified=to_provision.num_nodes_specified)
                 if zones and len(zones) == 1:
                     launched_resources = launched_resources.copy(
                         zone=zones[0].name)
@@ -1971,16 +1980,16 @@ class RetryingVmProvisioner(object):
                         failover_history=failover_history) from last_error
                 # An INIT cluster should have been terminated by
                 # _retry_zones(), so it can be retried on other resources.
+                num_nodes_str = backend_utils.get_task_num_nodes_str(
+                    task, all_candidates=True)
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
-                        f'{task.num_nodes}x {task.resources}'))
+                        f'{num_nodes_str}x {task.resources}'))
                 # Retry with the current, potentially "smaller" resources:
                 # to_provision == the current new resources (e.g., V100:1),
                 # which may be "smaller" than the original (V100:8).
-                # num_nodes is not part of a Resources so must be updated
-                # separately.
-                num_nodes = task.num_nodes
+                # num_nodes is updated below, after re-optimizing.
                 prev_cluster_status = None
                 prev_handle = None
 
@@ -2013,9 +2022,9 @@ class RetryingVmProvisioner(object):
             assert task in self._dag.tasks, 'Internal logic error.'
             assert best_resources is not None, task
             to_provision = best_resources
-            # A multi-host TPU slice on Kubernetes has one node per VM.
-            num_nodes = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
-                to_provision)
+            # A multi-host TPU slice has one cluster node per VM.
+            num_nodes = ((to_provision).num_nodes *
+                         kubernetes_utils.tpu_vms_per_slice(to_provision))
         return config_dict
 
 
@@ -3327,9 +3336,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             check_ports: If True, also check that requested ports fit.
             skip_num_nodes_check: If True, only validate hardware (instance
                 type, accelerators, region, zone, etc.) and ignore
-                ``task.num_nodes`` vs ``handle.launched_nodes``. Used during
+                requested nodes vs ``handle.launched_nodes``. Used during
                 resize, where num_nodes is allowed to differ by design.
-                Error messages still show the original ``task.num_nodes`` so
+                Error messages still show the original requested count so
                 users see their actual request.
 
         Raises:
@@ -3356,10 +3365,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # For the validation comparison, optionally treat the node count as
         # matching (resize) while still reporting the user's real num_nodes
         # in any error message below.
-        fit_num_nodes = (handle.launched_nodes
-                         if skip_num_nodes_check else task.num_nodes *
-                         kubernetes_utils.tpu_vms_per_slice(launched_resources))
-        for resource in task.resources:
+        # Honor ordered preferences. For unordered requests, prefer using the
+        # available cluster capacity; on resize choose the smallest matching
+        # request, consistently with node-count cost optimization. Sort ties
+        # so iteration over an any_of set cannot change the requested size.
+        candidates = list(task.resources)
+        if isinstance(task.resources, set):
+            candidates.sort(
+                key=lambda r: (r.num_nodes if skip_num_nodes_check else -r.
+                               num_nodes, r.repr_with_region_zone))
+        for resource in candidates:
+            fit_num_nodes = (
+                handle.launched_nodes if skip_num_nodes_check else
+                (resource).num_nodes *
+                kubernetes_utils.tpu_vms_per_slice(launched_resources))
             if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
@@ -3368,7 +3387,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 valid_resource = resource
                 break
             else:
-                requested_resource_list.append(f'{task.num_nodes}x {resource}')
+                requested_resource_list.append(
+                    f'{(resource).num_nodes}x {resource}')
 
         if valid_resource is None:
             for example_resource in task.resources:
@@ -3664,7 +3684,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'possible launchable resources.'
                         f'{colorama.Style.RESET_ALL}'
                         ' Relax the task\'s resource requirements: '
-                        f'{task.num_nodes}x {list(task.resources)[0]}')
+                        f'{(list(task.resources)[0]).num_nodes}x '
+                        f'{list(task.resources)[0]}')
                     if e.no_failover:
                         error_message = str(e)
 
@@ -4720,8 +4741,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # mode.
             # In this case, we reset the resources for the task, so that the
             # detached setup does not need to wait for the task resources to be
-            # ready (which is not used for setup anyway).
-            valid_resource = resources_lib.Resources()
+            # ready (which is not used for setup anyway). Keep the count of
+            # the request that matches the cluster.
+            matched_resource = self.check_resources_fit_cluster(handle, task)
+            valid_resource = resources_lib.Resources().copy(
+                num_nodes=matched_resource.num_nodes,
+                _num_nodes_specified=matched_resource.num_nodes_specified)
         else:
             # Check the task resources vs the cluster resources. Since
             # `sky exec` will not run the provision and _check_existing_cluster
@@ -4751,7 +4776,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # multi-host TPU slice on Kubernetes (task num_nodes counts slices;
         # the cluster has one pod per VM of each slice).
         num_actual_nodes = (
-            task.num_nodes * handle.num_ips_per_node *
+            valid_resource.num_nodes * handle.num_ips_per_node *
             kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
         # Case: task_lib.Task(run, num_nodes=N), TPU VM Pods, or multi-host
         # TPU slices on Kubernetes (one cluster node per VM of the slice)
@@ -6310,7 +6335,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _handle_resize_pre_provision(
         self,
         handle: CloudVmRayResourceHandle,
-        task: task_lib.Task,
+        requested_nodes: int,
         cluster_name: str,
         cluster_status: Optional[status_lib.ClusterStatus] = None,
     ) -> None:
@@ -6323,10 +6348,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         For scale-up or same-size: no-op (bulk_provision handles it).
         """
         current_nodes = handle.launched_nodes
-        # On a multi-host TPU slice, a task node is one slice and the cluster
-        # has one node per VM of the slice. Compare cluster node counts.
-        requested_nodes = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
-            handle.launched_resources)
 
         if requested_nodes >= current_nodes:
             # Scale-up or no-op: nothing to do pre-provision.
@@ -6491,14 +6512,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # non-node hardware (instance type, accelerators, region,
                 # zone, ports, etc.) matches the existing cluster to prevent
                 # ending up with a mixed-resource cluster.
-                self.check_resources_fit_cluster(handle,
-                                                 task,
-                                                 skip_num_nodes_check=True)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle, task, skip_num_nodes_check=True)
+                # Resize to the node count of the candidate that matches the
+                # cluster's hardware, then convert slices to physical nodes.
+                resize_num_nodes = ((matched_resource).num_nodes *
+                                    kubernetes_utils.tpu_vms_per_slice(
+                                        handle.launched_resources))
                 # Then run resize-specific pre-provision logic (e.g. verify
                 # no running jobs and terminate workers for scale-down).
                 self._handle_resize_pre_provision(
                     handle,
-                    task,
+                    resize_num_nodes,
                     cluster_name,
                     cluster_status=prev_cluster_status)
             else:
@@ -6726,9 +6751,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
-            num_nodes = (task.num_nodes *
-                         kubernetes_utils.tpu_vms_per_slice(to_provision)
-                         if resize else handle.launched_nodes)
+            num_nodes = (resize_num_nodes if resize else handle.launched_nodes)
+            # This plan provisions cluster capacity (which can exceed the
+            # user's execution request). Keep its resource count in task-node
+            # units, consistently with the physical count passed below.
+            to_provision = to_provision.copy(
+                num_nodes=kubernetes_utils.num_task_nodes(
+                    num_nodes, to_provision),
+                _num_nodes_specified=to_provision.num_nodes_specified)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
@@ -6756,9 +6786,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # placement, prefer reusing it.
             if (isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
                     handle_before_refresh.launched_resources is not None):
-                to_provision = handle_before_refresh.launched_resources
                 # Ensure the requested task fits the previous placement.
-                self.check_resources_fit_cluster(handle_before_refresh, task)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle_before_refresh, task)
+                to_provision = handle_before_refresh.launched_resources.copy(
+                    num_nodes=matched_resource.num_nodes,
+                    _num_nodes_specified=matched_resource.num_nodes_specified)
                 # Mirror the original message for reuse path.
                 status_before_refresh_str = None
                 if status_before_refresh is not None:
@@ -6786,8 +6819,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
             to_provision,
-            # A multi-host TPU slice on Kubernetes has one node per VM.
-            task.num_nodes * kubernetes_utils.tpu_vms_per_slice(to_provision),
+            # A multi-host TPU slice has one cluster node per VM.
+            (to_provision).num_nodes *
+            kubernetes_utils.tpu_vms_per_slice(to_provision),
             prev_cluster_status=None,
             prev_handle=None,
             prev_cluster_ever_up=False,
@@ -7265,7 +7299,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # A multi-host TPU slice on Kubernetes has one cluster node per VM.
         # At most one of the two multipliers exceeds 1 (see _execute()).
         num_actual_nodes = (
-            task.num_nodes * handle.num_ips_per_node *
+            list(task.resources)[0].num_nodes * handle.num_ips_per_node *
             kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 

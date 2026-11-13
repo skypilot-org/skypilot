@@ -1006,6 +1006,8 @@ class TestProvisionExistingClusterError:
             prev_config_hash=None)
         task_mock = MagicMock()
         task_mock.is_controller_task.return_value = False
+        task_mock.resources = [MagicMock(num_nodes=1)]
+        task_mock.best_resources = None
         return provisioner.provision_with_retries(
             task_mock,
             config,
