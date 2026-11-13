@@ -1233,6 +1233,25 @@ def test_multi_node_failure(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.parametrize('exit_code,job_status', [(1, 'FAILED'),
+                                                  (0, 'SUCCEEDED')])
+def test_escaped_output_holder(generic_cloud: str, exit_code: int,
+                               job_status: str):
+    """The job reports its command's exit code, not the escaped holder's."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        f'escaped_output_holder_exit_{exit_code}',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env EXIT_CODE={exit_code} tests/test_yamls/escaped_output_holder.yaml || [ $? -eq 100 ]',
+            f'sky logs {name} 1 --status | grep -w {job_status}',
+            f'sky logs {name} 1 | grep "Terminating process"',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- EFA. ----------
 @pytest.mark.aws
 def test_efa():
