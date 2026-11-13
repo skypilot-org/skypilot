@@ -552,6 +552,8 @@ Allow managed jobs to set the deprecated ``event_callback`` field (optional).
 
 Set this to ``true`` in the API server's config to keep using ``event_callback``. It cannot be set from a client's config.
 
+Unless locked down with an :ref:`admin policy <advanced-policy-config>`, this can allow users to run code on the API server pod.
+
 Default: ``false``. Changes require an API server restart to take effect.
 
 Example:
