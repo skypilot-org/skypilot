@@ -992,12 +992,11 @@ class Resources:
                     'The "head_node_cpus" field should be positive. '
                     f'Found: {head_node_cpus!r}')
 
-        memory = resources_utils.parse_memory_resource(
-            str(head_node_memory),
-            'head_node_memory',
-            ret_type=float,
-            allow_plus=True,
-            allow_x=False)
+        memory = resources_utils.parse_memory_resource(str(head_node_memory),
+                                                       'head_node_memory',
+                                                       ret_type=float,
+                                                       allow_plus=True,
+                                                       allow_x=False)
         mem_str = memory[:-1] if memory.endswith('+') else memory
         try:
             memory_gb = float(mem_str)
@@ -1040,7 +1039,6 @@ class Resources:
     def head_node_memory(self) -> Optional[str]:
         """Memory request (GiB) for the dedicated head, or None if not set."""
         return self._head_node_memory
-
 
     def _set_accelerators(
         self,
@@ -2482,7 +2480,7 @@ class Resources:
             memory=override.pop('memory', self._memory),
             head_node_cpus=override.pop('head_node_cpus', self._head_node_cpus),
             head_node_memory=override.pop('head_node_memory',
-                                         self._head_node_memory),
+                                          self._head_node_memory),
             # Need to pass `self._accelerators` instead of `self.accelerators`
             # as the latter can auto-infer, causing potential conflicts with
             # instance_type override.

@@ -2384,7 +2384,6 @@ def inject_ephemeral_volumes(
             volume_mounts.append(volume_mount)
 
 
-
 def _apply_head_resources_to_pod_spec(pod_spec: Dict[str, Any],
                                       head_resources: Dict[str, Any]) -> None:
     """Overwrite container CPU/memory requests and limits for a thin head.
@@ -3614,8 +3613,7 @@ def get_cluster_info(
         ]
         primary_container = kubernetes_utils.get_pod_primary_container(pod)
         resources = getattr(primary_container, 'resources', None)
-        requests = (getattr(resources, 'requests', None)
-                    if resources else None)
+        requests = (getattr(resources, 'requests', None) if resources else None)
         limits = (getattr(resources, 'limits', None) if resources else None)
         pod_cpu = ((requests or {}).get('cpu') or (limits or {}).get('cpu'))
         if _is_head(pod):
