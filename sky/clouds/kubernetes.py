@@ -1660,16 +1660,14 @@ class Kubernetes(clouds.Cloud):
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
                     disk_size * mul, 3)
 
-        # Thin head: always emit limits (request==limit by default) so packing
-        # can size the head even when worker limits are off.
+        # Thin head: always emit limits equal to requests so the head stays
+        # Guaranteed QoS for packing, even when worker limits are off or use
+        # a numeric set_pod_resource_limits burst multiplier.
         if resources.has_separate_head() is True:
             h_cpu = float(str(resources.head_node_cpus).rstrip('+'))
             h_mem = float(str(resources.head_node_memory).rstrip('+'))
-            head_mul = 1.0
-            if set_pod_resource_limits_config not in (False, True, None):
-                head_mul = float(set_pod_resource_limits_config)
-            deploy_vars['head_cpu_limit'] = round(h_cpu * head_mul, 3)
-            deploy_vars['head_memory_limit'] = round(h_mem * head_mul, 3)
+            deploy_vars['head_cpu_limit'] = round(h_cpu, 3)
+            deploy_vars['head_memory_limit'] = round(h_mem, 3)
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (

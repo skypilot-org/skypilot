@@ -1865,6 +1865,65 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_thin_head_limits_ignore_numeric_multiplier(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Thin head keeps Guaranteed QoS when workers use a limit multiplier."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=1.5)
+
+        self.resources.has_separate_head.return_value = True
+        self.resources.head_node_cpus = '2'
+        self.resources.head_node_memory = '4'
+        self.resources.disk_size = 256
+        self.resources.disk_size_specified = False
+        self.resources.hooks = None
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # Workers still get the 1.5x burst limits.
+        self.assertEqual(deploy_vars['k8s_cpu_limit'], 3.0)
+        self.assertEqual(deploy_vars['k8s_memory_limit'], 6.0)
+        # Head limits match head requests (Guaranteed), not request * 1.5.
+        self.assertEqual(deploy_vars['head_cpus'], '2.0')
+        self.assertEqual(deploy_vars['head_memory'], '4.0')
+        self.assertEqual(deploy_vars['head_cpu_limit'], 2.0)
+        self.assertEqual(deploy_vars['head_memory_limit'], 4.0)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_set_pod_resource_limits_disabled(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
