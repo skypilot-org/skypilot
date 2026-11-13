@@ -592,12 +592,12 @@ class TestWorkspaceManagement(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             core._validate_workspace_config_changes('test-workspace', {}, {})
 
-        error_message = str(cm.exception)
-        self.assertIn("Cannot change workspace 'test-workspace' to private",
-                      error_message)
-        self.assertIn("unauthorized-user", error_message)
-        self.assertIn("2 active cluster(s): cluster-1, cluster-2",
-                      error_message)
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot change workspace 'test-workspace' to private because the "
+            "user 'unauthorized-user' is not in allowed_users but has 2 "
+            'active cluster(s): cluster-1, cluster-2. Please add the user to '
+            'allowed_users, or terminate these resources first.')
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
@@ -627,11 +627,12 @@ class TestWorkspaceManagement(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             core._validate_workspace_config_changes('test-workspace', {}, {})
 
-        error_message = str(cm.exception)
-        self.assertIn("Cannot remove user", error_message)
-        self.assertIn("user2", error_message)
-        self.assertIn("2 active cluster(s): cluster-1, cluster-2",
-                      error_message)
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot remove user 'user2' from workspace 'test-workspace' "
+            'because the user has 2 active cluster(s): cluster-1, cluster-2. '
+            'Please terminate these resources first, or keep the user in '
+            'allowed_users.')
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
@@ -660,10 +661,71 @@ class TestWorkspaceManagement(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             core._validate_workspace_config_changes('test-workspace', {}, {})
 
-        error_message = str(cm.exception)
-        self.assertIn("because the users", error_message)  # Plural form
-        self.assertIn("user2", error_message)
-        self.assertIn("user3", error_message)
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot change workspace 'test-workspace' to private because the "
+            "users 'user2', 'user3' are not in allowed_users but have 3 "
+            'active cluster(s): cluster-1, cluster-2, cluster-3. Please add '
+            'the users to allowed_users, or terminate these resources first.')
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_private_unknown_owners(
+            self, mock_compare_configs, mock_check_resources):
+        """Owners missing from the user table still yield a full sentence."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=True,
+            private_old=False,
+            private_new=True,
+            allowed_users_new=['user1'],
+            removed_users=[],
+            added_users=[],
+            allowed_users_old=[],
+            allowed_users_changed=True,
+        )
+        mock_check_resources.return_value = ('1 active cluster(s): c1', [], {})
+
+        with self.assertRaises(ValueError) as cm:
+            core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot change workspace 'test-workspace' to private because "
+            'users not in allowed_users have 1 active cluster(s): c1. Please '
+            'add those users to allowed_users, or terminate these resources '
+            'first.')
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_remove_users_plural(
+            self, mock_compare_configs, mock_check_resources):
+        """Removing several users that own resources names each of them."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_new=['user1'],
+            removed_users=['user2', 'user3'],
+            added_users=[],
+            allowed_users_old=['user1', 'user2', 'user3'],
+            allowed_users_changed=True,
+        )
+        mock_check_resources.return_value = ('2 active sandbox(s): s2, s3',
+                                             ['user2', 'user3'], {})
+
+        with self.assertRaises(ValueError) as cm:
+            core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot remove users 'user2', 'user3' from workspace "
+            "'test-workspace' because the users have 2 active sandbox(s): s2, "
+            's3. Please terminate these resources first, or keep the users in '
+            'allowed_users.')
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')

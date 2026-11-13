@@ -507,6 +507,10 @@ def _validate_workspace_config_changes_with_lock(
             f'{common_utils.format_exception(e)}') from None
 
 
+def _quote_users(names: List[str]) -> str:
+    return ', '.join(repr(name) for name in names)
+
+
 def _validate_workspace_config_changes(
     workspace_name: str,
     current_config: Dict[str, Any],
@@ -583,20 +587,24 @@ def _validate_workspace_config_changes(
                         config_comparison.allowed_users_new, [workspace_name],
                         resources=resources))
                 if error_summary:
-                    error_msg=f'Cannot change workspace {ws_name!r}' \
-                    f' to private '
-                    if missed_users_names:
-                        missed_users_list = ', '.join(missed_users_names)
-                        if len(missed_users_names) == 1:
-                            error_msg += f'because the user ' \
-                            f'{missed_users_list!r} has {error_summary}'
-                        else:
-                            error_msg += f'because the users ' \
-                            f'{missed_users_list!r} have {error_summary}'
-                        error_msg += ' but not in the allowed_users list.' \
-                        ' Please either add the users to allowed_users or' \
-                        ' ask them to terminate their resources.'
-                    raise ValueError(error_msg)
+                    users = _quote_users(missed_users_names)
+                    if len(missed_users_names) == 1:
+                        reason = (f'the user {users} is not in allowed_users '
+                                  'but has')
+                        who = 'the user'
+                    elif missed_users_names:
+                        reason = (f'the users {users} are not in '
+                                  'allowed_users but have')
+                        who = 'the users'
+                    else:
+                        # The owners are no longer in the user table.
+                        reason = 'users not in allowed_users have'
+                        who = 'those users'
+                    raise ValueError(
+                        f'Cannot change workspace {ws_name!r} to private '
+                        f'because {reason} {error_summary}. Please add {who} '
+                        'to allowed_users, or terminate these resources '
+                        'first.')
         else:
             # Private setting didn't change, but allowed_users changed
             if (config_comparison.allowed_users_changed and
@@ -612,20 +620,18 @@ def _validate_workspace_config_changes(
                         resources=resources,
                         owners=config_comparison.removed_users))
                 if error_summary:
-                    error_msg = 'Cannot '
-                    error_users_list = ', '.join(error_user_names)
                     if len(error_user_names) == 1:
-                        error_msg += f'remove user {error_users_list!r} ' \
-                        f'from workspace {ws_name!r} because the ' \
-                        f'user has {error_summary}'
+                        target = f'user {_quote_users(error_user_names)}'
+                        who, has = 'the user', 'has'
                     else:
-                        error_msg += f'remove users {error_users_list!r}' \
-                        f' from workspace {ws_name!r} because the' \
-                        f' users have {error_summary}'
-                    error_msg += ', but not in the allowed_users list.' \
-                    ' Please either add the users to allowed_users or' \
-                    ' ask them to terminate their resources.'
-                    raise ValueError(error_msg)
+                        target = (
+                            f'users {_quote_users(error_user_names)}'.rstrip())
+                        who, has = 'the users', 'have'
+                    raise ValueError(
+                        f'Cannot remove {target} from workspace {ws_name!r} '
+                        f'because {who} {has} {error_summary}. Please '
+                        f'terminate these resources first, or keep {who} in '
+                        'allowed_users.')
     else:
         # Other configuration changes - check that workspace has no active
         # resources
