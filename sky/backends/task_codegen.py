@@ -491,12 +491,12 @@ class RayCodeGen(TaskCodeGen):
             self._code += [
                 textwrap.dedent(f"""\
                 setup_cmd = {setup_cmd!r}
-                _SETUP_CPUS = 0.0001
-                # Keep in sync with kubernetes THIN_HEAD_RAY_NUM_CPUS: thin heads
-                # advertise this token so STRICT_SPREAD setup can place on them.
-                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
-                # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
-                # We unset it so that user setup command may properly use this env var.
+                # Pin each setup task to a Ray node via the per-node ``node:<ip>``
+                # resource (no CPU ask). Dedicated thin heads advertise
+                # ``num-cpus=0`` and cannot satisfy a CPU placement-group bundle;
+                # ``ray start --num-cpus`` is also integer-only, so a fractional
+                # token CPU is not an option. ``num_cpus=0`` still clears
+                # CUDA_VISIBLE_DEVICES in Ray — unset it for user setup.
                 setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
                 job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
 
@@ -510,12 +510,15 @@ class RayCodeGen(TaskCodeGen):
                 # the alive nodes.
                 alive_nodes = [n for n in ray.nodes() if 'Alive' in n and n['Alive']]
                 total_num_nodes = len(alive_nodes)
-                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
+                setup_bundles = [
+                    {{f"node:{{n['NodeManagerAddress']}}": 0.001}}
+                    for n in alive_nodes
+                ]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
                 setup_workers = [run_bash_command_with_log_and_return_pid \\
                     .options(
                         name='setup',
-                        num_cpus=_SETUP_CPUS,
+                        num_cpus=0,
                         scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
                             placement_group=setup_pg,
                             placement_group_bundle_index=i)

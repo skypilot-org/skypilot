@@ -1218,12 +1218,12 @@ class Kubernetes(clouds.Cloud):
         # the CPU usage on the head pod, otherwise the ray cluster will use the
         # CPU resources on the node instead within the pod.
         #
-        # Dedicated thin head (head_node_*): head Ray advertises the setup
-        # token CPU (THIN_HEAD_RAY_NUM_CPUS / task_codegen._SETUP_CPUS) so
-        # STRICT_SPREAD setup can place on the head while normal tasks
-        # (num_cpus>=1) stay on workers. Workers keep the normal CPU count.
-        # Do not share a single custom_ray_options dict across head and worker
-        # start commands — that previously zeroed worker CPUs and stalled jobs.
+        # Dedicated thin head (head_node_*): head Ray advertises
+        # THIN_HEAD_RAY_NUM_CPUS ('0') so no Ray CPU tasks schedule there.
+        # Setup places on the head via node:<ip> (see task_codegen), not CPU.
+        # Workers keep the normal CPU count. Do not share a single
+        # custom_ray_options dict across head and worker start commands —
+        # that previously zeroed worker CPUs and stalled jobs.
         # Homogeneous / worker 'num-cpus' stays an integer >=1 when cpus <1.
         worker_ray_num_cpus = str(max(int(cpus), 1))
         worker_custom_ray_options = {

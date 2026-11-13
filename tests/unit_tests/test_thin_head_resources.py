@@ -99,14 +99,14 @@ def test_apply_head_resources_defaults_limits_to_requests():
     assert res['limits'] == {'cpu': '0.5', 'memory': '16G'}
 
 
-def test_separate_head_implies_ray_setup_token_cpu_contract():
-    """Dedicated head: pod sized by head_node_*; Ray advertises setup-token CPU.
+def test_separate_head_implies_ray_num_cpus_zero_contract():
+    """Dedicated head: pod sized by head_node_*; Ray advertises num-cpus=0.
 
     Provision paths in clouds/kubernetes.py and
     provision/kubernetes/instance.py set custom_ray_options['num-cpus'] to
-    THIN_HEAD_RAY_NUM_CPUS (0.0001, matching task_codegen._SETUP_CPUS) when
-    head_resources / has_separate_head() is set. This test locks the
-    Resources API side of that contract.
+    THIN_HEAD_RAY_NUM_CPUS ('0') when head_resources / has_separate_head()
+    is set. Setup places via node:<ip>, not a CPU bundle. This test locks
+    the Resources API side of that contract.
     """
     r = resources_lib.Resources(
         cpus=8,
@@ -117,10 +117,10 @@ def test_separate_head_implies_ray_setup_token_cpu_contract():
     )
     assert r.has_separate_head()
     assert float(str(r.head_node_cpus).rstrip('+')) == 20.0
-    # Worker shape unchanged; Ray exclusion is via setup-token num-cpus, not
-    # by zeroing the pod request.
+    # Worker shape unchanged; Ray exclusion is via num-cpus=0, not by
+    # zeroing the pod request.
     assert r.cpus == '8'
-    assert float(k8s_constants.THIN_HEAD_RAY_NUM_CPUS) == 0.0001
+    assert k8s_constants.THIN_HEAD_RAY_NUM_CPUS == '0'
 
 
 def test_copy_preserves_head_fields():

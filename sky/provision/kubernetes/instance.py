@@ -3665,8 +3665,8 @@ def get_cluster_info(
     # cpu_request may be a string like `100m`, need to parse and convert
     num_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(cpu_request)
     # Keep consistent with clouds/kubernetes.py: dedicated thin head advertises
-    # THIN_HEAD_RAY_NUM_CPUS (setup token; pod CPU still from head_resources).
-    # Workers keep their own CPU count — do not share the head token.
+    # THIN_HEAD_RAY_NUM_CPUS ('0'; pod CPU still from head_resources).
+    # Workers keep their own CPU count — do not share head num-cpus=0.
     # Homogeneous / worker 'num-cpus' stays an integer >=1 when cpus <1.
     worker_custom_ray_options = None
     if provider_config.get('head_resources'):

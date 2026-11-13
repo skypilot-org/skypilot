@@ -569,9 +569,9 @@ Must be set together with :ref:`resources.head_node_memory
   :ref:`resources.memory <yaml-spec-resources-memory>`.
 - The head pod uses ``head_node_cpus`` / ``head_node_memory`` for **both**
   Kubernetes requests and limits (Guaranteed QoS / management headroom).
-  Ray on the head advertises a setup-token ``num-cpus`` (``0.0001``, matching
-  SkyPilot's setup STRICT_SPREAD) so normal worker tasks (``num_cpus>=1``)
-  are not scheduled there; pod CPU/memory still backs GCS/driver/etc.
+  Ray on the head advertises ``num-cpus=0`` so Ray CPU tasks are not
+  scheduled there; setup pins to the head via ``node:<ip>`` (no CPU
+  bundle). Pod CPU/memory still backs GCS/driver/etc.
 
 Format matches :ref:`resources.cpus <yaml-spec-resources-cpus>`
 (``<count>`` or ``<count>+``).

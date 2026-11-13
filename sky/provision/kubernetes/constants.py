@@ -42,9 +42,8 @@ PROVIDER_EXECUTION_CONTEXT_KEY = 'execution_context'
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']
 
-# Ray ``--num-cpus`` for a dedicated thin head. Must match
-# ``task_codegen._SETUP_CPUS`` (0.0001): setup uses STRICT_SPREAD with that
-# token CPU on every alive node (including head). Advertising the same token
-# lets setup place without offering meaningful worker capacity — normal tasks
-# use ``num_cpus>=1``. Pod requests/limits still come from ``head_node_*``.
-THIN_HEAD_RAY_NUM_CPUS = '0.0001'
+# Ray ``--num-cpus`` for a dedicated thin head (integer; ``ray start`` rejects
+# fractions). ``0`` means no Ray CPU tasks schedule on the head. Setup pins via
+# ``node:<ip>`` resources instead of a CPU placement-group bundle. Pod
+# requests/limits still come from ``head_node_*``.
+THIN_HEAD_RAY_NUM_CPUS = '0'
