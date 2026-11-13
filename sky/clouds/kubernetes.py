@@ -1576,8 +1576,11 @@ class Kubernetes(clouds.Cloud):
             # 'ray_installation_commands' and 'ray_patches_cmd' are filled in by
             # backend_utils.write_cluster_config: both depend on the Ray version
             # this particular cluster is pinned to, which is not known here.
+            # Thin head must not advertise worker accelerators to Ray; workers
+            # keep custom_resources unchanged.
             'ray_head_start_command': instance_setup.ray_head_start_command(
-                custom_resources, head_custom_ray_options),
+                (None if resources.has_separate_head() is True else
+                 custom_resources), head_custom_ray_options),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
             'ray_worker_start_command': instance_setup.ray_worker_start_command(
                 custom_resources, worker_custom_ray_options, no_restart=False),

@@ -6,6 +6,7 @@ import pytest
 
 from sky import clouds
 from sky import resources as resources_lib
+from sky.provision import instance_setup
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance as k8s_instance
 
@@ -79,6 +80,99 @@ def test_apply_head_resources_to_pod_spec():
         'cpu'] == '8'
 
 
+def test_apply_head_resources_strips_accelerators_and_sidecars():
+    """Thin head must not inherit worker GPU/TPU asks or GPUDirect sidecars."""
+    pod = {
+        'metadata': {
+            'annotations': {
+                'k8s.v1.cni.cncf.io/networks': 'rdma-net',
+                'devices.gke.io/container.tcpx-daemon': '- path: /dev/nvidia0',
+                'skypilot-user': 'alice',
+            }
+        },
+        'spec': {
+            'runtimeClassName': 'nvidia',
+            'nodeSelector': {
+                'cloud.google.com/gke-accelerator': 'nvidia-l4',
+                'cloud.google.com/gke-flex-start': 'true',
+                'topology.kubernetes.io/zone': 'us-central1-a',
+            },
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [{
+                            'matchExpressions': [{
+                                'key': 'cloud.google.com/gke-accelerator',
+                                'operator': 'In',
+                                'values': ['nvidia-l4'],
+                            }]
+                        }]
+                    },
+                    'preferredDuringSchedulingIgnoredDuringExecution': [{
+                        'weight': 1,
+                        'preference': {
+                            'matchExpressions': [{
+                                'key': 'skypilot-binpack',
+                                'operator': 'In',
+                                'values': ['gpu'],
+                            }]
+                        },
+                    }],
+                }
+            },
+            'containers': [
+                {
+                    'name': 'ray-node',
+                    'resources': {
+                        'requests': {
+                            'cpu': '8',
+                            'memory': '32G',
+                            'nvidia.com/gpu': '1',
+                            'nvidia.com/rdma_ib': '1',
+                        },
+                        'limits': {
+                            'cpu': '8',
+                            'memory': '32G',
+                            'nvidia.com/gpu': '1',
+                            'nvidia.com/rdma_ib': '1',
+                        },
+                    },
+                },
+                {
+                    'name': 'tcpx-daemon',
+                    'resources': {
+                        'requests': {
+                            'cpu': '1',
+                            'nvidia.com/gpu': '1'
+                        },
+                    },
+                },
+            ],
+        },
+    }
+    worker = copy.deepcopy(pod)
+    k8s_instance._apply_head_resources_to_pod_spec(pod, {
+        'cpus': '2',
+        'memory': '4',
+    })
+    head_res = pod['spec']['containers'][0]['resources']
+    assert head_res['requests'] == {'cpu': '2', 'memory': '4G'}
+    assert head_res['limits'] == {'cpu': '2', 'memory': '4G'}
+    assert len(pod['spec']['containers']) == 1
+    assert 'runtimeClassName' not in pod['spec']
+    assert pod['spec']['nodeSelector'] == {
+        'topology.kubernetes.io/zone': 'us-central1-a',
+    }
+    node_aff = pod['spec']['affinity']['nodeAffinity']
+    assert 'requiredDuringSchedulingIgnoredDuringExecution' not in node_aff
+    assert 'preferredDuringSchedulingIgnoredDuringExecution' in node_aff
+    assert pod['metadata']['annotations'] == {'skypilot-user': 'alice'}
+    # Worker clone untouched (still has GPU + sidecar).
+    assert worker['spec']['containers'][0]['resources']['requests'][
+        'nvidia.com/gpu'] == '1'
+    assert len(worker['spec']['containers']) == 2
+
+
 def test_apply_head_resources_defaults_limits_to_requests():
     """Limits match requests when cpu_limit/memory_limit are omitted."""
     pod = {
@@ -128,6 +222,18 @@ def test_separate_head_implies_ray_num_cpus_zero_contract():
     # zeroing the pod request.
     assert r.cpus == '8'
     assert k8s_constants.THIN_HEAD_RAY_NUM_CPUS == '0'
+
+
+def test_thin_head_ray_start_omits_accelerator_resources():
+    """Head ray start must not advertise worker GPUs via --resources."""
+    with_gpu = instance_setup.ray_head_start_command(
+        '{"GPU":1}', {'num-cpus': '0', 'object-store-memory': 500000000})
+    assert '--resources=' in with_gpu
+
+    thin = instance_setup.ray_head_start_command(
+        None, {'num-cpus': '0', 'object-store-memory': 500000000})
+    assert '--resources=' not in thin
+    assert '--num-cpus=0' in thin
 
 
 def test_copy_preserves_head_fields():
