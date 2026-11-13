@@ -17,11 +17,10 @@ and a controller takes a signal away with one rename. A signal is therefore
 either taken with its whole content or still in place, also when a second
 cancel arrives while the first is being taken.
 """
-import asyncio
 import concurrent.futures
 import os
 import time
-from typing import Any, Callable, List, Optional, Set, TypeVar
+from typing import Any, Awaitable, Callable, List, Optional, Set, TypeVar
 import uuid
 
 import filelock
@@ -57,7 +56,7 @@ _EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=3, thread_name_prefix='cancel-signal')
 
 
-def in_thread(func: Callable[..., T], *args: Any) -> 'asyncio.Future[T]':
+def in_thread(func: Callable[..., T], *args: Any) -> Awaitable[T]:
     """Runs a blocking call on the signal directory off the event loop."""
     return context_utils.to_thread_with_executor(_EXECUTOR, func, *args)
 
