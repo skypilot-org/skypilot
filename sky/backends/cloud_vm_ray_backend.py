@@ -1050,6 +1050,8 @@ class RetryingVmProvisioner(object):
                                      cluster_name=cluster_name))
 
         # Opt-in dedicated thin head: num_nodes is worker count; launch +1 pod.
+        # Existing non-resize clusters convert handle.launched_nodes (physical)
+        # back to workers in _check_existing_cluster before reaching here.
         # ``is True`` avoids MagicMock auto-attrs looking like a thin head.
         if to_provision.has_separate_head() is True:
             if not isinstance(to_provision.cloud, clouds.Kubernetes):
@@ -6740,6 +6742,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             num_nodes = (task.num_nodes *
                          kubernetes_utils.tpu_vms_per_slice(to_provision)
                          if resize else handle.launched_nodes)
+            # Dedicated thin head stores physical pods in launched_nodes
+            # (workers + head). _retry_zones applies launch_node_count(+1)
+            # assuming a task worker count — convert back so relaunch does
+            # not grow the cluster by one worker each time. Gate on the
+            # handle (source of launched_nodes); to_provision may be a copy.
+            if (not resize and handle.launched_resources is not None and
+                    handle.launched_resources.has_separate_head() is True):
+                num_nodes = handle.launched_nodes - 1
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,

@@ -578,6 +578,63 @@ def test_check_existing_cluster_no_resize_uses_handle_nodes(
 
 @mock.patch('sky.backends.backend_utils.refresh_cluster_record')
 @mock.patch('sky.global_user_state.get_cluster_from_name')
+def test_check_existing_cluster_thin_head_relaunch_uses_worker_count(
+        mock_get_cluster, mock_refresh):
+    """Thin-head relaunch must pass worker count, not physical pods.
+
+    handle.launched_nodes includes the dedicated head. _retry_zones applies
+    launch_node_count(+1), so ToProvisionConfig must receive workers only —
+    otherwise each relaunch grows the cluster by one worker.
+    """
+    backend = CloudVmRayBackend()
+    # 10 workers + 1 thin head.
+    handle = _make_mock_handle(launched_nodes=11)
+    launched_res = mock.MagicMock(unsafe=True)
+    launched_res.cloud = mock.MagicMock()
+    launched_res.region = 'us-central1'
+    launched_res.zone = 'us-central1-a'
+    launched_res.ports = None
+    launched_res.assert_launchable.return_value = launched_res
+    launched_res.cloud.OPEN_PORTS_VERSION = clouds.OpenPortsVersion.UPDATABLE
+    launched_res.has_separate_head.return_value = True
+    launched_res.launch_node_count.side_effect = lambda n: n + 1
+    handle.launched_resources = launched_res
+
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': 'abc123',
+    }
+    mock_get_cluster.return_value = record
+    mock_refresh.return_value = record
+
+    task = _make_mock_task(num_nodes=10)
+    mock_resource = mock.MagicMock()
+    mock_resource.ports = None
+    mock_resource.docker_login_config = None
+    mock_resource.cluster_config_overrides = None
+    mock_resource.less_demanding_than.return_value = True
+    task.resources = {mock_resource}
+
+    with mock.patch('sky.global_user_state.get_cluster_yaml_str'
+                   ) as mock_yaml_str, \
+         mock.patch('sky.usage.usage_lib.messages'):
+        mock_yaml_str.return_value = None
+        config = backend._check_existing_cluster(task,
+                                                 launched_res,
+                                                 'test-cluster',
+                                                 dryrun=False,
+                                                 resize=False)
+
+    assert config.num_nodes == 10, (
+        f'Expected worker count 10 (11 physical - 1 head) but got '
+        f'{config.num_nodes}')
+    assert launched_res.launch_node_count(config.num_nodes) == 11
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_record')
+@mock.patch('sky.global_user_state.get_cluster_from_name')
 def test_check_existing_cluster_resize_nonexistent_warns(
         mock_get_cluster, mock_refresh):
     """resize=True on a non-existent cluster should warn and fall through
