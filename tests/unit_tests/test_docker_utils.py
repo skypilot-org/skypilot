@@ -1,4 +1,5 @@
 """Tests for docker container initialization on a remote node."""
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -194,3 +195,61 @@ docker() {
         assert (tmp_path / 'docker-command').read_text().strip() == (
             f'login {_ACR_SERVER} --username {docker_utils.ACR_TOKEN_USERNAME} '
             '--password-stdin')
+
+
+def test_cgroupfs_config_installs_no_packages():
+    runs = []
+    initializer = _make_initializer(
+        {
+            'container_name': 'sky_container',
+            'image': 'myimage:latest',
+        }, runs)
+    initializer.initialize()
+    commands = [cmd for cmd, _ in runs]
+
+    assert docker_utils.DOCKER_CGROUPFS_CMD in commands
+    assert not any(
+        'apt' in cmd or 'jq' in cmd for cmd in commands if 'daemon.json' in cmd)
+
+
+def _run_cgroupfs_cmd(tmp_path, config):
+    """Executes the generated command, stubbing only sudo and systemctl."""
+    shell_functions = (
+        'sudo() { "$@"; }; '
+        f'systemctl() {{ echo "$*" >> {tmp_path}/systemctl; }}; ')
+    command = docker_utils.DOCKER_CGROUPFS_CMD.replace(
+        '/etc/docker/daemon.json', str(config))
+    subprocess.run(['bash', '-c', shell_functions + command], check=True)
+
+
+@pytest.mark.parametrize('existing', [
+    None,
+    'null',
+    json.dumps({
+        'runtimes': {
+            'nvidia': {
+                'path': 'nvidia-container-runtime'
+            }
+        },
+        'exec-opts': ['native.cgroupdriver=systemd'],
+    }),
+])
+def test_cgroupfs_config_keeps_other_settings(tmp_path, existing):
+    config = tmp_path / 'daemon.json'
+    if existing is not None:
+        config.write_text(existing)
+    _run_cgroupfs_cmd(tmp_path, config)
+
+    expected = (json.loads(existing) if existing else None) or {}
+    expected['exec-opts'] = ['native.cgroupdriver=cgroupfs']
+    assert json.loads(config.read_text()) == expected
+    assert (tmp_path / 'systemctl').read_text() == 'restart docker\n'
+
+
+def test_cgroupfs_config_leaves_invalid_file_untouched(tmp_path):
+    config = tmp_path / 'daemon.json'
+    config.write_text('{not json')
+    _run_cgroupfs_cmd(tmp_path, config)
+
+    assert config.read_text() == '{not json'
+    assert not (tmp_path / 'systemctl').exists()

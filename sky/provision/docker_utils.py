@@ -39,6 +39,25 @@ DOCKER_SOCKET_NOT_READY_STR_2 = (
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
+# Runs on the host as root with the host's python3, which every supported
+# VM image ships. Setting the cgroup driver must not install anything: jq is
+# absent from some provider images (e.g. Lambda), and installing it makes
+# every launch depend on the host's package mirrors.
+DOCKER_CGROUPFS_SCRIPT = (
+    'import json, os, sys\n'
+    'path = sys.argv[1]\n'
+    'config = {}\n'
+    'if os.path.exists(path):\n'
+    '    with open(path, encoding="utf-8") as f:\n'
+    '        config = json.load(f) or {}\n'
+    'config["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\n'
+    'with open(path + ".tmp", "w", encoding="utf-8") as f:\n'
+    '    json.dump(config, f, indent=2)\n'
+    'os.replace(path + ".tmp", path)\n')
+DOCKER_CGROUPFS_CMD = (
+    f'{{ sudo python3 -c {shlex.quote(DOCKER_CGROUPFS_SCRIPT)} '
+    '/etc/docker/daemon.json && sudo systemctl restart docker; } || true')
+
 # Install AWS CLI v2 (not v1 from pip) as it's required for ECR authentication
 # AWS CLI v2 is installed as a standalone binary, not a Python package. See:
 # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
@@ -430,14 +449,7 @@ class DockerInitializer:
             # from GPUs when a systemctl command is called. This is a known
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
-            self._run(
-                '{ which jq || sudo apt update && sudo apt install -y jq; } && '
-                '{ [ -f /etc/docker/daemon.json ] || '
-                'echo "{}" | sudo tee /etc/docker/daemon.json;'
-                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
-                '/etc/docker/daemon.json > /tmp/daemon.json;'
-                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
-                'sudo systemctl restart docker; } || true')
+            self._run(DOCKER_CGROUPFS_CMD)
             user_docker_run_options = self.docker_config.get('run_options', [])
             remove_container_cmd = maybe_remove_container_cmds(
                 self.container_name,
