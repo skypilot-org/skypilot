@@ -21,6 +21,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import network_utils
@@ -1217,12 +1218,13 @@ class Kubernetes(clouds.Cloud):
         # the CPU usage on the head pod, otherwise the ray cluster will use the
         # CPU resources on the node instead within the pod.
         #
-        # Dedicated thin head (head_node_*): head Ray advertises num-cpus=0 so
-        # tasks stay off the head; workers keep the normal worker CPU count.
+        # Dedicated thin head (head_node_*): head Ray advertises the setup
+        # token CPU (THIN_HEAD_RAY_NUM_CPUS / task_codegen._SETUP_CPUS) so
+        # STRICT_SPREAD setup can place on the head while normal tasks
+        # (num_cpus>=1) stay on workers. Workers keep the normal CPU count.
         # Do not share a single custom_ray_options dict across head and worker
         # start commands — that previously zeroed worker CPUs and stalled jobs.
-        # 'num-cpus' must be an integer, but we should not set it to 0 if
-        # cpus is <1 (homogeneous / worker case).
+        # Homogeneous / worker 'num-cpus' stays an integer >=1 when cpus <1.
         worker_ray_num_cpus = str(max(int(cpus), 1))
         worker_custom_ray_options = {
             'object-store-memory': 500000000,
@@ -1231,7 +1233,7 @@ class Kubernetes(clouds.Cloud):
         if resources.has_separate_head():
             head_custom_ray_options = {
                 'object-store-memory': 500000000,
-                'num-cpus': '0',
+                'num-cpus': kubernetes_constants.THIN_HEAD_RAY_NUM_CPUS,
             }
         else:
             head_custom_ray_options = dict(worker_custom_ray_options)

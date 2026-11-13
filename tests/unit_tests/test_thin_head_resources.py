@@ -6,6 +6,7 @@ import pytest
 
 from sky import clouds
 from sky import resources as resources_lib
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance as k8s_instance
 
 
@@ -98,12 +99,13 @@ def test_apply_head_resources_defaults_limits_to_requests():
     assert res['limits'] == {'cpu': '0.5', 'memory': '16G'}
 
 
-def test_separate_head_implies_ray_num_cpus_zero_contract():
-    """Dedicated head: pod sized by head_node_*; Ray must advertise 0 CPUs.
+def test_separate_head_implies_ray_setup_token_cpu_contract():
+    """Dedicated head: pod sized by head_node_*; Ray advertises setup-token CPU.
 
     Provision paths in clouds/kubernetes.py and
-    provision/kubernetes/instance.py set custom_ray_options['num-cpus']='0'
-    when head_resources / has_separate_head() is set. This test locks the
+    provision/kubernetes/instance.py set custom_ray_options['num-cpus'] to
+    THIN_HEAD_RAY_NUM_CPUS (0.0001, matching task_codegen._SETUP_CPUS) when
+    head_resources / has_separate_head() is set. This test locks the
     Resources API side of that contract.
     """
     r = resources_lib.Resources(
@@ -115,9 +117,10 @@ def test_separate_head_implies_ray_num_cpus_zero_contract():
     )
     assert r.has_separate_head()
     assert float(str(r.head_node_cpus).rstrip('+')) == 20.0
-    # Worker shape unchanged; Ray exclusion is via num-cpus=0, not by
-    # zeroing the pod request.
+    # Worker shape unchanged; Ray exclusion is via setup-token num-cpus, not
+    # by zeroing the pod request.
     assert r.cpus == '8'
+    assert float(k8s_constants.THIN_HEAD_RAY_NUM_CPUS) == 0.0001
 
 
 def test_copy_preserves_head_fields():

@@ -519,9 +519,11 @@ Behavior:
   worker shape. Workers follow the normal ``set_pod_resource_limits`` behavior.
 * **Kubernetes only.** Other clouds reject these fields until a VM head-shape
   API exists.
-* **Ray.** The head is started with ``num-cpus: 0`` so Ray does not schedule
-  normal CPU tasks onto it. ``head_node_cpus`` / ``head_node_memory`` still
-  size the pod for management (GCS, driver, object store).
+* **Ray.** The head advertises a setup-token ``num-cpus`` (``0.0001``, same
+  as SkyPilot setup) so normal CPU tasks (``num_cpus>=1``) stay on workers,
+  while setup STRICT_SPREAD can still place on the head.
+  ``head_node_cpus`` / ``head_node_memory`` still size the pod for
+  management (GCS, driver, object store).
 
 See also :ref:`resources.head_node_cpus <yaml-spec-resources-head-node-cpus>`
 in the YAML spec.

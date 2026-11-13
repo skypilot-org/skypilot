@@ -492,6 +492,8 @@ class RayCodeGen(TaskCodeGen):
                 textwrap.dedent(f"""\
                 setup_cmd = {setup_cmd!r}
                 _SETUP_CPUS = 0.0001
+                # Keep in sync with kubernetes THIN_HEAD_RAY_NUM_CPUS: thin heads
+                # advertise this token so STRICT_SPREAD setup can place on them.
                 # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
                 # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
                 # We unset it so that user setup command may properly use this env var.
