@@ -226,12 +226,14 @@ class Resources:
           memory: the amount of memory in GiB required. If a
             str, must be a string of the form ``'16'`` or ``'16+'``, where
             the ``+`` indicates that the task requires at least 16 GB of memory.
-          head_node_cpus: optional CPU request for a dedicated Ray head node.
-            When set with ``head_node_memory``, ``num_nodes`` is treated as the
-            worker count and one extra thin head pod is provisioned (Kubernetes
-            only). Both head fields must be set together.
-          head_node_memory: optional memory (GiB) for the dedicated head node.
-            See ``head_node_cpus``.
+          head_node_cpus: optional CPU request/limit for a dedicated Ray head
+            node (Kubernetes only). When set with ``head_node_memory``,
+            ``num_nodes`` is the worker count and one extra head pod is
+            provisioned. Ray on that head uses ``num-cpus: 0`` (no scheduled
+            worker tasks); pod CPU still backs management. Both head fields
+            must be set together.
+          head_node_memory: optional memory (GiB) request/limit for the
+            dedicated head node. See ``head_node_cpus``.
           accelerators: the accelerators required. If a str, must be
             a string of the form ``'V100'`` or ``'V100:2'``, where the ``:2``
             indicates that the task requires 2 V100 GPUs. If a dict, must be a

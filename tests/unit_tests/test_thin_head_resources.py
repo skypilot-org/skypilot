@@ -98,6 +98,28 @@ def test_apply_head_resources_defaults_limits_to_requests():
     assert res['limits'] == {'cpu': '0.5', 'memory': '16G'}
 
 
+def test_separate_head_implies_ray_num_cpus_zero_contract():
+    """Dedicated head: pod sized by head_node_*; Ray must advertise 0 CPUs.
+
+    Provision paths in clouds/kubernetes.py and
+    provision/kubernetes/instance.py set custom_ray_options['num-cpus']='0'
+    when head_resources / has_separate_head() is set. This test locks the
+    Resources API side of that contract.
+    """
+    r = resources_lib.Resources(
+        cpus=8,
+        memory=32,
+        head_node_cpus=20,
+        head_node_memory=16,
+        infra='k8s',
+    )
+    assert r.has_separate_head()
+    assert float(str(r.head_node_cpus).rstrip('+')) == 20.0
+    # Worker shape unchanged; Ray exclusion is via num-cpus=0, not by
+    # zeroing the pod request.
+    assert r.cpus == '8'
+
+
 def test_copy_preserves_head_fields():
     r = resources_lib.Resources(
         cpus=8,

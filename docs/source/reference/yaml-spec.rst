@@ -568,8 +568,9 @@ Must be set together with :ref:`resources.head_node_memory
 - Worker pods use :ref:`resources.cpus <yaml-spec-resources-cpus>` /
   :ref:`resources.memory <yaml-spec-resources-memory>`.
 - The head pod uses ``head_node_cpus`` / ``head_node_memory`` for **both**
-  Kubernetes requests and limits (Guaranteed QoS). Ray's head ``num-cpus``
-  is derived from ``head_node_cpus``.
+  Kubernetes requests and limits (Guaranteed QoS / management headroom).
+  Ray on the head is started with ``num-cpus: 0`` so worker tasks are not
+  scheduled there; pod CPU/memory still backs GCS/driver/etc.
 
 Format matches :ref:`resources.cpus <yaml-spec-resources-cpus>`
 (``<count>`` or ``<count>+``).

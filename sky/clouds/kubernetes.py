@@ -1216,15 +1216,19 @@ class Kubernetes(clouds.Cloud):
         # much memory on the head node. 'num-cpus' should be set to limit
         # the CPU usage on the head pod, otherwise the ray cluster will use the
         # CPU resources on the node instead within the pod.
-        head_cpus_for_ray = cpus
+        #
+        # Dedicated thin head (head_node_*): K8s requests/limits still come
+        # from head_node_cpus/memory for management headroom, but Ray
+        # advertises num-cpus=0 so worker tasks are not scheduled on the head.
         if resources.has_separate_head():
-            head_cpus_for_ray = float(
-                str(resources.head_node_cpus).rstrip('+'))
-        custom_ray_options = {
-            'object-store-memory': 500000000,
+            ray_num_cpus = '0'
+        else:
             # 'num-cpus' must be an integer, but we should not set it to 0 if
             # cpus is <1.
-            'num-cpus': str(max(int(head_cpus_for_ray), 1)),
+            ray_num_cpus = str(max(int(cpus), 1))
+        custom_ray_options = {
+            'object-store-memory': 500000000,
+            'num-cpus': ray_num_cpus,
         }
 
         # Get the storage class name for high availability controller's PVC

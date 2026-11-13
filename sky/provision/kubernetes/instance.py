@@ -3661,10 +3661,13 @@ def get_cluster_info(
 
     # cpu_request may be a string like `100m`, need to parse and convert
     num_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(cpu_request)
-    # 'num-cpus' for ray must be an integer, but we should not set it to 0 if
-    # cpus is <1.
-    # Keep consistent with the logic in clouds/kubernetes.py
-    str_cpus = str(max(int(num_cpus), 1))
+    # Keep consistent with clouds/kubernetes.py: dedicated thin head advertises
+    # Ray num-cpus=0 (pod CPU still from head_resources for management).
+    # Otherwise 'num-cpus' must be an integer, but not 0 if cpus is <1.
+    if provider_config.get('head_resources'):
+        str_cpus = '0'
+    else:
+        str_cpus = str(max(int(num_cpus), 1))
 
     # Record the pod's actual resource requests so display paths can show
     # what the scheduler sees, even when an admin policy has overridden
