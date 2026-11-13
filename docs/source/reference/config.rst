@@ -92,6 +92,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         myannotation: myvalue
     :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
     :ref:`max_inline_command_length <config-yaml-kubernetes-max-inline-command-length>`: 32768
+    :ref:`allow_unmanaged_cluster_destructive_stop <config-yaml-kubernetes-allow-unmanaged-cluster-destructive-stop>`: false
     :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
     :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
       metadata:
@@ -2049,6 +2050,39 @@ PVC must be provisioned; and 24 hours when a Kueue local queue or a KAI
 queue is configured.
 
 Default: ``10``–``60`` seconds (see above).
+
+.. _config-yaml-kubernetes-allow-unmanaged-cluster-destructive-stop:
+
+``kubernetes.allow_unmanaged_cluster_destructive_stop``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Allow ``sky stop`` and ``sky start`` on Kubernetes clusters (optional).
+
+Stopping deletes the cluster's pods and services and keeps its
+PersistentVolumeClaims, including the cluster's ephemeral volumes.
+``sky start`` recreates the pods and reattaches those volumes. Anything not on
+a volume, such as the container filesystem and installed packages, is lost.
+
+With this flag on, a cluster whose pods disappear (eviction, node loss,
+preemption) is also marked ``STOPPED`` instead of removed, so its volumes
+survive. Autodown still terminates the cluster. Autostop stays unsupported.
+High-availability clusters cannot be stopped.
+
+Read from the API server's config only. A value in a client's config has no
+effect, because the server's background status refresh never sees it.
+
+Turning the flag off later keeps already-stopped clusters, so they can still
+be started or torn down.
+
+Default: ``false``.
+
+.. code-block:: yaml
+
+  kubernetes:
+    allow_unmanaged_cluster_destructive_stop: true
+    context_configs:
+      my-shared-context:
+        allow_unmanaged_cluster_destructive_stop: false
 
 .. _config-yaml-kubernetes-autoscaler:
 

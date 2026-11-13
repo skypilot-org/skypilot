@@ -7263,3 +7263,136 @@ def test_missing_pod_reason_from_cluster_events_taint_eviction(
         kwargs: [f'[kubernetes pod p] TaintManagerEviction {message}'])
     assert instance._derive_missing_pod_reason_from_cluster_events(
         'c') == expected
+
+
+@pytest.fixture
+def destructive_stop_allowed(monkeypatch):
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.allow_unmanaged_cluster_destructive_stop',
+        lambda *a, **k: True)
+
+
+def test_stop_instances_refuses_when_flag_off(monkeypatch):
+    """A failover stop must not delete pods unless the flag allows it."""
+    core_api_mock = mock.MagicMock()
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **k: core_api_mock)
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.allow_unmanaged_cluster_destructive_stop',
+        lambda *a, **k: False)
+
+    with pytest.raises(NotImplementedError):
+        instance.stop_instances('test-cluster-on-cloud',
+                                provider_config={'namespace': 'default'})
+    assert not core_api_mock.delete_namespaced_pod.called
+
+
+def test_stop_instances_reads_flag_for_in_cluster_context(monkeypatch):
+    """In-cluster auth uses a None context, but the flag is keyed by name."""
+    in_cluster = 'in-cluster'
+    monkeypatch.setattr('sky.adaptors.kubernetes.in_cluster_context_name',
+                        lambda: in_cluster)
+    seen = []
+
+    def _allow(context):
+        seen.append(context)
+        return False
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.allow_unmanaged_cluster_destructive_stop',
+        _allow)
+
+    with pytest.raises(NotImplementedError):
+        instance.stop_instances('test-cluster-on-cloud',
+                                provider_config={
+                                    'namespace': 'default',
+                                    'context': in_cluster
+                                })
+    assert seen == [in_cluster]
+
+
+def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch,
+                                                   destructive_stop_allowed):
+    """`sky stop` on Kubernetes must delete pods/services but never PVCs."""
+    core_api_mock = mock.MagicMock()
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **k: core_api_mock)
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+    head_pod = mock.MagicMock()
+    head_pod.metadata.name = 'test-cluster-head'
+    head_pod.spec.resource_claims = None
+    monkeypatch.setattr('sky.provision.kubernetes.utils.filter_pods',
+                        lambda *a, **k: {'test-cluster-head': head_pod})
+    monkeypatch.setattr(instance, '_is_head', lambda pod: True)
+    monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                        lambda fn, items, n: [fn(i) for i in items])
+
+    instance.stop_instances('test-cluster-on-cloud',
+                            provider_config={'namespace': 'default'})
+
+    # Pods are deleted ...
+    assert core_api_mock.delete_namespaced_pod.called
+    # ... but the PersistentVolumeClaim is retained for restart.
+    assert not core_api_mock.delete_namespaced_persistent_volume_claim.called
+
+
+@pytest.mark.parametrize(('resource_claims', 'expected_claims'), [
+    ([mock.MagicMock()], True),
+    (None, False),
+])
+def test_stop_instances_passes_claim_state_to_terminate(
+        monkeypatch, destructive_stop_allowed, resource_claims,
+        expected_claims):
+    """Stop deletes DRA-claim pods gracefully, like terminate does."""
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+    pod = mock.MagicMock()
+    pod.spec.resource_claims = resource_claims
+    monkeypatch.setattr('sky.provision.kubernetes.utils.filter_pods',
+                        lambda *a, **k: {'test-cluster-head': pod})
+    monkeypatch.setattr(instance, '_is_head', lambda pod: True)
+    monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                        lambda fn, items, n: [fn(i) for i in items])
+    monkeypatch.setattr(instance, '_delete_cluster_services',
+                        lambda *a, **k: None)
+    recorded = {}
+    monkeypatch.setattr(
+        instance, '_terminate_node',
+        lambda *a, **kw: recorded.update(claims=kw['has_resource_claims']))
+
+    instance.stop_instances('test-cluster-on-cloud',
+                            provider_config={'namespace': 'default'})
+
+    assert recorded['claims'] is expected_claims
+
+
+def test_stop_instances_high_availability_raises(monkeypatch,
+                                                 destructive_stop_allowed):
+    """Stopping an HA (Deployment-backed) cluster is not supported."""
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: True)
+    with pytest.raises(NotImplementedError):
+        instance.stop_instances('test-cluster-on-cloud',
+                                provider_config={'namespace': 'default'})
