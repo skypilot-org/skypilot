@@ -651,7 +651,7 @@ async def test_wait_for_scheduling_timeout_cancels_job_blocked_in_launch(
 @pytest.mark.asyncio
 async def test_wait_for_scheduling_timeout_full_cancel_path_ends_cancelled(
         _mock_managed_jobs_db_conn, monkeypatch):
-    """Through run_job_loop: the job ends CANCELLED via the same path as a
+    """Through start_job: the job ends CANCELLED via the same path as a
     user cancel (CANCELLING, cleanup, CANCELLED, schedule DONE)."""
     job_id = _create_job()
     await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
@@ -679,13 +679,9 @@ async def test_wait_for_scheduling_timeout_full_cancel_path_ends_cancelled(
     manager._cleanup = mock.AsyncMock()
     manager._download_logs_for_cancelled_job = mock.AsyncMock()
 
-    loop_task = asyncio.create_task(
-        manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
-    for _ in range(100):
-        if job_id in manager.job_tasks:
-            break
-        await asyncio.sleep(0.01)
+    await manager.start_job(job_id)
     assert job_id in manager.job_tasks
+    loop_task = manager.job_tasks[job_id]
 
     await manager._check_deadlines(time.time())
     with pytest.raises(asyncio.CancelledError):
@@ -1069,16 +1065,9 @@ async def test_cancels_per_check_are_capped(_mock_managed_jobs_db_conn,
     manager = _manager()
     manager._cleanup = mock.AsyncMock()
     manager._download_logs_for_cancelled_job = mock.AsyncMock()
-    loops = {
-        job_id: asyncio.create_task(
-            manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
-        for job_id in job_ids
-    }
-    for _ in range(100):
-        if all(job_id in manager.job_tasks for job_id in job_ids):
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.gather(*(manager.start_job(job_id) for job_id in job_ids))
     assert all(job_id in manager.job_tasks for job_id in job_ids)
+    loops = dict(manager.job_tasks)
 
     recorded_after_each_check = []
     for _ in range(4):
@@ -1257,6 +1246,25 @@ async def test_task_starting_after_the_read_is_not_cancelled(
 
 
 @pytest.mark.asyncio
+async def test_deadline_does_not_recancel_a_finalizing_job(
+        _mock_managed_jobs_db_conn):
+    job_id = _create_job()
+    await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
+    manager = _manager()
+    job_task = mock.MagicMock()
+    job_task.done.return_value = False
+    manager.job_tasks[job_id] = job_task
+    manager._stopping_jobs.add(job_id)
+
+    with mock.patch.object(managed_job_state,
+                           'set_deadline_exceeded_async') as record:
+        await manager._check_deadlines(time.time())
+
+    record.assert_not_called()
+    job_task.cancel.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_set_deadline_exceeded_refuses_a_started_task(
         _mock_managed_jobs_db_conn):
     job_id = _create_job()
@@ -1339,13 +1347,9 @@ async def test_pending_graceful_user_cancel_wins_over_the_deadline(
     manager = _manager()
     manager._cleanup = mock.AsyncMock()
     manager._download_logs_for_cancelled_job = mock.AsyncMock()
-    loop_task = asyncio.create_task(
-        manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
-    for _ in range(100):
-        if job_id in manager.job_tasks:
-            break
-        await asyncio.sleep(0.01)
+    await manager.start_job(job_id)
     assert job_id in manager.job_tasks
+    loop_task = manager.job_tasks[job_id]
 
     _write_cancel_signal(
         _signal_dir, job_id,
