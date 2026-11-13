@@ -1,6 +1,8 @@
 """Unit tests for cluster_event accessors in global_user_state."""
 import time
 
+from sqlalchemy import orm
+
 from sky import global_user_state
 from sky.skylet import constants
 from sky.utils import status_lib
@@ -455,3 +457,154 @@ def test_latest_cluster_events_chunks_the_name_list(tmp_path, monkeypatch):
     assert events == {
         f'chunk-{i}': (f'Launching (pending: r{i})', 1000 + i) for i in range(5)
     }
+
+
+def _starting_status(cluster_hash: str, reason: str):
+    """Read back the starting_status column of a single event row."""
+    events = global_user_state.cluster_event_table
+    engine = global_user_state._db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(events).filter(
+            events.c.cluster_hash == cluster_hash,
+            events.c.reason == reason,
+        ).one()
+    return row.starting_status
+
+
+def test_add_cluster_event_with_explicit_hash_for_removed_cluster(
+        tmp_path, monkeypatch):
+    """A caller that already knows the hash can record an event after the
+    clusters row is gone (e.g. post-teardown cleanup)."""
+    _fresh_db(tmp_path, monkeypatch)
+    cluster_hash = _add_cluster('removed-1')
+    global_user_state.remove_cluster('removed-1', terminate=True)
+    assert global_user_state._get_hash_for_existing_cluster('removed-1') is None
+
+    global_user_state.add_cluster_event(
+        'removed-1',
+        new_status=None,
+        reason='cleaned up after teardown',
+        event_type=global_user_state.ClusterEventType.STATUS_CHANGE,
+        transitioned_at=10,
+        cluster_hash=cluster_hash,
+    )
+
+    assert global_user_state.get_cluster_events(
+        cluster_name=None,
+        cluster_hash=cluster_hash,
+        event_type=global_user_state.ClusterEventType.STATUS_CHANGE,
+    ) == ['cleaned up after teardown']
+    # No clusters row left, so there is no status to start from.
+    assert _starting_status(cluster_hash, 'cleaned up after teardown') is None
+
+
+def test_add_cluster_event_without_hash_still_skips_removed_cluster(
+        tmp_path, monkeypatch):
+    """Without the explicit hash, the old silent-skip behaviour is kept."""
+    _fresh_db(tmp_path, monkeypatch)
+    cluster_hash = _add_cluster('removed-2')
+    global_user_state.remove_cluster('removed-2', terminate=True)
+
+    global_user_state.add_cluster_event(
+        'removed-2',
+        new_status=None,
+        reason='dropped on the floor',
+        event_type=global_user_state.ClusterEventType.STATUS_CHANGE,
+        transitioned_at=10,
+    )
+
+    assert not global_user_state.get_cluster_events(
+        cluster_name=None,
+        cluster_hash=cluster_hash,
+        event_type=global_user_state.ClusterEventType.STATUS_CHANGE,
+    )
+
+
+def test_add_cluster_event_explicit_hash_ignores_relaunched_cluster(
+        tmp_path, monkeypatch):
+    """An explicit hash must not pick up whichever row owns the name now.
+
+    A teardown-time event for the old cluster is recorded after a new cluster
+    has already been launched under the same name. It must be keyed by the
+    explicit (old) hash, and it must not take the live cluster's status.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    old_hash = _add_cluster('reused')
+    global_user_state.remove_cluster('reused', terminate=True)
+    # Relaunch under the same name: a new row, a new hash, and it is UP.
+    global_user_state.add_or_update_cluster(
+        cluster_name='reused',
+        cluster_handle=_MinimalHandle(),
+        requested_resources=set(),
+        ready=True,
+    )
+    new_hash = global_user_state._get_hash_for_existing_cluster('reused')
+    assert new_hash is not None and new_hash != old_hash
+
+    status_change = global_user_state.ClusterEventType.STATUS_CHANGE
+    global_user_state.add_cluster_event(
+        'reused',
+        new_status=None,
+        reason='old cluster teardown leftovers',
+        event_type=status_change,
+        transitioned_at=10,
+        cluster_hash=old_hash,
+    )
+
+    # Keyed by the explicit hash, and not attributed to the live cluster.
+    assert global_user_state.get_cluster_events(
+        cluster_name=None,
+        cluster_hash=old_hash,
+        event_type=status_change,
+    ) == ['old cluster teardown leftovers']
+    assert 'old cluster teardown leftovers' not in (
+        global_user_state.get_cluster_events(
+            cluster_name=None,
+            cluster_hash=new_hash,
+            event_type=status_change,
+        ))
+    # The live cluster's status must not leak into the old cluster's event.
+    assert _starting_status(old_hash, 'old cluster teardown leftovers') is None
+
+
+def test_add_cluster_event_explicit_hash_nop_if_duplicate(
+        tmp_path, monkeypatch):
+    """nop_if_duplicate (and duplicate_regex) work off the explicit hash."""
+    _fresh_db(tmp_path, monkeypatch)
+    cluster_hash = _add_cluster('removed-3')
+    global_user_state.remove_cluster('removed-3', terminate=True)
+
+    status_change = global_user_state.ClusterEventType.STATUS_CHANGE
+    for transitioned_at in (10, 20):
+        # Different timestamps, so the primary key does not dedupe for us.
+        global_user_state.add_cluster_event(
+            'removed-3',
+            new_status=None,
+            reason='same reason',
+            event_type=status_change,
+            nop_if_duplicate=True,
+            transitioned_at=transitioned_at,
+            cluster_hash=cluster_hash,
+        )
+    assert global_user_state.get_cluster_events(
+        cluster_name=None,
+        cluster_hash=cluster_hash,
+        event_type=status_change,
+    ) == ['same reason']
+
+    # duplicate_regex matches the last event, so this one is a nop too.
+    global_user_state.add_cluster_event(
+        'removed-3',
+        new_status=None,
+        reason='a different reason',
+        event_type=status_change,
+        nop_if_duplicate=True,
+        duplicate_regex='same.*',
+        transitioned_at=30,
+        cluster_hash=cluster_hash,
+    )
+    assert global_user_state.get_cluster_events(
+        cluster_name=None,
+        cluster_hash=cluster_hash,
+        event_type=status_change,
+    ) == ['same reason']
