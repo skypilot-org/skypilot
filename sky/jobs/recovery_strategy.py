@@ -778,6 +778,11 @@ class StrategyExecutor:
                         self.cluster_name,
                         self.job_id_on_pool_cluster,
                         get_end_time=False)
+                    if job_submitted_at is None:
+                        reason = ':missing_timestamp'
+                        logger.info('Job submission time is unavailable. '
+                                    'Retrying the job status check.')
+                        continue
                     return job_submitted_at, None
                 except Exception as e:  # pylint: disable=broad-except
                     # If we failed to get the job timestamp, we will retry

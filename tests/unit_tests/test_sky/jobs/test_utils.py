@@ -2165,6 +2165,27 @@ class TestTryToGetJobEndTime:
         assert jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster',
                                                   1) == 12345.0
 
+    @pytest.mark.parametrize('timestamp', [None, 0.0, 12345.0])
+    def test_decodes_remote_timestamp(self, monkeypatch, timestamp):
+        self._disable_runtime(monkeypatch)
+        handle = MagicMock()
+        handle.is_grpc_enabled_with_flag = False
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name', lambda _: handle)
+        backend = MagicMock()
+        backend.run_on_head.return_value = (
+            0, jobs_utils.message_utils.encode_payload(timestamp), '')
+
+        # A successful null payload is a recovery condition, not a numeric
+        # timestamp. Zero remains a valid timestamp.
+        if timestamp is None:
+            with pytest.raises(jobs_utils.JobEndTimeUnavailableError,
+                               match='Job end time is unavailable'):
+                jobs_utils.try_to_get_job_end_time(backend, 'cluster', None)
+        else:
+            assert jobs_utils.try_to_get_job_end_time(backend, 'cluster',
+                                                      None) == timestamp
+
     def test_ssh_connection_failure_falls_back(self, monkeypatch):
         self._disable_runtime(monkeypatch)
 

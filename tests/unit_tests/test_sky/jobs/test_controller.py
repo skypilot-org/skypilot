@@ -2219,6 +2219,72 @@ class TestUserJobStatusClassification:
         controller._cleanup_cluster = AsyncMock()
         return controller
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('terminal_status', [
+        job_lib.JobStatus.SUCCEEDED, job_lib.JobStatus.FAILED,
+        job_lib.JobStatus.FAILED_SETUP, job_lib.JobStatus.FAILED_DRIVER
+    ])
+    async def test_missing_end_time_runs_normal_recovery(self, terminal_status):
+        controller = self._make_controller()
+        controller._update_cost_units = AsyncMock()
+        controller._count_in_full = AsyncMock()
+        task = MagicMock()
+        task.name = 'test-task'
+        task.num_nodes = 1
+        executor = MagicMock()
+        executor.recover = AsyncMock(return_value=1000.0)
+        statuses = AsyncMock(
+            side_effect=[(terminal_status,
+                          None), (job_lib.JobStatus.SUCCEEDED, None)])
+        end_times = MagicMock(side_effect=[
+            managed_job_utils.JobEndTimeUnavailableError(
+                'Job end time is unavailable'), 12345.0
+        ])
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+        state = managed_job_state
+
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch.object(controller_module, 'check_network_connection',
+                          new=AsyncMock()), \
+             patch('sky.jobs.runtime.is_registered', return_value=False), \
+             patch('sky.jobs.utils.get_job_status', statuses), \
+             patch('sky.jobs.utils.try_to_get_job_end_time', end_times), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   return_value=(status_lib.ClusterStatus.UP, handle)), \
+             patch('sky.backends.backend_utils.get_clusters', return_value=[]), \
+             patch.object(state, 'set_recovering_async', new=AsyncMock()) as recovering, \
+             patch.object(state, 'set_recovered_async', new=AsyncMock()) as recovered, \
+             patch.object(state, 'record_emergency_recovery_attempt_async',
+                          new=AsyncMock()) as emergency, \
+             patch.object(state, 'set_succeeded_async', new=AsyncMock()) as succeeded, \
+             patch.object(state, 'set_failed_async', new=AsyncMock()) as failed:
+            result = await controller._monitor_one_task(
+                task_id=0,
+                task=task,
+                cluster_name='test-cluster',
+                executor=executor,
+                callback_func=MagicMock())
+
+        # Missing end time must recover even when user-error retries are off.
+        # Only the subsequent run with a valid end time may finish the job.
+        assert result is True
+        recovering.assert_awaited_once()
+        assert (recovering.call_args.kwargs['recovery_source'] ==
+                state.RecoverySource.FAILURE)
+        assert 'end time is unavailable' in recovering.call_args.kwargs[
+            'cluster_event_reason']
+        executor.recover.assert_awaited_once()
+        executor.should_restart_on_failure.assert_not_called()
+        recovered.assert_awaited_once()
+        emergency.assert_not_awaited()
+        failed.assert_not_awaited()
+        succeeded.assert_awaited_once()
+        assert succeeded.call_args.kwargs['end_time'] == 12345.0
+        assert statuses.await_count == 2
+        assert end_times.call_count == 2
+
     async def _run_until_terminal(self, controller, worker_job_status):
         """Drive _monitor_one_task through one iteration for a terminal
         worker-cluster job status with the cluster UP, returning the

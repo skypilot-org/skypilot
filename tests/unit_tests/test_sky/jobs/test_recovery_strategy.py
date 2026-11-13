@@ -2184,6 +2184,27 @@ def _make_submit_wait_executor(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('timestamps,expected',
+                         [([None, 123.0], (123.0, None)),
+                          ([None, None], (None, ':missing_timestamp'))])
+async def test_submit_wait_retries_missing_timestamp(monkeypatch, timestamps,
+                                                     expected):
+    executor = _make_submit_wait_executor(monkeypatch)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: False)
+    monkeypatch.setattr(
+        recovery_strategy.managed_job_utils, 'get_job_status',
+        mock.AsyncMock(
+            return_value=(recovery_strategy.job_lib.JobStatus.RUNNING, None)))
+    timestamp_probe = mock.Mock(side_effect=timestamps)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'get_job_timestamp', timestamp_probe)
+
+    assert await executor._wait_until_job_starts_on_cluster() == expected
+    assert timestamp_probe.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_submit_wait_attributes_cluster_preemption(monkeypatch):
     """The audit's 'preempted during provisioning' family gets its own name.
 
