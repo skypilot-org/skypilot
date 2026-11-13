@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
 
 # Default images for Verda Cloud
 # These images are provided by Verda and include CUDA drivers
-VERDA_DEFAULT_IMAGE = 'ubuntu-24.04-cuda-12.8-open-docker'
+VERDA_DEFAULT_IMAGE = '26.04.cuda13.4.docker'
 
 
 @registry.CLOUD_REGISTRY.register
