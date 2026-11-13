@@ -2343,6 +2343,9 @@ def test_volume_not_ready_on_kubernetes():
 
 # ---------- A volume that cannot be judged before the launch ----------
 @pytest.mark.kubernetes
+# The auto-mount is set in the client config, and a remote server ignores a
+# client's kubernetes.auto_mounts.
+@pytest.mark.no_remote_server
 def test_auto_mount_pending_volume_on_kubernetes():
     """A WaitForFirstConsumer claim, which no pre-launch check can catch.
 
