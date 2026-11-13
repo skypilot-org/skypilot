@@ -416,6 +416,16 @@ def _all_in_the_signal_pool(threads: List[str]) -> bool:
         name.startswith('cancel-signal') for name in threads)
 
 
+async def _finishes_within(awaitable, seconds: float):
+    """Awaits something, failing the test if it takes longer than given."""
+    task = asyncio.ensure_future(awaitable)
+    done, _ = await asyncio.wait({task}, timeout=seconds)
+    if not done:
+        task.cancel()
+        pytest.fail(f'Not finished within {seconds} s.')
+    return task.result()
+
+
 async def _run_cancel_loop_once(manager) -> None:
     """Runs one pass of cancel_job(), up to its sleep."""
 
@@ -515,7 +525,7 @@ async def test_cancel_is_taken_while_the_shared_thread_pool_is_full(signal_dir):
         await asyncio.sleep(0.2)
         assert not queued_call.done()
 
-        await asyncio.wait_for(_run_cancel_loop_once(manager), timeout=10)
+        await _finishes_within(_run_cancel_loop_once(manager), 10)
 
         job_task.cancel.assert_called_once_with()
         assert manager._cancel_info[7] == (True, 30)  # pylint: disable=protected-access
@@ -552,8 +562,8 @@ async def test_hung_signal_directory_takes_no_shared_thread(signal_dir):
             while not listing_threads:
                 await asyncio.sleep(0.01)
 
-            assert await asyncio.wait_for(asyncio.to_thread(lambda: 'ran'),
-                                          timeout=10) == 'ran'
+            assert await _finishes_within(asyncio.to_thread(lambda: 'ran'),
+                                          10) == 'ran'
             # Well past the moment a retry would have come.
             await asyncio.sleep(0.3)
             assert not cancel_loop.done()
