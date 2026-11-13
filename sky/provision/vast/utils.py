@@ -129,7 +129,13 @@ def launch(name: str,
         query.append('hosting_type>=1')
     query_str = ' '.join(query)
 
-    instance_list = vast.vast().search_offers(query=query_str)
+    # Rent the cheapest offer rather than the first in vast.ai's default
+    # 'score' order: by hourly price including the requested disk, or by
+    # minimum bid for an interruptible instance, which bids min_bid below.
+    instance_list = vast.vast().search_offers(
+        query=query_str,
+        order='min_bid' if preemptible else 'dph_total',
+        storage=disk_size)
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise RuntimeError('Failed to create instances, could not find an '
