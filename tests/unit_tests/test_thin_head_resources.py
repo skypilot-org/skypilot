@@ -232,12 +232,16 @@ def test_separate_head_implies_ray_num_cpus_zero_contract():
 
 def test_thin_head_ray_start_omits_accelerator_resources():
     """Head ray start must not advertise worker GPUs via --resources."""
-    with_gpu = instance_setup.ray_head_start_command(
-        '{"GPU":1}', {'num-cpus': '0', 'object-store-memory': 500000000})
+    with_gpu = instance_setup.ray_head_start_command('{"GPU":1}', {
+        'num-cpus': '0',
+        'object-store-memory': 500000000
+    })
     assert '--resources=' in with_gpu
 
-    thin = instance_setup.ray_head_start_command(
-        None, {'num-cpus': '0', 'object-store-memory': 500000000})
+    thin = instance_setup.ray_head_start_command(None, {
+        'num-cpus': '0',
+        'object-store-memory': 500000000
+    })
     assert '--resources=' not in thin
     assert '--num-cpus=0' in thin
 

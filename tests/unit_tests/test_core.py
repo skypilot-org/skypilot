@@ -212,9 +212,8 @@ def test_resize_thin_head_same_size_is_noop_pre_provision():
     handle.launched_resources.has_separate_head.return_value = True
     handle.launched_resources.launch_node_count.side_effect = lambda n: n + 1
     task = _make_mock_task(num_nodes=10)
-    backend.run_on_head = mock.MagicMock(
-        side_effect=AssertionError(
-            'same-size thin-head resize must not check jobs / terminate'))
+    backend.run_on_head = mock.MagicMock(side_effect=AssertionError(
+        'same-size thin-head resize must not check jobs / terminate'))
     backend._handle_resize_pre_provision(handle, task, 'test-cluster')
     handle.launched_resources.launch_node_count.assert_called_once_with(10)
 
@@ -226,17 +225,17 @@ def test_resize_thin_head_scale_up_is_noop_pre_provision():
     handle.launched_resources.has_separate_head.return_value = True
     handle.launched_resources.launch_node_count.side_effect = lambda n: n + 1
     task = _make_mock_task(num_nodes=12)  # 12 workers + head = 13 physical
-    backend.run_on_head = mock.MagicMock(
-        side_effect=AssertionError(
-            'thin-head scale-up must not check jobs / terminate'))
+    backend.run_on_head = mock.MagicMock(side_effect=AssertionError(
+        'thin-head scale-up must not check jobs / terminate'))
     backend._handle_resize_pre_provision(handle, task, 'test-cluster')
 
 
 @mock.patch('sky.provision.terminate_instances')
 @mock.patch('sky.global_user_state.get_cluster_yaml_dict')
 @mock.patch('sky.skylet.job_lib.load_job_queue')
-def test_resize_thin_head_scale_down_terminates_workers(
-        mock_load_queue, mock_get_yaml, mock_terminate):
+def test_resize_thin_head_scale_down_terminates_workers(mock_load_queue,
+                                                        mock_get_yaml,
+                                                        mock_terminate):
     """Thin-head scale-down still terminates workers when physical shrinks."""
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=11)  # 10 workers + head
