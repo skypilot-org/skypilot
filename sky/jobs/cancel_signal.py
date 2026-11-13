@@ -47,7 +47,7 @@ _GC_INTERVAL_SECONDS = 3600
 
 # A controller's event loop makes its calls on the signal directory in these
 # threads (see in_thread). Deliberately NOT asyncio.to_thread's default
-# executor: that one is small and shared by every blocking call of every job
+# executor: that one is small and shared by the to_thread calls of every job
 # in the process. A cancel must still be noticed while those calls have it
 # exhausted (e.g. many jobs tearing down at once), and a hung filesystem must
 # not take its workers. The cancel, claim and deadline loops of a controller

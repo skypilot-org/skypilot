@@ -410,8 +410,8 @@ def _record_calling_thread(function, threads: List[str]):
 
 def _all_in_the_signal_pool(threads: List[str]) -> bool:
     """Whether calls were made, all in the pool kept for the signal directory:
-    not on the event loop, and not in the pool that asyncio.to_thread shares
-    with every blocking call of every job."""
+    not on the event loop, and not in the default executor that the
+    asyncio.to_thread calls of every job share."""
     return bool(threads) and all(
         name.startswith('cancel-signal') for name in threads)
 
@@ -501,10 +501,10 @@ async def test_controller_takes_signals_off_the_event_loop(signal_dir):
 
 @pytest.mark.asyncio
 async def test_cancel_is_taken_while_the_shared_thread_pool_is_full(signal_dir):
-    """Every blocking call of every job in a controller process goes through
-    asyncio.to_thread's default executor. When slow calls have all of its
-    workers (many jobs tearing down at once, a stuck API server), a cancel
-    must still be noticed and applied."""
+    """The jobs of a controller process make most of their blocking calls
+    through asyncio.to_thread, so in its default executor. When slow calls
+    have all of its workers (many jobs tearing down at once, a stuck API
+    server), a cancel must still be noticed and applied."""
     del signal_dir
     manager = controller_module.ControllerManager('test-uuid')
     job_task = mock.MagicMock()
