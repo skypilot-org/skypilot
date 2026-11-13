@@ -37,6 +37,29 @@ class StopFailoverError(Exception):
     """
 
 
+class NothingCreatedError(Exception):
+    """A launch attempt failed before it could create anything.
+
+    A provisioner raises this from run_instances() only for a failure in a
+    read-only check that runs before the first call that can create, start or
+    adopt anything, and only if nothing earlier in the attempt (such as its
+    bootstrap_instances()) creates anything for the cluster either. So this
+    attempt changed nothing on the cloud.
+
+    That does not mean nothing exists: an earlier launch with the same cluster
+    name may have left resources behind. bulk_provision() skips the failover
+    teardown only when the cluster had no record before this launch.
+
+    Server-side only. bulk_provision() raises `error` in its place. `error`
+    must be a builtin or a sky.exceptions class, because clients load the
+    failover history by class.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
 # These fields are sensitive and should be redacted from the config for logging
 # purposes.
 SENSITIVE_FIELDS: List[Tuple[str, ...]] = [

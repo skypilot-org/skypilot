@@ -229,6 +229,66 @@ def _existing_cluster_hash(cluster_name: str) -> Optional[str]:
         return None
 
 
+def _teardown_failed_cluster(cloud: clouds.Cloud,
+                             cluster_name: resources_utils.ClusterName,
+                             prev_cluster_ever_up: bool, provider_config: Dict,
+                             provision_error: Exception) -> None:
+    """Tears down what a failed launch may have left behind.
+
+    Raises:
+        StopFailoverError: The teardown failed despite retries, so resources
+            may have leaked. Failover must stop and keep the cluster record,
+            so that the user can find the cluster.
+    """
+    # If the cluster was ever up, stop it; otherwise terminate it.
+    terminate = not prev_cluster_ever_up
+    terminate_str = ('Terminating' if terminate else 'Stopping')
+    logger.debug(f'{terminate_str} the failed cluster.')
+    retry_cnt = 1
+    while True:
+        try:
+            teardown_cluster(repr(cloud),
+                             cluster_name,
+                             terminate=terminate,
+                             provider_config=provider_config)
+            break
+        except NotImplementedError as e:
+            assert not terminate, (
+                'Terminating must be supported by all clouds')
+            exc_msg = common_utils.format_exception(provision_error).replace(
+                '\n', ' ')
+            # If the underlying cloud does not support stopping
+            # instances, we should stop failover as well.
+            raise provision_common.StopFailoverError(
+                f'Provisioning cluster {cluster_name.display_name} '
+                f'failed: {exc_msg}. Failover is stopped for safety '
+                'because the cluster was previously in UP state but '
+                f'{cloud} does not support stopping instances to '
+                'preserve the cluster state. Please try launching the '
+                'cluster again, or terminate it with: '
+                f'sky down {cluster_name.display_name}') from e
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'{terminate_str} {cluster_name!r} failed.')
+            logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
+            retry_cnt += 1
+            if retry_cnt <= _MAX_RETRY:
+                logger.debug(f'Retrying {retry_cnt}/{_MAX_RETRY}...')
+                time.sleep(5)
+                continue
+            formatted_exception = common_utils.format_exception(
+                e, use_bracket=True)
+            provision_exception = common_utils.format_exception(
+                provision_error, use_bracket=True)
+            raise provision_common.StopFailoverError(
+                'During provisioner\'s failover, '
+                f'{terminate_str.lower()} {cluster_name!r} failed. '
+                'This can cause resource leakage. Please check the '
+                'failure and the cluster status on the cloud, and '
+                'manually terminate the cluster.\n'
+                f'Provisioning error: {provision_exception}\n'
+                f'Teardown error: {formatted_exception}') from e
+
+
 def bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
@@ -236,17 +296,27 @@ def bulk_provision(
     cluster_name: resources_utils.ClusterName,
     num_nodes: int,
     cluster_yaml: str,
+    prev_cluster_exists: bool,
     prev_cluster_ever_up: bool,
     log_dir: str,
     ports_to_open_on_launch: Optional[List[int]] = None,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned.
 
+    Args:
+        prev_cluster_exists: Whether the cluster had a record before this
+            launch. An earlier launch with the same name may have left
+            resources, so a NothingCreatedError skips the failover teardown
+            only when the cluster had no record and was never up.
+
     Raises:
         StopFailoverError: Raised when during failover cleanup, tearing
             down any potentially live cluster failed despite retries
         Cloud specific exceptions: If the provisioning process failed, cloud-
-            specific exceptions will be raised by the cloud APIs.
+            specific exceptions will be raised by the cloud APIs. A
+            NothingCreatedError is never raised: the error it carries is
+            raised instead, or a RuntimeError with its message if the
+            cluster was ever up.
     """
     original_config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     head_node_type = original_config['head_node_type']
@@ -334,6 +404,27 @@ def bulk_provision(
                 repr(cloud), 'success',
                 time.time() - provision_start)
             return provision_record
+        except provision_common.NothingCreatedError as e:
+            logger.debug(f'bulk_provision for {cluster_name!r} failed before '
+                         'creating anything. Stacktrace:\n'
+                         f'{traceback.format_exc()}')
+            if not prev_cluster_exists and not prev_cluster_ever_up:
+                # This attempt created nothing, and the cluster had no record
+                # before this launch, so there is nothing to tear down.
+                raise e.error from e
+            # An earlier launch with this name may have left resources, and
+            # failover can remove the cluster's record once it runs out of
+            # candidates. Tear down as for any other failure, so that a
+            # failed teardown still stops failover and keeps the record.
+            _teardown_failed_cluster(cloud, cluster_name, prev_cluster_ever_up,
+                                     original_config['provider'], e.error)
+            if prev_cluster_ever_up:
+                # Report a plain error, as for any other failure on a cluster
+                # that was up. Failover moves on from a
+                # ProvisionUnsupportedError on an INIT cluster and may then
+                # remove the record, which would hide the stopped cluster.
+                raise RuntimeError(str(e.error)) from e
+            raise e.error from e
         except exceptions.NoClusterLaunchedError:
             # Skip the teardown if the cluster was never launched.
             raise
@@ -359,51 +450,8 @@ def bulk_provision(
                          f'on {cloud} ({zone_str}).')
             logger.debug(f'bulk_provision for {cluster_name!r} '
                          f'failed. Stacktrace:\n{traceback.format_exc()}')
-            # If the cluster was ever up, stop it; otherwise terminate it.
-            terminate = not prev_cluster_ever_up
-            terminate_str = ('Terminating' if terminate else 'Stopping')
-            logger.debug(f'{terminate_str} the failed cluster.')
-            retry_cnt = 1
-            while True:
-                try:
-                    teardown_cluster(
-                        repr(cloud),
-                        cluster_name,
-                        terminate=terminate,
-                        provider_config=original_config['provider'])
-                    break
-                except NotImplementedError as e:
-                    assert not terminate, (
-                        'Terminating must be supported by all clouds')
-                    exc_msg = common_utils.format_exception(exc).replace(
-                        '\n', ' ')
-                    # If the underlying cloud does not support stopping
-                    # instances, we should stop failover as well.
-                    raise provision_common.StopFailoverError(
-                        f'Provisioning cluster {cluster_name.display_name} '
-                        f'failed: {exc_msg}. Failover is stopped for safety '
-                        'because the cluster was previously in UP state but '
-                        f'{cloud} does not support stopping instances to '
-                        'preserve the cluster state. Please try launching the '
-                        'cluster again, or terminate it with: '
-                        f'sky down {cluster_name.display_name}') from e
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'{terminate_str} {cluster_name!r} failed.')
-                    logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
-                    retry_cnt += 1
-                    if retry_cnt <= _MAX_RETRY:
-                        logger.debug(f'Retrying {retry_cnt}/{_MAX_RETRY}...')
-                        time.sleep(5)
-                        continue
-                    formatted_exception = common_utils.format_exception(
-                        e, use_bracket=True)
-                    raise provision_common.StopFailoverError(
-                        'During provisioner\'s failover, '
-                        f'{terminate_str.lower()} {cluster_name!r} failed. '
-                        'This can cause resource leakage. Please check the '
-                        'failure and the cluster status on the cloud, and '
-                        'manually terminate the cluster. '
-                        f'Details: {formatted_exception}') from e
+            _teardown_failed_cluster(cloud, cluster_name, prev_cluster_ever_up,
+                                     original_config['provider'], exc)
             raise
 
 
