@@ -824,6 +824,12 @@ class Rclone:
                         secret_access_key = {secret_access_key}
                         acl = private
                         """)
+                    if aws_credentials.token:
+                        # Any temporary credential that still reaches this
+                        # branch (e.g. credential_process, or env vars
+                        # sourced from STS) is rejected on the first request
+                        # without its session token.
+                        config += (f'session_token = {aws_credentials.token}\n')
             elif self is Rclone.RcloneStores.GCS:
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
