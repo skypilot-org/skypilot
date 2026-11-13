@@ -4505,8 +4505,8 @@ async def _yield_to_event_loop():
 class TestJobCostUnits:
     """The per-process job cap counts each job at its cost units.
 
-    A job costs controller_utils.JOB_COST_UNITS until a launch brings its
-    cluster up, then what the cluster's runtime reports. A process stops
+    A job starts at full cost, then uses its runtime's estimate at park entry
+    or after launch. A process stops
     claiming once its jobs reach its share of the total cap in units, or
     MAX_JOBS_PER_WORKER jobs.
     """
@@ -4700,7 +4700,8 @@ class TestJobCostUnits:
     def test_reported_cost_is_validated(self, reported, expected):
         with patch.object(controller_module.controller_utils, 'JOB_COST_UNITS',
                           5):
-            assert controller_module._job_cost_units(reported) == expected
+            assert controller_module.recovery_strategy._job_cost_units(
+                reported) == expected
 
     def _job_controller(self, job_costs, pool=None, job_group=False):
         jc = JobController.__new__(JobController)
@@ -4764,15 +4765,15 @@ class TestJobCostUnits:
         jc = self._job_controller(job_costs, pool=pool, job_group=job_group)
         runtime = controller_module.managed_job_runtime
         with patch.object(runtime, 'is_registered', return_value=True), \
-             patch.object(runtime, 'cost_units', return_value=1) as hook:
+             patch.object(runtime, 'cost_units',
+                          return_value=1) as hook:
             await jc._update_cost_units('cluster')
         hook.assert_not_called()
         assert job_costs == {1: 5}
 
 
 class TestClaimedJobCostUnits:
-    """A job claimed with its cluster already up counts at that cluster's cost
-    from the claim on; any other job counts in full."""
+    """Reclaimed jobs use their persisted handle's runtime cost, including parks."""
 
     @pytest.mark.asyncio
     async def test_pool_job_counts_in_full(self):
@@ -4862,8 +4863,7 @@ class TestClaimedJobCostUnits:
 
 
 class TestNewTaskCountsInFull:
-    """A pipeline's next task counts in full while it launches, not at the
-    cost of the previous task's cluster."""
+    """A pipeline's next task starts at full cost, replacing the old estimate."""
 
     def _fresh_task(self, monkeypatch, job_costs):
         jc = JobController.__new__(JobController)
@@ -4922,6 +4922,24 @@ class TestNewTaskCountsInFull:
         return jc, task, costs_at_launch
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('pool', [None, 'pool'])
+    async def test_launch_passes_cost_table_to_strategy(self, monkeypatch,
+                                                        pool):
+        job_costs = {1: 1_000_000}
+        jc, task, _ = self._fresh_task(monkeypatch, job_costs)
+        jc._pool = pool
+        # Stop at the factory boundary: the launch itself is irrelevant to
+        # whether accounting reaches the strategy.
+        factory = MagicMock(side_effect=RuntimeError('strategy constructed'))
+        monkeypatch.setattr(
+            controller_module.recovery_strategy.StrategyExecutor, 'make',
+            factory)
+        with pytest.raises(RuntimeError, match='strategy constructed'):
+            await jc._run_one_task(1, task)
+        expected = job_costs if pool is None else None
+        assert factory.call_args.kwargs['job_costs'] is expected
+
+    @pytest.mark.asyncio
     async def test_next_task_launches_at_full_cost(self, monkeypatch):
         full = controller_module.controller_utils.JOB_COST_UNITS
         # The previous task's cluster was cheap.
@@ -4944,8 +4962,7 @@ class TestNewTaskCountsInFull:
 
 
 class TestRecoveryCountsInFull:
-    """A recovery relaunch counts the job in full until the new cluster reports
-    its cost, like any launch."""
+    """Recovery starts at full cost before a park or completion refreshes it."""
 
     class _StopLoop(Exception):
         pass

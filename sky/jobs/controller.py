@@ -231,33 +231,6 @@ async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     return task
 
 
-def _cluster_cost_units(cluster_name: str) -> int:
-    """The cost units of a job running on this cluster, or the full cost.
-
-    Reads the cluster's handle and asks the runtime that owns it. Blocking
-    (database reads), so async callers run it in a thread.
-    """
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    return _job_cost_units(managed_job_runtime.cost_units(handle))
-
-
-def _job_cost_units(units: Optional[int]) -> int:
-    """A runtime-reported job cost, or the full cost if it reported none.
-
-    A cost above the full cost, or one that is not a positive integer, is
-    ignored: a runtime can only make a job count for less than a full job.
-    """
-    if units is None:
-        return controller_utils.JOB_COST_UNITS
-    if (isinstance(units, bool) or not isinstance(units, int) or
-            not 1 <= units <= controller_utils.JOB_COST_UNITS):
-        logger.warning(f'Ignoring job cost {units!r} reported by a runtime: '
-                       'not an integer from 1 to '
-                       f'{controller_utils.JOB_COST_UNITS}.')
-        return controller_utils.JOB_COST_UNITS
-    return units
-
-
 def _get_dag(job_id: int) -> 'sky.Dag':
     """Parse a fresh Dag from the job's stored YAML.
 
@@ -996,34 +969,14 @@ class JobController:
                 self._job_costs[self._job_id] = controller_utils.JOB_COST_UNITS
 
     async def _update_cost_units(self, cluster_name: str) -> None:
-        """Count this job at the cost its runtime reports for its cluster.
-
-        A job counts in full while it launches, a pipeline's next task
-        launches, or a recovery relaunches it (_count_in_full); once the
-        launch brings its cluster up, or if it already had one when this
-        process claimed it, it counts at that cluster's cost. A lower cost
-        lets this process claim more jobs; a higher one holds off new claims
-        until the process is back under its cap. Pools and job groups keep
-        the full cost: their clusters are shared or several.
-        """
+        """Refresh this job's estimate from its runtime."""
         if (self._job_costs is None or self._pool is not None or
-                self._dag.is_job_group() or
-                not managed_job_runtime.is_registered()):
+                self._dag.is_job_group()):
             return
-        try:
-            units = await asyncio.to_thread(_cluster_cost_units, cluster_name)
-        except Exception as e:  # pylint: disable=broad-except
-            # Keep the current cost; it is a capacity estimate, not a reason
-            # to fail the job.
-            logger.warning(
-                f'Failed to get the cost of job {self._job_id} on '
-                f'{cluster_name}: {common_utils.format_exception(e)}')
-            return
-        async with self.starting_lock:
-            if self._job_costs.get(self._job_id, units) != units:
-                logger.info(f'Job {self._job_id} now counts for {units} of '
-                            f'{controller_utils.JOB_COST_UNITS} cost units.')
-                self._job_costs[self._job_id] = units
+        await recovery_strategy.update_job_cost_units(self._job_costs,
+                                                      self.starting_lock,
+                                                      self._job_id,
+                                                      cluster_name)
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -1147,7 +1100,8 @@ class JobController:
             self.starting,
             self.starting_lock,
             self.starting_signal,
-            file_mounts_blob_id=file_mounts_blob_id)
+            file_mounts_blob_id=file_mounts_blob_id,
+            job_costs=self._job_costs if self._pool is None else None)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -2300,8 +2254,8 @@ class JobController:
                         'run to completion): '
                         f'{common_utils.format_exception(e)}')
 
-            # A relaunch launches, or waits for resources, like any launching
-            # job: count the job in full until the new cluster reports its cost.
+            # Reset the previous cluster's estimate before recovery. A park
+            # or the completed relaunch refreshes it from the new runtime.
             await self._count_in_full()
             recovered_time = await executor.recover()
             # The relaunch may have persisted runtime observations of its own.
@@ -4702,12 +4656,10 @@ class ControllerManager:
                                   pool: Optional[str]) -> int:
         """The cost units a job counts for from the moment it is claimed.
 
-        A job claimed again, for example after a controller restart, may
-        already have its cluster up. It counts at that cluster's cost at once,
-        rather than in full until it resumes, so this process keeps claiming
-        while its jobs come back. Any other job counts in full until a launch
-        brings its cluster up (JobController._update_cost_units). Pool jobs
-        always count in full.
+        A reclaimed job with a persisted handle, including a parked launch,
+        counts at the runtime's estimate. A fresh job starts at full cost
+        until park entry or launch completion refreshes it. Pool jobs always
+        count in full.
         """
         full = controller_utils.JOB_COST_UNITS
         if pool is not None or not managed_job_runtime.is_registered():
@@ -4719,7 +4671,8 @@ class ControllerManager:
                 return full
             cluster_name = managed_job_utils.generate_managed_job_cluster_name(
                 task_name, job_id)
-            return await asyncio.to_thread(_cluster_cost_units, cluster_name)
+            return await asyncio.to_thread(
+                recovery_strategy.get_cluster_cost_units, cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get the cost of claimed job {job_id}: '
                            f'{common_utils.format_exception(e)}')

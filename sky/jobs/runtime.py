@@ -316,13 +316,16 @@ class ManagedJobRuntime(Protocol):
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     ) -> Optional[int]:
-        """Controller cost units of a job running on this cluster.
+        """Controller cost units of a job parked or running on this cluster.
 
         Return a cost from 1 to ``controller_utils.JOB_COST_UNITS``, or
-        ``None`` for the full cost. A job counts in full against its
-        controller's job cap until a launch brings its cluster up: while it
-        launches or waits for resources, it costs the controller about the
-        same whatever its runtime."""
+        ``None`` for the full cost. The controller refreshes this estimate
+        when a launch parks, after launch or recovery, and when reclaiming
+        a job after a controller restart. Before provisioning completes,
+        ``run_started`` is False; return ``None`` for those handles to keep
+        new launches at full cost. Existing implementations that
+        return a running cost for every owned handle also discount parks.
+        """
         ...
 
 
