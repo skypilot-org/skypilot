@@ -1215,8 +1215,11 @@ class SlurmClient:
         rc, _, _ = self._run_slurm_cmd(cmd)
         return rc == 0
 
-    def get_env(self) -> Dict[str, str]:
+    def get_env(self, *, raise_on_error: bool = False) -> Dict[str, str]:
         """Fetch environment variables from the remote host.
+
+        Args:
+            raise_on_error: Raise CommandError when the remote command fails.
 
         Returns:
             Dictionary of environment variable name -> value.
@@ -1225,11 +1228,20 @@ class SlurmClient:
         try:
             rc, stdout, stderr = self._run_slurm_cmd('env')
         except Exception as e:  # pylint: disable=broad-except
+            if raise_on_error:
+                raise
             logger.warning(
                 'Failed to fetch remote env from %s; continuing '
                 'with available user variables: %s', self.ssh_host, e)
         else:
             if rc != 0:
+                if raise_on_error:
+                    subprocess_utils.handle_returncode(
+                        rc,
+                        'env',
+                        'Failed to fetch remote environment.',
+                        stderr=f'{stdout}\n{stderr}',
+                        stream_logs=False)
                 logger.warning(
                     'Failed to fetch remote env from %s '
                     '(exit code %s); continuing with available '
