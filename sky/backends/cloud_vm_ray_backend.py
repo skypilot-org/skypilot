@@ -2510,9 +2510,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def launched_task_nodes(self) -> int:
         """Task nodes of the cluster, as described by launched_resources.
 
-        Equal to launched_nodes except on a multi-host TPU slice on
-        Kubernetes, where launched_nodes counts pods (one per VM) and each
-        task node is one slice.
+        Equal to launched_nodes except when pods and task nodes differ:
+        multi-host TPU slices (pods per VM) or a dedicated thin head
+        (physical pods include a CPU-only head that is not a task slot).
         """
         return kubernetes_utils.num_task_nodes(self.launched_nodes,
                                                self.launched_resources)
@@ -3366,14 +3366,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'existing cluster first: sky down {cluster_name}')
         valid_resource = None
         requested_resource_list = []
+        # Capacity in cluster-node units that can host Ray CPU tasks. A
+        # dedicated thin head advertises num-cpus=0, so it is not a slot —
+        # comparing against launched_nodes would accept an extra job bundle
+        # that then hangs forever.
+        capacity_nodes = handle.launched_nodes
+        if (launched_resources is not None and
+                launched_resources.has_separate_head() is True):
+            capacity_nodes = max(handle.launched_nodes - 1, 0)
         # For the validation comparison, optionally treat the node count as
         # matching (resize) while still reporting the user's real num_nodes
         # in any error message below.
-        fit_num_nodes = (handle.launched_nodes
+        fit_num_nodes = (capacity_nodes
                          if skip_num_nodes_check else task.num_nodes *
                          kubernetes_utils.tpu_vms_per_slice(launched_resources))
         for resource in task.resources:
-            if (fit_num_nodes <= handle.launched_nodes and
+            if (fit_num_nodes <= capacity_nodes and
                     resource.less_demanding_than(
                         launched_resources,
                         requested_num_nodes=fit_num_nodes,

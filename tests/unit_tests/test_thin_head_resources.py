@@ -1,14 +1,20 @@
 """Tests for opt-in dedicated thin head (head_node_cpus / head_node_memory)."""
 
 import copy
+from unittest import mock
 
 import pytest
 
 from sky import clouds
+from sky import exceptions
 from sky import resources as resources_lib
+from sky import task as task_lib
+from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.provision import instance_setup
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 
 def test_head_fields_require_pair():
@@ -234,6 +240,52 @@ def test_thin_head_ray_start_omits_accelerator_resources():
         None, {'num-cpus': '0', 'object-store-memory': 500000000})
     assert '--resources=' not in thin
     assert '--num-cpus=0' in thin
+
+
+def test_num_task_nodes_excludes_thin_head():
+    """Physical pods include the head; task slots are workers only."""
+    r = resources_lib.Resources(
+        cpus=8,
+        memory=32,
+        head_node_cpus=2,
+        head_node_memory=4,
+        infra='k8s',
+    )
+    assert kubernetes_utils.num_task_nodes(11, r) == 10
+    assert kubernetes_utils.num_task_nodes(3, r) == 2
+
+
+def test_check_resources_fit_cluster_rejects_extra_thin_head_slot():
+    """sky exec asking for physical pod count must fail on thin head."""
+    launched = resources_lib.Resources(
+        cpus=8,
+        memory=32,
+        head_node_cpus=2,
+        head_node_memory=4,
+        infra='k8s/ctx',
+    )
+    handle = CloudVmRayResourceHandle.__new__(CloudVmRayResourceHandle)
+    handle.cluster_name = 'thin-head-cluster'
+    handle.launched_nodes = 3  # 2 workers + head
+    handle.launched_resources = launched
+
+    task = task_lib.Task(num_nodes=3)
+    task.set_resources(launched)
+
+    backend = CloudVmRayBackend()
+    with mock.patch('sky.usage.usage_lib.messages'), \
+         mock.patch('sky.global_user_state.get_status_from_cluster_name',
+                    return_value=None), \
+         pytest.raises(exceptions.ResourcesMismatchError, match='Requested'):
+        backend.check_resources_fit_cluster(handle, task)
+
+    # Exact worker count still fits.
+    task_ok = task_lib.Task(num_nodes=2)
+    task_ok.set_resources(launched)
+    with mock.patch('sky.usage.usage_lib.messages'), \
+         mock.patch('sky.global_user_state.get_status_from_cluster_name',
+                    return_value=None):
+        assert backend.check_resources_fit_cluster(handle, task_ok) is not None
 
 
 def test_copy_preserves_head_fields():
