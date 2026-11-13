@@ -2387,7 +2387,12 @@ def inject_ephemeral_volumes(
 
 def _apply_head_resources_to_pod_spec(pod_spec: Dict[str, Any],
                                       head_resources: Dict[str, Any]) -> None:
-    """Overwrite container CPU/memory requests (and limits) for a thin head.
+    """Overwrite container CPU/memory requests and limits for a thin head.
+
+    Always sets both requests and limits so the head is Guaranteed QoS and
+    callers can size the head independently of workers (packing / Ray
+    control-plane tuning). When ``cpu_limit`` / ``memory_limit`` are omitted,
+    limits match requests.
 
     Args:
         pod_spec: Pod dict cloned for the head (i==0).
@@ -2399,12 +2404,19 @@ def _apply_head_resources_to_pod_spec(pod_spec: Dict[str, Any],
         return
     resources = containers[0].setdefault('resources', {})
     requests = resources.setdefault('requests', {})
-    requests['cpu'] = head_resources['cpus']
-    requests['memory'] = f"{head_resources['memory']}G"
-    if 'cpu_limit' in head_resources and head_resources['cpu_limit'] is not None:
-        limits = resources.setdefault('limits', {})
-        limits['cpu'] = head_resources['cpu_limit']
-        limits['memory'] = f"{head_resources['memory_limit']}G"
+    cpu = head_resources['cpus']
+    memory = head_resources['memory']
+    requests['cpu'] = cpu
+    requests['memory'] = f'{memory}G'
+    cpu_limit = head_resources.get('cpu_limit')
+    memory_limit = head_resources.get('memory_limit')
+    if cpu_limit is None:
+        cpu_limit = cpu
+    if memory_limit is None:
+        memory_limit = memory
+    limits = resources.setdefault('limits', {})
+    limits['cpu'] = cpu_limit
+    limits['memory'] = f'{memory_limit}G'
 
 
 @timeline.event

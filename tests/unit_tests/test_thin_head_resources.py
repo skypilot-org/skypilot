@@ -73,8 +73,29 @@ def test_apply_head_resources_to_pod_spec():
     assert pod['spec']['containers'][0]['resources']['requests'][
         'memory'] == '4G'
     assert pod['spec']['containers'][0]['resources']['limits']['cpu'] == '2'
+    assert pod['spec']['containers'][0]['resources']['limits'][
+        'memory'] == '4G'
     # Worker clone untouched
     assert worker['spec']['containers'][0]['resources']['requests']['cpu'] == '8'
+
+
+def test_apply_head_resources_defaults_limits_to_requests():
+    """Limits match requests when cpu_limit/memory_limit are omitted."""
+    pod = {
+        'spec': {
+            'containers': [{
+                'resources': {
+                    'requests': {'cpu': '8', 'memory': '32G'},
+                    'limits': {'cpu': '8', 'memory': '32G'},
+                }
+            }]
+        }
+    }
+    k8s_instance._apply_head_resources_to_pod_spec(
+        pod, {'cpus': '0.5', 'memory': '16'})
+    res = pod['spec']['containers'][0]['resources']
+    assert res['requests'] == {'cpu': '0.5', 'memory': '16G'}
+    assert res['limits'] == {'cpu': '0.5', 'memory': '16G'}
 
 
 def test_copy_preserves_head_fields():

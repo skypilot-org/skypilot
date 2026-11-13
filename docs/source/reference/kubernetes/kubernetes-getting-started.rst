@@ -471,3 +471,56 @@ FAQs
 
   SkyPilot will try to schedule all pods on a given cluster. If SkyPilot cannot schedule all pods on a given cluster (i.e. some or all of the pods cannot be scheduled),
   SkyPilot will fail over to another cluster or cloud.
+
+* **Can the Ray head use a different CPU/memory shape than workers?**
+
+  Yes — see :ref:`kubernetes-thin-head`. Set ``resources.head_node_cpus`` and
+  ``resources.head_node_memory`` so the head runs in its own pod with its own
+  requests and limits; ``num_nodes`` then counts workers only.
+
+
+.. _kubernetes-thin-head:
+
+Thin / dedicated head node
+--------------------------
+
+By default, every pod in a multi-node SkyPilot job on Kubernetes (including the
+Ray head) uses the same ``resources.cpus`` / ``resources.memory`` shape.
+
+For workloads where the head should stay light (control plane / driver) while
+workers keep a dense shape, set both fields:
+
+.. code-block:: yaml
+
+  name: thin-head-example
+
+  resources:
+    infra: k8s
+    cpus: 8              # workers
+    memory: 32           # workers (GiB)
+    head_node_cpus: 2    # dedicated head
+    head_node_memory: 16 # dedicated head (GiB)
+
+  num_nodes: 10          # worker count → 11 pods total (1 head + 10 workers)
+
+  run: |
+    echo "rank=$SKYPILOT_NODE_RANK nodes=$SKYPILOT_NUM_NODES"
+
+Behavior:
+
+* **Opt-in.** Omit both head fields for the usual homogeneous cluster
+  (``num_nodes`` includes the head).
+* **Pair required.** Setting only one of ``head_node_cpus`` /
+  ``head_node_memory`` is an error.
+* **Separate pod.** The Ray head is pod ``i==0`` with the thin shape; workers
+  keep ``resources.cpus`` / ``resources.memory``.
+* **Requests and limits.** The head pod's Kubernetes **requests and limits**
+  are both set from the head fields (Guaranteed QoS), independent of the
+  worker shape. Workers follow the normal ``set_pod_resource_limits`` behavior.
+* **Kubernetes only.** Other clouds reject these fields until a VM head-shape
+  API exists.
+* **Ray.** Head ``num-cpus`` is derived from ``head_node_cpus`` so task
+  scheduling on the head stays aligned with the thin pod.
+
+See also :ref:`resources.head_node_cpus <yaml-spec-resources-head-node-cpus>`
+in the YAML spec.
