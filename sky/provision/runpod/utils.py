@@ -16,6 +16,18 @@ from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
+# Packages the pod needs for SkyPilot's SSH access and file syncing. Install
+# only what the image lacks, so an image that ships them starts without
+# reaching any apt mirror. Expects the `prefix_cmd` shell function defined by
+# the pod setup command.
+_POD_PACKAGES_INSTALL_CMD = (
+    'missing=""; for pkg in openssh-server rsync curl patch; do '
+    'case "$(dpkg-query -W -f \'${Status}\' "$pkg" 2>/dev/null)" in '
+    '*" ok installed") ;; *) missing="$missing $pkg" ;; esac; done; '
+    'if [ -n "$missing" ]; then $(prefix_cmd) apt update; '
+    'export DEBIAN_FRONTEND=noninteractive; '
+    '$(prefix_cmd) apt install -y $missing; fi; ')
+
 GPU_NAME_MAP = {
     # AMD
     'MI300X': 'AMD Instinct MI300X OAM',
@@ -246,9 +258,7 @@ def launch(
     setup_cmd = (
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-        '$(prefix_cmd) apt update;'
-        'export DEBIAN_FRONTEND=noninteractive;'
-        '$(prefix_cmd) apt install openssh-server rsync curl patch -y;'
+        f'{_POD_PACKAGES_INSTALL_CMD}'
         '$(prefix_cmd) mkdir -p /var/run/sshd; '
         '$(prefix_cmd) '
         'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
