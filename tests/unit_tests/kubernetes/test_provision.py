@@ -137,7 +137,7 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
 
 @pytest.mark.parametrize('kai_queue', ['team-queue', None])
 def test_create_pods_gangs_a_kai_cluster_only(monkeypatch, kai_queue):
-    """A KAI cluster gets its PodGroup, sized once its pods are scheduled."""
+    """A KAI cluster gets a PodGroup, the KAI check, then its gang size."""
     cluster_on_cloud = 'test-cluster-kai'
     head_name = f'{cluster_on_cloud}-head'
     existing = {head_name: _fake_pod(head_name)}
@@ -145,10 +145,13 @@ def test_create_pods_gangs_a_kai_cluster_only(monkeypatch, kai_queue):
     monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
                         lambda fn, items, *a, **k: [fn(i) for i in items])
     calls = []
+    checker = object()
     monkeypatch.setattr(kai, 'ensure_pod_group', lambda *args: calls.append(
         ('gang',) + args))
-    monkeypatch.setattr(instance, '_wait_for_pods_to_schedule',
-                        lambda *a, **k: calls.append(('wait',)))
+    monkeypatch.setattr(kai, 'queued_launch_check', lambda: checker)
+    monkeypatch.setattr(
+        instance, '_wait_for_pods_to_schedule', lambda *a, **k: calls.append(
+            ('wait', k.get('scheduling_callback'))))
     monkeypatch.setattr(kai, 'set_gang_size', lambda *args: calls.append(
         ('size',) + args))
     config = _make_provision_config(count=1)
@@ -158,12 +161,12 @@ def test_create_pods_gangs_a_kai_cluster_only(monkeypatch, kai_queue):
     instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
 
     if kai_queue is None:
-        assert calls == [('wait',)]
+        assert calls == [('wait', None)]
     else:
         assert calls == [
             ('gang', 'ctx', 'ns', cluster_on_cloud, config.provider_config,
              config.node_config, 1),
-            ('wait',),
+            ('wait', checker),
             ('size', 'ctx', 'ns', cluster_on_cloud, 1),
         ]
 
