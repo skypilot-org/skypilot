@@ -57,6 +57,7 @@ from sky.utils import yaml_utils
 @pytest.mark.no_hyperbolic  #requires GCP and AWS set up
 @pytest.mark.no_shadeform  #requires GCP and AWS set up
 @pytest.mark.no_seeweb  #requires GCP and AWS set up
+@pytest.mark.no_upcloud  # Requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
         'example_app',
@@ -1736,6 +1737,7 @@ class TestYamlSpecs:
 @pytest.mark.no_nebius  # Nebius does not support K80s
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_seeweb  # Seeweb does not support K80s
+@pytest.mark.no_upcloud  # UpCloud does not have K80 GPUs
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1757,6 +1759,7 @@ def test_multiple_accelerators_ordered():
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_seeweb  # Seeweb does not support T4
+@pytest.mark.no_upcloud  # UpCloud does not have T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1778,6 +1781,7 @@ def test_multiple_accelerators_ordered_with_default():
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_seeweb  # Seeweb does not support T4
+@pytest.mark.no_upcloud  # UpCloud does not have T4 GPUs
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1798,6 +1802,7 @@ def test_multiple_accelerators_unordered():
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_seeweb  # Seeweb does not support T4
+@pytest.mark.no_upcloud  # UpCloud does not have T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1817,6 +1822,7 @@ def test_multiple_accelerators_unordered_with_default():
 @pytest.mark.no_hyperbolic  # Requires other clouds to be enabled
 @pytest.mark.no_shadeform  # Requires other clouds to be enabled
 @pytest.mark.no_seeweb  # Requires other clouds to be enabled
+@pytest.mark.no_upcloud  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

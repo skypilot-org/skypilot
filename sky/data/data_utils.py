@@ -26,6 +26,7 @@ from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
 from sky.adaptors import oci_s3
+from sky.adaptors import upcloud
 from sky.adaptors import vastdata
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -109,6 +110,18 @@ def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
       nebius_path: str; Nebius Path, e.g. nebius://imagenet/train/
     """
     path_parts = nebius_path.replace('nebius://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_upcloud_path(upcloud_path: str) -> Tuple[str, str]:
+    """Splits UpCloud Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      upcloud_path: str; UpCloud Path, e.g. upcloud://imagenet/train/
+    """
+    path_parts = upcloud_path.replace('upcloud://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -447,6 +460,11 @@ def create_nebius_client() -> Client:
     return nebius.client('s3')
 
 
+def create_upcloud_client() -> Client:
+    """Helper method that connects to Boto3 client for UpCloud Object Storage"""
+    return upcloud.s3_client('s3')
+
+
 def verify_r2_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists
 
@@ -467,6 +485,17 @@ def verify_nebius_bucket(name: str) -> bool:
     nebius_s = nebius.resource('s3')
     bucket = nebius_s.Bucket(name)
     return bucket in nebius_s.buckets.all()
+
+
+def verify_upcloud_bucket(name: str) -> bool:
+    """Helper method that checks if the UpCloud bucket exists
+
+    Args:
+      name: str; Name of UpCloud Object Storage (without upcloud:// prefix)
+    """
+    upcloud_s = upcloud.resource('s3')
+    bucket = upcloud_s.Bucket(name)
+    return bucket in upcloud_s.buckets.all()
 
 
 def verify_ibm_cos_bucket(name: str) -> bool:
@@ -744,6 +773,7 @@ class Rclone:
         R2 = 'R2'
         AZURE = 'AZURE'
         NEBIUS = 'NEBIUS'
+        UPCLOUD = 'UPCLOUD'
         COREWEAVE = 'COREWEAVE'
         VASTDATA = 'VASTDATA'
         OCI = 'OCI'
@@ -765,6 +795,7 @@ class Rclone:
                 Rclone.RcloneStores.R2: 'sky-r2',
                 Rclone.RcloneStores.AZURE: 'sky-azure',
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
+                Rclone.RcloneStores.UPCLOUD: 'sky-upcloud',
                 Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
                 Rclone.RcloneStores.VASTDATA: 'sky-vastdata',
                 Rclone.RcloneStores.OCI: 'sky-oci',
@@ -878,6 +909,23 @@ class Rclone:
                 endpoint_url = client.meta.endpoint_url
                 access_key_id = nebius_credentials.access_key
                 secret_access_key = nebius_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    acl = private
+                    """)
+            elif self is Rclone.RcloneStores.UPCLOUD:
+                upcloud_session = upcloud.session()
+                upcloud_credentials = upcloud.get_upcloud_credentials(
+                    upcloud_session)
+                client = upcloud.s3_client('s3')
+                endpoint_url = client.meta.endpoint_url
+                access_key_id = upcloud_credentials.access_key
+                secret_access_key = upcloud_credentials.secret_key
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
                     type = s3

@@ -15,7 +15,8 @@ from sky.schemas.api import responses
 from sky.utils import status_lib
 
 CLOUDS_TO_TEST = [
-    'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
+    'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius',
+    'upcloud'
 ]
 
 

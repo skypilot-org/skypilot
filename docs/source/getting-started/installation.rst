@@ -234,6 +234,7 @@ This will produce a summary like:
     IBM: enabled
     SCP: enabled
     Seeweb: enabled
+    UpCloud: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     VastData: enabled
@@ -1905,6 +1906,104 @@ Seeweb |community-badge|
 
   [DEFAULT]
   api_key = <your-api-token>
+
+UpCloud |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`UpCloud <https://upcloud.com/>`_ is a European cloud provider with GPU and
+CPU Cloud Servers. To use UpCloud with SkyPilot:
+
+1. Log into the `UpCloud Hub <https://hub.upcloud.com/>`_.
+2. Create an API token in the control panel.
+3. Save the token in the `upctl <https://github.com/UpCloudLtd/upcloud-cli>`_
+   configuration file :code:`~/.config/upctl.yaml`:
+
+.. code-block:: yaml
+
+  token: <your-api-token>
+
+.. note::
+
+  SkyPilot requires this file for UpCloud authentication and copies it to
+  clusters and controllers for autostop and managed jobs. The
+  :code:`UPCLOUD_TOKEN` environment variable is not used. Restrict the file's
+  permissions with :code:`chmod 600 ~/.config/upctl.yaml`. When running SkyPilot
+  in a container, make this file available inside the container as well.
+
+4. Install SkyPilot with the UpCloud extra:
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      uv pip install "skypilot[upcloud]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      uv tool install --with pip "skypilot[upcloud]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      pip install "skypilot[upcloud]"
+      # From source
+      pip install -e ".[upcloud]"
+
+5. Verify credentials:
+
+.. code-block:: shell
+
+  sky check upcloud
+
+UpCloud also offers `Managed Object Storage <https://upcloud.com/products/managed-object-storage>`_,
+an S3-compatible object storage. SkyPilot can download/upload data to UpCloud
+buckets and mount them as local filesystems on clusters. To set up object
+storage support, run:
+
+.. code-block:: shell
+
+  # Install boto3
+  pip install boto3
+  # Configure your UpCloud Managed Object Storage credentials
+  aws configure --profile upcloud
+
+In the prompt, enter your UpCloud Access Key ID and Secret Access Key
+(create keys in the UpCloud Hub under Managed Object Storage). Select
+``auto`` for the default region and ``json`` for the default output format.
+Then set the S3 endpoint URL for your MOS instance:
+
+.. code-block:: bash
+
+  aws configure set aws_access_key_id $UPCLOUD_ACCESS_KEY_ID --profile upcloud
+  aws configure set aws_secret_access_key $UPCLOUD_SECRET_ACCESS_KEY --profile upcloud
+  aws configure set region auto --profile upcloud
+  aws configure set endpoint_url https://xxxxxx.upbucket.com --profile upcloud
+
+Use ``upcloud://bucket-name/path`` in file mounts and storage configs.
+
+Kubernetes (UKS)
+^^^^^^^^^^^^^^^^
+
+To use `UpCloud Managed Kubernetes <https://upcloud.com/products/managed-kubernetes/>`_,
+see :ref:`Kubernetes Installation <kubernetes-installation>`. Create a UKS cluster in
+the `UpCloud Hub <https://hub.upcloud.com/>`_, then retrieve the Kubernetes credential
+with `upctl <https://github.com/UpCloudLtd/upcloud-cli>`_:
+
+.. code-block:: shell
+
+  mkdir -p ~/.kube
+  upctl kubernetes config <cluster_name_or_uuid> --write $HOME/.kube/config
+
+UKS GPU nodes come with NVIDIA drivers but without the NVIDIA device plugin.
+Install it as described in `GPU workloads on UKS <https://upcloud.com/docs/guides/gpu-workloads-managed-kubernetes/>`_,
+then label the nodes as described in :ref:`Setting up GPU labels <kubernetes-gpu-labels>`.
 
 Verda |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

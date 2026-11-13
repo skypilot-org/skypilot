@@ -161,6 +161,11 @@ async def volume_apply(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='Runpod network volume is only supported on Runpod')
+    elif volume_type == volume_utils.VolumeType.UPCLOUD_FILE_STORAGE.value:
+        if not cloud.is_same_cloud(clouds.UpCloud()):
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail='UpCloud file storage is only supported on UpCloud')
     # Validate here rather than trusting each client to call /validate first:
     # the dashboard posts straight to this endpoint.
     with _volume_errors_as_400():

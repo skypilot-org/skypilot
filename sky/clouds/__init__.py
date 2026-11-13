@@ -34,6 +34,7 @@ from sky.clouds.seeweb import Seeweb
 from sky.clouds.shadeform import Shadeform
 from sky.clouds.slurm import Slurm
 from sky.clouds.ssh import SSH
+from sky.clouds.upcloud import UpCloud
 from sky.clouds.vast import Vast
 from sky.clouds.verda import Verda
 from sky.clouds.vsphere import Vsphere
@@ -71,6 +72,7 @@ __all__ = [
     'Hyperbolic',
     'Mithril',
     'Seeweb',
+    'UpCloud',
     'Yotta',
     # Utility functions
     'cloud_in_iterable',
