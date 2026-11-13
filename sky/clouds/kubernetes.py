@@ -21,6 +21,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import network_utils
@@ -1216,12 +1217,28 @@ class Kubernetes(clouds.Cloud):
         # much memory on the head node. 'num-cpus' should be set to limit
         # the CPU usage on the head pod, otherwise the ray cluster will use the
         # CPU resources on the node instead within the pod.
-        custom_ray_options = {
+        #
+        # Dedicated thin head (head_node_*): head Ray advertises
+        # THIN_HEAD_RAY_NUM_CPUS ('0') so no Ray CPU tasks schedule there.
+        # Setup places on the head via node:<ip> (see task_codegen), not CPU.
+        # Workers keep the normal CPU count. Do not share a single
+        # custom_ray_options dict across head and worker start commands —
+        # that previously zeroed worker CPUs and stalled jobs.
+        # Homogeneous / worker 'num-cpus' stays an integer >=1 when cpus <1.
+        worker_ray_num_cpus = str(max(int(cpus), 1))
+        worker_custom_ray_options = {
             'object-store-memory': 500000000,
-            # 'num-cpus' must be an integer, but we should not set it to 0 if
-            # cpus is <1.
-            'num-cpus': str(max(int(cpus), 1)),
+            'num-cpus': worker_ray_num_cpus,
         }
+        # Use ``is True`` so MagicMock resources in unit tests (auto-attrs)
+        # do not look like a dedicated thin head.
+        if resources.has_separate_head() is True:
+            head_custom_ray_options = {
+                'object-store-memory': 500000000,
+                'num-cpus': kubernetes_constants.THIN_HEAD_RAY_NUM_CPUS,
+            }
+        else:
+            head_custom_ray_options = dict(worker_custom_ray_options)
 
         # Get the storage class name for high availability controller's PVC
         k8s_ha_storage_class_name = (
@@ -1504,6 +1521,11 @@ class Kubernetes(clouds.Cloud):
             'custom_resources': custom_resources,
             'cpus': str(cpus),
             'memory': str(mem),
+            'head_cpus': (str(float(str(resources.head_node_cpus).rstrip('+')))
+                          if resources.has_separate_head() is True else None),
+            'head_memory':
+                (str(float(str(resources.head_node_memory).rstrip('+')))
+                 if resources.has_separate_head() is True else None),
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_efa_count': str(k8s_efa_count)
@@ -1554,11 +1576,14 @@ class Kubernetes(clouds.Cloud):
             # 'ray_installation_commands' and 'ray_patches_cmd' are filled in by
             # backend_utils.write_cluster_config: both depend on the Ray version
             # this particular cluster is pinned to, which is not known here.
+            # Thin head must not advertise worker accelerators to Ray; workers
+            # keep custom_resources unchanged.
             'ray_head_start_command': instance_setup.ray_head_start_command(
-                custom_resources, custom_ray_options),
+                (None if resources.has_separate_head() is True else
+                 custom_resources), head_custom_ray_options),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
             'ray_worker_start_command': instance_setup.ray_worker_start_command(
-                custom_resources, custom_ray_options, no_restart=False),
+                custom_resources, worker_custom_ray_options, no_restart=False),
             'k8s_high_availability_deployment_volume_mount_name':
                 (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME
                 ),
@@ -1634,6 +1659,15 @@ class Kubernetes(clouds.Cloud):
             if resources.disk_size_specified:
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
                     disk_size * mul, 3)
+
+        # Thin head: always emit limits equal to requests so the head stays
+        # Guaranteed QoS for packing, even when worker limits are off or use
+        # a numeric set_pod_resource_limits burst multiplier.
+        if resources.has_separate_head() is True:
+            h_cpu = float(str(resources.head_node_cpus).rstrip('+'))
+            h_mem = float(str(resources.head_node_memory).rstrip('+'))
+            deploy_vars['head_cpu_limit'] = round(h_cpu, 3)
+            deploy_vars['head_memory_limit'] = round(h_mem, 3)
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (

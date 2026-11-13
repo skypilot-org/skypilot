@@ -1049,6 +1049,19 @@ class RetryingVmProvisioner(object):
                                      log_path,
                                      cluster_name=cluster_name))
 
+        # Opt-in dedicated thin head: num_nodes is worker count; launch +1 pod.
+        # Existing non-resize clusters convert handle.launched_nodes (physical)
+        # back to workers in _check_existing_cluster before reaching here.
+        # ``is True`` avoids MagicMock auto-attrs looking like a thin head.
+        if to_provision.has_separate_head() is True:
+            if not isinstance(to_provision.cloud, clouds.Kubernetes):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'resources.head_node_cpus / head_node_memory are '
+                        'only supported on Kubernetes in this SkyPilot '
+                        f'version (got cloud={to_provision.cloud}).')
+            num_nodes = to_provision.launch_node_count(num_nodes)
+
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
 
@@ -2497,9 +2510,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def launched_task_nodes(self) -> int:
         """Task nodes of the cluster, as described by launched_resources.
 
-        Equal to launched_nodes except on a multi-host TPU slice on
-        Kubernetes, where launched_nodes counts pods (one per VM) and each
-        task node is one slice.
+        Equal to launched_nodes except when pods and task nodes differ:
+        multi-host TPU slices (pods per VM) or a dedicated thin head
+        (physical pods include a CPU-only head that is not a task slot).
         """
         return kubernetes_utils.num_task_nodes(self.launched_nodes,
                                                self.launched_resources)
@@ -3353,14 +3366,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'existing cluster first: sky down {cluster_name}')
         valid_resource = None
         requested_resource_list = []
+        # Capacity in cluster-node units that can host Ray CPU tasks. A
+        # dedicated thin head advertises num-cpus=0, so it is not a slot —
+        # comparing against launched_nodes would accept an extra job bundle
+        # that then hangs forever.
+        capacity_nodes = handle.launched_nodes
+        if (launched_resources is not None and
+                launched_resources.has_separate_head() is True):
+            capacity_nodes = max(handle.launched_nodes - 1, 0)
         # For the validation comparison, optionally treat the node count as
         # matching (resize) while still reporting the user's real num_nodes
         # in any error message below.
-        fit_num_nodes = (handle.launched_nodes
+        fit_num_nodes = (capacity_nodes
                          if skip_num_nodes_check else task.num_nodes *
                          kubernetes_utils.tpu_vms_per_slice(launched_resources))
         for resource in task.resources:
-            if (fit_num_nodes <= handle.launched_nodes and
+            if (fit_num_nodes <= capacity_nodes and
                     resource.less_demanding_than(
                         launched_resources,
                         requested_num_nodes=fit_num_nodes,
@@ -6325,8 +6346,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         current_nodes = handle.launched_nodes
         # On a multi-host TPU slice, a task node is one slice and the cluster
         # has one node per VM of the slice. Compare cluster node counts.
-        requested_nodes = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
-            handle.launched_resources)
+        # Thin head: task.num_nodes is workers only; launched_nodes is
+        # physical (workers + head). Compare physical to physical.
+        launched = handle.launched_resources
+        requested_workers = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
+            launched)
+        if launched is not None and launched.has_separate_head() is True:
+            requested_nodes = launched.launch_node_count(requested_workers)
+        else:
+            requested_nodes = requested_workers
 
         if requested_nodes >= current_nodes:
             # Scale-up or no-op: nothing to do pre-provision.
@@ -6729,6 +6757,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             num_nodes = (task.num_nodes *
                          kubernetes_utils.tpu_vms_per_slice(to_provision)
                          if resize else handle.launched_nodes)
+            # Dedicated thin head stores physical pods in launched_nodes
+            # (workers + head). _retry_zones applies launch_node_count(+1)
+            # assuming a task worker count — convert back so relaunch does
+            # not grow the cluster by one worker each time. Gate on the
+            # handle (source of launched_nodes); to_provision may be a copy.
+            if (not resize and handle.launched_resources is not None and
+                    handle.launched_resources.has_separate_head() is True):
+                num_nodes = handle.launched_nodes - 1
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,

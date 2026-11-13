@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 36  # add _kubernetes_identity, _remote_identity_none.
+    _VERSION = 37  # add head_node_cpus / head_node_memory (separate thin head).
 
     def __init__(
         self,
@@ -164,6 +164,8 @@ class Resources:
         instance_type: Optional[str] = None,
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
+        head_node_cpus: Union[None, int, float, str] = None,
+        head_node_memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         infra: Optional[str] = None,
@@ -224,6 +226,15 @@ class Resources:
           memory: the amount of memory in GiB required. If a
             str, must be a string of the form ``'16'`` or ``'16+'``, where
             the ``+`` indicates that the task requires at least 16 GB of memory.
+          head_node_cpus: optional CPU request/limit for a dedicated Ray head
+            node (Kubernetes only). When set with ``head_node_memory``,
+            ``num_nodes`` is the worker count and one extra head pod is
+            provisioned. Ray on that head uses ``num-cpus=0`` so Ray CPU
+            tasks do not schedule there; pod CPU still backs management.
+            Setup pins to the head via ``node:<ip>`` (no CPU bundle). Both
+            head fields must be set together.
+          head_node_memory: optional memory (GiB) request/limit for the
+            dedicated head node. See ``head_node_cpus``.
           accelerators: the accelerators required. If a str, must be
             a string of the form ``'V100'`` or ``'V100:2'``, where the ``:2``
             indicates that the task requires 2 V100 GPUs. If a dict, must be a
@@ -480,6 +491,7 @@ class Resources:
 
         self._set_cpus(cpus)
         self._set_memory(memory)
+        self._set_head_node_resources(head_node_cpus, head_node_memory)
         self._set_accelerators(accelerators, accelerator_args)
         self._hooks: Optional[List[Dict[str, Any]]] = None
         self._set_autostop_config(autostop, extra_hooks=hooks)
@@ -937,6 +949,96 @@ class Resources:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'The "memory" field should be positive. Found: {memory!r}')
+
+    def _set_head_node_resources(
+        self,
+        head_node_cpus: Union[None, int, float, str],
+        head_node_memory: Union[None, int, float, str],
+    ) -> None:
+        """Validate and store optional dedicated-head CPU/memory overrides.
+
+        Both must be set or both omitted. When set, ``Task.num_nodes`` is the
+        worker count and one extra thin head pod is provisioned (Kubernetes
+        only in v1).
+        """
+        if head_node_cpus is None and head_node_memory is None:
+            self._head_node_cpus = None
+            self._head_node_memory = None
+            return
+        if head_node_cpus is None or head_node_memory is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'head_node_cpus and head_node_memory must be provided '
+                    'together (got '
+                    f'head_node_cpus={head_node_cpus!r}, '
+                    f'head_node_memory={head_node_memory!r}).')
+
+        cpus_str = str(head_node_cpus)
+        if cpus_str.endswith('+'):
+            num_cpus_str = cpus_str[:-1]
+        else:
+            num_cpus_str = cpus_str
+        try:
+            num_cpus = float(num_cpus_str)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'The "head_node_cpus" field should be either a number or '
+                    f'a string "<number>+". Found: {head_node_cpus!r}'
+                ) from None
+        if num_cpus <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'The "head_node_cpus" field should be positive. '
+                    f'Found: {head_node_cpus!r}')
+
+        memory = resources_utils.parse_memory_resource(str(head_node_memory),
+                                                       'head_node_memory',
+                                                       ret_type=float,
+                                                       allow_plus=True,
+                                                       allow_x=False)
+        mem_str = memory[:-1] if memory.endswith('+') else memory
+        try:
+            memory_gb = float(mem_str)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'The "head_node_memory" field should be either a number '
+                    f'or a string "<number>+". Found: {head_node_memory!r}'
+                ) from None
+        if memory_gb <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'The "head_node_memory" field should be positive. '
+                    f'Found: {head_node_memory!r}')
+
+        self._head_node_cpus = cpus_str
+        self._head_node_memory = memory
+
+    def has_separate_head(self) -> bool:
+        """Return whether a dedicated thin head node is requested."""
+        return self._head_node_cpus is not None
+
+    def launch_node_count(self, num_nodes: int) -> int:
+        """Return pods/VMs to launch for a task ``num_nodes`` value.
+
+        When ``has_separate_head()`` is true, ``num_nodes`` is the worker count
+        and one extra head is added. Otherwise ``num_nodes`` is unchanged
+        (includes the homogeneous head).
+        """
+        if self.has_separate_head():
+            return num_nodes + 1
+        return num_nodes
+
+    @property
+    def head_node_cpus(self) -> Optional[str]:
+        """CPU request for the dedicated head, or None if not set."""
+        return self._head_node_cpus
+
+    @property
+    def head_node_memory(self) -> Optional[str]:
+        """Memory request (GiB) for the dedicated head, or None if not set."""
+        return self._head_node_memory
 
     def _set_accelerators(
         self,
@@ -2376,6 +2478,9 @@ class Resources:
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self._cpus),
             memory=override.pop('memory', self._memory),
+            head_node_cpus=override.pop('head_node_cpus', self._head_node_cpus),
+            head_node_memory=override.pop('head_node_memory',
+                                          self._head_node_memory),
             # Need to pass `self._accelerators` instead of `self.accelerators`
             # as the latter can auto-infer, causing potential conflicts with
             # instance_type override.
@@ -2714,6 +2819,9 @@ class Resources:
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)
         resources_fields['memory'] = config.pop('memory', None)
+        resources_fields['head_node_cpus'] = config.pop('head_node_cpus', None)
+        resources_fields['head_node_memory'] = config.pop(
+            'head_node_memory', None)
         resources_fields['accelerators'] = config.pop('accelerators', None)
         resources_fields['accelerator_args'] = config.pop(
             'accelerator_args', None)
@@ -2775,6 +2883,12 @@ class Resources:
             resources_fields['cpus'] = str(resources_fields['cpus'])
         if resources_fields['memory'] is not None:
             resources_fields['memory'] = str(resources_fields['memory'])
+        if resources_fields['head_node_cpus'] is not None:
+            resources_fields['head_node_cpus'] = str(
+                resources_fields['head_node_cpus'])
+        if resources_fields['head_node_memory'] is not None:
+            resources_fields['head_node_memory'] = str(
+                resources_fields['head_node_memory'])
         if resources_fields['accelerator_args'] is not None:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
@@ -2824,6 +2938,8 @@ class Resources:
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
+        add_if_not_none('head_node_cpus', self._head_node_cpus)
+        add_if_not_none('head_node_memory', self._head_node_memory)
         add_if_not_none('accelerators', self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
@@ -3080,6 +3196,10 @@ class Resources:
         if version < 36:
             self._kubernetes_identity = None
             self._remote_identity_none = None
+
+        if version < 37:
+            self._head_node_cpus = None
+            self._head_node_memory = None
 
         if version < 35:
             state.pop('_ephemeral_storage', None)

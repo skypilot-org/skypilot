@@ -804,8 +804,9 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         else:
             head_ip = head_instance.internal_ip
 
-    ray_cmd = ray_worker_start_command(custom_resource,
-                                       cluster_info.custom_ray_options,
+    worker_ray_options = getattr(cluster_info, 'worker_custom_ray_options',
+                                 None) or cluster_info.custom_ray_options
+    ray_cmd = ray_worker_start_command(custom_resource, worker_ray_options,
                                        no_restart)
 
     cmd = (f'export SKYPILOT_RAY_HEAD_IP="{head_ip}"; '

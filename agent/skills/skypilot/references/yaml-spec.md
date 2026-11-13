@@ -186,8 +186,14 @@ A task can set this to a smaller value than the size of a cluster.
 
 ```yaml
 num_nodes: 4
-
 ```
+
+When resources.head_node_cpus and
+resources.head_node_memory are
+both set (Kubernetes only), `num_nodes` is the **worker** count. SkyPilot
+provisions `num_nodes + 1` pods: one dedicated thin head plus
+`num_nodes` workers. See kubernetes-thin-head.
+
 
 
 ### ``job``
@@ -518,7 +524,57 @@ OR
 ```yaml
 resources:
   memory: 64GB
+
 ```
+
+
+### ``resources.head_node_cpus``
+
+CPU request for a **dedicated thin Ray head** pod (optional; Kubernetes only).
+
+Must be set together with :ref:`resources.head_node_memory
+<yaml-spec-resources-head-node-memory>`. When both are set:
+
+- num_nodes is the **worker** count (not including
+  the head).
+- SkyPilot launches `num_nodes + 1` pods: one head + `num_nodes` workers.
+- Worker pods use resources.cpus /
+  resources.memory.
+- The head pod uses `head_node_cpus` / `head_node_memory` for **both**
+  Kubernetes requests and limits (Guaranteed QoS / management headroom).
+  Ray on the head advertises `num-cpus=0` so Ray CPU tasks are not
+  scheduled there; setup pins to the head via `node:<ip>` (no CPU
+  bundle). Pod CPU/memory still backs GCS/driver/etc.
+
+Format matches resources.cpus
+(`<count>` or `<count>+`).
+
+Unsupported on non-Kubernetes clouds in this version (raises an error).
+
+```yaml
+resources:
+  infra: k8s
+  cpus: 8
+  memory: 32
+  head_node_cpus: 2
+  head_node_memory: 16
+
+num_nodes: 10   # 10 workers @ 8/32 + 1 head @ 2/16 = 11 pods
+
+```
+
+
+### ``resources.head_node_memory``
+
+Memory (GiB) for the dedicated thin Ray head pod (optional; Kubernetes only).
+
+Must be set together with :ref:`resources.head_node_cpus
+<yaml-spec-resources-head-node-cpus>`. See that field for semantics, requests
+vs limits, and `num_nodes` meaning.
+
+Format matches resources.memory
+(numeric GiB, optional `+` suffix).
+
 
 
 ### ``resources.instance_type``
