@@ -309,7 +309,7 @@ When running SkyPilot locally, necessary dependencies and credentials need to be
 
 To configure infra access for team deployment instead, see :ref:`sky-api-server-configure-credentials`.
 
-SkyPilot supports most major cloud providers, Kubernetes, and Slurm.
+SkyPilot supports most major cloud providers, Kubernetes, Slurm, and PBS Pro.
 
 
 .. _kubernetes-installation:
@@ -398,6 +398,30 @@ To configure Slurm support, create a ``~/.slurm/config`` file with your Slurm cl
   EOF
 
 See :ref:`SkyPilot on Slurm <slurm-overview>` for more.
+
+.. _pbs-installation:
+
+PBS Pro
+~~~~~~~
+
+SkyPilot can run workloads on PBS Pro and OpenPBS clusters. The only requirement is SSH access to a PBS login node.
+
+To configure PBS support, create a ``~/.pbs/config`` file with your PBS cluster configuration and add the SSH credentials to connect to the login node.
+
+.. code-block:: shell
+
+  # Create the PBS config directory
+  mkdir -p ~/.pbs
+
+  # Add your PBS cluster configuration
+  cat > ~/.pbs/config << EOF
+  Host mycluster
+      HostName login.mycluster.myorg.com
+      User myusername
+      IdentityFile ~/.ssh/id_rsa
+  EOF
+
+See :ref:`SkyPilot on PBS Pro <pbs-overview>` for more.
 
 .. _aws-installation:
 
