@@ -4508,9 +4508,10 @@ class ControllerManager:
         """Cancel an existing job."""
         while True:
             # The signal directory may be on a network filesystem, where a
-            # call can take seconds. Every call on it runs in a thread, so it
-            # cannot stall the jobs of this process.
-            cancels = await asyncio.to_thread(
+            # call can take seconds. Every call on it runs in a thread of its
+            # own pool (see cancel_signal.in_thread), so it cannot stall the
+            # jobs of this process and does not wait for their blocking calls.
+            cancels = await cancel_signal.in_thread(
                 os.listdir, jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             for cancel in cancels:
                 if not cancel.isdigit():
@@ -4520,7 +4521,7 @@ class ControllerManager:
                     job_id = int(cancel)
                     if job_id in self.job_tasks:
                         task = self.job_tasks[job_id]
-                        content = await asyncio.to_thread(
+                        content = await cancel_signal.in_thread(
                             cancel_signal.take, job_id)
                         if content is None:
                             # The signal is gone since the directory was
@@ -4654,7 +4655,8 @@ class ControllerManager:
                     # A cancel signal arrived meanwhile and already cancelled
                     # the task.
                     return False
-                if await asyncio.to_thread(_has_pending_cancel_signal, job_id):
+                if await cancel_signal.in_thread(_has_pending_cancel_signal,
+                                                 job_id):
                     # A user cancel arrived while the reason was recorded.
                     # cancel_job() holds _job_tasks_lock while it applies a
                     # signal, so it cannot be halfway through one here.
@@ -4676,7 +4678,8 @@ class ControllerManager:
             async with self._cancel_info_lock:
                 if job_id in self._cancel_info:
                     return False
-            if await asyncio.to_thread(_has_pending_cancel_signal, job_id):
+            if await cancel_signal.in_thread(_has_pending_cancel_signal,
+                                             job_id):
                 logger.debug(f'Job {job_id} has a pending cancel request; not '
                              'cancelling it for its deadline.')
                 return False
@@ -4801,11 +4804,11 @@ class ControllerManager:
             job_id = waiting_job['job_id']
             pool = waiting_job.get('pool', None)
 
-            if await asyncio.to_thread(cancel_signal.exists, job_id):
+            if await cancel_signal.in_thread(cancel_signal.exists, job_id):
                 status = await managed_job_state.get_status_async(job_id)
                 if status == managed_job_state.ManagedJobStatus.PENDING:
                     logger.info(f'Job {job_id} cancelled')
-                    await asyncio.to_thread(cancel_signal.remove, job_id)
+                    await cancel_signal.in_thread(cancel_signal.remove, job_id)
                     await managed_job_state.set_cancelling_async(
                         job_id=job_id,
                         callback_func=managed_job_utils.event_callback_func(

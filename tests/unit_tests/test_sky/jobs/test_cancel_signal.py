@@ -5,10 +5,15 @@ replicas, where a call can take seconds and a listing costs more the more
 entries there are. These tests pin down that:
 
   - writing or taking a signal leaves no file behind;
-  - a controller process never calls into the directory on its event loop;
+  - a signal is taken whole or left in place, without a lock, also next to an
+    older writer that still writes under one;
+  - a controller process calls into the directory neither on its event loop
+    nor in the thread pool it shares with its jobs;
   - the files that older code left behind are cleaned up, and nothing else.
 """
 import asyncio
+import concurrent.futures
+import io
 import os
 import threading
 import time
@@ -119,6 +124,18 @@ def test_failed_write_leaves_nothing_behind(signal_dir):
     assert _names(signal_dir) == []
 
 
+def test_write_makes_a_missing_directory(tmp_path, monkeypatch):
+    """The file lock that writers used to take made the directory. A server
+    replica that never ran a controller may not have it."""
+    directory = tmp_path / 'not' / 'there'
+    monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                        str(directory))
+
+    cancel_signal.write(42, 'graceful')
+
+    assert _names(directory) == ['42']
+
+
 @pytest.mark.parametrize('content', ['', 'graceful', 'graceful:60'])
 def test_take_returns_the_content_and_removes_the_signal(signal_dir, content):
     cancel_signal.write(42, content)
@@ -135,48 +152,117 @@ def test_take_without_a_signal(signal_dir):
     assert _names(signal_dir) == []
 
 
-def test_take_removes_the_lock_file_of_an_older_writer(signal_dir):
-    """Writers used to hold '<job id>.lock' while writing, and it was never
-    removed: one file was left in the directory for every cancelled job."""
-    _make(signal_dir, '42', content='graceful:60')
-    _make(signal_dir, '42.lock')
+def test_signal_written_during_a_take_is_left_in_place(signal_dir):
+    """A second cancel that lands while the first is being taken must not be
+    removed with it, unread. The file lock used to see to that."""
+    cancel_signal.write(42, 'graceful:60')
+    real_open = open
+    second_written = []
 
-    assert cancel_signal.take(42) == 'graceful:60'
+    def open_then_write_a_second_signal(path, mode='r', **kwargs):
+        if 'r' not in mode or second_written:
+            return real_open(path, mode, **kwargs)
+        # The controller reads the first signal. The second one lands right
+        # after that, before the controller removes what it has read.
+        with real_open(path, mode, **kwargs) as f:
+            first = f.read()
+        second_written.append(True)
+        cancel_signal.write(42, '')
+        return io.StringIO(first)
+
+    with mock.patch.object(cancel_signal,
+                           'open',
+                           open_then_write_a_second_signal,
+                           create=True):
+        assert cancel_signal.take(42) == 'graceful:60'
+
+    assert second_written
+    assert _names(signal_dir) == ['42']
+    assert cancel_signal.take(42) == ''
+    assert _names(signal_dir) == []
+
+
+def test_take_survives_a_rename_reported_as_failed(signal_dir):
+    """A network filesystem can apply a rename and still report that the file
+    was not there, when the request was sent twice."""
+    cancel_signal.write(42, 'graceful')
+    real_rename = os.rename
+
+    def rename_then_report_failure(source, destination):
+        real_rename(source, destination)
+        raise FileNotFoundError(source)
+
+    with mock.patch.object(os, 'rename', rename_then_report_failure):
+        assert cancel_signal.take(42) == 'graceful'
 
     assert _names(signal_dir) == []
 
 
-def test_take_waits_for_an_older_writer_that_holds_the_lock(signal_dir):
-    """During a rolling update an older API server may still write a signal
-    in place, under its lock. Its signal must be read whole."""
+def test_take_reads_the_signal_whole_from_an_older_writer(signal_dir):
+    """During a rolling update an older API server still writes a signal in
+    place, under its lock. A controller that takes the signal in the middle
+    of that write waits for the lock and reads the whole content."""
     signal_path = signal_dir / '42'
-    lock_held = threading.Event()
-    release_writer = threading.Event()
+    file_open = threading.Event()
+    finish_writing = threading.Event()
 
     def older_writer():
         with filelock.FileLock(str(signal_path) + '.lock'):
-            # Created empty first: an empty signal means a plain cancel.
-            signal_path.touch()
-            lock_held.set()
-            release_writer.wait(timeout=10)
-            signal_path.write_text('graceful:60', encoding='utf-8')
+            # As pathlib's write_text does, with a pause in the middle.
+            with signal_path.open('w', encoding='utf-8') as f:
+                file_open.set()
+                finish_writing.wait(timeout=10)
+                f.write('graceful:60')
 
     writer = threading.Thread(target=older_writer)
     writer.start()
-    assert lock_held.wait(timeout=10)
+    assert file_open.wait(timeout=10)
     taken = []
     reader = threading.Thread(
         target=lambda: taken.append(cancel_signal.take(42)))
     reader.start()
-    # The reader is blocked on the lock, not done with an empty signal.
+    # The controller waits for the lock; it is not done with an empty signal.
     reader.join(timeout=0.5)
     assert reader.is_alive()
-    release_writer.set()
+    finish_writing.set()
     writer.join(timeout=10)
     reader.join(timeout=10)
 
     assert taken == ['graceful:60']
-    assert _names(signal_dir) == []
+    # The lock file is left to the garbage collector.
+    assert _names(signal_dir) == ['42.lock']
+
+
+def test_signal_of_an_older_writer_that_starts_during_a_take_is_left_in_place(
+        signal_dir):
+    """An older writer that takes its lock just after the controller looked
+    for it writes a new signal file: the one being taken has a private name
+    by then. Neither signal is read half-written, and neither is lost."""
+    signal_path = signal_dir / '42'
+    cancel_signal.write(42, 'graceful')
+    real_exists = os.path.exists
+    older_writers = []
+
+    def exists_then_older_writer_starts(path):
+        found = real_exists(path)
+        if str(path).endswith('.lock') and not older_writers:
+            lock = filelock.FileLock(str(path))
+            lock.acquire()
+            # Opened and truncated, but not written yet.
+            older_writers.append((lock, signal_path.open('w',
+                                                         encoding='utf-8')))
+        return found
+
+    with mock.patch.object(cancel_signal.os.path, 'exists',
+                           exists_then_older_writer_starts):
+        assert cancel_signal.take(42) == 'graceful'
+
+    lock, signal_file = older_writers[0]
+    signal_file.write('graceful:60')
+    signal_file.close()
+    lock.release()
+    assert _names(signal_dir) == ['42', '42.lock']
+    assert cancel_signal.take(42) == 'graceful:60'
 
 
 def test_remove(signal_dir):
@@ -187,7 +273,9 @@ def test_remove(signal_dir):
     cancel_signal.remove(42)
     cancel_signal.remove(44)  # Nothing to remove is fine.
 
-    assert _names(signal_dir) == ['43']
+    # Lock files are only removed by the garbage collector, once their job
+    # is over.
+    assert _names(signal_dir) == ['42.lock', '43']
 
 
 # --------------------------------------------------------------------------
@@ -311,13 +399,21 @@ class _StopLoop(Exception):
     pass
 
 
-def _record_calling_thread(function, threads: List[int]):
+def _record_calling_thread(function, threads: List[str]):
 
     def wrapper(*args, **kwargs):
-        threads.append(threading.get_ident())
+        threads.append(threading.current_thread().name)
         return function(*args, **kwargs)
 
     return wrapper
+
+
+def _all_in_the_signal_pool(threads: List[str]) -> bool:
+    """Whether calls were made, all in the pool kept for the signal directory:
+    not on the event loop, and not in the pool that asyncio.to_thread shares
+    with every blocking call of every job."""
+    return bool(threads) and all(
+        name.startswith('cancel-signal') for name in threads)
 
 
 async def _run_cancel_loop_once(manager) -> None:
@@ -334,8 +430,8 @@ async def _run_cancel_loop_once(manager) -> None:
 
 @pytest.mark.asyncio
 async def test_controller_takes_signals_off_the_event_loop(signal_dir):
-    """The directory listing and the signal file calls run in a thread, and
-    the event loop keeps running while they do."""
+    """The directory listing and the signal file calls run in a thread of the
+    pool kept for them, and the event loop keeps running while they do."""
     manager = controller_module.ControllerManager('test-uuid')
     job_task = mock.MagicMock()
     manager.job_tasks[7] = job_task
@@ -344,14 +440,13 @@ async def test_controller_takes_signals_off_the_event_loop(signal_dir):
     cancel_signal.write(8, '')  # A job of another controller process.
     _make(signal_dir, 'waiting_jobs.marker')
 
-    loop_thread = threading.get_ident()
-    listing_threads: List[int] = []
-    take_threads: List[int] = []
+    listing_threads: List[str] = []
+    take_threads: List[str] = []
     ticks_during_listing = []
     real_listdir = os.listdir
 
     def slow_listdir(path):
-        listing_threads.append(threading.get_ident())
+        listing_threads.append(threading.current_thread().name)
         # Long enough for the event loop to prove it is not blocked.
         time.sleep(0.3)
         return real_listdir(path)
@@ -382,15 +477,93 @@ async def test_controller_takes_signals_off_the_event_loop(signal_dir):
             await manager.cancel_job()
     await ticker
 
-    assert listing_threads and loop_thread not in listing_threads
-    assert take_threads and loop_thread not in take_threads
+    assert _all_in_the_signal_pool(listing_threads)
+    assert _all_in_the_signal_pool(take_threads)
     # The loop ran other work during the 0.3 s listing.
     assert len(ticks_during_listing) >= 5
-    # Job 7 was cancelled with the settings of its signal, and nothing of the
-    # signal is left. Job 8 is not run here, so its signal is not touched.
+    # Job 7 was cancelled with the settings of its signal, and the signal is
+    # gone. Job 8 is not run here, so its signal is not touched. The lock file
+    # is left to the garbage collector.
     job_task.cancel.assert_called_once_with()
     assert manager._cancel_info[7] == (True, 30)  # pylint: disable=protected-access
-    assert _names(signal_dir) == ['8', 'waiting_jobs.marker']
+    assert _names(signal_dir) == ['7.lock', '8', 'waiting_jobs.marker']
+
+
+@pytest.mark.asyncio
+async def test_cancel_is_taken_while_the_shared_thread_pool_is_full(signal_dir):
+    """Every blocking call of every job in a controller process goes through
+    asyncio.to_thread's default executor. When slow calls have all of its
+    workers (many jobs tearing down at once, a stuck API server), a cancel
+    must still be noticed and applied."""
+    del signal_dir
+    manager = controller_module.ControllerManager('test-uuid')
+    job_task = mock.MagicMock()
+    manager.job_tasks[7] = job_task
+    cancel_signal.write(7, 'graceful:30')
+
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(max_workers=2))
+    release = threading.Event()
+    slow_calls = [
+        asyncio.ensure_future(asyncio.to_thread(release.wait, 30))
+        for _ in range(2)
+    ]
+    # A third call cannot start: the pool is full.
+    queued_call = asyncio.ensure_future(asyncio.to_thread(lambda: 'ran'))
+    try:
+        await asyncio.sleep(0.2)
+        assert not queued_call.done()
+
+        await asyncio.wait_for(_run_cancel_loop_once(manager), timeout=10)
+
+        job_task.cancel.assert_called_once_with()
+        assert manager._cancel_info[7] == (True, 30)  # pylint: disable=protected-access
+        assert not queued_call.done()
+    finally:
+        release.set()
+        await asyncio.gather(*slow_calls, queued_call)
+
+
+@pytest.mark.asyncio
+async def test_hung_signal_directory_takes_no_shared_thread(signal_dir):
+    """A listing that does not return (a hung network filesystem) stops the
+    cancel loop, and only that: it holds no worker of the pool that the jobs
+    share, and the loop does not send further calls after it."""
+    del signal_dir
+    manager = controller_module.ControllerManager('test-uuid')
+    loop = asyncio.get_running_loop()
+    # One worker: if the listing took it, nothing else could run.
+    loop.set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(max_workers=1))
+    listing_threads: List[str] = []
+    release = threading.Event()
+
+    def hung_listdir(path):
+        del path
+        listing_threads.append(threading.current_thread().name)
+        release.wait(30)
+        return []
+
+    cancel_loop = None
+    try:
+        with mock.patch.object(controller_module.os, 'listdir', hung_listdir):
+            cancel_loop = asyncio.ensure_future(manager.cancel_job())
+            while not listing_threads:
+                await asyncio.sleep(0.01)
+
+            assert await asyncio.wait_for(asyncio.to_thread(lambda: 'ran'),
+                                          timeout=10) == 'ran'
+            # Well past the moment a retry would have come.
+            await asyncio.sleep(0.3)
+            assert not cancel_loop.done()
+            assert len(listing_threads) == 1
+            assert _all_in_the_signal_pool(listing_threads)
+    finally:
+        release.set()
+        if cancel_loop is not None:
+            cancel_loop.cancel()
+            await asyncio.gather(cancel_loop, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -417,8 +590,9 @@ async def test_controller_skips_a_signal_that_is_gone(signal_dir):
 @pytest.mark.asyncio
 async def test_claimed_job_is_checked_without_listing(signal_dir):
     """A job that was cancelled while it waited is cancelled when a controller
-    process claims it. The check is one file lookup in a thread: it does not
-    list the directory, so it does not cost more when the directory is big."""
+    process claims it. The check is one file lookup in a thread of the signal
+    pool: it does not list the directory, so it does not cost more when the
+    directory is big."""
     manager = controller_module.ControllerManager('test-uuid')
     manager.start_job = mock.AsyncMock()
     cancel_signal.write(7, '')
@@ -437,9 +611,8 @@ async def test_claimed_job_is_checked_without_listing(signal_dir):
     def no_listing(path):
         raise AssertionError(f'{path} was listed')
 
-    loop_thread = threading.get_ident()
-    lookup_threads: List[int] = []
-    removal_threads: List[int] = []
+    lookup_threads: List[str] = []
+    removal_threads: List[str] = []
     set_cancelled = mock.AsyncMock()
     with mock.patch.object(controller_module.os, 'listdir', no_listing), \
          mock.patch.object(
@@ -471,6 +644,6 @@ async def test_claimed_job_is_checked_without_listing(signal_dir):
 
     manager.start_job.assert_not_called()
     assert set_cancelled.await_args.kwargs['job_id'] == 7
-    assert lookup_threads and loop_thread not in lookup_threads
-    assert removal_threads and loop_thread not in removal_threads
-    assert _names(signal_dir) == ['8']
+    assert _all_in_the_signal_pool(lookup_threads)
+    assert _all_in_the_signal_pool(removal_threads)
+    assert _names(signal_dir) == ['7.lock', '8']
