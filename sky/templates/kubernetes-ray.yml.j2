@@ -894,7 +894,7 @@ available_node_types:
               # pam_limits at login.
               {{raise_nofile_limit_command}}
 
-              # Marker STEP 1 publishes once the CORE prereqs (curl/rsync/wget)
+              # Marker STEP 1 publishes once the CORE prereqs (rsync, and curl when needed)
               # are installed AND CONFIGURED -- i.e. the package manager has
               # returned, not merely unpacked a binary. STEP 2 gates its HTTPS
               # conda download on this; see the wait there for why binary
@@ -915,6 +915,14 @@ available_node_types:
                 APT_INSTALL_CMD_TIMEOUT=90
                 APT_OPTS="-o Acquire::http::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::https::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::Retries=0"
 
+                # Set by apt_update_with_retries when none of its attempts
+                # reached any source (no `Hit`/`Get` line). Without network
+                # each attempt costs a full timeout, so a fallback mirror that
+                # reaches nothing is not retried, and no install is attempted
+                # after such a refresh. The image's own sources keep their
+                # retries: they may be the only ones an egress allowlist lets
+                # through.
+                APT_ZERO_REACH=false
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
                   # do not fail the whole shell; we handle return codes
@@ -923,11 +931,16 @@ available_node_types:
                   local tries=3
                   local delay=1
                   local i
+                  local reached=false
+                  APT_ZERO_REACH=false
                   for i in $(seq 1 $tries); do
                     # apt-get update returns 0 even when sources fail to fetch,
-                    # so we also check output for failure indicators.
+                    # so we also check output for failure indicators. LC_ALL=C:
+                    # apt translates the strings matched here. quiet=1: an
+                    # image's apt.conf may hide the Hit/Get lines (quiet=2),
+                    # and quiet=0 prefixes them with \r progress output.
                     local output
-                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
+                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get update -o quiet=1 $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
                     if [ $rc -eq 124 ]; then
@@ -937,8 +950,24 @@ available_node_types:
                     else
                       echo "apt-get update attempt $i/$tries failed (rc=$rc)" >> "$log"
                     fi
+                    if echo "$output" | grep -qE '^(Hit|Get)[: ]'; then
+                      reached=true
+                    else
+                      echo "apt-get update reached no source" >> "$log"
+                      # apt_mirror_candidate is a `local` of the mirror loop
+                      # below (bash scoping makes it visible here); it is
+                      # unset for every other caller, which keep retrying.
+                      if [ "${apt_mirror_candidate:-false}" = "true" ]; then
+                        break
+                      fi
+                    fi
                     [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
                   done
+                  # Lists from an attempt that reached a source may be usable,
+                  # even if a later attempt reached nothing.
+                  if [ "$reached" = "false" ]; then
+                    APT_ZERO_REACH=true
+                  fi
                   set -e
                   return 1
                 }
@@ -973,6 +1002,11 @@ available_node_types:
                 }
                 apt_update_install_with_retries() {
                   apt_update_with_retries
+                  # A refresh that partly failed may still leave usable lists,
+                  # so install anyway; one that reached nothing cannot help.
+                  if [ "$APT_ZERO_REACH" = "true" ]; then
+                    return 1
+                  fi
                   apt_install_with_retries "$@"
                 }
                 backup_dir=/etc/apt/sources.list.backup_skypilot
@@ -1112,27 +1146,46 @@ available_node_types:
                 }
 
                 # Separate packages into two groups: packages that are installed first
-                # so that curl, rsync, ssh and wget are available sooner to unblock the following
+                # so that curl and rsync are available sooner to unblock the following
                 # conda installation and rsync.
                 set -e
+                # curl is core only when this setup downloads with it: the uv
+                # installer (when uv is not already runnable), conda, or the
+                # Docker CLI. Otherwise an image without curl and without
+                # internet access would fail here for nothing.
+                CURL_IS_CORE=true
+                if "$HOME/.local/bin/uv" -V >/dev/null 2>&1; then
+                  CURL_IS_CORE=false
+                fi
+                {% if conda_installation_commands or k8s_enable_docker_all or k8s_enable_docker_build %}
+                CURL_IS_CORE=true
+                {% endif %}
                 INSTALL_FIRST="";
                 MISSING_PACKAGES="";
                 for pkg in $PACKAGES; do
                   pkg_present "$pkg" && continue
-                  # curl/rsync/wget are core (needed early to unblock conda + rsync).
-                  # Everything else — incl. netcat — is best-effort: worker readiness
-                  # uses bash /dev/tcp (not `nc`), so netcat is not a launch blocker,
-                  # and its per-distro name (nmap-ncat / netcat-openbsd) can't fail
-                  # the launch.
+                  # rsync is core (file uploads), and curl when CURL_IS_CORE.
+                  # Everything else is best-effort: worker readiness uses bash
+                  # /dev/tcp (not `nc`), so netcat is not a launch blocker, its
+                  # per-distro name (nmap-ncat / netcat-openbsd) can't fail the
+                  # launch, and pod setup itself never uses wget (storage-mount
+                  # installers do, and still get it best-effort).
                   case "$pkg" in
-                    curl|rsync|wget) INSTALL_FIRST="$INSTALL_FIRST $pkg" ;;
-                    *)               MISSING_PACKAGES="$MISSING_PACKAGES $pkg" ;;
+                    rsync) INSTALL_FIRST="$INSTALL_FIRST $pkg" ;;
+                    curl)
+                      if [ "$CURL_IS_CORE" = "true" ]; then
+                        INSTALL_FIRST="$INSTALL_FIRST $pkg"
+                      else
+                        MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
+                      fi
+                      ;;
+                    *)     MISSING_PACKAGES="$MISSING_PACKAGES $pkg" ;;
                   esac
                 done;
 
                 # No core package missing => the image already ships curl (and
-                # whatever trust store its curl uses), so STEP 2 has nothing to
-                # wait for. Publish the marker HERE, not only on the install
+                # whatever trust store its curl uses), or STEP 2 needs no curl,
+                # so STEP 2 has nothing to wait for. Publish the marker HERE, not only on the install
                 # paths, because several of those can bail out without being
                 # fatal and would otherwise leave STEP 2 waiting forever:
                 #   - apt with INSTALL_FIRST empty but MISSING_PACKAGES set: the
@@ -1216,7 +1269,11 @@ available_node_types:
                 run_apt_install_with_fallback() {
                 INSTALL_SUCCESS=false
                 backup_source
+                local apt_mirror_candidate=false
                 for candidate in "" $MIRROR_CANDIDATES; do
+                  if [ -n "$candidate" ]; then
+                    apt_mirror_candidate=true
+                  fi
                   restore_source
                   if [ -n "$candidate" ]; then
                     echo "Trying APT mirror ($APT_OS): $candidate" >> /tmp/apt-update.log
@@ -1406,6 +1463,12 @@ available_node_types:
                 {{ k8s_fusermount_setup_command | indent(16) }}
                 {% endif %}
 
+                # SkyPilot reaches the pod through `kubectl exec`; sshd only serves
+                # `ssh <cluster>`. An image without it (and no way to install it,
+                # e.g. no internet) still launches, without that.
+                HAS_SSHD=false
+                pkg_present openssh-server && HAS_SSHD=true
+                if [ "$HAS_SSHD" = "true" ]; then
                 $(prefix_cmd) mkdir -p /var/run/sshd;
                 $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
                 # Cosmetic (silences a pam_loginuid warning in containers); not
@@ -1414,6 +1477,18 @@ available_node_types:
                 # dropping set -e for the load-bearing commands below.
                 $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd || true;
                 cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
+                else
+                {% if k8s_host_network %}
+                # Host networking records its verified ports in sshd_config;
+                # without sshd a later Ray restart would re-probe its own ports.
+                # Error last: the launch output shows only the log's tail.
+                dump_apt_log
+                echo "Error: kubernetes host networking needs openssh-server in the image, and it is not installed and could not be installed."
+                exit 1
+                {% else %}
+                echo "WARNING: sshd is not installed in this image and could not be installed; 'ssh <cluster>' will not work. Install openssh-server in the image to enable it."
+                {% endif %}
+                fi
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
                 $(prefix_cmd) chmod 700 ~/.ssh;
@@ -1425,6 +1500,7 @@ available_node_types:
                 # `sshd` on RHEL/UBI/SUSE, and minimal containers often have no
                 # service manager at all — fall back to launching the daemon
                 # directly. `|| true` so a benign restart failure never aborts.
+                if [ "$HAS_SSHD" = "true" ]; then
                 $(prefix_cmd) service ssh restart 2>/dev/null \
                   || $(prefix_cmd) service sshd restart 2>/dev/null \
                   || $(prefix_cmd) systemctl restart ssh 2>/dev/null \
@@ -1434,6 +1510,7 @@ available_node_types:
                   || $(prefix_cmd) /usr/sbin/sshd 2>/dev/null \
                   || $(prefix_cmd) /sbin/sshd 2>/dev/null \
                   || true;
+                fi
                 # Also cosmetic, and ~/.profile is a Debian convention (RHEL ships
                 # ~/.bash_profile) -- tolerate a missing file.
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile || true;
@@ -1501,11 +1578,26 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ uv_installation_commands }}
+                # Whether the image already carries the runtime (Ray at the
+                # pinned version). Checked before ray_installation_commands,
+                # which always leaves that Ray installed.
+                RUNTIME_PREBUILT=false
+                if {{ ray_installed_check_command }}; then
+                  RUNTIME_PREBUILT=true
+                fi
                 {{ ray_installation_commands }}
 
+                # Prefetch SkyPilot's dependencies from PyPI while the cluster
+                # is still provisioning, so the wheel install in setup_commands
+                # finds them. An image that already carries the runtime has
+                # them, and may have no internet access; a failed prefetch is
+                # not an error by itself (the wheel install reports a real one).
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
-                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                if [ "$RUNTIME_PREBUILT" = "false" ]; then
+                  VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote] \
+                    || echo "WARNING: could not prefetch SkyPilot dependencies; continuing."
+                fi
                 # Wait (bounded) for the best-effort `patch` install to land
                 # before applying the Ray patches. An image may ship no `patch`
                 # and have no usable repo, so proceed after 60s rather than hang

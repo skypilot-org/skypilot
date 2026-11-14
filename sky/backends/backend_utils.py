@@ -1413,6 +1413,9 @@ def write_cluster_config(
             'ray_installation_commands':
                 (constants.RAY_INSTALLATION_COMMANDS.replace(
                     '{ray_version}', ray_version)),
+            'ray_installed_check_command':
+                (constants.SKY_RAY_INSTALLED_CHECK_CMD.replace(
+                    '{ray_version}', ray_version)),
             'skypilot_wheel_installation_commands':
                 constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
                     '{sky_wheel_hash}',

@@ -393,6 +393,10 @@ SKY_USER_ENV_CREATION_COMMANDS = (
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
+# Succeeds when the runtime env already has Ray at {ray_version}. Also used by
+# the Kubernetes pod template, which must decide this before installing Ray.
+SKY_RAY_INSTALLED_CHECK_CMD = (f'{SKY_UV_PIP_CMD} list | grep "ray " | '
+                               'grep {ray_version} 2>&1 > /dev/null')
 RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{SETUP_SKY_DIRS_COMMANDS}'
@@ -401,14 +405,22 @@ RAY_INSTALLATION_COMMANDS = (
     # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
     # causing the error:
     #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
-    f'{SKY_UV_PIP_CMD} install "setuptools<70"; '
     # Always pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy
     # issues with Sentinel values. We force this even when ray is already
     # installed (e.g. baked into the SkyPilot AMI), since the ray-version
     # idempotency guard below would otherwise skip the install and leave
     # click at whatever the AMI shipped.
     # See: https://github.com/ray-project/ray/issues/56747
-    f'{SKY_UV_PIP_CMD} install "click<8.3.0"; '
+    # Best-effort: an image that violates a pin needs the index to fix it, and
+    # one without internet access must still be able to start. Separate
+    # installs, so an index that has one pin but not the other still fixes
+    # the one it has.
+    f'{SKY_UV_PIP_CMD} install "setuptools<70" || '
+    'echo "WARNING: could not install setuptools<70; continuing with the '
+    'version in the image."; '
+    f'{SKY_UV_PIP_CMD} install "click<8.3.0" || '
+    'echo "WARNING: could not install click<8.3.0; continuing with the '
+    'version in the image."; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -422,8 +434,7 @@ RAY_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
-    f'{SKY_UV_PIP_CMD} list | grep "ray " | '
-    'grep {ray_version} 2>&1 > /dev/null '
+    f'{SKY_RAY_INSTALLED_CHECK_CMD} '
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
@@ -481,6 +492,8 @@ COPY_SKYPILOT_TEMPLATES_COMMANDS = (
     f'find {SKY_TEMPLATES_DIRECTORY} -type f ! -name "*.py" ! -name "*.md" '
     '-exec chmod +x {} + ; ')
 
+_SKY_WHEEL_SPEC = (f'"$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
+                   f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]"')
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
@@ -496,9 +509,11 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     'if [ "{cloud}" = "azure" ]; then '
     f'{SKY_UV_PIP_CMD} install --prerelease=allow "{dependencies.AZURE_CLI}";'
     'fi;'
-    # Install skypilot from wheel
-    f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
-    f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
+    # Install skypilot from wheel. Offline first: for a local wheel, uv
+    # queries the index even when every dependency is already installed, so a
+    # pod without internet access would fail here although it needs nothing.
+    f'{{ {SKY_UV_PIP_CMD} install --offline {_SKY_WHEEL_SPEC} > /dev/null 2>&1 '
+    f'|| {SKY_UV_PIP_CMD} install {_SKY_WHEEL_SPEC}; }} && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; ')
 

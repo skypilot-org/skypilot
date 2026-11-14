@@ -54,6 +54,24 @@ def test_pinned_ray_version_matches_constant(rel_path, pattern):
             f'{constants.SKY_REMOTE_RAY_VERSION}')
 
 
+@pytest.mark.parametrize('rel_path', [
+    'Dockerfile_k8s',
+    'Dockerfile_k8s_gpu',
+    'docs/source/reference/kubernetes/kubernetes-getting-started.rst',
+])
+def test_images_bake_the_runtime_pins(rel_path):
+    """An image that misses a pin makes every pod fetch it from the index."""
+    pins = re.findall(r'install "((?:setuptools|click)<[0-9.]+)"',
+                      constants.RAY_INSTALLATION_COMMANDS)
+    assert sorted(pins) == ['click<8.3.0', 'setuptools<70'], pins
+    path = os.path.join(ROOT_DIR, *rel_path.split('/'))
+    if not os.path.exists(path):
+        pytest.skip(f'{rel_path} not present in this checkout')
+    content = _read(path)
+    for pin in pins:
+        assert f"'{pin}'" in content, f'{rel_path} does not bake {pin}'
+
+
 def test_vm_image_bake_reads_ray_version_from_the_installed_skypilot():
     """The VM image bake patches Ray with the installed SkyPilot's patches.
 
