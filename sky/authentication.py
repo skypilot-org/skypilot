@@ -21,6 +21,7 @@ provider. See the comments in setup_lambda_authentication)
 import copy
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -206,6 +207,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # Enable ssh port for all the instances
         enable_ssh_cmd = ('gcloud compute firewall-rules create '
                           'allow-ssh-ingress-from-iap '
+                          f'--project={shlex.quote(project_id)} '
                           '--direction=INGRESS '
                           '--action=allow '
                           '--rules=tcp:22 '
