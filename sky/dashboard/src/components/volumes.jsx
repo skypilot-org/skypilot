@@ -784,7 +784,7 @@ export function VolumesTable({
 
   const sortableHeader = (label, sortKey) => (
     <TableHead
-      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
       onClick={() => requestSort(sortKey)}
     >
       {label}
@@ -921,7 +921,7 @@ export function VolumesTable({
     isPlugin: true,
     renderHeader: () => {
       const baseClasses = col.header.sortKey
-        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle'
+        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover'
         : 'whitespace-nowrap';
       const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
       return (

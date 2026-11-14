@@ -386,7 +386,7 @@ export function JobDetailPage() {
                             </Tooltip>
                           </span>
                         ) : (
-                          <span className="text-content-faint">-</span>
+                          <span className="text-content-tertiary">-</span>
                         )}
                       </div>
                     </div>

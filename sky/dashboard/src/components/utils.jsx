@@ -171,7 +171,7 @@ export const CustomTooltip = ({ children, ...props }) => {
       {...DEFAULT_TOOLTIP_PROPS}
       {...props}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm capitalize rounded">
+        <span className="left-full w-max px-2 py-1 text-sm text-surface-muted bg-content-tertiary text-sm capitalize rounded">
           {content}
         </span>
       }
@@ -191,7 +191,7 @@ export const NonCapitalizedTooltip = ({ children, ...props }) => {
       {...DEFAULT_TOOLTIP_PROPS}
       {...restProps}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 rounded whitespace-pre-line normal-case">
+        <span className="left-full w-max px-2 py-1 text-sm text-surface-muted bg-content-tertiary rounded whitespace-pre-line normal-case">
           {content}
         </span>
       }
@@ -794,7 +794,7 @@ export const renderPoolLink = (poolName, poolHash, poolsData) => {
   return (
     <div className="flex items-center space-x-2">
       <NonCapitalizedTooltip content="This pool is terminated" placement="top">
-        <div className="w-2 h-2 bg-gray-800"></div>
+        <div className="w-2 h-2 bg-gray-800 dark:bg-gray-400"></div>
       </NonCapitalizedTooltip>
       <span>
         {poolName} ({shortHash})

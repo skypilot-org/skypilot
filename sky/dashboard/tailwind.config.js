@@ -64,11 +64,14 @@ module.exports = {
         surface: {
           DEFAULT: token('surface'),
           subtle: token('surface-subtle'),
+          page: token('surface-page'),
+          hover: token('surface-hover'),
           muted: token('surface-muted'),
           strong: token('surface-strong'),
           stronger: token('surface-stronger'),
           log: token('surface-log'),
           code: token('surface-code'),
+          nav: token('surface-nav'),
         },
         content: {
           DEFAULT: token('content'),

@@ -17,6 +17,7 @@ import {
 import { useMobile } from '@/hooks/useMobile';
 import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { THEME_DARK, useTheme } from '@/hooks/useTheme';
 import {
   checkGrafanaAvailability,
   getGrafanaUrl,
@@ -193,7 +194,7 @@ const CleanUtilizationBar = ({
       <Tooltip
         placement="top"
         content={
-          <span className="px-2 py-1 text-xs text-white bg-gray-800 rounded whitespace-nowrap">
+          <span className="px-2 py-1 text-xs text-white bg-gray-800 dark:bg-gray-700 rounded whitespace-nowrap">
             {value.toLocaleString()} {label}
           </span>
         }
@@ -784,9 +785,9 @@ export function InfrastructureSection({
                     if (!typeEntry) {
                       return (
                         <>
-                          <td className="p-3 text-content-faint">-</td>
-                          <td className="p-3 text-content-faint">-</td>
-                          <td className="p-3 text-content-faint">-</td>
+                          <td className="p-3 text-content-tertiary">-</td>
+                          <td className="p-3 text-content-tertiary">-</td>
+                          <td className="p-3 text-content-tertiary">-</td>
                         </>
                       );
                     }
@@ -874,7 +875,7 @@ export function InfrastructureSection({
                         rowSpan={summaryRowCount}
                       >
                         {!isExpandable ? (
-                          <span className="text-content-faint">-</span>
+                          <span className="text-content-tertiary">-</span>
                         ) : (
                           <button
                             className="inline-flex items-center gap-1 text-content-tertiary hover:text-content"
@@ -1067,7 +1068,7 @@ export function InfrastructureSection({
                           content={row.note || 'Not enabled for compute'}
                           className="text-sm text-muted-foreground"
                         >
-                          <span className="px-1.5 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium cursor-help">
+                          <span className="px-1.5 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium cursor-help">
                             Not enabled
                           </span>
                         </NonCapitalizedTooltip>
@@ -1078,7 +1079,10 @@ export function InfrastructureSection({
                         of these, so a dash in each. */}
                     {Array.from({ length: isSlurm ? 5 : 6 }).map(
                       (_, cellIndex) => (
-                        <td key={cellIndex} className="p-3 text-content-faint">
+                        <td
+                          key={cellIndex}
+                          className="p-3 text-content-tertiary"
+                        >
                           -
                         </td>
                       )
@@ -1255,7 +1259,7 @@ export function InfrastructureSection({
                     >
                       {row.name}
                     </span>
-                    <span className="px-1.5 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium flex-shrink-0">
+                    <span className="px-1.5 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium flex-shrink-0">
                       Not enabled
                     </span>
                   </div>
@@ -1291,6 +1295,7 @@ export function ContextDetails({
   // Determine if this is an SSH context
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
+  const { resolvedTheme } = useTheme();
 
   // Slurm exposes power-saved (POWER_SAVE, `~`-state) cloud nodes with no
   // backing instance; fold them out of the node table so it lists only nodes
@@ -1458,7 +1463,7 @@ export function ContextDetails({
     // When "All Nodes" is selected (.*), pass .* directly to match all nodes
     const hostParam = selectedHosts;
 
-    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&var-cluster=${encodeURIComponent(clusterParam)}&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&var-cluster=${encodeURIComponent(clusterParam)}&refresh=5s&theme=${resolvedTheme === THEME_DARK ? 'dark' : 'light'}&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // Handle host selection change
@@ -1673,7 +1678,7 @@ export function ContextDetails({
                       return (
                         <tr
                           key={`${node.node_name}-${nodesStartIndex + index}`}
-                          className="hover:bg-surface-subtle"
+                          className="hover:bg-surface-hover"
                         >
                           <td className="p-3 whitespace-nowrap text-content">
                             {node.node_name}
@@ -1819,8 +1824,8 @@ export function ContextDetails({
                             className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
                               timeRange.from === `now-${preset.value}` &&
                               timeRange.to === 'now'
-                                ? 'bg-brand-solid text-white border-brand'
-                                : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-subtle'
+                                ? 'bg-brand-solid text-white border-transparent'
+                                : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-hover'
                             }`}
                           >
                             {preset.label}
@@ -2331,7 +2336,7 @@ function SSHNodePoolDetails({
                 Deploy
               </button>
               <button
-                className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-subtle flex items-center text-red-fg hover:text-red-fg-strong"
+                className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-hover flex items-center text-red-fg hover:text-red-fg-strong"
                 onClick={handleDeleteClick}
               >
                 <TrashIcon className="w-4 h-4 mr-2" />
@@ -2549,7 +2554,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
   const StatusDisplay = ({ pool }) => {
     if (!pool.isDeployed) {
       return (
-        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
           Not Deployed
         </span>
       );
@@ -2567,7 +2572,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
     const status = poolStatuses[pool.name];
     if (!status) {
       return (
-        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
           Unknown
         </span>
       );
@@ -2643,7 +2648,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
             return (
               <tr
                 key={pool.name}
-                className="hover:bg-surface-subtle cursor-pointer"
+                className="hover:bg-surface-hover cursor-pointer"
                 onClick={() => handleContextClick(`ssh-${pool.name}`)}
               >
                 <td className="p-3 font-medium text-content">
@@ -2662,7 +2667,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
                       {pool.clusters}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                       0
                     </span>
                   )}
@@ -2677,7 +2682,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
                       {pool.jobs}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                       0
                     </span>
                   )}
@@ -4009,14 +4014,14 @@ export function GPUs() {
                         <td className="p-3">
                           {cloud.storageOnly ? (
                             <NonCapitalizedTooltip content="Storage-only infrastructure does not run clusters">
-                              <span className="px-1.5 py-0.5 text-content-faint text-xs font-medium cursor-help">
+                              <span className="px-1.5 py-0.5 text-content-tertiary text-xs font-medium cursor-help">
                                 —
                               </span>
                             </NonCapitalizedTooltip>
                           ) : clusterDataLoading ? (
                             <SkeletonBadge />
                           ) : (
-                            <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                            <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                               {clusterCount ?? 0}
                             </span>
                           )}
@@ -4024,14 +4029,14 @@ export function GPUs() {
                         <td className="p-3">
                           {cloud.storageOnly ? (
                             <NonCapitalizedTooltip content="Storage-only infrastructure does not run managed jobs">
-                              <span className="px-1.5 py-0.5 text-content-faint text-xs font-medium cursor-help">
+                              <span className="px-1.5 py-0.5 text-content-tertiary text-xs font-medium cursor-help">
                                 —
                               </span>
                             </NonCapitalizedTooltip>
                           ) : sshAndKubeJobsDataLoading ? (
                             <SkeletonBadge />
                           ) : (
-                            <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                            <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                               {jobCount ?? 0}
                             </span>
                           )}
@@ -4091,7 +4096,7 @@ export function GPUs() {
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
-          //   className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-subtle flex items-center"
+          //   className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-hover flex items-center"
           //   onClick={handleAddSSHPool}
           // >
           //   <PlusIcon className="w-4 h-4 mr-2" />

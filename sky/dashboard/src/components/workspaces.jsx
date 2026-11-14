@@ -994,19 +994,19 @@ export function Workspaces() {
               <TableHeader>
                 <TableRow>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                     onClick={() => handleSort('displayName')}
                   >
                     Workspace{getSortDirection('displayName')}
                   </TableHead>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                     onClick={() => handleSort('runningClusterCount')}
                   >
                     Running Clusters {getSortDirection('runningClusterCount')}
                   </TableHead>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                     onClick={() => handleSort('managedJobsCount')}
                   >
                     Jobs{getSortDirection('managedJobsCount')}
@@ -1045,7 +1045,7 @@ export function Workspaces() {
                     return (
                       <TableRow
                         key={workspace.name}
-                        className="group hover:bg-surface-subtle"
+                        className="group hover:bg-surface-hover"
                       >
                         <TableCell className="">
                           <button

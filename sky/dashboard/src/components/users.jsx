@@ -2414,7 +2414,7 @@ function UsersTable({
                       setWsDropdownOpen(false);
                       openBulkDialog('add');
                     }}
-                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-subtle rounded transition-colors whitespace-nowrap"
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-hover rounded transition-colors whitespace-nowrap"
                   >
                     <PlusIcon className="h-4 w-4 text-content-tertiary flex-shrink-0" />
                     <span>Add to workspaces</span>
@@ -2426,7 +2426,7 @@ function UsersTable({
                       setWsDropdownOpen(false);
                       openBulkDialog('remove');
                     }}
-                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-subtle rounded transition-colors whitespace-nowrap"
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-hover rounded transition-colors whitespace-nowrap"
                   >
                     <MinusIcon className="h-4 w-4 text-content-tertiary flex-shrink-0" />
                     <span>Remove from workspaces</span>
@@ -2460,14 +2460,14 @@ function UsersTable({
                 )}
                 <TableHead
                   onClick={() => requestSort('usernameDisplay')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Name{getSortDirection('usernameDisplay')}
                 </TableHead>
                 {!deduplicateUsers && (
                   <TableHead
                     onClick={() => requestSort('fullEmailID')}
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                   >
                     User ID{getSortDirection('fullEmailID')}
                   </TableHead>
@@ -2475,7 +2475,7 @@ function UsersTable({
                 {!deduplicateUsers && !ingressBasicAuthEnabled && (
                   <TableHead
                     onClick={() => requestSort('role')}
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                   >
                     Role{getSortDirection('role')}
                   </TableHead>
@@ -2485,32 +2485,32 @@ function UsersTable({
                   !externalProxyAuthEnabled && (
                     <TableHead
                       onClick={() => requestSort('userType')}
-                      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                     >
                       Type{getSortDirection('userType')}
                     </TableHead>
                   )}
                 <TableHead
                   onClick={() => requestSort('created_at')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Joined{getSortDirection('created_at')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('gpuCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   GPUs{getSortDirection('gpuCount')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('clusterCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Clusters{getSortDirection('clusterCount')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('jobCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Jobs{getSortDirection('jobCount')}
                 </TableHead>
@@ -2522,7 +2522,7 @@ function UsersTable({
                       onClick={sortKey ? () => requestSort(sortKey) : undefined}
                       className={`whitespace-nowrap w-1/6${
                         sortKey
-                          ? ' sortable cursor-pointer hover:bg-surface-subtle'
+                          ? ' sortable cursor-pointer hover:bg-surface-hover'
                           : ''
                       }${col.header?.className ? ' ' + col.header.className : ''}`}
                     >
@@ -2665,7 +2665,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.gpuCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2673,7 +2673,7 @@ function UsersTable({
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
                             user.gpuCount > 0
                               ? 'bg-purple-tint-strong text-purple-fg'
-                              : 'bg-surface-muted text-content-tertiary'
+                              : 'bg-surface-muted text-content-secondary'
                           }`}
                           title={`Total GPUs: ${user.gpuCount}`}
                         >
@@ -2683,7 +2683,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.clusterCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2692,7 +2692,7 @@ function UsersTable({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             user.clusterCount > 0
                               ? 'bg-blue-tint-strong text-blue-fg hover:bg-blue-line hover:text-blue-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                         >
@@ -2702,7 +2702,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.jobCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2711,7 +2711,7 @@ function UsersTable({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             user.jobCount > 0
                               ? 'bg-green-tint-strong text-green-fg hover:bg-green-line hover:text-green-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                         >
@@ -3403,7 +3403,7 @@ function ServiceAccountTokensView({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             token.clusterCount > 0
                               ? 'bg-blue-tint-strong text-blue-fg hover:bg-blue-line hover:text-blue-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${token.clusterCount} cluster${token.clusterCount !== 1 ? 's' : ''} for ${token.token_name}`}
                         >
@@ -3425,7 +3425,7 @@ function ServiceAccountTokensView({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             token.jobCount > 0
                               ? 'bg-green-tint-strong text-green-fg hover:bg-green-line hover:text-green-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
                         >
@@ -3446,7 +3446,7 @@ function ServiceAccountTokensView({
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
                             token.gpuCount > 0
                               ? 'bg-purple-tint-strong text-purple-fg'
-                              : 'bg-surface-muted text-content-tertiary'
+                              : 'bg-surface-muted text-content-secondary'
                           }`}
                           title={`Total GPUs: ${token.gpuCount}`}
                         >
@@ -3782,7 +3782,7 @@ function ServiceAccountTokensView({
             <div className="grid gap-2">
               <label
                 htmlFor="edit-sa-role-select"
-                className="text-sm font-medium text-gray-700"
+                className="text-sm font-medium text-content"
               >
                 Role
               </label>
@@ -3813,7 +3813,7 @@ function ServiceAccountTokensView({
               />
             )}
             {accessError && (
-              <p className="text-sm text-red-600">{accessError}</p>
+              <p className="text-sm text-red-fg">{accessError}</p>
             )}
           </div>
           <DialogFooter>
@@ -3825,7 +3825,7 @@ function ServiceAccountTokensView({
               Cancel
             </button>
             <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
               onClick={handleSaveAccess}
               disabled={
                 savingAccess ||

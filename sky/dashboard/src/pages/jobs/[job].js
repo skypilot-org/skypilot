@@ -576,7 +576,7 @@ function JobDetails({
                           {allTasks.map((task, index) => (
                             <TableRow
                               key={task.task_job_id}
-                              className="hover:bg-surface-subtle"
+                              className="hover:bg-surface-hover"
                             >
                               <TableCell>
                                 <Link
@@ -677,7 +677,7 @@ function JobDetails({
                           {launchedJobs.map((job) => (
                             <TableRow
                               key={`dynamic-${job.id}`}
-                              className="hover:bg-surface-subtle"
+                              className="hover:bg-surface-hover"
                             >
                               <TableCell>
                                 <Link
@@ -1691,7 +1691,7 @@ function JobDetailsContent({
   // full-width rows below. Every field is a label over its value.
   const isEmpty = (v) =>
     v == null || v === '' || v === '-' || v === '–' || v === 'N/A';
-  const dash = <span className="text-content-faint">-</span>;
+  const dash = <span className="text-content-tertiary">-</span>;
   const show = (v) => (isEmpty(v) ? dash : v);
   // Base column count must not be grid-cols-2: a stylesheet loaded later can
   // redefine it and override the breakpoint variants.

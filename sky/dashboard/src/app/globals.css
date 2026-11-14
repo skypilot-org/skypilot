@@ -36,9 +36,14 @@
        colors, so both themes work without per-component dark: variants. */
     --surface: 0 0% 100%;
     --surface-subtle: 210 20% 98.04%;
+    --surface-page: 210 20% 98.04%;
+    --surface-hover: 210 20% 98.04%;
+    --surface-editor: 0 0% 100%;
     --surface-muted: 220 14.29% 95.88%;
     --surface-strong: 220 13.04% 90.98%;
     --surface-stronger: 216 12.2% 83.92%;
+    /* Top bar fill. */
+    --surface-nav: 0 0% 100%;
     --content-strong: 220.91 39.29% 10.98%;
     --content-heavy: 215 27.91% 16.86%;
     --content: 216.92 19.12% 26.67%;
@@ -148,37 +153,182 @@
     --sky-fg-strong: 201.27 96.34% 32.16%;
     --sky-fg-stronger: 200.95 90% 27.45%;
     --sky-fg-strongest: 202.04 80.33% 23.92%;
+    color-scheme: light;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --background: 0 0% 9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 12.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 83%;
+    --muted: 0 0% 25%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 15%;
+    --input: 0 0% 25%;
+    --ring: 0 0% 45%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    --text-strong: 0 0% 98%;
+    color-scheme: dark;
+    --surface: 0 0% 9%;
+    --surface-subtle: 0 0% 12.5%;
+    --surface-page: 0 0% 9%;
+    --surface-hover: 0 0% 15%;
+    --surface-editor: 0 0% 12.5%;
+    --surface-muted: 0 0% 15%;
+    --surface-strong: 0 0% 25%;
+    --surface-stronger: 0 0% 32%;
+    /* A half step above the page (#1c1c1c) so the top bar stands apart. */
+    --surface-nav: 0 0% 10.98%;
+    --content-strong: 0 0% 98%;
+    --content-heavy: 0 0% 98%;
+    --content: 0 0% 98%;
+    --content-secondary: 0 0% 83%;
+    --content-tertiary: 0 0% 64%;
+    --content-faint: 0 0% 64%;
+    --content-faintest: 0 0% 25%;
+    --line-subtle: 0 0% 12.5%;
+    --line: 0 0% 15%;
+    --line-strong: 0 0% 25%;
+    --line-stronger: 0 0% 32%;
+    --brand: 217 89% 76%;
+    --brand-bright: 214 92% 85%;
+    --brand-solid: 217 68% 38%;
+    --brand-solid-hover: 217 62% 47%;
+    --surface-log: 0 0% 12.5%;
+    --surface-code: 0 0% 12.5%;
+    --code-string: 141.71 76.64% 73.14%;
+    --code-gutter: 0 0% 64%;
+    --red-tint: 0 74.68% 15.49%;
+    --red-tint-strong: 0 66.67% 22.35%;
+    --red-line: 0 70% 35.29%;
+    --red-solid-soft: 0 72.22% 50.59%;
+    --red-solid: 0 73.71% 41.76%;
+    --red-solid-hover: 0 70% 35.29%;
+    --red-fg-faint: 0 72.22% 50.59%;
+    --red-fg-soft: 0 84.24% 60.2%;
+    --red-fg: 0 90.6% 70.78%;
+    --red-fg-strong: 0 93.55% 81.76%;
+    --red-fg-stronger: 0 96.3% 89.41%;
+    --green-tint: 144.88 80.39% 10%;
+    --green-tint-strong: 143.53 68% 14.71%;
+    --green-line: 142.78 64.23% 24.12%;
+    --green-line-strong: 142.43 71.81% 29.22%;
+    --green-solid-soft: 142.13 76.22% 36.27%;
+    --green-solid: 142.43 71.81% 29.22%;
+    --green-solid-hover: 142.78 64.23% 24.12%;
+    --green-fg-faint: 142.13 76.22% 36.27%;
+    --green-fg-soft: 142.09 70.56% 45.29%;
+    --green-fg: 141.89 69.16% 58.04%;
+    --green-fg-strong: 141.71 76.64% 73.14%;
+    --green-fg-stronger: 141 78.95% 85.1%;
+    --green-fg-strongest: 140.63 84.21% 92.55%;
+    --yellow-tint: 26 83.33% 14.12%;
+    --yellow-tint-strong: 27.63 77.55% 19.22%;
+    --yellow-line: 31.76 80.95% 28.82%;
+    --yellow-solid-soft: 40.61 96.12% 40.39%;
+    --yellow-fg-soft: 45.4 93.39% 47.45%;
+    --yellow-fg: 47.95 95.82% 53.14%;
+    --yellow-fg-strong: 50.44 97.85% 63.53%;
+    --yellow-fg-stronger: 52.76 98.31% 76.86%;
+    --amber-tint: 20.91 91.67% 14.12%;
+    --amber-tint-strong: 21.43 84% 19.61%;
+    --amber-line: 22.73 82.5% 31.37%;
+    --amber-solid: 25.96 90.48% 37.06%;
+    --amber-solid-hover: 22.73 82.5% 31.37%;
+    --amber-fg-faint: 32.13 94.62% 43.73%;
+    --amber-fg-soft: 37.69 92.13% 50.2%;
+    --amber-fg: 43.26 96.41% 56.27%;
+    --amber-fg-strong: 45.94 96.69% 64.51%;
+    --amber-fg-stronger: 48 96.64% 76.67%;
+    --amber-fg-strongest: 48 96.49% 88.82%;
+    --orange-tint: 13 81.08% 14.51%;
+    --orange-fg: 27.02 95.98% 60.98%;
+    --orange-fg-strong: 30.66 97.16% 72.35%;
+    --purple-tint: 273.55 86.92% 20.98%;
+    --purple-tint-strong: 273.6 75.76% 25.88%;
+    --purple-fg: 270 95.24% 75.29%;
+    --purple-fg-strong: 269.19 97.37% 85.1%;
+    --purple-fg-stronger: 268.57 100% 91.76%;
+    --indigo-tint: 243.75 47.06% 20%;
+    --indigo-fg-soft: 238.73 83.53% 66.67%;
+    --indigo-fg: 234.45 89.47% 73.92%;
+    --indigo-fg-strong: 229.66 93.55% 81.76%;
+    --cyan-tint: 197 78.95% 14.9%;
+    --cyan-fg-strong: 186.99 92.41% 69.02%;
+    --pink-tint: 336.16 83.91% 17.06%;
+    --pink-fg-strong: 327.41 87.1% 81.76%;
+    --emerald-tint: 165.71 91.3% 9.02%;
+    --emerald-line: 163.15 88.12% 19.8%;
+    --emerald-solid: 162.93 93.55% 24.31%;
+    --emerald-fg-soft: 160.12 84.08% 39.41%;
+    --emerald-fg: 158.11 64.37% 51.57%;
+    --emerald-fg-strong: 156.2 71.6% 66.86%;
+    --teal-tint: 178.6 84.31% 10%;
+    --blue-tint: 226.23 57.01% 20.98%;
+    --blue-tint-strong: 225.37 61.19% 26.27%;
+    --blue-line: 225.93 70.73% 40.2%;
+    --blue-line-strong: 224.28 76.33% 48.04%;
+    --blue-solid-soft: 221.21 83.19% 53.33%;
+    --blue-solid: 224.28 76.33% 48.04%;
+    --blue-solid-hover: 225.93 70.73% 40.2%;
+    --blue-fg-faint: 221.21 83.19% 53.33%;
+    --blue-fg-soft: 217.22 91.22% 59.8%;
+    --blue-fg: 213.12 93.9% 67.84%;
+    --blue-fg-strong: 211.7 96.36% 78.43%;
+    --blue-fg-stronger: 213.33 96.92% 87.25%;
+    --blue-fg-strongest: 214.29 94.59% 92.75%;
+    --sky-tint: 204 80.25% 15.88%;
+    --sky-tint-strong: 203.25 80% 19.61%;
+    --sky-line: 200.95 90% 27.45%;
+    --sky-solid-soft: 200.41 98.01% 39.41%;
+    --sky-solid: 201.27 96.34% 32.16%;
+    --sky-solid-hover: 200.95 90% 27.45%;
+    --sky-fg-soft: 198.63 88.66% 48.43%;
+    --sky-fg: 198.44 93.2% 59.61%;
+    --sky-fg-strong: 199.37 95.49% 73.92%;
+    --sky-fg-stronger: 200.6 94.37% 86.08%;
+    --sky-fg-strongest: 204 93.75% 93.73%;
   }
 }
 
 @layer base {
+  /* Native fields with no background class would otherwise get the browser's
+     dark-scheme gray. :where() keeps this at zero specificity, so any
+     component or utility background still wins. */
+  :where(
+    .dark
+      input:not(
+        [type='checkbox'],
+        [type='radio'],
+        [type='range'],
+        [type='file'],
+        [type='color']
+      ),
+    .dark textarea,
+    .dark select
+  ) {
+    background-color: hsl(var(--surface));
+  }
+  /* Dark: table header cells sit one step above the page so the column
+     labels stand apart from the rows. This colors the cells rather than the
+     row, so pinned header cells, which carry their own fill, match. */
+  .dark thead th {
+    background-color: hsl(var(--surface-subtle));
+  }
   * {
     @apply border-border;
   }
@@ -297,8 +447,10 @@
   box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  border: 1px solid hsl(var(--line));
-  background: hsl(var(--surface));
+  /* No backdrop, so the edge has to hold against gray pages and the table
+     lines behind it. */
+  border: 1px solid hsl(var(--line-strong));
+  background: hsl(var(--popover));
   font-family: inherit;
   margin: 8px;
   position: relative;
@@ -336,7 +488,7 @@
   font-size: 16px;
   line-height: 1.6 !important;
   color: hsl(var(--content-secondary));
-  background: hsl(var(--surface));
+  background: hsl(var(--popover));
   margin: 0 !important; /* Remove any default margins */
 }
 
@@ -388,7 +540,7 @@
 }
 
 .shepherd-footer {
-  background: hsl(var(--surface));
+  background: hsl(var(--popover));
   padding: 8px 24px 20px;
   border-radius: 0 0 0.5rem 0.5rem;
   display: flex;
@@ -474,6 +626,21 @@
   transition: all 0.2s ease;
 }
 
+/* MUI spinners default to a blue that is below 3:1 on dark surfaces. */
+.dark .MuiCircularProgress-colorPrimary {
+  color: hsl(var(--blue-fg));
+}
+
+/* On dark the light shadow disappears; a deeper one lifts the tour. */
+.dark .shepherd-element {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Shepherd colors the glyph itself (translucent gray); lift it on dark. */
+.dark .shepherd-cancel-icon span {
+  color: hsl(var(--content-tertiary));
+}
+
 .shepherd-cancel-icon:hover {
   background: hsl(var(--surface-muted));
   color: hsl(var(--content-tertiary));
@@ -490,7 +657,7 @@
 
 .shepherd-element[data-popper-placement^='top'] .shepherd-arrow {
   border-width: 6px 6px 0 6px;
-  border-color: hsl(var(--surface)) transparent transparent transparent;
+  border-color: hsl(var(--popover)) transparent transparent transparent;
   bottom: -6px;
   left: 50%;
   transform: translateX(-50%);
@@ -498,7 +665,7 @@
 
 .shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow {
   border-width: 0 6px 6px 6px;
-  border-color: transparent transparent hsl(var(--surface)) transparent;
+  border-color: transparent transparent hsl(var(--popover)) transparent;
   top: -6px;
   left: 50%;
   transform: translateX(-50%);
@@ -506,7 +673,7 @@
 
 .shepherd-element[data-popper-placement^='left'] .shepherd-arrow {
   border-width: 6px 0 6px 6px;
-  border-color: transparent transparent transparent hsl(var(--surface));
+  border-color: transparent transparent transparent hsl(var(--popover));
   right: -6px;
   top: 50%;
   transform: translateY(-50%);
@@ -514,7 +681,7 @@
 
 .shepherd-element[data-popper-placement^='right'] .shepherd-arrow {
   border-width: 6px 6px 6px 0;
-  border-color: transparent hsl(var(--surface)) transparent transparent;
+  border-color: transparent hsl(var(--popover)) transparent transparent;
   left: -6px;
   top: 50%;
   transform: translateY(-50%);

@@ -365,7 +365,7 @@ function TaskDetails() {
 function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
   const isEmpty = (v) =>
     v == null || v === '' || v === '-' || v === '–' || v === 'N/A';
-  const dash = <span className="text-content-faint">-</span>;
+  const dash = <span className="text-content-tertiary">-</span>;
   const show = (v) => (isEmpty(v) ? dash : v);
   const field = (label, value, { wide = false, newRow = false } = {}) => (
     <div
