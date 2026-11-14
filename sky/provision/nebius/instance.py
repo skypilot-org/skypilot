@@ -406,9 +406,26 @@ def terminate_instances(
             # timeout, as the worker_only path does, so the caller does
             # not treat the teardown as complete while the GPU cluster
             # may still exist.
-            if not _wait_for_instances_terminated(provider_config['region'],
-                                                  cluster_name_on_cloud,
-                                                  project_id):
+            try:
+                instances_terminated = _wait_for_instances_terminated(
+                    provider_config['region'], cluster_name_on_cloud,
+                    project_id)
+            except Exception as e:  # pylint: disable=broad-except
+                # The wait could not confirm termination (e.g. the
+                # instance-listing RPC failed). Fall through to the
+                # delete attempt anyway, as the code did before this
+                # wait existed: Nebius still refuses the delete while
+                # instances are attached, whereas skipping it can orphan
+                # a GPU cluster whose instances are already gone (a
+                # later status refresh may drop the cluster record,
+                # leaving no teardown path for the GPU cluster).
+                logger.warning(
+                    f'Could not confirm that the instances of '
+                    f'{cluster_name_on_cloud} terminated: '
+                    f'{common_utils.format_exception(e, use_bracket=False)} '
+                    f'Attempting to delete the GPU cluster anyway.')
+                instances_terminated = True
+            if not instances_terminated:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         f'Timed out waiting for the instances of '

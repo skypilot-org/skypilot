@@ -514,6 +514,45 @@ def test_terminate_instances_full_teardown_waits_before_delete_cluster():
     assert mock_sleep.call_count == 1
 
 
+def test_terminate_instances_full_teardown_delete_attempted_when_wait_fails():
+    """If the wait cannot confirm termination because the instance
+    listing itself fails, the GPU cluster delete is still attempted (as
+    before the wait existed): Nebius refuses the delete while instances
+    are attached, but skipping it could orphan a GPU cluster whose
+    instances are already gone."""
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    listings = {'n': 0}
+
+    def fake_filter(*_args, **_kwargs):
+        listings['n'] += 1
+        if listings['n'] == 1:
+            return {'i-head': head}
+        if listings['n'] == 2:
+            raise RuntimeError('list RPC failed')
+        return {}
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove'), \
+         mock.patch.object(nebius_utils, 'delete_cluster') as mock_del_cluster, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep'), \
+         mock.patch.object(nebius_instance, 'logger') as mock_logger:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+    mock_del_cluster.assert_called_once()
+    warn_calls = [c.args[0] for c in mock_logger.warning.call_args_list]
+    assert any('Could not confirm' in m for m in warn_calls)
+    mock_del_sg.assert_called_once_with('sg-2')
+
+
 
 def test_terminate_instances_noop_for_legacy_cluster_sg():
     """If no SG exists for the cluster (pre-PR launch), terminate cleanly
