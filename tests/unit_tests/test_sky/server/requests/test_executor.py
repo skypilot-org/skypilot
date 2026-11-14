@@ -1754,6 +1754,78 @@ def test_gated_sigterm_handler_swallows_when_idle(reset_sigterm_gate):
     executor._gated_sigterm_handler(_signal.SIGTERM, None)
 
 
+def test_gated_sigterm_handler_is_one_shot(reset_sigterm_gate):
+    """A second SIGTERM must not interrupt the first one's cleanup (#11364)."""
+    import signal as _signal
+    executor._in_request_execution = True
+    with pytest.raises(KeyboardInterrupt):
+        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+    # The first interrupt disarmed the gate: a duplicate cancel racing the
+    # cleanup of the first one is swallowed like an idle-worker SIGTERM.
+    try:
+        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+    except KeyboardInterrupt:
+        pytest.fail('Second SIGTERM raised KeyboardInterrupt during cleanup')
+    assert executor._in_request_execution is False
+
+
+_second_sigterm_cleanup_events: List[str] = []
+
+
+def _entrypoint_with_interruptible_cleanup():
+    """Mimic run_with_log: catch the cancel interrupt, then clean up.
+
+    The first SIGTERM arrives while executing; a second one arrives while
+    the entrypoint is unwinding. The cleanup must run to completion.
+    """
+    import signal as _signal
+    try:
+        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+    except KeyboardInterrupt:
+        _second_sigterm_cleanup_events.append('interrupted')
+    # Cleanup (killing child processes, closing streams) starts here. A
+    # second SIGTERM landing in this window must be swallowed.
+    try:
+        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+    except KeyboardInterrupt:
+        _second_sigterm_cleanup_events.append('cleanup-interrupted')
+        return 'cleanup-aborted'
+    _second_sigterm_cleanup_events.append('cleanup-completed')
+    return 'unreachable'
+
+
+@pytest.mark.asyncio
+async def test_wrapper_survives_second_sigterm_during_cleanup(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """Regression test for #11364: duplicate cancels wedge the executor.
+
+    Before the fix, the second SIGTERM raised KeyboardInterrupt inside the
+    entrypoint's cleanup, aborting it mid-unwind; in production that can
+    leave the pool worker stuck inside the cancelled request forever.
+    """
+    monkeypatch.setattr(
+        'sky.server.requests.executor.subprocess_utils.'
+        'kill_children_processes', lambda: None)
+    _second_sigterm_cleanup_events.clear()
+    req = requests_lib.Request(
+        request_id='gate-second-sigterm',
+        name='test',
+        entrypoint=_entrypoint_with_interruptible_cleanup,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.PENDING,
+        created_at=0.0,
+        user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    executor._request_execution_wrapper('gate-second-sigterm',
+                                        ignore_return_value=False)
+
+    assert _second_sigterm_cleanup_events == [
+        'interrupted', 'cleanup-completed'
+    ]
+    assert executor._in_request_execution is False
+
+
 @pytest.mark.asyncio
 async def test_wrapper_clears_in_request_execution_after_success(
         isolated_database, reset_sigterm_gate):
