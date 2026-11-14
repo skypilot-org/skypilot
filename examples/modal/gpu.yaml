@@ -1,0 +1,8 @@
+resources:
+  cloud: modal
+  accelerators: H100:1
+  # Modal's GPU containers are always preemptible.
+  use_spot: true
+
+run: |
+  nvidia-smi

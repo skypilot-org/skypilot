@@ -50,6 +50,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.modal import modal_utils
 from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
@@ -880,6 +881,7 @@ def write_cluster_config(
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
+    storage_mounts: Optional[Dict[str, Any]] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
     extra_template_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
@@ -1313,6 +1315,13 @@ def write_cluster_config(
                         last_attached_at=now,
                         status=status_lib.VolumeStatus.IN_USE)
 
+    # Modal mounts buckets into the cluster's Function when it is launched,
+    # so they go into the cluster config rather than being mounted afterwards.
+    modal_cloud_bucket_mounts = []
+    if isinstance(cloud, clouds.Modal):
+        modal_cloud_bucket_mounts = modal_utils.get_cloud_bucket_mount_specs(
+            storage_mounts, dryrun=dryrun)
+
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
@@ -1474,6 +1483,7 @@ def write_cluster_config(
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
             'volume_mount_rw_paths': volume_mount_rw_paths,
+            'modal_cloud_bucket_mounts': modal_cloud_bucket_mounts,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
@@ -1619,6 +1629,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
+            clouds.Modal,
             clouds.Yotta,
         )):
         config = auth.configure_ssh_info(config)

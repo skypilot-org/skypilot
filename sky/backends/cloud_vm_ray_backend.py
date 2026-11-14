@@ -55,6 +55,7 @@ from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.modal import modal_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
 from sky.server import common as server_common
@@ -353,6 +354,7 @@ def _get_cluster_config_template(cloud):
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
         clouds.Mithril: 'mithril-ray.yml.j2',
+        clouds.Modal: 'modal-ray.yml.j2',
         clouds.Verda: 'verda-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -1158,6 +1160,7 @@ class RetryingVmProvisioner(object):
                         dryrun=dryrun,
                         keep_launch_fields_in_existing_config=cluster_exists,
                         volume_mounts=volume_mounts,
+                        storage_mounts=task.storage_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
                         extra_template_variables=extra_vars,
                     )
@@ -6676,6 +6679,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                     existing_slurm_host_mounts.add(
                                         (host_path, mount_path,
                                          config.get('mode')))
+                        elif isinstance(to_provision.cloud, clouds.Modal):
+                            # See sky/templates/modal-ray.yml.j2.
+                            volume_mounts_config = node_config.get(
+                                'ModalVolumes', [])
+                            for vol_mount in volume_mounts_config:
+                                vol_name = vol_mount.get('VolumeNameOnCloud')
+                                if vol_name:
+                                    existing_volume_names.add(vol_name)
                 except Exception as e:  # pylint: disable=broad-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
@@ -6936,6 +6947,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'File mount sync took {end - start} seconds.')
         logger.info(ux_utils.finishing_message('Synced file_mounts.', log_path))
 
+    @staticmethod
+    def _check_modal_storage_mounts(
+            handle: CloudVmRayResourceHandle,
+            storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
+        """Raises if a mount was not part of the Modal cluster's launch."""
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+        node_config = config.get('available_node_types',
+                                 {}).get('ray_head_default',
+                                         {}).get('node_config', {})
+        mounted = {
+            mount['Path'] for mount in node_config.get('CloudBucketMounts', [])
+        }
+        missing = [
+            dst for dst in storage_mounts
+            if modal_utils.resolve_mount_path(dst) not in mounted
+        ]
+        if missing:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Modal mounts buckets when a cluster is launched, so '
+                    f'{", ".join(sorted(missing))} cannot be mounted on the '
+                    f'running cluster {handle.cluster_name!r}. Launch a new '
+                    'cluster with this mount, or use mode: COPY.')
+
     def _execute_storage_mounts(
             self, handle: CloudVmRayResourceHandle,
             storage_mounts: Optional[Dict[Path, storage_lib.Storage]]):
@@ -6959,6 +6994,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # MOUNT_CACHED mode.
         if not storage_mounts:
             return
+
+        if isinstance(handle.launched_resources.cloud, clouds.Modal):
+            # Modal mounts buckets into the Function at launch (see
+            # CloudBucketMounts in the cluster YAML), so a mount can't be
+            # added to a running cluster.
+            self._check_modal_storage_mounts(handle, storage_mounts)
+            return
+
         start = time.time()
         runners = handle.get_command_runners()
         num_threads = subprocess_utils.get_parallel_threads(

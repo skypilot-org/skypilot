@@ -1,0 +1,152 @@
+"""Modal Volume provisioning."""
+
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from sky import clouds
+from sky import global_user_state
+from sky import models
+from sky import sky_logging
+from sky.adaptors import modal as modal_adaptor
+
+logger = sky_logging.init_logger(__name__)
+
+
+def _environment_name(config: models.VolumeConfig):
+    return config.config.get('environment_name')
+
+
+def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
+    """Create or resolve a Modal Volume."""
+    name_on_cloud = config.name_on_cloud
+    assert name_on_cloud is not None
+    environment_name = _environment_name(config)
+    if environment_name is None:
+        # Record the active environment, so later deletes and mounts target
+        # this volume even after the active environment changes.
+        # pylint: disable=protected-access
+        environment_name = clouds.Modal._get_active_environment_name()
+        config.config['environment_name'] = environment_name
+    volume = modal_adaptor.modal.Volume.from_name(
+        name_on_cloud,
+        environment_name=environment_name,
+        create_if_missing=not config.config.get('use_existing', False))
+    volume.hydrate()
+    config.id_on_cloud = getattr(volume, 'object_id', None)
+    logger.info(f'Created or resolved Modal Volume {name_on_cloud}.')
+    return config
+
+
+def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
+    """Delete a Modal Volume.
+
+    A volume registered with ``use_existing`` was not created by SkyPilot, so
+    only its record is dropped and the Modal Volume and its data are kept.
+    """
+    name_on_cloud = config.name_on_cloud
+    assert name_on_cloud is not None
+    if config.config.get('use_existing'):
+        logger.info(f'Leaving Modal Volume {name_on_cloud} intact '
+                    '(use_existing=True).')
+        return config
+    modal_adaptor.modal.Volume.objects.delete(
+        name_on_cloud,
+        allow_missing=True,
+        environment_name=_environment_name(config))
+    logger.info(f'Deleted Modal Volume {name_on_cloud}.')
+    return config
+
+
+def _modal_volume_mounts(
+        cluster_record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The `ModalVolumes` of a cluster's config; empty if not on Modal."""
+    handle = cluster_record.get('handle')
+    if handle is None:
+        return []
+    launched_resources = getattr(handle, 'launched_resources', None)
+    if not isinstance(getattr(launched_resources, 'cloud', None), clouds.Modal):
+        return []
+    # `handle.cluster_yaml` is the YAML's path, not its contents.
+    cluster_yaml = getattr(handle, 'cluster_yaml', None)
+    if not cluster_yaml:
+        return []
+    try:
+        cluster_yaml_obj = global_user_state.get_cluster_yaml_dict(cluster_yaml)
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Failed to read cluster YAML for Modal volume used-by.',
+                     exc_info=True)
+        return []
+    node_config = (cluster_yaml_obj.get('available_node_types',
+                                        {}).get('ray_head_default',
+                                                {}).get('node_config', {}))
+    return node_config.get('ModalVolumes', [])
+
+
+def _mounts_by_cluster() -> Dict[str, List[Dict[str, Any]]]:
+    """{cluster name: its Modal Volume mounts}, for clusters that have any."""
+    mounts = {}
+    for cluster_record in global_user_state.get_clusters():
+        name = cluster_record.get('name')
+        volume_mounts = _modal_volume_mounts(cluster_record)
+        if name and volume_mounts:
+            mounts[name] = volume_mounts
+    return mounts
+
+
+def _uses_volume(volume_mounts: List[Dict[str, Any]], volume_name_on_cloud: str,
+                 environment_name: Optional[str]) -> bool:
+    for volume_mount in volume_mounts:
+        if volume_mount.get('VolumeNameOnCloud') != volume_name_on_cloud:
+            continue
+        # Modal Volume names are per environment. Volumes created before
+        # their environment was recorded match on name alone.
+        mount_environment = volume_mount.get('EnvironmentName')
+        if (environment_name is None or mount_environment is None or
+                mount_environment == environment_name):
+            return True
+    return False
+
+
+def _clusters_using(
+        config: models.VolumeConfig,
+        mounts_by_cluster: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+    volume_name_on_cloud = config.name_on_cloud
+    assert volume_name_on_cloud is not None
+    return [
+        name for name, volume_mounts in mounts_by_cluster.items()
+        if _uses_volume(volume_mounts, volume_name_on_cloud,
+                        _environment_name(config))
+    ]
+
+
+def get_volume_usedby(
+    config: models.VolumeConfig,) -> Tuple[List[str], List[str]]:
+    """Return SkyPilot Modal clusters known to reference this volume."""
+    return [], _clusters_using(config, _mounts_by_cluster())
+
+
+def get_all_volumes_usedby(
+    configs: List[models.VolumeConfig],
+) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+    used_by_pods: Dict[str, Any] = {}
+    used_by_clusters: Dict[str, Any] = {}
+    failed_volume_names: Set[str] = set()
+    # The clusters and their configs are read once for all volumes.
+    mounts_by_cluster = _mounts_by_cluster() if configs else {}
+    for config in configs:
+        try:
+            used_by_clusters[config.name_on_cloud] = _clusters_using(
+                config, mounts_by_cluster)
+            used_by_pods[config.name_on_cloud] = []
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get usedby info for Modal volume '
+                         f'{config.name}: {e}')
+            failed_volume_names.add(config.name)
+    return used_by_pods, used_by_clusters, failed_volume_names
+
+
+def map_all_volumes_usedby(
+        used_by_pods: Dict[str, Any], used_by_clusters: Dict[str, Any],
+        config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
+    return (used_by_pods.get(config.name_on_cloud,
+                             []), used_by_clusters.get(config.name_on_cloud,
+                                                       []))
