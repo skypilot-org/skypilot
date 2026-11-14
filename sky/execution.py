@@ -20,10 +20,12 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.jobs import constants as managed_job_constants
 from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.usage import usage_lib
@@ -41,7 +43,6 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
-    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -404,6 +405,33 @@ def _autodown_needs_identity_it_lacks(
                                                       launched))
 
 
+def _blocked_resources_from_context(
+        extra_launch_context: Dict[str, Any],
+        job_logger: logging.Logger) -> List[resources_lib.Resources]:
+    """The resources the jobs controller asked this launch not to use.
+
+    Task.blocked_resources does not survive the task YAML, so the controller
+    sends them in the launch context. Blocks this server cannot use are
+    dropped.
+    """
+    blocked: List[resources_lib.Resources] = []
+    for config in extra_launch_context.get(
+            managed_job_constants.BLOCKED_RESOURCES_LAUNCH_CONTEXT_KEY, []):
+        try:
+            parsed = resources_lib.Resources.from_yaml_config(config)
+            for r in parsed:
+                # Parsing defers this; matching would otherwise hit it.
+                r.validate()
+            blocked.extend(parsed)
+        except Exception as e:  # pylint: disable=broad-except
+            # E.g. this server's catalog or Kubernetes contexts dropped what
+            # the block names, so nothing can launch there anyway. A block
+            # only orders the search, so launch without it rather than fail.
+            job_logger.warning(f'Ignoring blocked resources {config}: '
+                               f'{common_utils.format_exception(e)}')
+    return blocked
+
+
 def _execute_dag(
     dag: 'sky.Dag',
     dryrun: bool,
@@ -433,6 +461,9 @@ def _execute_dag(
     """
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
+    blocked = _blocked_resources_from_context(_extra_launch_context, job_logger)
+    if blocked:
+        task.blocked_resources = blocked
 
     if any(r.job_recovery is not None for r in task.resources):
         job_logger.warning(
@@ -572,9 +603,25 @@ def _execute_dag(
                         job_logger.info(
                             f'Choosing resources for {controller.value.name}...'
                         )
-                    dag = optimizer.Optimizer.optimize(dag,
-                                                       minimize=optimize_target,
-                                                       quiet=_quiet_optimizer)
+                    try:
+                        dag = optimizer.Optimizer.optimize(
+                            dag,
+                            minimize=optimize_target,
+                            blocked_resources=task.blocked_resources,
+                            quiet=_quiet_optimizer)
+                    except exceptions.ResourcesUnavailableError:
+                        if not task.blocked_resources:
+                            raise
+                        # Only the blocked resources fit, e.g. a recovering
+                        # managed job with a single region or Kubernetes
+                        # context: launch there rather than fail.
+                        job_logger.info('No other resources fit; trying the '
+                                        'blocked ones.')
+                        task.blocked_resources = None
+                        dag = optimizer.Optimizer.optimize(
+                            dag,
+                            minimize=optimize_target,
+                            quiet=_quiet_optimizer)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
@@ -589,9 +636,11 @@ def _execute_dag(
                   backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
 
         def _planner(_t: 'sky.Task'):
-            new_dag = optimizer.Optimizer.optimize(dag,
-                                                   minimize=optimize_target,
-                                                   quiet=_quiet_optimizer)
+            new_dag = optimizer.Optimizer.optimize(
+                dag,
+                minimize=optimize_target,
+                blocked_resources=task.blocked_resources,
+                quiet=_quiet_optimizer)
             new_task = new_dag.tasks[0]
             assert new_task.best_resources is not None, new_task
             return new_task.best_resources.assert_launchable()

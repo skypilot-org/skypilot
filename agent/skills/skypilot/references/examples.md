@@ -374,7 +374,7 @@ resources:
 
   # Recovery strategy when spot instance is preempted
   job_recovery:
-    strategy: EAGER_NEXT_REGION    # Move to next region on preemption
+    strategy: EAGER_NEXT_REGION    # Relaunch right away on preemption
     max_restarts_on_errors: 3      # Retry up to 3 times on user code errors
 
 envs:
@@ -1217,9 +1217,11 @@ resources:
   accelerators: A100:8
   use_spot: true
   job_recovery:
-    # EAGER_NEXT_REGION: immediately try a different region on preemption
-    # Best for spot instances where preemption signals regional shortage
+    # EAGER_NEXT_REGION: relaunch immediately on preemption
     strategy: EAGER_NEXT_REGION
+    # Try other regions first: preemption often signals regional shortage.
+    # Off by default, as moving regions can change cost and data locality.
+    try_other_regions_first: true
 
 file_mounts:
   /checkpoints:

@@ -249,6 +249,10 @@ class Resources:
             - recover_on_exit_codes: a list of exit codes that should trigger
               job recovery. If any task exits with a code in this list, the job
               will be recovered regardless of max_restarts_on_errors limit.
+            - try_other_regions_first: with EAGER_NEXT_REGION, after a
+              preemption or node failure on a cloud, relaunch in another
+              region first, falling back to the same region. Defaults to
+              False.
 
           region: the region to use. Deprecated. Use `infra` instead.
           zone: the zone to use. Deprecated. Use `infra` instead.
@@ -1522,6 +1526,13 @@ class Resources:
             # registered, so we pass to let the server validate.
             if annotations.is_on_api_server:
                 raise
+        if (self._job_recovery['strategy'] == 'FAILOVER' and
+                self._job_recovery.get('try_other_regions_first')):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'job_recovery.try_other_regions_first needs the '
+                    'EAGER_NEXT_REGION strategy: FAILOVER retries the same '
+                    'region first.')
 
     def extract_docker_image(self) -> Optional[str]:
         if self._docker_image is not None:

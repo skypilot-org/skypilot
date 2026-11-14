@@ -969,7 +969,7 @@ We can specify the strategy for which region to recover the job to when it fails
 
 If `FAILOVER` is specified, the job will be restarted in the same region if the node fails, and go to the next region if no available resources are found in the same region.
 
-If `EAGER_NEXT_REGION` is specified, the job will go to the next region directly if the node fails. This is useful for spot instances, as in practice, preemptions in a region usually indicate a shortage of resources in that region.
+If `EAGER_NEXT_REGION` is specified, the cluster is terminated as soon as the node fails, and the job is relaunched on the cheapest available resources, which can be in the same region. To try other regions first, set `try_other_regions_first` (see below).
 
 Default: `EAGER_NEXT_REGION`
 
@@ -988,6 +988,17 @@ resources:
   job_recovery:
     strategy: EAGER_NEXT_REGION
 ```
+
+With `EAGER_NEXT_REGION`, we can also make the job try other regions first after a preemption or node failure. This is useful for spot instances, as in practice, preemptions in a region usually indicate a shortage of resources in that region. It is off by default, as moving regions can change the job's cost and how far it runs from its data.
+
+```yaml
+resources:
+  job_recovery:
+    strategy: EAGER_NEXT_REGION
+    try_other_regions_first: true
+```
+
+The region is skipped only for the instance type and spot setting that failed, so other candidates in `resources` can still run there. If no other region can run the job, or none has capacity, the job is relaunched in the same region. To keep the job near its data, list only the regions it may use, for example with `any_of`. The region is not skipped on Kubernetes or Slurm, where it is a single cluster and losing a pod or node does not mean the cluster is short of capacity. It is also not skipped when the job runs on a pool, or when the restart is due to the user program failing (see `max_restarts_on_errors`).
 
 We can also specify the maximum number of times to restart the job on user code errors (non-zero exit codes).
 
@@ -1022,6 +1033,7 @@ Available fields:
 - `strategy`: The recovery strategy to use (`FAILOVER` or `EAGER_NEXT_REGION`)
 - `max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
 - `recover_on_exit_codes`: Exit code(s) (0-255) that should always trigger recovery. Can be a single integer (e.g., `33`) or a list (e.g., `[33, 34]`). Restarts triggered by these exit codes do not count towards the `max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
+- `try_other_regions_first`: With `EAGER_NEXT_REGION` only. After a preemption or node failure on a cloud, relaunch in another region first, and fall back to the same region if none can run the job. Default: `false`.
 
 
 

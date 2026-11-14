@@ -338,7 +338,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    :header-rows: 0
 
    * - Hardware fails (GPU errors, node crashes, preemptions):
-     - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
+     - Tear down the old temporary cluster and provision a new one on the cheapest available resources, then restart the job. To try other regions first, set :ref:`try_other_regions_first <yaml-spec-resources-job-recovery>`.
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Can't find available resources due to capacity:
