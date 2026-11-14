@@ -47,20 +47,20 @@ function JobHeader({
   return (
     <div className="flex items-center justify-between mb-4 h-5">
       <div className="text-base flex items-center">
-        <Link href="/clusters" className="text-sky-blue hover:underline">
+        <Link href="/clusters" className="text-brand hover:underline">
           Sky Clusters
         </Link>
-        <span className="mx-2 text-gray-500">›</span>
+        <span className="mx-2 text-content-tertiary">›</span>
         <Link
           href={`/clusters/${cluster}`}
-          className="text-sky-blue hover:underline"
+          className="text-brand hover:underline"
         >
           {cluster}
         </Link>
-        <span className="mx-2 text-gray-500">›</span>
+        <span className="mx-2 text-content-tertiary">›</span>
         <Link
           href={`/clusters/${cluster}/${job}`}
-          className="text-sky-blue hover:underline"
+          className="text-brand hover:underline"
         >
           {job}
           {jobData.job && jobData.job != '-' ? ` (${jobData.job})` : ''}
@@ -71,14 +71,16 @@ function JobHeader({
         {(loading || isRefreshing) && (
           <div className="flex items-center mr-2">
             <CircularProgress size={15} className="mt-0" />
-            <span className="text-sm ml-2 text-gray-500">Loading...</span>
+            <span className="text-sm ml-2 text-content-tertiary">
+              Loading...
+            </span>
           </div>
         )}
         <Tooltip content="Refresh" className="text-muted-foreground">
           <button
             onClick={onRefresh}
             disabled={loading || isRefreshing}
-            className="text-sm text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
+            className="text-sm text-brand hover:text-brand-bright font-medium mx-2 flex items-center"
           >
             <RotateCwIcon className="w-4 h-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
@@ -288,19 +290,19 @@ export function JobDetailPage() {
                 <div className="p-4">
                   <div className="grid grid-cols-2 gap-6">
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-content-secondary font-medium text-base">
                         Job ID
                       </div>
                       <div className="text-base mt-1">{jobData.id}</div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-content-secondary font-medium text-base">
                         Job Name
                       </div>
                       <div className="text-base mt-1">{jobData.job}</div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-content-secondary font-medium text-base">
                         Status
                       </div>
                       <div className="text-base mt-1">
@@ -308,7 +310,7 @@ export function JobDetailPage() {
                       </div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-content-secondary font-medium text-base">
                         User
                       </div>
                       <div className="text-base mt-1">
@@ -319,7 +321,7 @@ export function JobDetailPage() {
                       </div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-content-secondary font-medium text-base">
                         Submitted
                       </div>
                       <div className="text-base mt-1">
@@ -330,7 +332,7 @@ export function JobDetailPage() {
                     </div>
                     {jobData.resources && (
                       <div>
-                        <div className="text-gray-600 font-medium text-base">
+                        <div className="text-content-secondary font-medium text-base">
                           Requested Resources
                         </div>
                         <div className="text-base mt-1">
@@ -340,13 +342,13 @@ export function JobDetailPage() {
                     )}
                     {jobData.cluster && (
                       <div>
-                        <div className="text-gray-600 font-medium text-base">
+                        <div className="text-content-secondary font-medium text-base">
                           Cluster
                         </div>
                         <div className="text-base mt-1">
                           <Link
                             href={`/clusters/${jobData.cluster}`}
-                            className="text-sky-blue hover:underline"
+                            className="text-brand hover:underline"
                           >
                             {jobData.cluster}
                           </Link>
@@ -354,7 +356,7 @@ export function JobDetailPage() {
                       </div>
                     )}
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-content-secondary font-medium text-base">
                         Git Commit
                       </div>
                       <div className="text-base mt-1 flex items-center">
@@ -373,10 +375,10 @@ export function JobDetailPage() {
                                   setIsCopied(true);
                                   setTimeout(() => setIsCopied(false), 2000);
                                 }}
-                                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                                className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
                               >
                                 {isCopied ? (
-                                  <CheckIcon className="w-4 h-4 text-green-600" />
+                                  <CheckIcon className="w-4 h-4 text-green-fg" />
                                 ) : (
                                   <CopyIcon className="w-4 h-4" />
                                 )}
@@ -384,13 +386,13 @@ export function JobDetailPage() {
                             </Tooltip>
                           </span>
                         ) : (
-                          <span className="text-gray-400">-</span>
+                          <span className="text-content-faint">-</span>
                         )}
                       </div>
                     </div>
                     {Object.keys(combinedExternalLinks).length > 0 && (
                       <div className="col-span-2">
-                        <div className="text-gray-600 font-medium text-base">
+                        <div className="text-content-secondary font-medium text-base">
                           External Links
                         </div>
                         <div className="text-base mt-1">
@@ -404,7 +406,7 @@ export function JobDetailPage() {
                                     href={normalizedUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                                    className="text-blue-fg hover:text-blue-fg-stronger hover:underline"
                                   >
                                     {label}
                                   </a>
@@ -430,7 +432,7 @@ export function JobDetailPage() {
                 <div className="flex items-center justify-between px-4 pt-4">
                   <div className="flex items-center">
                     <h2 className="text-lg font-semibold">Logs</h2>
-                    <span className="ml-2 text-xs text-gray-500">
+                    <span className="ml-2 text-xs text-content-tertiary">
                       (Logs are not streaming; click refresh to fetch the latest
                       logs.)
                     </span>
@@ -448,7 +450,7 @@ export function JobDetailPage() {
                             workspace: clusterData?.workspace,
                           })
                         }
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        className="text-brand hover:text-brand-bright flex items-center"
                       >
                         <Download className="w-4 h-4" />
                       </button>
@@ -460,7 +462,7 @@ export function JobDetailPage() {
                       <button
                         onClick={handleRefreshLogs}
                         disabled={isLoadingLogs}
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        className="text-brand hover:text-brand-bright flex items-center"
                       >
                         <RotateCwIcon
                           className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
@@ -471,7 +473,7 @@ export function JobDetailPage() {
                 </div>
                 <div className="p-4">
                   {isPending ? (
-                    <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+                    <div className="bg-surface-log flex items-center justify-center py-4 text-content-tertiary">
                       <span>
                         Waiting for the job to start; refresh in a few moments.
                       </span>

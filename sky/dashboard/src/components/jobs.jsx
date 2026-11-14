@@ -560,7 +560,7 @@ export function ManagedJobs() {
         <div className="flex items-center">
           <Link
             href="/jobs"
-            className="text-sky-blue hover:underline leading-none text-base"
+            className="text-brand hover:underline leading-none text-base"
           >
             Managed Jobs
           </Link>
@@ -629,20 +629,21 @@ export function ManagedJobs() {
 
 function BatchProgressBar({ completed, total }) {
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+  const barColor =
+    completed >= total ? 'bg-green-solid-soft' : 'bg-blue-solid-soft';
   return (
     <NonCapitalizedTooltip
       content={`Batch progress: ${completed}/${total} (${pct}%)`}
       className="text-sm text-muted-foreground"
     >
       <div className="flex items-center gap-2">
-        <div className="w-20 bg-gray-200 rounded-full h-2">
+        <div className="w-20 bg-surface-strong rounded-full h-2">
           <div
             className={`${barColor} h-2 rounded-full transition-all`}
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="text-xs text-gray-600">
+        <span className="text-xs text-content-secondary">
           {completed}/{total}
         </span>
       </div>
@@ -660,7 +661,7 @@ function externalJobHref(item) {
 function ExternalPill() {
   return (
     <span
-      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-gray-200 bg-gray-100 text-gray-600 text-xs font-medium"
+      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-line bg-surface-muted text-content-secondary text-xs font-medium"
       style={{ paddingTop: 1, paddingBottom: 1, lineHeight: 1.4 }}
       title="This workload is launched and managed outside of SkyPilot"
     >
@@ -677,7 +678,10 @@ function ExternalJobId({ item, href }) {
     <NonCapitalizedTooltip
       content={`External ID managed by Slurm cluster ${item.external_cluster}`}
     >
-      <Link href={href} className="text-gray-400 underline decoration-dotted">
+      <Link
+        href={href}
+        className="text-content-faint underline decoration-dotted"
+      >
         {item.external_job_id}
       </Link>
     </NonCapitalizedTooltip>
@@ -692,7 +696,10 @@ function JobNameLink({ href, name, id, tooltip, muted }) {
   if (!name) {
     return (
       <NonCapitalizedTooltip content={tooltip || `Job ${id} has no name`}>
-        <Link href={href} className="text-gray-500 hover:underline block">
+        <Link
+          href={href}
+          className="text-content-tertiary hover:underline block"
+        >
           -
         </Link>
       </NonCapitalizedTooltip>
@@ -701,7 +708,9 @@ function JobNameLink({ href, name, id, tooltip, muted }) {
   // max-w (not fixed w): the box shrinks to the name so a trailing badge
   // sits next to the text instead of parking at the 240px edge after a
   // short name; long names still truncate at 240px.
-  const color = muted ? 'text-gray-500 hover:underline' : 'text-blue-600';
+  const color = muted
+    ? 'text-content-tertiary hover:underline'
+    : 'text-blue-fg';
   return (
     <NonCapitalizedTooltip content={tooltip || name}>
       <Link href={href} className={`${color} block max-w-[240px] truncate`}>
@@ -1699,15 +1708,15 @@ export function ManagedJobsTable({
                 <div className="flex items-center">
                   <button
                     onClick={() => toggleJobGroup(jobId)}
-                    className="p-1 hover:bg-gray-200 rounded mr-1"
+                    className="p-1 hover:bg-surface-strong rounded mr-1"
                   >
                     {isExpanded ? (
-                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                      <ChevronDownIcon className="w-4 h-4 text-content-tertiary" />
                     ) : (
-                      <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                      <ChevronRightIcon className="w-4 h-4 text-content-tertiary" />
                     )}
                   </button>
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                  <Link href={`/jobs/${jobId}`} className="text-blue-fg">
                     {jobId}
                   </Link>
                 </div>
@@ -1718,7 +1727,7 @@ export function ManagedJobsTable({
           if (renderMode === 'groupChild') {
             return (
               <TableCell className="whitespace-nowrap relative">
-                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
+                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-line-strong"></div>
                 {isMember && item.dynamic_task_index != null ? (
                   // A dynamic task (a job launched from this group) reads
                   // like one of the group's tasks: its server-assigned index
@@ -1727,7 +1736,7 @@ export function ManagedJobsTable({
                   // declared task index. The job id is in the tooltip and behind
                   // the name link.
                   <span
-                    className="text-gray-500 pl-6"
+                    className="text-content-tertiary pl-6"
                     title={`Dynamic task ${item.dynamic_task_index} of this job (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
                   >
                     {item.dynamic_task_index}
@@ -1736,13 +1745,15 @@ export function ManagedJobsTable({
                 ) : isMember ? (
                   // A member from before indices existed: its job id.
                   <span className="pl-6">
-                    <span className="text-gray-500">↳ </span>
-                    <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                    <span className="text-content-tertiary">↳ </span>
+                    <Link href={`/jobs/${item.id}`} className="text-blue-fg">
                       {item.id}
                     </Link>
                   </span>
                 ) : (
-                  <span className="text-gray-500 pl-6">{taskIndex}</span>
+                  <span className="text-content-tertiary pl-6">
+                    {taskIndex}
+                  </span>
                 )}
               </TableCell>
             );
@@ -1757,7 +1768,7 @@ export function ManagedJobsTable({
           const idLink = item.is_external ? (
             <ExternalJobId item={item} href={detailHref} />
           ) : (
-            <Link href={detailHref} className="text-blue-600">
+            <Link href={detailHref} className="text-blue-fg">
               {item.id}
             </Link>
           );
@@ -1829,7 +1840,7 @@ export function ManagedJobsTable({
                   {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
-                    className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
+                    className="ml-2 text-xs font-medium bg-surface-strong text-content hover:bg-surface-stronger px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
                   >
                     {badgeKind}: {badgeLabel}
                   </button>
@@ -1860,10 +1871,10 @@ export function ManagedJobsTable({
                 : null;
             return (
               <TableCell className="whitespace-nowrap">
-                <Link href={href} className="text-blue-600 hover:underline">
+                <Link href={href} className="text-blue-fg hover:underline">
                   {item.name || `Job ${item.id}`}
                   {memberIsMultiTask && (
-                    <span className="text-gray-500">
+                    <span className="text-content-tertiary">
                       {`: ${item.task || `Task ${taskIndex}`}`}
                     </span>
                   )}
@@ -1886,7 +1897,7 @@ export function ManagedJobsTable({
               <TableCell className="whitespace-nowrap">
                 <Link
                   href={`/jobs/${item.id}/${taskIndex}`}
-                  className="text-blue-600 hover:underline"
+                  className="text-blue-fg hover:underline"
                 >
                   {item.task || `Task ${taskIndex}`}
                 </Link>
@@ -1959,11 +1970,11 @@ export function ManagedJobsTable({
           shouldShowWorkspace ? (
             <TableCell>
               {item.is_external ? (
-                <span className="text-gray-400">—</span>
+                <span className="text-content-faint">—</span>
               ) : (
                 <Link
                   href="/workspaces"
-                  className="text-gray-700 hover:text-blue-600 hover:underline"
+                  className="text-content hover:text-blue-fg hover:underline"
                 >
                   {workspaceLabel(item)}
                 </Link>
@@ -2124,7 +2135,7 @@ export function ManagedJobsTable({
                     <span>
                       <Link
                         href="/infra"
-                        className="text-blue-600 hover:underline"
+                        className="text-blue-fg hover:underline"
                       >
                         {item.cloud || item.infra.split('(')[0].trim()}
                       </Link>
@@ -2312,7 +2323,7 @@ export function ManagedJobsTable({
                   <Link
                     href={externalJobHref(item)}
                     title="View logs"
-                    className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+                    className="text-brand hover:text-brand-bright font-medium inline-flex items-center h-8"
                   >
                     <FileSearchIcon className="w-4 h-4" />
                   </Link>
@@ -2437,13 +2448,15 @@ export function ManagedJobsTable({
             later, cannot override them. */}
         <div className="text-sm mb-4 lg:flex lg:items-end lg:justify-between max-lg:grid max-lg:grid-cols-[minmax(0,1fr)_auto] max-lg:items-start max-lg:gap-y-3">
           <div className="lg:flex lg:flex-wrap lg:items-center lg:min-w-0 max-lg:contents">
-            <span className="mr-2 text-sm font-medium text-gray-700 max-lg:hidden">
+            <span className="mr-2 text-sm font-medium text-content max-lg:hidden">
               Statuses:
             </span>
             <div className="lg:flex lg:flex-wrap lg:gap-2 lg:items-center max-lg:contents">
               <div className="max-lg:relative max-lg:flex max-lg:flex-wrap max-lg:items-center max-lg:gap-2 max-lg:col-span-2 lg:contents">
                 {!loading && totalNoFilter === 0 && !isInitialLoad && (
-                  <span className="text-gray-500 mr-2">No jobs found</span>
+                  <span className="text-content-tertiary mr-2">
+                    No jobs found
+                  </span>
                 )}
                 {/* Primary statuses: always rendered in fixed order so the bar
                   doesn't jitter when counts change. The count badge uses
@@ -2461,12 +2474,12 @@ export function ManagedJobsTable({
                       className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
                         highlighted
                           ? getBadgeStyle(status)
-                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                          : 'bg-surface-subtle text-content-secondary hover:bg-surface-muted'
                       }`}
                     >
                       <span>{status}</span>
                       <span
-                        className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                        className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-surface/50' : 'bg-surface-strong'} px-1.5 py-0.5 rounded`}
                       >
                         {count}
                       </span>
@@ -2485,7 +2498,7 @@ export function ManagedJobsTable({
                       className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
                     >
                       <span>{status}</span>
-                      <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
+                      <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-surface/50 px-1.5 py-0.5 rounded">
                         {count}
                       </span>
                     </button>
@@ -2511,15 +2524,15 @@ export function ManagedJobsTable({
                         onClick={() => setMoreMenuOpen((v) => !v)}
                         className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
                           isNarrowed
-                            ? 'bg-gray-200 text-gray-800'
-                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                            ? 'bg-surface-strong text-content-heavy'
+                            : 'bg-surface-subtle text-content-secondary hover:bg-surface-muted'
                         }`}
                         aria-haspopup="true"
                         aria-expanded={moreMenuOpen}
                       >
                         <span>More</span>
                         {isNarrowed ? (
-                          <span className="text-xs tabular-nums bg-white/70 px-1.5 py-0.5 rounded">
+                          <span className="text-xs tabular-nums bg-surface/70 px-1.5 py-0.5 rounded">
                             <span className="inline-block text-center min-w-[1rem]">
                               {otherIncludedCount}
                             </span>{' '}
@@ -2527,7 +2540,7 @@ export function ManagedJobsTable({
                           </span>
                         ) : (
                           otherTotalCount > 0 && (
-                            <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-gray-200 px-1.5 py-0.5 rounded">
+                            <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-surface-strong px-1.5 py-0.5 rounded">
                               {otherTotalCount}
                             </span>
                           )
@@ -2537,7 +2550,7 @@ export function ManagedJobsTable({
                         />
                       </button>
                       {moreMenuOpen && (
-                        <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
+                        <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-line bg-surface shadow-md py-1">
                           {OTHER_STATUSES.map((status) => {
                             const count = statusCounts[status] ?? 0;
                             // A status is included in the current view either
@@ -2551,22 +2564,22 @@ export function ManagedJobsTable({
                               <button
                                 key={status}
                                 onClick={() => handleStatusClick(status)}
-                                className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
-                                  explicit ? 'bg-gray-50' : ''
+                                className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-surface-subtle ${
+                                  explicit ? 'bg-surface-subtle' : ''
                                 }`}
                               >
                                 <span className="flex items-center gap-2 min-w-0">
                                   <CheckIcon
-                                    className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-sky-blue' : 'text-transparent'}`}
+                                    className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-brand' : 'text-transparent'}`}
                                   />
                                   <span
-                                    className={`truncate ${included ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
+                                    className={`truncate ${included ? 'font-medium text-content-strong' : count === 0 ? 'text-content-faint' : 'text-content'}`}
                                   >
                                     {status}
                                   </span>
                                 </span>
                                 <span
-                                  className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-gray-400' : 'text-gray-500'}`}
+                                  className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-content-faint' : 'text-content-tertiary'}`}
                                 >
                                   {count}
                                 </span>
@@ -2654,18 +2667,18 @@ export function ManagedJobsTable({
                   if (!showHint) return null;
                   return (
                     <div
-                      className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                      className="inline-flex items-center gap-2 rounded-full border border-sky-line/70 bg-sky-tint pl-2 pr-2.5 py-0.5 text-xs shrink-0"
                       role="status"
                       aria-live="polite"
                     >
-                      <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
-                      <span className="text-gray-700">
+                      <InfoIcon className="h-3 w-3 text-sky-fg shrink-0" />
+                      <span className="text-content">
                         Showing your jobs only.
                       </span>
                       <button
                         type="button"
                         onClick={() => selectScope('all')}
-                        className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                        className="font-medium text-sky-fg-strong transition-colors hover:text-sky-fg-stronger hover:underline"
                       >
                         View all jobs
                       </button>
@@ -2679,7 +2692,7 @@ export function ManagedJobsTable({
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="max-lg:hidden ml-2 text-gray-500 text-sm">
+                <span className="max-lg:hidden ml-2 text-content-tertiary text-sm">
                   Loading...
                 </span>
               </div>
@@ -2698,7 +2711,7 @@ export function ManagedJobsTable({
               }}
               disabled={loading}
               title="Refresh"
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+              className="text-brand hover:text-brand-bright flex items-center text-sm"
             >
               <RotateCwIcon className="h-4 w-4 md:mr-1.5" />
               <span className="max-md:hidden">Refresh</span>
@@ -2717,7 +2730,7 @@ export function ManagedJobsTable({
             .join(' · ');
           if (errorText === externalErrorsDismissed) return null;
           return (
-            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-line bg-amber-tint px-3 py-2 text-sm text-amber-fg-stronger">
               <div>
                 <div>
                   Failed to fetch Slurm jobs from{' '}
@@ -2728,7 +2741,7 @@ export function ManagedJobsTable({
                 {externalFetchErrors.map((f) => (
                   <div
                     key={f.cluster}
-                    className="mt-1 font-mono text-xs text-amber-700"
+                    className="mt-1 font-mono text-xs text-amber-fg-strong"
                   >
                     {f.cluster}: {f.error}
                   </div>
@@ -2736,7 +2749,7 @@ export function ManagedJobsTable({
               </div>
               <button
                 onClick={() => setExternalErrorsDismissed(errorText)}
-                className="ml-3 flex-shrink-0 font-medium text-amber-800 hover:text-amber-900"
+                className="ml-3 flex-shrink-0 font-medium text-amber-fg-stronger hover:text-amber-fg-strongest"
                 title="Dismiss"
               >
                 ×
@@ -2751,9 +2764,9 @@ export function ManagedJobsTable({
         paginatedData.length === 0 &&
         !loading &&
         !isInitialLoad && (
-          <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+          <div className="mb-4 p-4 bg-surface-subtle rounded-lg border">
             <div className="flex flex-col items-center space-y-3">
-              <p className="text-gray-700 text-center text-sm">
+              <p className="text-content text-center text-sm">
                 Job controller stopped.
                 <br />
                 Restart to check status.
@@ -2762,7 +2775,7 @@ export function ManagedJobsTable({
                 variant="outline"
                 size="sm"
                 onClick={handleRestartController}
-                className="text-sky-blue hover:text-sky-blue-bright"
+                className="text-brand hover:text-brand-bright"
                 disabled={loading || isRestarting}
               >
                 {isRestarting ? (
@@ -2782,7 +2795,7 @@ export function ManagedJobsTable({
         )}
 
       {infraFilterUnsupported && (
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="mb-3 rounded-md border border-amber-line bg-amber-tint px-3 py-2 text-sm text-amber-fg-stronger">
           {infraFilterUnsupported}
         </div>
       )}
@@ -2791,7 +2804,7 @@ export function ManagedJobsTable({
         <div className="overflow-x-auto relative">
           {showSlowSpinner && (
             <div
-              className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 pointer-events-none transition-opacity"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-surface/70 pointer-events-none transition-opacity"
               aria-hidden="true"
             >
               <CircularProgress size={28} />
@@ -2823,7 +2836,7 @@ export function ManagedJobsTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-content-tertiary"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -2898,7 +2911,7 @@ export function ManagedJobsTable({
                     return (
                       <React.Fragment key={`group-${jobId}`}>
                         {/* Parent row for job group */}
-                        <TableRow className="hover:bg-gray-50">
+                        <TableRow className="hover:bg-surface-subtle">
                           {visibleColumns.map((col) => {
                             const cell = col.renderCell(firstTask, parentCtx);
                             return cell
@@ -2937,7 +2950,7 @@ export function ManagedJobsTable({
                             };
                             return (
                               <React.Fragment key={task.task_job_id}>
-                                <TableRow className="bg-gray-50/50">
+                                <TableRow className="bg-surface-subtle/50">
                                   {visibleColumns.map((col) => {
                                     const cell = col.renderCell(task, childCtx);
                                     return cell
@@ -2970,13 +2983,15 @@ export function ManagedJobsTable({
                     >
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
-                          <p className="text-gray-700">
+                          <p className="text-content">
                             The managed job controller is launching. It will be
                             ready shortly.
                           </p>
                           <div className="flex items-center">
                             <CircularProgress size={12} className="mr-2" />
-                            <span className="text-gray-500">Launching...</span>
+                            <span className="text-content-tertiary">
+                              Launching...
+                            </span>
                           </div>
                         </div>
                       )}
@@ -2984,10 +2999,10 @@ export function ManagedJobsTable({
                         !controllerLaunching &&
                         (infraFilterUnsupported ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md text-center">
-                            <p className="text-gray-700">
+                            <p className="text-content">
                               Cannot filter these jobs by infra.
                             </p>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-sm text-content-tertiary">
                               {infraFilterUnsupported}
                             </p>
                           </div>
@@ -2996,10 +3011,10 @@ export function ManagedJobsTable({
                           activeTab === 'all' &&
                           everyoneTotal > 0 ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md">
-                            <p className="text-gray-700">
+                            <p className="text-content">
                               You haven&apos;t submitted any managed jobs yet.
                             </p>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-sm text-content-tertiary">
                               {everyoneTotal.toLocaleString()} job
                               {everyoneTotal === 1 ? '' : 's'} in total — switch
                               to All Jobs to see them.
@@ -3008,7 +3023,7 @@ export function ManagedJobsTable({
                               variant="outline"
                               size="sm"
                               onClick={() => selectScope('all')}
-                              className="text-sky-blue hover:text-sky-blue-bright"
+                              className="text-brand hover:text-brand-bright"
                             >
                               View all jobs
                             </Button>
@@ -3024,7 +3039,7 @@ export function ManagedJobsTable({
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
                         <div className="flex flex-col items-center space-y-3 px-4">
-                          <p className="text-gray-700 text-center text-sm sm:text-base max-w-md">
+                          <p className="text-content text-center text-sm sm:text-base max-w-md">
                             The managed job controller has been stopped. Restart
                             to check the latest job status.
                           </p>
@@ -3032,7 +3047,7 @@ export function ManagedJobsTable({
                             variant="outline"
                             size="sm"
                             onClick={handleRestartController}
-                            className="text-sky-blue hover:text-sky-blue-bright"
+                            className="text-brand hover:text-brand-bright"
                             disabled={loading || isRestarting}
                           >
                             {isRestarting ? (
@@ -3091,7 +3106,7 @@ export function ManagedJobsTable({
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
-        confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
+        confirmClassName="bg-blue-solid hover:bg-blue-solid-hover text-white"
       />
     </div>
   );
@@ -3155,7 +3170,7 @@ export function Status2Actions({
       >
         <button
           onClick={(e) => handleLogsClick(e, 'logs')}
-          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+          className="text-brand hover:text-brand-bright font-medium inline-flex items-center h-8"
         >
           <FileSearchIcon className="w-4 h-4" />
           {withLabel && <span className="ml-1.5">Logs</span>}
@@ -3168,7 +3183,7 @@ export function Status2Actions({
       >
         <button
           onClick={(e) => handleDownloadLogs(e, false)}
-          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+          className="text-brand hover:text-brand-bright font-medium inline-flex items-center h-8"
           title="Download logs"
         >
           <Download className="w-4 h-4" />
@@ -3309,7 +3324,7 @@ export function ClusterJobs({
               <button
                 onClick={refreshClusterJobsOnly}
                 disabled={loading}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center text-sm ml-2"
+                className="text-brand hover:text-brand-bright font-medium inline-flex items-center text-sm ml-2"
               >
                 <RotateCwIcon className="w-4 h-4 mr-1" />
                 Refresh Jobs
@@ -3370,7 +3385,7 @@ export function ClusterJobs({
               <TableRow>
                 <TableCell
                   colSpan={8}
-                  className="text-center py-12 text-gray-500"
+                  className="text-center py-12 text-content-tertiary"
                 >
                   <div className="flex justify-center items-center">
                     <CircularProgress size={24} className="mr-2" />
@@ -3387,7 +3402,7 @@ export function ClusterJobs({
                     <TableCell>
                       <Link
                         href={`/clusters/${clusterName}/${item.id}`}
-                        className="text-blue-600"
+                        className="text-blue-fg"
                       >
                         {item.id}
                       </Link>
@@ -3395,7 +3410,7 @@ export function ClusterJobs({
                     <TableCell>
                       <Link
                         href={`/clusters/${clusterName}/${item.id}`}
-                        className="text-blue-600"
+                        className="text-blue-fg"
                       >
                         <TruncatedDetails
                           text={item.job || 'Unnamed job'}
@@ -3657,7 +3672,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableRow>
                 <TableCell
                   colSpan={poolColumnCount}
-                  className="text-center py-6 text-gray-500"
+                  className="text-center py-6 text-content-tertiary"
                 >
                   <div className="flex justify-center items-center">
                     <CircularProgress size={20} className="mr-2" />
@@ -3671,7 +3686,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>
                     <Link
                       href={`/jobs/pools/${pool.name}`}
-                      className="text-blue-600 hover:text-blue-800"
+                      className="text-blue-fg hover:text-blue-fg-stronger"
                     >
                       {pool.name}
                     </Link>
@@ -3691,7 +3706,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                       <JobStatusBadges jobCounts={pool.jobCounts} />
                       <Link
                         href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
-                        className="text-blue-600 hover:text-blue-800 text-xs"
+                        className="text-blue-fg hover:text-blue-fg-stronger text-xs"
                       >
                         See all jobs
                       </Link>

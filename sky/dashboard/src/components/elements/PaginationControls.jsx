@@ -37,7 +37,7 @@ export function PaginationControls({
       : '0 – 0 of 0';
 
   return (
-    <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+    <div className="flex justify-end items-center py-2 px-4 text-sm text-content">
       <div className="flex items-center space-x-4">
         <div className="flex items-center">
           <span className="mr-2">{itemLabel} per page:</span>
@@ -56,7 +56,7 @@ export function PaginationControls({
             </select>
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+              className="h-4 w-4 text-content-tertiary absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -95,14 +95,14 @@ export function PaginationControls({
                 }
               }}
               autoFocus
-              className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
+              className="w-16 px-2 py-1 border border-line-strong rounded text-sm text-center"
               placeholder={`1-${totalPages}`}
             />
-            <span className="text-gray-400">of {totalPages}</span>
+            <span className="text-content-faint">of {totalPages}</span>
           </form>
         ) : (
           <div
-            className="cursor-pointer select-none hover:text-blue-600"
+            className="cursor-pointer select-none hover:text-blue-fg"
             onClick={() => {
               if (totalPages > 1) {
                 setShowPageInput(true);
@@ -120,7 +120,7 @@ export function PaginationControls({
             size="icon"
             onClick={onPreviousPage}
             disabled={isPrevDisabled}
-            className="text-gray-500 h-8 w-8 p-0"
+            className="text-content-tertiary h-8 w-8 p-0"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -141,7 +141,7 @@ export function PaginationControls({
             size="icon"
             onClick={onNextPage}
             disabled={isNextDisabled}
-            className="text-gray-500 h-8 w-8 p-0"
+            className="text-content-tertiary h-8 w-8 p-0"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"

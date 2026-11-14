@@ -175,7 +175,7 @@ TOP_LINKS = [
 
 ACTIVE_LINKS_JS = """
   () => [...document.querySelectorAll('a.border-b-2')]
-    .filter(a => a.classList.contains('text-blue-600'))
+    .filter(a => a.classList.contains('text-blue-fg'))
     .map(a => a.getAttribute('href'))
 """
 
@@ -371,8 +371,8 @@ def test_every_top_level_page_renders(make_user, open_as, twist):
           expect=r'the top bar must highlight only',
           apply=run_script("""
             new MutationObserver(() => document
-              .querySelectorAll('a.border-b-2.text-blue-600')
-              .forEach(a => a.classList.remove('text-blue-600')))
+              .querySelectorAll('a.border-b-2.text-blue-fg')
+              .forEach(a => a.classList.remove('text-blue-fg')))
               .observe(document, {subtree: true, childList: true,
                                   attributes: true,
                                   attributeFilter: ['class']});
@@ -419,7 +419,7 @@ def test_top_bar_links_route_and_highlight(make_user, open_as, twist):
     expect(
         config,
         'the Configuration link must be highlighted on Settings').to_have_class(
-            re.compile(r'(^|\s)text-blue-600(\s|$)'))
+            re.compile(r'(^|\s)text-blue-fg(\s|$)'))
     assert page.evaluate(ACTIVE_LINKS_JS) == [], (
         'the top bar must highlight only Configuration on Settings, got '
         f'{page.evaluate(ACTIVE_LINKS_JS)}')

@@ -44,7 +44,7 @@ function LayoutContent({ children, highlighted }) {
   }, [reportUpgrade, clearUpgrade]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-surface-subtle">
       {/* Upgrade banner - rendered outside PluginSlot so it shows
           regardless of which navigation plugin is active */}
       <UpgradeBanner />
