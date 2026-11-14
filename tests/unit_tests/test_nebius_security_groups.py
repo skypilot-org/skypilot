@@ -468,6 +468,53 @@ def test_terminate_instances_worker_only_wait_times_out():
     assert any('still present' in m for m in warn_calls)
 
 
+def test_terminate_instances_full_teardown_waits_before_delete_cluster():
+    """Full teardown must not delete the GPU cluster while instances are
+    still attached: Nebius refuses that delete and delete_cluster only
+    logs the refusal at debug level, leaking the cluster. The GPU cluster
+    may only be deleted once the instance list is empty."""
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    listings = {'n': 0}
+    attached_at_delete = []
+
+    def fake_filter(*_args, **_kwargs):
+        listings['n'] += 1
+        # Terminate-loop listing and the first wait poll still see the
+        # head (delete in flight); later listings see it gone. The SG
+        # cleanup in the finally block polls again and also sees empty.
+        if listings['n'] <= 2:
+            return {'i-head': head}
+        return {}
+
+    def fake_delete_cluster(*_args, **_kwargs):
+        attached_at_delete.append(listings['n'])
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove') as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster',
+                           side_effect=fake_delete_cluster) as mock_del_cluster, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group'), \
+         mock.patch('time.sleep') as mock_sleep:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+    mock_remove.assert_called_once_with('i-head')
+    mock_del_cluster.assert_called_once()
+    # delete_cluster ran only after a listing came back empty (the third
+    # listing): one terminate-loop listing, one poll that still saw the
+    # head, one poll that saw it gone.
+    assert attached_at_delete == [3]
+    assert mock_sleep.call_count == 1
+
+
+
 def test_terminate_instances_noop_for_legacy_cluster_sg():
     """If no SG exists for the cluster (pre-PR launch), terminate cleanly
     skips the SG-delete branch."""
@@ -497,8 +544,9 @@ def test_terminate_instances_waits_for_termination_before_sg_delete():
     """
     order = []
     # _filter_instances: first call (terminate loop) returns one RUNNING
-    # instance; the wait-for-termination poll then sees one DELETING
-    # instance and finally an empty cluster.
+    # instance; the wait before delete_cluster then sees one DELETING
+    # instance and finally an empty cluster; the SG cleanup's own wait
+    # polls once more and sees the empty cluster right away.
     filter_results = iter([
         {
             'i-1': {
@@ -512,6 +560,7 @@ def test_terminate_instances_waits_for_termination_before_sg_delete():
                 'status': 'DELETING'
             }
         },
+        {},
         {},
     ])
 
@@ -543,8 +592,9 @@ def test_terminate_instances_waits_for_termination_before_sg_delete():
     assert order == [
         ('filter', 1),  # terminate loop enumerates the cluster
         ('remove', 'i-1'),
-        ('filter', 1),  # wait poll: still DELETING
-        ('filter', 0),  # wait poll: drained
+        ('filter', 1),  # pre-delete_cluster wait poll: still DELETING
+        ('filter', 0),  # pre-delete_cluster wait poll: drained
+        ('filter', 0),  # SG cleanup wait poll: already drained
         ('delete_sg', 'sg-2'),
     ]
 
@@ -655,9 +705,11 @@ def test_terminate_instances_sg_cleanup_error_does_not_mask_failure():
 
 
 def test_terminate_instances_sg_delete_proceeds_on_wait_timeout():
-    """If instances never drain within the bounded wait, we still take a
-    best-effort shot at the SG delete (its internal retry may catch a
-    late detach) instead of silently skipping it."""
+    """If instances never drain within the bounded wait, the teardown
+    raises (so the GPU cluster is not deleted too early and silently
+    leaked), but we still take a best-effort shot at the SG delete (its
+    internal retry may catch a late detach) instead of silently
+    skipping it."""
     filter_calls = {'n': 0}
 
     def fake_filter(*_args, **_kwargs):
@@ -667,22 +719,26 @@ def test_terminate_instances_sg_delete_proceeds_on_wait_timeout():
     with mock.patch.object(nebius_instance, '_filter_instances',
                            side_effect=fake_filter), \
          mock.patch.object(nebius_utils, 'remove'), \
-         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'delete_cluster') as mock_del_cluster, \
          mock.patch.object(nebius_utils, 'get_project_by_region',
                            return_value='proj-abc'), \
          mock.patch.object(nebius_utils, 'get_security_group_by_name',
                            return_value='sg-2'), \
          mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
          mock.patch('time.sleep'), \
-         mock.patch.object(nebius_instance, 'logger') as mock_logger:
+         mock.patch.object(nebius_instance, 'logger') as mock_logger, \
+         pytest.raises(RuntimeError, match='Timed out waiting for the '
+                                           'instances of mycluster'):
         nebius_instance.terminate_instances(
             'mycluster',
             provider_config={'region': 'eu-north1'},
             worker_only=False,
         )
 
+    mock_del_cluster.assert_not_called()
     mock_del_sg.assert_called_once_with('sg-2')
-    # Terminate-loop listing + the full bounded wait.
+    # Terminate-loop listing + the full bounded wait; the SG cleanup
+    # skips its own wait when termination failed.
     # pylint: disable-next=protected-access
     assert filter_calls['n'] == 1 + nebius_instance._TERMINATION_POLL_ATTEMPTS
     warn_calls = [c.args[0] for c in mock_logger.warning.call_args_list]

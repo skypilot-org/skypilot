@@ -397,6 +397,22 @@ def terminate_instances(
                         f'Timed out waiting for the worker instances of '
                         f'{cluster_name_on_cloud} to terminate.')
         else:
+            # Wait for all instances to be gone before deleting the GPU
+            # cluster. Instance deletion is async, and Nebius refuses to
+            # delete a GPU cluster while instances are still attached;
+            # delete_cluster logs that refusal only at debug level, so
+            # deleting right away silently leaks the cluster (and its
+            # fabric is then reused unchecked by later launches). Raise on
+            # timeout, as the worker_only path does, so the caller does
+            # not treat the teardown as complete while the GPU cluster
+            # may still exist.
+            if not _wait_for_instances_terminated(provider_config['region'],
+                                                  cluster_name_on_cloud,
+                                                  project_id):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Timed out waiting for the instances of '
+                        f'{cluster_name_on_cloud} to terminate.')
             utils.delete_cluster(cluster_name_on_cloud,
                                  provider_config['region'],
                                  project_id=project_id)
