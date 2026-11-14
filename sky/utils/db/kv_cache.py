@@ -159,26 +159,3 @@ def delete_cache_entries_by_prefix(prefix: str) -> None:
                 kv_cache_table.c.key.like(f'{escaped}%',
                                           escape=_LIKE_ESCAPE_CHAR)))
         session.commit()
-
-
-@metrics_lib.time_me
-def delete_cache_entries_by_prefix_suffix(prefix: str, suffix: str) -> None:
-    """Delete all cache entries whose key starts with *prefix* and ends
-    with *suffix*, with any content in between.
-
-    Both *prefix* and *suffix* are treated as literal strings — any SQL
-    LIKE wildcards (%, _) they contain are escaped automatically.
-
-    Args:
-        prefix: Literal prefix to match against cache keys.
-        suffix: Literal suffix to match against cache keys.
-    """
-    escaped_prefix = _escape_like(prefix)
-    escaped_suffix = _escape_like(suffix)
-    pattern = f'{escaped_prefix}%{escaped_suffix}'
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        session.execute(
-            sqlalchemy.delete(kv_cache_table).where(
-                kv_cache_table.c.key.like(pattern, escape=_LIKE_ESCAPE_CHAR)))
-        session.commit()

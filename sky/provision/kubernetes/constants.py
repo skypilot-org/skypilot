@@ -28,6 +28,10 @@ RAY_NODE_CONTAINER_NAME = 'ray-node'
 # replacement is observed, so it blocks garbage-collection of a deleted pod.
 KUEUE_MANAGED_FINALIZER = 'kueue.x-k8s.io/managed'
 
+# Label SkyPilot stamps on a cluster's pods when (and only when) a Kueue queue
+# is configured (templates/kubernetes-ray.yml.j2).
+KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
+
 # Provider-config key recording the Kubernetes context a cluster's pods
 # actually run on, when that can differ from the context the cluster was
 # submitted to (see get_execution_context_from_config). Recorded alongside

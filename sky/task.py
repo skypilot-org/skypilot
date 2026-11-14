@@ -427,8 +427,10 @@ class Task:
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
-          event_callback: A bash script that will be executed when the task
-            changes state.
+          event_callback: (Deprecated) A bash script that the jobs controller
+            runs when a managed job changes state. Disabled unless the API
+            server sets ``jobs.allow_event_callback: true``; it will be removed
+            in a future release.
           blocked_resources: A set of resources that this task cannot run on.
           api_server_access: If True, auto-inject API server credentials
             (endpoint and service account token) into the job's environment

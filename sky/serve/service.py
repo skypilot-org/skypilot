@@ -18,6 +18,7 @@ import filelock
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -113,6 +114,15 @@ def cleanup_storage(yaml_content: str) -> bool:
                 logger.debug(f'cleanup_storage: bucket for storage '
                              f'{storage_name!r} already gone, treating as '
                              f'already cleaned: {e}')
+                del task.storage_mounts[storage_name]
+            except exceptions.StorageWorkspaceError as e:
+                # Recorded in another workspace (by an update made from
+                # there before updates were held to the service's): not
+                # this service's to remove, and failing over it would fail
+                # again on every recovery.
+                logger.warning(f'cleanup_storage: storage {storage_name!r} '
+                               'is not reachable from the workspace this '
+                               f'service runs in; leaving it: {e}')
                 del task.storage_mounts[storage_name]
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
@@ -467,7 +477,8 @@ def _start(service_name: str,
                 controller_ip=pod_ip,
                 entrypoint=entrypoint,
                 user_hash=user_hash,
-                file_mounts_blob_id=file_mounts_blob_id)
+                file_mounts_blob_id=file_mounts_blob_id,
+                workspace=skypilot_config.get_active_workspace())
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:

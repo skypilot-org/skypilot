@@ -168,6 +168,20 @@ def test_with_low_cpu_count(mock_startable, mock_sleep, mock_cpu_count):
     assert batch_sizes == expected_started_counts
 
 
+def test_parallel_threads_follow_the_cpu_limit(mock_cpu_count):
+    # A 22-CPU container on a 32-core host gets 21 threads, not 31.
+    mock_cpu_count.return_value = 22
+    with mock.patch('os.cpu_count', return_value=32):
+        assert subprocess_utils.get_parallel_threads() == 21
+        assert subprocess_utils.get_parallel_threads('kubernetes') == 84
+
+
+def test_parallel_threads_keep_the_floor_of_four(mock_cpu_count):
+    # get_cpu_count() floors a fractional limit, so 0.5 CPU reports 0.
+    mock_cpu_count.return_value = 0
+    assert subprocess_utils.get_parallel_threads() == 4
+
+
 def _ignore_sigterm():
     """Process function that ignores SIGTERM signal."""
     signal.signal(signal.SIGTERM, signal.SIG_IGN)

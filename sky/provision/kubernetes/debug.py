@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import kai
 from sky.utils import yaml_utils
 
@@ -46,12 +47,10 @@ logger = sky_logging.init_logger(__name__)
 _KUEUE_GROUP = 'kueue.x-k8s.io'
 _KUEUE_VERSIONS = ('v1beta2', 'v1beta1')
 _KUEUE_WORKLOADS_PLURAL = 'workloads'
-# Label SkyPilot stamps on a cluster's pods when (and only when) a Kueue queue
-# is configured (templates/kubernetes-ray.yml.j2). Its presence is the reliable
-# "this cluster is using Kueue" signal -- more reliable than a Workload, which a
-# using-Kueue cluster can transiently lack (creation race, GC, pod-integration
-# off).
-_KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
+# The Kueue queue-name label (k8s_constants.KUEUE_QUEUE_NAME_LABEL) is the
+# reliable "this cluster is using Kueue" signal -- more reliable than a
+# Workload, which a using-Kueue cluster can transiently lack (creation race, GC,
+# pod-integration off).
 
 # GPU-metrics observability pods, useful for debugging a cluster's GPU metrics
 # (see the API server GPU-metrics setup docs). These are cluster-wide infra, not
@@ -149,9 +148,8 @@ def dump_cluster_resources(context: Optional[str], namespace: str,
     # manageJobsWithoutQueueName=true would have even its unlabeled pods managed
     # by Kueue; this gate would then skip it. We accept that to avoid noise in
     # the common case.
-    uses_kueue = any(
-        _KUEUE_QUEUE_NAME_LABEL in (getattr(pod.metadata, 'labels', None) or {})
-        for pod in pods)
+    uses_kueue = any(k8s_constants.KUEUE_QUEUE_NAME_LABEL in (
+        getattr(pod.metadata, 'labels', None) or {}) for pod in pods)
     if uses_kueue:
         _dump_workload(context, namespace, cluster_name_on_cloud, output_dir,
                        errors)

@@ -697,6 +697,8 @@ def reset_global_state():
     # an int (e.g. test_sky/server/test_sdk.py::test_api_login_*).
     versions.set_remote_api_version(None)
     versions.set_remote_version('unknown')
+    # A server config cached by an earlier test (often with a mocked parse).
+    skypilot_config._server_config_cache = None  # pylint: disable=protected-access
     # Ensure a usable event loop is installed on the main thread.
     # Python 3.9 + xdist sometimes leaves a worker process with no
     # current event loop after pytest-asyncio (or any test that calls
