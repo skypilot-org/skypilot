@@ -2835,22 +2835,31 @@ def test_nebius_security_group_lifecycle():
             f'expected 8 rules after adding 20 batched ports, got '
             f'{len(nebius_utils.list_security_rules(sg_id))}')
 
-        # cleanup_ports must NOT delete the SG. SG ownership belongs to
-        # the VM lifecycle (terminate_instances), not the port lifecycle.
+        # With no instances left in the cluster, cleanup_ports is the
+        # post-teardown backstop that reaps the SkyPilot-managed SG (it only
+        # leaves the SG in place while instances exist). This test never
+        # launches a VM, so cleanup_ports must delete the SG here. This also
+        # exercises delete_security_group's rule-drain-then-delete path
+        # against the real Nebius "cannot delete with rules" precondition.
         nebius_instance.cleanup_ports(test_cluster, ['8080'],
                                       provider_config={'region': region})
-        assert nebius_utils.get_security_group_by_name(
-            project_id, sg_name) == sg_id, (
-                'cleanup_ports must not delete the SG; deleting it on a '
-                'still-running cluster would break SSH and intra-cluster '
-                'Ray traffic.')
+        # SG deletion is async; poll until it disappears.
+        for _ in range(30):
+            if nebius_utils.get_security_group_by_name(project_id,
+                                                       sg_name) is None:
+                break
+            time.sleep(2)
+        else:
+            raise AssertionError(
+                f'cleanup_ports did not delete SG {sg_id} of a cluster '
+                'with no instances.')
 
     finally:
-        # delete_security_group exercises the rule-drain-then-delete path
-        # that the unit tests didn't cover (they mocked list_security_rules
-        # to return [] so the drain logic was never exercised against the
-        # real Nebius "cannot delete with rules" precondition).
-        if sg_id is not None:
+        # Best-effort cleanup if the test failed before cleanup_ports reaped
+        # the SG. Skip if it is already gone: delete_security_group lists
+        # the SG's rules first, which fails on a deleted SG.
+        if (sg_id is not None and nebius_utils.get_security_group_by_name(
+                project_id, sg_name) is not None):
             print(f'Cleaning up SG {sg_id}')
             nebius_utils.delete_security_group(sg_id)
             time.sleep(2)
