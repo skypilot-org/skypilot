@@ -2126,8 +2126,8 @@ def _show_enabled_infra(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
-@flags.all_users_option('Show all clusters, including those not owned by the '
-                        'current user.')
+@flags.all_users_option(
+    'Show clusters and managed jobs from all users that you have access to.')
 @flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -2145,7 +2145,11 @@ def status(verbose: bool,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
-    If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
+    By default, show your clusters and recent in-progress managed jobs, along
+    with pools and services you have access to (including other users'). Use
+    ``--all-users`` to also include other users' clusters and managed jobs
+    that you have access to. Pools and services are unaffected by this flag.
+    If CLUSTERS is given, filter the clusters by name.
 
     If --ip is specified, show the IP address of the head node of the cluster.
     Only available when CLUSTERS contains exactly one cluster, e.g.
@@ -2410,7 +2414,9 @@ def status(verbose: bool,
             display_workspace, all_workspaces)
     _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+    owner_scope = 'All users\'' if all_users else 'Your'
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'{owner_scope} clusters'
                f'{colorama.Style.RESET_ALL}')
 
     num_pending_autostop = 0
@@ -2421,7 +2427,7 @@ def status(verbose: bool,
     managed_jobs_query_interrupted = False
     if show_managed_jobs:
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Managed jobs{colorama.Style.RESET_ALL}')
+                   f'{owner_scope} managed jobs{colorama.Style.RESET_ALL}')
         with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
             try:
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
@@ -2489,7 +2495,7 @@ def status(verbose: bool,
         if num_pools is not None:
             if num_pools > 0:
                 click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Pools{colorama.Style.RESET_ALL}')
+                           f'Accessible pools{colorama.Style.RESET_ALL}')
                 click.echo(msg)
                 hints.append(
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
@@ -2497,7 +2503,7 @@ def status(verbose: bool,
 
     if show_services:
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Services{colorama.Style.RESET_ALL}')
+                   f'Accessible services{colorama.Style.RESET_ALL}')
         num_services = None
         if managed_jobs_query_interrupted:
             msg = 'KeyboardInterrupt'
