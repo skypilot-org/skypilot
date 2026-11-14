@@ -7,6 +7,7 @@ import os
 import pathlib
 import pickle
 import queue as queue_lib
+import signal
 import textwrap
 import threading
 import time
@@ -1732,38 +1733,34 @@ def test_resolve_blob_missing_file(tmp_path, monkeypatch):
 @pytest.fixture()
 def reset_sigterm_gate():
     """Reset module-level flag (shared across tests in same process)."""
-    import signal as _signal
-    original_handler = _signal.getsignal(_signal.SIGTERM)
+    original_handler = signal.getsignal(signal.SIGTERM)
     executor._in_request_execution = False
     yield
     executor._in_request_execution = False
-    _signal.signal(_signal.SIGTERM, original_handler)
+    signal.signal(signal.SIGTERM, original_handler)
 
 
 def test_gated_sigterm_handler_raises_when_active(reset_sigterm_gate):
-    import signal as _signal
     executor._in_request_execution = True
     with pytest.raises(KeyboardInterrupt):
-        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+        executor._gated_sigterm_handler(signal.SIGTERM, None)
 
 
 def test_gated_sigterm_handler_swallows_when_idle(reset_sigterm_gate):
-    import signal as _signal
     executor._in_request_execution = False
     # Must not raise; pool would break if SIGTERM escapes _process_worker.
-    executor._gated_sigterm_handler(_signal.SIGTERM, None)
+    executor._gated_sigterm_handler(signal.SIGTERM, None)
 
 
 def test_gated_sigterm_handler_is_one_shot(reset_sigterm_gate):
     """A second SIGTERM must not interrupt the first one's cleanup (#11364)."""
-    import signal as _signal
     executor._in_request_execution = True
     with pytest.raises(KeyboardInterrupt):
-        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+        executor._gated_sigterm_handler(signal.SIGTERM, None)
     # The first interrupt disarmed the gate: a duplicate cancel racing the
     # cleanup of the first one is swallowed like an idle-worker SIGTERM.
     try:
-        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+        executor._gated_sigterm_handler(signal.SIGTERM, None)
     except KeyboardInterrupt:
         pytest.fail('Second SIGTERM raised KeyboardInterrupt during cleanup')
     assert executor._in_request_execution is False
@@ -1778,15 +1775,14 @@ def _entrypoint_with_interruptible_cleanup():
     The first SIGTERM arrives while executing; a second one arrives while
     the entrypoint is unwinding. The cleanup must run to completion.
     """
-    import signal as _signal
     try:
-        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+        executor._gated_sigterm_handler(signal.SIGTERM, None)
     except KeyboardInterrupt:
         _second_sigterm_cleanup_events.append('interrupted')
     # Cleanup (killing child processes, closing streams) starts here. A
     # second SIGTERM landing in this window must be swallowed.
     try:
-        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+        executor._gated_sigterm_handler(signal.SIGTERM, None)
     except KeyboardInterrupt:
         _second_sigterm_cleanup_events.append('cleanup-interrupted')
         return 'cleanup-aborted'
@@ -2047,10 +2043,8 @@ async def test_wrapper_clears_request_cache_when_release_is_skipped(
 
 
 def _install_gated_handler_in_worker():
-    import signal as _signal
-
     from sky.server.requests import executor as _executor
-    _signal.signal(_signal.SIGTERM, _executor._gated_sigterm_handler)
+    signal.signal(signal.SIGTERM, _executor._gated_sigterm_handler)
     _executor._in_request_execution = False
 
 
@@ -2068,12 +2062,11 @@ def test_idle_worker_survives_sigterm_with_gated_handler():
     With the bare _sigterm_handler (always raises KI), the post-SIGTERM
     submit below fails with BrokenProcessPool.
     """
-    import signal as _signal
     with concurrent.futures.ProcessPoolExecutor(
             max_workers=2,
             initializer=_install_gated_handler_in_worker) as pool:
         pid = pool.submit(_worker_pid).result(timeout=10)
-        os.kill(pid, _signal.SIGTERM)
+        os.kill(pid, signal.SIGTERM)
 
         # Poll-submit until signal delivers; bug surfaces on first attempt.
         deadline = time.time() + 5
