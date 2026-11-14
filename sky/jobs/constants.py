@@ -6,6 +6,11 @@ from sky.skylet import runtime_utils
 # Environment variable for JobGroup name, injected into all jobs in a JobGroup
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
 
+# Key in sdk.launch's _extra_launch_context: a list of Resources YAML configs
+# the launch must not use. The jobs controller sends recovery blocks this way
+# because Task.blocked_resources is not part of the task YAML.
+BLOCKED_RESOURCES_LAUNCH_CONTEXT_KEY = 'blocked_resources'
+
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
 JOBS_CONTROLLER_PROVISION_TEMPLATE = 'jobs-controller-provision.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'

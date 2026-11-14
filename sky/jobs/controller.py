@@ -2219,6 +2219,9 @@ class JobController:
             # A relaunch launches, or waits for resources, like any launching
             # job: count the job in full until the new cluster reports its cost.
             await self._count_in_full()
+            executor.recovering_from_cluster_failure = (
+                not force_transit_to_recovering and
+                user_job_failure_reason is None)
             recovered_time = await executor.recover()
             # The relaunch may have persisted runtime observations of its own.
             runtime_cursor_stale = True

@@ -491,6 +491,9 @@ def _get_single_resources_schema():
                                     },
                                 ],
                             },
+                            'try_other_regions_first': {
+                                'type': 'boolean',
+                            },
                             # Plugin-registered strategy-specific
                             # properties (validated on server side
                             # where plugins are loaded).
