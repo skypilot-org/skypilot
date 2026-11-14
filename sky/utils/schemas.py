@@ -2589,6 +2589,9 @@ def get_config_schema():
                 'use_personal_pricing': {
                     'type': 'boolean',
                 },
+                'spot_pricing_policy_name': {
+                    'type': 'string',
+                },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'region_configs': {
@@ -2607,6 +2610,9 @@ def get_config_schema():
                                 'type': 'string',
                             },
                             'fabric': {
+                                'type': 'string',
+                            },
+                            'spot_pricing_policy_name': {
                                 'type': 'string',
                             },
                             'disk_encrypted': {

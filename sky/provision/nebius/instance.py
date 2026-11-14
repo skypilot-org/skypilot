@@ -166,6 +166,18 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     platform, preset = config.node_config['InstanceType'].split('_')
     new_head_idx = 0 if head_instance_id is None else None
 
+    # Resolve the spot pricing policy once for all new VMs, before any of
+    # them is created: if the policy blocks scheduling (spot price above its
+    # max price), this raises and the provisioner fails over to the next
+    # region instead of leaving half-launched clusters behind.
+    use_spot = config.node_config['use_spot']
+    spot_pricing_policy_id: Optional[str] = None
+    spot_pricing_policy_name = config.node_config.get(
+        'spot_pricing_policy_name')
+    if use_spot and spot_pricing_policy_name and to_start_count > 0:
+        spot_pricing_policy_id = utils.get_spot_pricing_policy_id(
+            project_id, spot_pricing_policy_name, platform)
+
     def _launch_one(idx: int) -> str:
         node_type = 'head' if idx == new_head_idx else 'worker'
         return utils.launch(
@@ -177,7 +189,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             image_id_or_family=config.node_config['ImageId'],
             disk_size=config.node_config['DiskSize'],
             user_data=config.node_config['UserData'],
-            use_spot=config.node_config['use_spot'],
+            use_spot=use_spot,
+            spot_pricing_policy_id=spot_pricing_policy_id,
             associate_public_ip_address=(
                 not config.provider_config['use_internal_ips']),
             disk_tier=config.node_config['disk_tier'],
