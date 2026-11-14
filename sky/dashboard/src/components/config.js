@@ -182,7 +182,7 @@ export function Config() {
   const header = (
     <div className="flex items-center justify-between mb-4 h-8">
       <div className="text-base flex items-center">
-        <span className="text-brand leading-none">SkyPilot API Server</span>
+        <span className="text-content leading-none">SkyPilot API Server</span>
       </div>
 
       <div className="flex items-center">
