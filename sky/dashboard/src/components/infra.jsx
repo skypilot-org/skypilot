@@ -1824,7 +1824,7 @@ export function ContextDetails({
                             className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
                               timeRange.from === `now-${preset.value}` &&
                               timeRange.to === 'now'
-                                ? 'bg-brand-solid text-white border-brand'
+                                ? 'bg-brand-solid text-white border-transparent'
                                 : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-hover'
                             }`}
                           >
