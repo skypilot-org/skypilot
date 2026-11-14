@@ -1478,8 +1478,8 @@ def test_azure_remote_identity():
 def test_azure_vpc_name():
     """Test Azure vpc_name with a custom VNet.
 
-    Creates a VNet, launches a cluster using it, and verifies the VM's
-    NIC is attached to the custom VNet's subnet.
+    Selects the second subnet of a custom VNet, verifies the VM's NIC,
+    and checks that a nonexistent subnet fails without falling back.
     """
     name = smoke_tests_utils.get_cluster_name()
     vnet_name = f'sky-test-vnet-{name}'
@@ -1488,11 +1488,16 @@ def test_azure_vpc_name():
     template_str = pathlib.Path(
         'tests/test_yamls/test_azure_vpc.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(vpc_name=vnet_name, region=region)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
+    content = template.render(vpc_name=vnet_name,
+                              region=region,
+                              subnet_id='SUBNET_ID')
+    invalid_name = f'{name}-invalid'
+    with tempfile.TemporaryDirectory() as temp_dir:
+        template_path = pathlib.Path(temp_dir) / 'template.yaml'
+        template_path.write_text(content)
+        file_path = pathlib.Path(temp_dir) / 'valid.yaml'
+        invalid_path = pathlib.Path(temp_dir) / 'invalid.yaml'
+        error_path = pathlib.Path(temp_dir) / 'invalid.log'
         test = smoke_tests_utils.Test(
             'azure_vpc_name',
             [
@@ -1503,17 +1508,34 @@ def test_azure_vpc_name():
                 f'az network vnet create -g {rg_name} -n {vnet_name} '
                 f'--address-prefix 10.0.0.0/16 '
                 f'--subnet-name default --subnet-prefix 10.0.0.0/24',
-                # Launch cluster using the custom VNet
+                f'az network vnet subnet create -g {rg_name} '
+                f'--vnet-name {vnet_name} -n workers '
+                '--address-prefixes 10.0.1.0/24',
+                # Resolve the full ID from Azure for the task-level override.
+                f'subnet_id=$(az network vnet subnet show -g {rg_name} '
+                f'--vnet-name {vnet_name} -n workers --query id -o tsv) && '
+                'test -n "$subnet_id" && '
+                f'sed "s|SUBNET_ID|$subnet_id|g" {template_path} > {file_path} && '
+                f'sed "s|SUBNET_ID|$subnet_id-missing|g" {template_path} > {invalid_path}',
+                # Launch cluster using the second subnet of the custom VNet.
                 f'sky launch -y -c {name} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
-                # Verify the VM NIC is in the custom VNet
+                # The VNet is unique to this test; require its second subnet.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, f'az network nic list '
                     f'--query "[?contains(ipConfigurations[0].subnet.id, '
                     f"'{vnet_name}'"
-                    f')].name" --output tsv | grep .'),
+                    f')].ipConfigurations[0].subnet.id" --output tsv '
+                    '| grep -E "/subnets/workers$"'),
+                # Require the subnet error, not just any launch failure.
+                f'if sky launch -y -c {invalid_name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {invalid_path} '
+                f'> {error_path} 2>&1; then cat {error_path}; exit 1; fi; '
+                f'cat {error_path}; '
+                f'grep -F "workers-missing" {error_path} && '
+                f'grep -F "does not identify exactly one subnet" {error_path}',
             ],
-            f'sky down -y {name}; '
+            f'sky down -y {name} {invalid_name}; '
             f'az group delete -n {rg_name} -y --no-wait; '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
             timeout=25 * 60,
