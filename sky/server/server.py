@@ -266,7 +266,8 @@ class RBACMiddleware(middleware_utils.ASGIMiddleware):
     async def on_request(self, request: fastapi.Request):
         # TODO(hailong): should have a list of paths
         # that are not checked for RBAC
-        if (request.url.path.startswith('/dashboard/') or
+        if (request.url.path in ('/', '/dashboard') or
+                request.url.path.startswith('/dashboard/') or
                 request.url.path.startswith('/api/')):
             return None
 
