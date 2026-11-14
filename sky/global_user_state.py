@@ -3846,6 +3846,25 @@ def get_volume_names(
     ]
 
 
+def get_volume_owners(
+    is_ephemeral: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Name, workspace and user_hash of each volume the filters allow.
+
+    Like `get_volume_names`, it skips unpickling the handle, so a corrupt
+    handle cannot fail the caller.
+    """
+    columns = [
+        volume_table.c.name, volume_table.c.workspace, volume_table.c.user_hash
+    ]
+    return [{
+        'name': row.name,
+        'workspace': row.workspace,
+        'user_hash': row.user_hash,
+    } for row in _query_volumes(columns, is_ephemeral, workspaces_filter, None)]
+
+
 @metrics_lib.time_me
 def get_volumes_from_names(
         volume_names: List[str],
@@ -4002,6 +4021,24 @@ def update_volume_status(name: str,
             update_dict[volume_table.c.usedby_clusters] = json.dumps(
                 usedby_clusters)
         session.query(volume_table).filter_by(name=name).update(update_dict)
+        session.commit()
+
+
+@metrics_lib.time_me
+def set_volume_workspace(names: List[str], workspace: str) -> None:
+    """Move volumes to ``workspace``, e.g. along with the resource using them.
+
+    Names with no row, and rows already in ``workspace``, are left alone.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        for offset in range(0, len(names), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            session.query(volume_table).filter(
+                volume_table.c.name.in_(batch),
+                volume_table.c.workspace.is_distinct_from(workspace)).update(
+                    {volume_table.c.workspace: workspace},
+                    synchronize_session=False)
         session.commit()
 
 

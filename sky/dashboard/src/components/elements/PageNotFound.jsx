@@ -46,7 +46,7 @@ export function PageNotFound() {
         alt=""
         width={150}
         height={113}
-        className="dark:invert"
+        className="dark:invert-[.91]"
       />
       <div
         className="text-[#525252] dark:text-content-secondary"

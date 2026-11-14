@@ -4845,6 +4845,10 @@ async def main(controller_uuid: str):
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.CONTROLLER))
 
+    # Before any job context: read the server's own setting, not a job's
+    # submission-time config snapshot.
+    managed_job_utils.record_controller_event_callback_policy()
+
     controller = ControllerManager(controller_uuid)
 
     # Will happen multiple times, who cares though
