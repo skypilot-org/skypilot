@@ -414,11 +414,14 @@ def terminate_instances(
                 # The wait could not confirm termination (e.g. the
                 # instance-listing RPC failed). Fall through to the
                 # delete attempt anyway, as the code did before this
-                # wait existed: Nebius still refuses the delete while
-                # instances are attached, whereas skipping it can orphan
-                # a GPU cluster whose instances are already gone (a
-                # later status refresh may drop the cluster record,
-                # leaving no teardown path for the GPU cluster).
+                # wait existed: skipping it can orphan a GPU cluster
+                # whose instances are already gone (a later status
+                # refresh may drop the cluster record, leaving no
+                # teardown path for the GPU cluster). The attempt is
+                # safe to make unconfirmed because delete_cluster now
+                # raises when Nebius rejects the delete (instances
+                # still attached), so this path cannot silently report
+                # success with the GPU cluster left behind either.
                 logger.warning(
                     f'Could not confirm that the instances of '
                     f'{cluster_name_on_cloud} terminated: '

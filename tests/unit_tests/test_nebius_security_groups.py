@@ -553,6 +553,113 @@ def test_terminate_instances_full_teardown_delete_attempted_when_wait_fails():
     mock_del_sg.assert_called_once_with('sg-2')
 
 
+def test_terminate_instances_full_teardown_unconfirmed_delete_rejected():
+    """If the wait cannot confirm termination AND Nebius rejects the
+    GPU cluster delete (instances still attached), the teardown must
+    fail rather than report success: post-teardown cleanup would drop
+    the cluster record and orphan the GPU cluster. The SG cleanup in
+    the finally block still runs."""
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    listings = {'n': 0}
+
+    def fake_filter(*_args, **_kwargs):
+        listings['n'] += 1
+        if listings['n'] == 1:
+            return {'i-head': head}
+        if listings['n'] == 2:
+            raise RuntimeError('list RPC failed')
+        return {}
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove'), \
+         mock.patch.object(nebius_utils, 'delete_cluster',
+                           side_effect=RuntimeError(
+                               'Failed to delete GPU cluster')) as mock_del, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep'), \
+         pytest.raises(RuntimeError, match='Failed to delete GPU cluster'):
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+    mock_del.assert_called_once()
+    mock_del_sg.assert_called_once_with('sg-2')
+
+
+class _FakeNebiusRequestError(Exception):
+    """Stand-in for the Nebius SDK request error type."""
+
+
+def _run_delete_cluster(sync_side_effects):
+    """Run utils.delete_cluster with the Nebius adaptor fully mocked.
+
+    Returns the adaptor mock so tests can assert on the calls made.
+    """
+    service = mock.MagicMock()
+    with mock.patch.object(nebius_utils, 'nebius') as mock_nebius:
+        mock_nebius.compute.return_value.GpuClusterServiceClient.\
+            return_value = service
+        mock_nebius.sdk.return_value = object()
+        mock_nebius.request_error.return_value = _FakeNebiusRequestError
+        mock_nebius.sync_call.side_effect = sync_side_effects
+        nebius_utils.delete_cluster('mycluster',
+                                    'eu-north1',
+                                    project_id='proj-abc')
+    return mock_nebius
+
+
+def test_delete_cluster_missing_cluster_is_noop():
+    """Most clusters have no GPU cluster: get_by_name reporting
+    not-found means there is nothing to delete, not an error."""
+    mock_nebius = _run_delete_cluster(
+        [_FakeNebiusRequestError('rpc error: code = NotFound')])
+    # Only the lookup ran; no delete was attempted.
+    assert mock_nebius.sync_call.call_count == 1
+
+
+def test_delete_cluster_lookup_error_raises():
+    """A lookup failure other than not-found (e.g. a transient or auth
+    error) must not be mistaken for 'no GPU cluster': that would
+    report teardown success and orphan an existing GPU cluster."""
+    with pytest.raises(RuntimeError, match='Failed to look up GPU cluster'):
+        _run_delete_cluster(
+            [_FakeNebiusRequestError('rpc error: unavailable')])
+
+
+def test_delete_cluster_success():
+    cluster = mock.MagicMock()
+    cluster.metadata.id = 'gpu-1'
+    mock_nebius = _run_delete_cluster([cluster, None])
+    # Lookup + delete both ran.
+    assert mock_nebius.sync_call.call_count == 2
+
+
+def test_delete_cluster_deleted_concurrently_is_success():
+    """The GPU cluster disappearing between the lookup and the delete
+    (e.g. a concurrent teardown) is already the desired end state."""
+    cluster = mock.MagicMock()
+    cluster.metadata.id = 'gpu-1'
+    _run_delete_cluster(
+        [cluster, _FakeNebiusRequestError('rpc error: code = NotFound')])
+
+
+def test_delete_cluster_rejected_delete_raises():
+    """A delete Nebius rejects (instances still attached) must surface
+    as an error, not be logged and swallowed as 'does not exist'."""
+    cluster = mock.MagicMock()
+    cluster.metadata.id = 'gpu-1'
+    with pytest.raises(RuntimeError, match='Failed to delete GPU cluster'):
+        _run_delete_cluster([
+            cluster,
+            _FakeNebiusRequestError('FAILED_PRECONDITION: attached'),
+        ])
+
 
 def test_terminate_instances_noop_for_legacy_cluster_sg():
     """If no SG exists for the cluster (pre-PR launch), terminate cleanly
