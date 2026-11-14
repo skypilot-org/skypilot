@@ -117,6 +117,9 @@ def increment(counter: Any, **labels: str) -> None:
 # here is a new series per (status, kind).
 REJECT_REASON_AUTH_WORKER_EXHAUSTED = 'auth_worker_exhausted'
 REJECT_REASON_AUTH_DB_TIMEOUT = 'auth_db_timeout'
+# The database raised instead of answering, e.g. a dropped or refused
+# connection. A timeout, client- or server-side, is `auth_db_timeout`.
+REJECT_REASON_AUTH_DB_UNAVAILABLE = 'auth_db_unavailable'
 REJECT_REASON_ROLE_SEED_UNAVAILABLE = 'role_seed_unavailable'
 REJECT_REASON_JWT_SECRET_UNAVAILABLE = 'jwt_secret_unavailable'
 REJECT_REASON_UNAUTHORIZED = 'unauthorized'

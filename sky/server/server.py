@@ -36,6 +36,7 @@ import anyio
 import fastapi
 from fastapi.middleware import cors
 import jwt as pyjwt
+import sqlalchemy
 import starlette.background
 import starlette.datastructures
 import starlette.requests
@@ -720,6 +721,14 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
             # token is fine and the database is not.
             logger.error(f'Service account auth unavailable: {e}')
             return db_lookup.jwt_secret_unavailable_response(request)
+        except sqlalchemy.exc.DBAPIError as e:
+            # The token row or user lookup failed in the database, e.g. on a
+            # connection a pooler drops or refuses while the database
+            # recovers. Same reasoning as the secret load above: the
+            # database failed, not the token, so a retryable 503, not a 401.
+            logger.error('Service account auth DB lookup failed: '
+                         f'{common_utils.format_exception(e)}')
+            return db_lookup.db_unavailable_response(request)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)

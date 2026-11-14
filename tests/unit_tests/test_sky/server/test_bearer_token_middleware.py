@@ -7,6 +7,7 @@ import unittest.mock as mock
 
 import fastapi
 import pytest
+import sqlalchemy
 import starlette.datastructures
 
 from sky.server import middleware_utils
@@ -823,6 +824,54 @@ class TestBearerTokenMiddleware:
                                                  mock_call_next)
 
             assert response.status_code == 503
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('db_error', [
+        sqlalchemy.exc.OperationalError(
+            'SELECT ...', {},
+            Exception('server closed the connection unexpectedly')),
+        sqlalchemy.exc.InterfaceError('SELECT ...', {},
+                                      Exception('connection already closed')),
+    ])
+    async def test_db_error_in_token_lookup_is_503_not_401(
+            self, middleware, base_mock_request, db_error):
+        """A database that drops or refuses the token lookup must not read
+        as a bad token.
+
+        Only timeouts are mapped by `db_lookup.call_with_deadline`; other DB
+        errors reach the middleware as raised. A 401 for one tells the client
+        to log in again when only the database failed, e.g. while a
+        connection pooler refuses connections after a database restart.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+        call_next = mock.AsyncMock()
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash',
+                           side_effect=db_error):
+
+            mock_token_service.verify_token.return_value = {
+                'sub': 'sa-123456',
+                'name': 'test-service-account',
+                'token_id': 'token_123'
+            }
+
+            response = await middleware.dispatch(base_mock_request, call_next)
+
+        assert response.status_code == 503
+        assert 'Retry-After' in response.headers
+        body = response.body.decode()
+        assert 'database could not be reached' in body
+        # The driver's message goes to the server log, not to the client.
+        assert 'closed' not in body
+        assert getattr(base_mock_request.state,
+                       middleware_utils.REJECT_REASON_STATE_KEY) == (
+                           middleware_utils.REJECT_REASON_AUTH_DB_UNAVAILABLE)
+        assert base_mock_request.state.auth_user is None
+        call_next.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_secret_load_does_not_block_event_loop(
