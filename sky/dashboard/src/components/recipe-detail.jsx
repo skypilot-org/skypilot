@@ -454,7 +454,7 @@ export function RecipeDetail() {
             />
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base text-brand leading-none">
+                <h1 className="text-base text-content leading-none">
                   {template.name}
                 </h1>
                 {template.pinned && (

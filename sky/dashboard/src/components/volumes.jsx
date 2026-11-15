@@ -274,12 +274,7 @@ export function Volumes() {
               />
             </>
           ) : (
-            <Link
-              href="/volumes"
-              className="text-brand hover:underline leading-none"
-            >
-              Volumes
-            </Link>
+            <span className="text-content leading-none">Volumes</span>
           )}
         </div>
         {activeTab === 'volumes' && (

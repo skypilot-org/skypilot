@@ -896,7 +896,7 @@ export function Workspaces() {
       {/* Header */}
       <div className="flex items-center justify-between mb-2 h-5">
         <div className="text-base flex items-center">
-          <span className="text-brand leading-none">Workspaces</span>
+          <span className="text-content leading-none">Workspaces</span>
         </div>
         <div className="flex items-center">
           {(clustersLoading || jobsLoading) && (

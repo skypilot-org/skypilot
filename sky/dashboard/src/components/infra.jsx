@@ -4335,12 +4335,9 @@ export function GPUs() {
       {!selectedContext && (
         <div className="flex items-center mb-4 max-lg:flex-wrap max-lg:gap-y-3 lg:h-5">
           <div className="flex-1 text-base flex items-center">
-            <Link
-              href="/infra"
-              className="text-brand cursor-default leading-none text-base"
-            >
+            <span className="text-content leading-none text-base">
               Infrastructure
-            </Link>
+            </span>
           </div>
           <div className="max-lg:order-3 max-lg:w-full flex items-center">
             {/* Workspace Selector */}
