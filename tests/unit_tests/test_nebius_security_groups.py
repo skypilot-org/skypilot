@@ -628,8 +628,7 @@ def test_delete_cluster_lookup_error_raises():
     error) must not be mistaken for 'no GPU cluster': that would
     report teardown success and orphan an existing GPU cluster."""
     with pytest.raises(RuntimeError, match='Failed to look up GPU cluster'):
-        _run_delete_cluster(
-            [_FakeNebiusRequestError('rpc error: unavailable')])
+        _run_delete_cluster([_FakeNebiusRequestError('rpc error: unavailable')])
 
 
 def test_delete_cluster_success():
@@ -646,7 +645,8 @@ def test_delete_cluster_deleted_concurrently_is_success():
     cluster = mock.MagicMock()
     cluster.metadata.id = 'gpu-1'
     _run_delete_cluster(
-        [cluster, _FakeNebiusRequestError('rpc error: code = NotFound')])
+        [cluster,
+         _FakeNebiusRequestError('rpc error: code = NotFound')])
 
 
 def test_delete_cluster_rejected_delete_raises():
