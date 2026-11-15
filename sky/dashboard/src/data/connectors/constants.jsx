@@ -125,6 +125,7 @@ export const WORKSPACE_CLOUD_KEYS = new Set([
   'shadeform',
   'yotta',
   'mithril',
+  'lium',
   'cloudflare',
   'coreweave',
   'vastdata',
