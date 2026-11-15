@@ -23,6 +23,15 @@ const TIME_RANGE_PRESETS = [
   { label: '7d', value: '7d' },
 ];
 
+// Finished-job Telemetry depends on Prometheus still holding the series.
+// Cross-origin Grafana iframes cannot report empty queries, so we surface
+// the hint in-dashboard (callout + footer) and set panel noValue in the
+// Grafana dashboard JSON for the in-panel empty overlay.
+const FINISHED_JOB_RETENTION_CALLOUT =
+  'No data available in a panel usually means this window is outside Prometheus retention (or the job emitted no samples).';
+const FINISHED_JOB_RETENTION_FOOTER =
+  'Finished-job Telemetry visibility depends on your Prometheus retention settings.';
+
 // Telemetry panels — all live in the same skypilot-dcgm-gpu dashboard,
 // pre-scoped to a single SkyPilot cluster via var-cluster. The `family`
 // field lets consumers hide GPU panels when the underlying cluster/job
@@ -265,30 +274,45 @@ export function TelemetrySection({
             </div>
 
             {clusterNameOnCloud ? (
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {visiblePanels.map((panel) => (
+              <>
+                {jobRange && (
                   <div
-                    key={panel.id}
-                    className="bg-white rounded-md border border-gray-200 shadow-sm"
+                    className="mb-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600"
+                    role="note"
                   >
-                    <div className="p-2">
-                      <iframe
-                        src={buildGrafanaPanelUrl(
-                          panel,
-                          clusterNameOnCloud,
-                          timeRange
-                        )}
-                        width="100%"
-                        height="400"
-                        frameBorder="0"
-                        title={panel.title}
-                        className="rounded"
-                        key={`${panel.keyPrefix}-${clusterNameOnCloud}-${timeRange.from}-${timeRange.to}-${refreshTrigger}`}
-                      />
-                    </div>
+                    {FINISHED_JOB_RETENTION_CALLOUT}
                   </div>
-                ))}
-              </div>
+                )}
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {visiblePanels.map((panel) => (
+                    <div
+                      key={panel.id}
+                      className="bg-white rounded-md border border-gray-200 shadow-sm"
+                    >
+                      <div className="p-2">
+                        <iframe
+                          src={buildGrafanaPanelUrl(
+                            panel,
+                            clusterNameOnCloud,
+                            timeRange
+                          )}
+                          width="100%"
+                          height="400"
+                          frameBorder="0"
+                          title={panel.title}
+                          className="rounded"
+                          key={`${panel.keyPrefix}-${clusterNameOnCloud}-${timeRange.from}-${timeRange.to}-${refreshTrigger}`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {jobRange && (
+                  <p className="mt-3 text-xs text-gray-500">
+                    {FINISHED_JOB_RETENTION_FOOTER}
+                  </p>
+                )}
+              </>
             ) : (
               <div className="p-4 text-center text-gray-500 bg-gray-50 rounded-md">
                 {noMetricsMessage}
