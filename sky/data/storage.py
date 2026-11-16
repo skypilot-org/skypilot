@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 import urllib.parse
 
 import colorama
@@ -51,6 +51,77 @@ if typing.TYPE_CHECKING:
     import mypy_boto3_s3
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _get_accessible_handle(
+        storage_name: Optional[str],
+        for_controller: bool = False) -> Optional['Storage.StorageMetadata']:
+    """The handle of a sky-managed storage the caller may reuse by name.
+
+    Reuse by name syncs into the bucket and, with ``persistent: false``,
+    deletes it, so it needs write access to the storage's workspace, as
+    deletion does. Outside a request the code runs on a controller, pinned
+    to the workspace of its job or service (in consolidation mode too), and
+    reaches that workspace's storage only. ``for_controller`` holds a
+    request to that rule as well, for a storage the controller will tear
+    down: accepting it here would leave its bucket behind.
+
+    Raises:
+        exceptions.StorageWorkspaceError: If the storage is in a workspace
+            the caller cannot read, or the controller does not run for, or
+            (``for_controller``) that is not the active one.
+        exceptions.StorageReadOnlyError: If the storage is in a workspace
+            the caller can only read.
+    """
+    if storage_name is None:
+        return None
+    record = global_user_state.get_storage_by_name(storage_name)
+    if record is None:
+        return None
+    workspace = record['workspace']
+    active = skypilot_config.get_active_workspace()
+    if not common_utils.is_in_request_context():
+        if workspace == active:
+            return record['handle']
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.StorageWorkspaceError(
+                f'Storage {storage_name!r} not found in workspace '
+                f'{skypilot_config.get_workspace_name(active)!r}.')
+    # Imported here because of a circular import: sky.server.common imports
+    # sky.data (this module), and sky.workspaces.core reaches back to
+    # sky.server.common through sky.backends.backend_utils -> sky.jobs ->
+    # sky.client.common -> sky.schemas.api.responses.
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import core as workspaces_core
+    readable, writable = workspaces_core.get_workspace_access_sets()
+    if workspace in writable:
+        if for_controller and workspace != active:
+            workspace_name = skypilot_config.get_workspace_name(workspace)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageWorkspaceError(
+                    f'Storage {storage_name!r} is in workspace '
+                    f'{workspace_name!r}, not in the active workspace '
+                    f'{skypilot_config.get_workspace_name(active)!r}. A job '
+                    'or service tears its storage down from the workspace '
+                    'it is launched in, so launch it in workspace '
+                    f'{workspace_name!r} to use this storage.')
+        return record['handle']
+    if workspace in readable:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.StorageReadOnlyError(
+                f'Storage {storage_name!r} is in workspace '
+                f'{skypilot_config.get_workspace_name(workspace)!r}, which '
+                'is read-only for you.')
+    if (not for_controller and
+            workspaces_core.get_readable_workspace_names() is None):
+        # An admin, and the workspace was removed from the config: the
+        # access sets cover configured workspaces only.
+        return record['handle']
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.StorageWorkspaceError(
+            f'Storage name {storage_name!r} is taken by a storage in a '
+            'workspace you cannot access. Choose another name.')
+
 
 StorageHandle = Any
 StorageStatus = status_lib.StorageStatus
@@ -760,7 +831,7 @@ class AbstractStore:
         if self.source is None:
             # Retrieve a handle associated with the storage name.
             # This handle links to sky managed storage if it exists.
-            handle = global_user_state.get_handle_from_storage_name(self.name)
+            handle = _get_accessible_handle(self.name)
             # If handle is None, it implies the bucket is created
             # externally and not managed by Skypilot. For mounting such
             # externally created buckets, users must provide the
@@ -968,6 +1039,12 @@ class Storage(object):
         self._bucket_sub_path = _bucket_sub_path
 
         self._constructed = False
+        # Whether the record under this name was loaded into this object, by
+        # ``construct`` or ``from_handle``; until then the record is not its.
+        self._record_loaded = False
+        # Store types of the loaded record whose buckets were deleted outside
+        # SkyPilot (not ones whose lookup failed for another reason).
+        self._gone_store_types: Set[StoreType] = set()
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
         # for managed jobs. Once sky storage supports forced management for
         # external buckets, this can be deprecated.
@@ -1025,6 +1102,21 @@ class Storage(object):
                                              self.mount_cached_config)
         return self.mount_cached_config
 
+    def check_accessible(self) -> None:
+        """Refuses a storage the caller may not reuse by name, before the
+        task reaches a controller. A controller constructs outside any
+        request what it tears down, the non-persistent mounts, and only in
+        its own workspace, so those are held to the active workspace here;
+        a persistent mount is constructed through a request as the owner.
+        The name of a storage given by a bucket URL is the bucket's, as
+        ``construct`` will set it. A name no storage has yet passes.
+        """
+        name = self.name
+        if (name is None and isinstance(self.source, str) and
+                data_utils.is_cloud_store_url(self.source)):
+            name, _ = self._name_from_source(self.source)
+        _get_accessible_handle(name, for_controller=not self.persistent)
+
     def construct(self):
         """Constructs the storage object.
 
@@ -1049,9 +1141,10 @@ class Storage(object):
         self._validate_storage_spec(self.name)
 
         # Logic to rebuild Storage if it is in global user state
-        handle = global_user_state.get_handle_from_storage_name(self.name)
+        handle = _get_accessible_handle(self.name)
         if handle is not None:
             self.handle = handle
+            self._record_loaded = True
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
@@ -1297,7 +1390,7 @@ class Storage(object):
                 # (e.g. used as scratch previously). Such storage objects can be
                 # mounted in copy mode even though they have no source in the
                 # yaml spec (the name is the source).
-                handle = global_user_state.get_handle_from_storage_name(name)
+                handle = _get_accessible_handle(name)
                 if handle is None:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageSourceError(
@@ -1327,23 +1420,9 @@ class Storage(object):
                 else:
                     assert isinstance(source, str)
                     # Set name to source bucket name and continue
-                    if data_utils.is_hf_path(source):
-                        if data_utils.is_hf_bucket_path(source):
-                            name, sub_path = data_utils.split_hf_path(source)
-                        else:
-                            repo_type, repo_id, _, sub_path = (
-                                data_utils.split_hf_repo_path(source))
-                            name = HuggingFaceStore.hf_id_from_repo_parts(
-                                repo_type, repo_id)
-                        if sub_path and self._bucket_sub_path is None:
-                            self._bucket_sub_path = sub_path
-                    elif source.startswith('cos://'):
-                        # cos url requires custom parsing
-                        name = data_utils.split_cos_path(source)[0]
-                    elif data_utils.is_az_container_endpoint(source):
-                        _, name, _ = data_utils.split_az_path(source)
-                    else:
-                        name = urllib.parse.urlsplit(source).netloc
+                    name, sub_path = self._name_from_source(source)
+                    if sub_path and self._bucket_sub_path is None:
+                        self._bucket_sub_path = sub_path
                     assert name is not None, source
                     self.name = name
                     return
@@ -1364,6 +1443,28 @@ class Storage(object):
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
+
+    @staticmethod
+    def _name_from_source(source: str) -> Tuple[str, Optional[str]]:
+        """The bucket (or repo) a cloud store URL names, and the sub path
+        under it that an ``hf://`` URL may give."""
+        sub_path = None
+        if data_utils.is_hf_path(source):
+            if data_utils.is_hf_bucket_path(source):
+                name, sub_path = data_utils.split_hf_path(source)
+            else:
+                repo_type, repo_id, _, sub_path = (
+                    data_utils.split_hf_repo_path(source))
+                name = HuggingFaceStore.hf_id_from_repo_parts(
+                    repo_type, repo_id)
+        elif source.startswith('cos://'):
+            # cos url requires custom parsing
+            name = data_utils.split_cos_path(source)[0]
+        elif data_utils.is_az_container_endpoint(source):
+            _, name, _ = data_utils.split_az_path(source)
+        else:
+            name = urllib.parse.urlsplit(source).netloc
+        return name, sub_path
 
     def _add_store_from_metadata(
             self, sky_stores: Dict[StoreType,
@@ -1461,6 +1562,7 @@ class Storage(object):
                     logger.debug(f'Storage object {self.name!r} was attempted '
                                  'to be reconstructed while the corresponding '
                                  'bucket was externally deleted.')
+                self._gone_store_types.add(s_type)
                 continue
             self._add_store(store, is_reconstructed=True)
 
@@ -1613,10 +1715,31 @@ class Storage(object):
             store_type: StoreType; Specific cloud store to remove from the list
               of backing stores.
         """
+        unbuilt = [t for t, s in self.stores.items() if s is None]
+        if any(t not in self._gone_store_types for t in unbuilt):
+            # A store type booked but never built: construction was refused,
+            # did not finish, or could not look the bucket up (e.g. a 403).
+            # The bucket may still exist; leave it and its record.
+            logger.warning('Could not look up or construct storage '
+                           f'{self.name!r}; leaving its bucket and record.')
+            return
+        # The rest are in the loaded record but their buckets are gone
+        # (deleted outside SkyPilot): nothing left to delete for them. Only
+        # a rebuild without sync_on_reconstruction (`sky storage delete`)
+        # gets here; a task's teardown re-creates the bucket first.
+        for t in unbuilt:
+            del self.stores[t]
         if not self.stores:
+            if not self._record_loaded:
+                # A record under this name, if any, belongs to a storage this
+                # object was refused, or never reached. Leave it.
+                logger.debug(f'Storage {self.name!r} has no stores of its '
+                             'own; nothing to delete.')
+                return
             logger.info('No backing stores found. Deleting storage.')
             assert self.name is not None
             global_user_state.remove_storage(self.name)
+            return
         if store_type is not None:
             assert self.name is not None
             store = self.stores[store_type]
@@ -1700,6 +1823,7 @@ class Storage(object):
                   source=handle.source,
                   sync_on_reconstruction=False)
         obj.handle = handle
+        obj._record_loaded = True
         obj._add_store_from_metadata(handle.sky_stores)
         return obj
 

@@ -111,6 +111,12 @@ _REQUEST_THREADS_LIMIT = 128
 # point where the sheer number of threads in one process starts slowing its
 # request handling down.
 _AUTH_THREADS_LIMIT = 32
+# Auth lookups that may wait for a free auth thread; the next one gets a 503.
+_AUTH_QUEUED_LIMIT = 4 * _AUTH_THREADS_LIMIT
+# Threads each executor starts when the server process starts; the rest start
+# on demand and are kept for reuse.
+_REQUEST_THREADS_WARM = 16
+_AUTH_THREADS_WARM = 8
 
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
@@ -253,9 +259,11 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     """Lazy init and return the auth thread executor for current process.
 
     For short, latency-sensitive work on the request hot path -- primarily the
-    DB lookups done by authentication middleware. Do not submit long-running or
-    streaming work here; that belongs in ``get_request_thread_executor()``,
-    whose exhaustion must not be able to lock users out.
+    DB lookups done by authentication middleware. A lookup that finds every
+    thread busy waits for one, up to _AUTH_QUEUED_LIMIT of them; callers bound
+    the wait with a deadline. Do not
+    submit long-running or streaming work here; that belongs in
+    ``get_request_thread_executor()``.
     """
     global _AUTH_THREAD_EXECUTOR
     if _AUTH_THREAD_EXECUTOR is not None:
@@ -263,8 +271,19 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     with _AUTH_THREAD_EXECUTOR_LOCK:
         if _AUTH_THREAD_EXECUTOR is None:
             _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
-                name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
+                name='auth_thread_executor',
+                max_workers=_AUTH_THREADS_LIMIT,
+                max_queued=_AUTH_QUEUED_LIMIT)
         return _AUTH_THREAD_EXECUTOR
+
+
+def warm_thread_executors() -> None:
+    """Starts the warm threads of the request and auth executors.
+
+    Thread start waits for the GIL, so call this off the event loop.
+    """
+    get_request_thread_executor().prestart(_REQUEST_THREADS_WARM)
+    get_auth_thread_executor().prestart(_AUTH_THREADS_WARM)
 
 
 class RequestQueue:
@@ -1312,13 +1331,47 @@ def _request_execution_wrapper(request_id: str,
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
-            with metrics_utils.time_it(name='release_memory', group='internal'):
-                common_utils.release_memory()
+            _maybe_release_memory(proc)
             if request_name is not None:
                 _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to record memory metrics: '
                          f'{common_utils.format_exception(e)}')
+
+
+# RSS of this process right after its last release_memory(), None before the
+# first one.
+_rss_after_release: Optional[int] = None
+
+
+@functools.lru_cache(maxsize=1)
+def _release_memory_threshold_bytes() -> int:
+    env_var = constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB
+    value = os.environ.get(env_var)
+    threshold_mb: float = constants.DEFAULT_RELEASE_MEMORY_THRESHOLD_MB
+    if value is not None:
+        try:
+            threshold_mb = max(float(value), 0)
+        except ValueError:
+            logger.warning(f'Ignoring invalid {env_var}={value!r}, using '
+                           f'{threshold_mb} MB.')
+    return int(threshold_mb * 1024 * 1024)
+
+
+def _maybe_release_memory(proc: psutil.Process) -> None:
+    """Releases memory if RSS grew by the threshold since the last release."""
+    global _rss_after_release
+    threshold = _release_memory_threshold_bytes()
+    if (threshold > 0 and _rss_after_release is not None and
+            proc.memory_info().rss - _rss_after_release < threshold):
+        metrics_utils.SKY_APISERVER_MEMORY_RELEASES_TOTAL.labels(
+            result='skipped').inc()
+        return
+    with metrics_utils.time_it(name='release_memory', group='internal'):
+        common_utils.release_memory()
+    _rss_after_release = proc.memory_info().rss
+    metrics_utils.SKY_APISERVER_MEMORY_RELEASES_TOTAL.labels(
+        result='released').inc()
 
 
 _first_request = True

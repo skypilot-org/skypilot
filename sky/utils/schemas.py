@@ -606,6 +606,9 @@ def _get_single_resources_schema():
                     'gcp_queued_resource': {
                         'type': 'boolean',
                     },
+                    'multi_host': {
+                        'type': 'boolean',
+                    },
                 }
             },
             '_no_missing_accel_warnings': {
@@ -2277,6 +2280,10 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
+                'subnet_id': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',
@@ -3354,6 +3361,12 @@ def get_config_schema():
                     'max_launching_jobs_per_user': {
                         'type': 'integer',
                         'minimum': 1,
+                    },
+                    # Opt-in for the deprecated managed-job `event_callback`
+                    # (off by default); see
+                    # sky.jobs.utils.event_callbacks_allowed.
+                    'allow_event_callback': {
+                        'type': 'boolean',
                     },
                     **_extra_jobs_properties,
                 },),

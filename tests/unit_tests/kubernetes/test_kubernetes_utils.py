@@ -1064,6 +1064,114 @@ def test_gke_autoscaler_node_pool_rtx_pro_6000(accelerator):
         assert not fits(f'4CPU--16GB--{accelerator}:2', node_pool)
 
 
+@pytest.mark.parametrize(
+    'accelerator,count,expected',
+    [
+        # GKE label values carry no count in the name: the request's count
+        # is kept.
+        ('tpu-v6e-slice', 1, ('tpu-v6e-slice', 1)),
+        ('tpu-v6e-slice', 4, ('tpu-v6e-slice', 4)),
+        ('tpu-v6e-slice', 8, ('tpu-v6e-slice', 8)),
+        ('tpu-v5-lite-podslice', 4, ('tpu-v5-lite-podslice', 4)),
+        # GCP TPU names carry the chip count in the name, which wins.
+        ('tpu-v6e-4', 1, ('tpu-v6e-slice', 4)),
+        ('tpu-v6e-8', 1, ('tpu-v6e-slice', 8)),
+        ('tpu-v5litepod-8', 1, ('tpu-v5-lite-podslice', 8)),
+        ('tpu-v6e-8', None, ('tpu-v6e-slice', 8)),
+    ])
+def test_normalize_tpu_accelerator(accelerator, count, expected):
+    assert utils.normalize_tpu_accelerator(accelerator, count) == expected
+
+
+def _gke_tpu_node(name, topology, chips):
+    node = mock.MagicMock()
+    node.metadata.name = name
+    node.metadata.labels = {
+        'cloud.google.com/gke-tpu-accelerator': 'tpu-v6e-slice',
+        'cloud.google.com/gke-tpu-topology': topology,
+        'cloud.google.com/gke-accelerator-count': str(chips),
+    }
+    node.status.allocatable = {
+        'cpu': '100',
+        'memory': '400Gi',
+        'google.com/tpu': str(chips),
+    }
+    node.status.capacity = dict(node.status.allocatable)
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
+    node.spec.taints = []
+    return node
+
+
+@pytest.mark.parametrize('instance_type', [
+    '4CPU--16GB--tpu-v6e-slice:4',
+    '4CPU--16GB--tpu-v6e-4:1',
+])
+def test_check_instance_fits_tpu_chip_count(instance_type):
+    """Both spellings of a 4-chip v6e request fit a 4-chip (2x2) node and
+    not a 1-chip (1x1) one."""
+    label = ('cloud.google.com/gke-tpu-accelerator', ['tpu-v6e-slice'], None,
+             None)
+    for nodes, expected in [
+        ([_gke_tpu_node('n-2x2', '2x2', 4)], True),
+        ([_gke_tpu_node('n-1x1', '1x1', 1)], False),
+    ]:
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=nodes), \
+             mock.patch(
+                 'sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                 return_value=label):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     instance_type)
+        assert fits is expected, (instance_type, nodes[0].metadata.name, reason)
+
+
+@pytest.mark.parametrize('instance_type', [
+    '4CPU--16GB--tpu-v6e-slice:4',
+    '4CPU--16GB--tpu-v6e-4:1',
+])
+def test_check_instance_fits_tpu_real_label_lookup(instance_type):
+    """Without an autoscaler, the label lookup reads the nodes' GKE label
+    (tpu-v6e-slice), so both spellings must match a 4-chip node. Only the
+    cluster reads are mocked; the label lookup itself runs."""
+    nodes = [_gke_tpu_node('n-2x2', '2x2', 4)]
+    node_labels = {
+        n.metadata.name: list(n.metadata.labels.items()) for n in nodes
+    }
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=nodes), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource',
+                    return_value=(True, {'google.com/tpu'})), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+                    return_value=(utils.GKELabelFormatter(), node_labels)), \
+         mock.patch('sky.skypilot_config.get_effective_region_config',
+                    return_value=None):
+        fits, reason = utils.check_instance_fits('test-context', instance_type)
+    assert fits is True, (instance_type, reason)
+
+
+@pytest.mark.parametrize('accelerator', ['tpu-v6e-slice:4', 'tpu-v6e-4:1'])
+def test_gke_autoscaler_node_pool_tpu_chip_count(accelerator):
+    """A single-host 4-chip v6e node pool (ct6e-standard-4t) can create a
+    node for both spellings of a 4-chip request, and not for 8 chips."""
+    node_pool = {
+        'name': 'v6e-2x2',
+        'config': {
+            'machineType': 'ct6e-standard-4t',
+            'resourceLabels': {
+                'goog-gke-tpu-node-pool-type': 'single-host',
+                'goog-gke-accelerator-type': 'tpu-v6e-slice',
+            },
+        }
+    }
+    # pylint: disable=protected-access
+    fits = utils.GKEAutoscaler._check_instance_fits_gke_autoscaler_node_pool
+    with mock.patch('sky.clouds.GCP.get_vcpus_mem_from_instance_type',
+                    return_value=(180, 720.0)):
+        assert fits(f'4CPU--16GB--{accelerator}', node_pool)
+        assert not fits('4CPU--16GB--tpu-v6e-slice:8', node_pool)
+
+
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
     """Tests that warnings are not logged when GKE label keys have
     CoreWeave-formatted values (e.g., cloud.google.com/gke-accelerator=H100_NVLINK_80GB).
