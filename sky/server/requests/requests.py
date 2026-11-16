@@ -251,6 +251,10 @@ class Request:
     finished_at: Optional[float] = None
     # Blob ID of uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
+    # Length of the serialized return value as last written by to_row().
+    stored_result_size: Optional[int] = dataclasses.field(default=None,
+                                                          compare=False,
+                                                          repr=False)
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -317,6 +321,7 @@ class Request:
         # version; that is a wire-only concern. to_row() feeds the database, so
         # always persist the true status regardless of the request context.
         payload.status = self.status.value
+        self.stored_result_size = len(payload.return_value or '')
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -1312,34 +1317,45 @@ async def set_request_failed_if_pending_async(request_id: str,
         return True
 
 
-def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
+def set_request_succeeded(request_id: str,
+                          result: Optional[Any]) -> Optional[int]:
+    """Set a request to succeeded and populate the result.
+
+    Returns:
+        The length of the stored serialized result.
+    """
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+    return request_task.stored_result_size
 
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_succeeded_async(request_id: str,
-                                      result: Optional[Any]) -> None:
+                                      result: Optional[Any]) -> Optional[int]:
     """Set a request to succeeded and populate the result.
 
     A request that already finished, e.g. cancelled while its thread was still
     running, keeps its status.
+
+    Returns:
+        The length of the stored serialized result, None if nothing was
+        stored.
     """
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
         if request_task.status in RequestStatus.finished_status():
-            return
+            return None
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+    return request_task.stored_result_size
 
 
 @metrics_lib.time_me_async

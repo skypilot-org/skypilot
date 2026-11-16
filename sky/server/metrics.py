@@ -27,6 +27,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server import caller_usage
 from sky.server import constants as server_constants
 from sky.server import container_memory
 from sky.server import local_disk
@@ -2400,18 +2401,23 @@ class PrometheusMiddleware:
         start_time = time.time()
         method = request.method
         recorded = False
+        http_call, http_call_token = caller_usage.begin_http_call()
 
-        def record(status_code: int) -> None:
+        def record(status_code: int, body_bytes: Optional[int]) -> None:
             nonlocal recorded
             recorded = True
             # This layer is outermost, so it sees 100% of responses: a
             # recording fault must not turn a served request into a 500.
             middleware_utils.record_safely('request', self._record, request,
                                            method, status_code, start_time)
+            middleware_utils.record_safely('caller usage', _record_caller_usage,
+                                           request, http_call, start_time,
+                                           body_bytes)
 
         async def send_and_record(message: starlette.types.Message) -> None:
             if message['type'] == 'http.response.start' and not recorded:
-                record(message['status'])
+                record(message['status'],
+                       _content_length(message.get('headers', ())))
             await send(message)
 
         status_code = 0
@@ -2426,7 +2432,8 @@ class PrometheusMiddleware:
             raise
         finally:
             if not recorded:
-                record(status_code)
+                record(status_code, None)
+            caller_usage.end_http_call(http_call_token)
 
     def _path_label(self, request: fastapi.Request, raw_path: str) -> str:
         """`path` label, never raising: a fault must not lose the count.
@@ -2477,6 +2484,51 @@ class PrometheusMiddleware:
         if request_name is not None:
             metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.labels(
                 name=request_name, status=status_code_group).observe(duration)
+
+
+# Route handlers left out of caller usage: /api/get is counted by the request
+# it returns, and health probes are not usage.
+_CALLER_USAGE_SKIPPED_PATHS = frozenset({'/api/get', '/api/health'})
+
+
+def _content_length(headers) -> Optional[int]:
+    for key, value in headers:
+        if key.lower() == b'content-length':
+            try:
+                return int(value)
+            except ValueError:
+                return None
+    return None
+
+
+def _record_caller_usage(request: fastapi.Request,
+                         http_call: caller_usage.HttpCall, start_time: float,
+                         body_bytes: Optional[int]) -> None:
+    caller = caller_usage.caller_of_user(
+        getattr(request.state, 'auth_user', None))
+    headers = request.headers
+    caller_usage.record_client(caller, headers.get('X-SkyPilot-Client-Type'),
+                               headers.get('User-Agent'),
+                               headers.get(server_constants.API_VERSION_HEADER))
+    # Set by /api/get and by a synchronous call that returned a request's
+    # result: the body is that request's result.
+    request_name = getattr(request.state, 'request_name', None)
+    if request_name is not None:
+        caller_usage.record_returned_bytes(caller, request_name, body_bytes)
+        return
+    if http_call.scheduled_request or not _reached_router(request):
+        return
+    raw_path = request.scope.get('path', '')
+    if raw_path in _CALLER_USAGE_SKIPPED_PATHS or _is_streaming_api(raw_path):
+        return
+    if not isinstance(request.scope.get('route'), fastapi.routing.APIRoute):
+        return
+    name = (
+        f'{request.method} ' +
+        caller_usage.route_template(raw_path, request.scope.get('path_params')))
+    caller_usage.record_execution(caller, name, caller_usage.KIND_HANDLER,
+                                  time.time() - start_time)
+    caller_usage.record_returned_bytes(caller, name, body_bytes)
 
 
 peak_rss_bytes = 0

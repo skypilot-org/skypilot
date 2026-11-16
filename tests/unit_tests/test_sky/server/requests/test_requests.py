@@ -9,6 +9,7 @@ from typing import List, Optional
 import unittest.mock as mock
 
 import filelock
+import orjson
 import pytest
 
 from sky import core
@@ -114,9 +115,11 @@ async def test_set_request_succeeded(isolated_database, test_async):
     await requests.create_if_not_exists_async(request)
     result = {'key': 'value', 'number': 42}
     if test_async:
-        await requests.set_request_succeeded_async('test-request-1', result)
+        stored = await requests.set_request_succeeded_async(
+            'test-request-1', result)
     else:
-        requests.set_request_succeeded('test-request-1', result)
+        stored = requests.set_request_succeeded('test-request-1', result)
+    assert stored == len(orjson.dumps(result))
 
     # Get the updated request
     if test_async:
