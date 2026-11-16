@@ -12,6 +12,17 @@ from sky.schemas.api import responses
 from sky.utils import volume as volume_utils
 
 
+def _mock_ls_and_workspaces(monkeypatch, volumes, workspaces):
+    """Answers `sdk.get` for the volume listing and the workspaces."""
+    monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                        mock.MagicMock(return_value='ls-request-id'))
+    monkeypatch.setattr('sky.client.sdk.workspaces',
+                        mock.MagicMock(return_value='ws-request-id'))
+    replies = {'ls-request-id': volumes, 'ws-request-id': workspaces}
+    monkeypatch.setattr('sky.client.sdk.get',
+                        mock.MagicMock(side_effect=replies.__getitem__))
+
+
 class TestVolumeCommands:
 
     def test_volumes_apply_with_yaml(self, monkeypatch):
@@ -31,6 +42,8 @@ class TestVolumeCommands:
         # Mock the volumes SDK
         mock_apply = mock.MagicMock(return_value='request-id')
         monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+        # The server's own checks (e.g. enabled clouds) are not under test.
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock.MagicMock())
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -69,6 +82,8 @@ class TestVolumeCommands:
         # Mock the volumes SDK
         mock_apply = mock.MagicMock(return_value='request-id')
         monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+        # The server's own checks (e.g. enabled clouds) are not under test.
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock.MagicMock())
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -283,9 +298,7 @@ class TestVolumeCommands:
         monkeypatch.setattr('sky.volumes.client.sdk.ls', mock_ls)
         monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
 
-        # Mock the SDK get
-        mock_get = mock.MagicMock(return_value=mock_volumes)
-        monkeypatch.setattr('sky.client.sdk.get', mock_get)
+        _mock_ls_and_workspaces(monkeypatch, mock_volumes, {})
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -301,6 +314,62 @@ class TestVolumeCommands:
         mock_delete.assert_called_once_with(['volume1', 'volume2'], purge=False)
         mock_async_call.assert_called_once_with('delete-request-id', False,
                                                 'sky.volumes.delete')
+
+    @pytest.mark.parametrize(
+        'args, deleted',
+        [
+            (['--all'], {'mine'}),
+            (['*'], {'mine'}),
+            # A name given exactly is left to the server to refuse.
+            (['theirs'], {'theirs'}),
+        ])
+    def test_volumes_delete_skips_unwritable_workspaces(self, monkeypatch, args,
+                                                        deleted):
+        _mock_ls_and_workspaces(monkeypatch, [{
+            'name': 'mine',
+            'workspace': 'ws-a'
+        }, {
+            'name': 'theirs',
+            'workspace': 'ws-b'
+        }], {
+            'ws-a': {
+                'writable': True
+            },
+            'ws-b': {
+                'writable': False
+            }
+        })
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                args + ['-y'])
+        assert not result.exit_code, result.output
+        assert set(mock_delete.call_args[0][0]) == deleted
+        assert ('Skipping 1 volume(s)'
+                in result.output) == (deleted == {'mine'})
+
+    def test_volumes_delete_all_without_writable_flag(self, monkeypatch):
+        """A server too old to report `writable` is not filtered against."""
+        _mock_ls_and_workspaces(monkeypatch, [{
+            'name': 'mine',
+            'workspace': 'ws-a'
+        }, {
+            'name': 'theirs',
+            'workspace': 'ws-b'
+        }], {
+            'ws-a': {},
+            'ws-b': {}
+        })
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                ['--all', '-y'])
+        assert not result.exit_code, result.output
+        assert set(mock_delete.call_args[0][0]) == {'mine', 'theirs'}
 
     def test_volumes_delete_no_volumes(self, monkeypatch):
         """Test `sky volumes delete` when no volumes exist."""
@@ -376,9 +445,7 @@ class TestVolumeCommands:
         monkeypatch.setattr('sky.volumes.client.sdk.ls', mock_ls)
         monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
 
-        # Mock the SDK get
-        mock_get = mock.MagicMock(return_value=mock_volumes)
-        monkeypatch.setattr('sky.client.sdk.get', mock_get)
+        _mock_ls_and_workspaces(monkeypatch, mock_volumes, {})
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
