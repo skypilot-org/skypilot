@@ -2488,3 +2488,17 @@ async def test_kill_requests_unscoped_cancels_all(isolated_database):
     cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
                                        user_id=None)
     assert set(cancelled) == {'shutdown-a', 'shutdown-b'}
+
+
+def test_stored_result_size_counts_utf8_bytes():
+    request = requests.Request(request_id='test-request-utf8',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               user_id='test-user')
+    result = {'name': '名字'}
+    request.set_return_value(result)
+    request.to_row()
+    assert request.stored_result_size == len(orjson.dumps(result))

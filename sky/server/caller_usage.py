@@ -81,7 +81,7 @@ _clients = _Admitted(MAX_CLIENTS)
 
 
 def _labels(caller: Caller, name: str) -> dict:
-    if not _caller_names.admit((caller.id, name)):
+    if not _caller_names.admit((*caller, name)):
         caller = _OVERFLOW
     return {
         'caller': caller.name,
@@ -187,8 +187,8 @@ def api_version(header: Optional[str]) -> str:
 
 def _record_client(caller: Caller, client: str, family: str,
                    version: str) -> None:
-    if not _clients.admit((caller.id, client, family, version)):
-        caller = _OVERFLOW
+    if not _clients.admit((*caller, client, family, version)):
+        caller, client, family, version = _OVERFLOW, OTHER, OTHER, OTHER
     metrics_utils.SKY_APISERVER_CALLER_CLIENT_CALLS_TOTAL.labels(
         caller=caller.name,
         caller_id=caller.id,
@@ -237,14 +237,13 @@ def mark_request_scheduled() -> None:
         call.scheduled_request = True
 
 
-def route_template(path: str, path_params: Optional[dict]) -> str:
-    """The route path of a matched request: path parameters as {name}."""
-    for key, value in (path_params or {}).items():
-        value = str(value)
-        if not value:
-            continue
-        start = path.rfind('/' + value)
-        end = start + 1 + len(value)
-        if start >= 0 and (end == len(path) or path[end] == '/'):
-            path = f'{path[:start + 1]}{{{key}}}{path[end:]}'
-    return path
+def route_template(path: str, route_path_format: str) -> str:
+    """The full route path of a request that matched route_path_format.
+
+    FastAPI 0.16x matches an included router's own route, whose path_format
+    lacks the prefix given to include_router; the prefix is the leading
+    segments of the request path that the route's path does not cover.
+    """
+    if ':path}' in route_path_format:
+        return route_path_format
+    return path.rsplit('/', route_path_format.count('/'))[0] + route_path_format

@@ -97,10 +97,17 @@ def test_client_label_sets_beyond_the_cap_are_recorded_as_other(monkeypatch):
     monkeypatch.setattr(caller_usage, '_clients', caller_usage._Admitted(1))
     caller = caller_usage.caller_of('user0', 'u0')
     caller_usage.record_client(caller, None, 'curl/8.0', None)
-    caller_usage.record_client(caller, None, 'python-requests/2.32', '12')
+    for i in range(10):
+        caller_usage.record_client(caller, f'client-{i}', 'python-requests/2',
+                                   '12')
     counter = metrics_utils.SKY_APISERVER_CALLER_CLIENT_CALLS_TOTAL
     assert _sample(counter, caller_id='user0', ua_family='curl') == 1
-    assert _sample(counter, caller='other', ua_family='python-requests') == 1
+    assert _sample(counter,
+                   caller='other',
+                   client_type='other',
+                   ua_family='other',
+                   api_version='other') == 10
+    assert len(_series(counter)) == 2
 
 
 @pytest.mark.parametrize('user_agent,family', [
@@ -130,20 +137,22 @@ def test_client_type_and_api_version_are_bounded():
     assert caller_usage.api_version('12345') == 'invalid'
 
 
-@pytest.mark.parametrize('path,params,template', [
-    ('/users/list', {}, '/users/list'),
-    ('/plugins/api/x/items/abc', {
-        'item_id': 'abc'
-    }, '/plugins/api/x/items/{item_id}'),
-    ('/a/abc/b/abc', {
-        'id': 'abc'
-    }, '/a/abc/b/{id}'),
-    ('/a/abcd', {
-        'id': 'abc'
-    }, '/a/abcd'),
-])
-def test_route_template(path, params, template):
-    assert caller_usage.route_template(path, params) == template
+@pytest.mark.parametrize(
+    'path,path_format,template',
+    [
+        # Routes registered with their full path.
+        ('/users/role', '/users/role', '/users/role'),
+        ('/ssh_node_pools/status/status', '/ssh_node_pools/{pool_name}/status',
+         '/ssh_node_pools/{pool_name}/status'),
+        # Routes of a router included with a prefix.
+        ('/users/role', '/role', '/users/role'),
+        ('/ssh_node_pools/status/status', '/{pool_name}/status',
+         '/ssh_node_pools/{pool_name}/status'),
+        ('/users/users/abc', '/users/{name}', '/users/users/{name}'),
+        ('/workspaces', '', '/workspaces'),
+    ])
+def test_route_template(path, path_format, template):
+    assert caller_usage.route_template(path, path_format) == template
 
 
 class _AuthUser:
@@ -160,6 +169,13 @@ class _AuthUser:
 
 def _app() -> fastapi.FastAPI:
     app = fastapi.FastAPI()
+    pools = fastapi.APIRouter()
+
+    @pools.get('/{pool_name}/status')
+    def pool_status(pool_name: str):  # pylint: disable=unused-variable
+        return {'pool': pool_name}
+
+    app.include_router(pools, prefix='/ssh_node_pools')
 
     @app.get('/items/{item_id}')
     def get_item(item_id: str):  # pylint: disable=unused-variable
@@ -208,6 +224,13 @@ def test_a_route_handler_is_counted_by_route():
                    client_type='none',
                    ua_family='curl',
                    api_version='42') == 1
+
+
+def test_an_included_route_keeps_its_prefix():
+    TestClient(_app()).get('/ssh_node_pools/status/status')
+    assert _sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                   kind='handler',
+                   name='GET /ssh_node_pools/{pool_name}/status') == 1
 
 
 def test_a_route_that_scheduled_a_request_is_not_a_handler_call():

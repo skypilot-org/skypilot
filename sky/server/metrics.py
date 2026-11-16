@@ -2521,11 +2521,11 @@ def _record_caller_usage(request: fastapi.Request,
     raw_path = request.scope.get('path', '')
     if raw_path in _CALLER_USAGE_SKIPPED_PATHS or _is_streaming_api(raw_path):
         return
-    if not isinstance(request.scope.get('route'), fastapi.routing.APIRoute):
+    route = request.scope.get('route')
+    if not isinstance(route, fastapi.routing.APIRoute):
         return
-    name = (
-        f'{request.method} ' +
-        caller_usage.route_template(raw_path, request.scope.get('path_params')))
+    name = (f'{request.method} ' +
+            caller_usage.route_template(raw_path, route.path_format))
     caller_usage.record_execution(caller, name, caller_usage.KIND_HANDLER,
                                   time.time() - start_time)
     caller_usage.record_returned_bytes(caller, name, body_bytes)

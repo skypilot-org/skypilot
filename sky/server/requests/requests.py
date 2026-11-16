@@ -251,7 +251,7 @@ class Request:
     finished_at: Optional[float] = None
     # Blob ID of uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
-    # Length of the serialized return value as last written by to_row().
+    # UTF-8 size of the serialized return value as last written by to_row().
     stored_result_size: Optional[int] = dataclasses.field(default=None,
                                                           compare=False,
                                                           repr=False)
@@ -321,7 +321,10 @@ class Request:
         # version; that is a wire-only concern. to_row() feeds the database, so
         # always persist the true status regardless of the request context.
         payload.status = self.status.value
-        self.stored_result_size = len(payload.return_value or '')
+        stored = payload.return_value or ''
+        # isascii() is O(1); only a result with non-ASCII text is encoded.
+        self.stored_result_size = (len(stored) if stored.isascii() else len(
+            stored.encode('utf-8')))
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
