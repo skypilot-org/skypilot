@@ -215,7 +215,7 @@ See :ref:`sky-api-server-deploy` for detailed instructions on how to deploy a re
 Install SkyPilot skill
 ----------------------
 
-Install the :ref:`SkyPilot Skill <skill>` to give your AI agent full SkyPilot expertise. If your agent does not support plugins or ``npx skills``, simply use this prompt:
+Install the :ref:`SkyPilot Skill <skill>` to give your AI agent full SkyPilot expertise. Simply use this prompt:
 
 .. code-block:: text
 
