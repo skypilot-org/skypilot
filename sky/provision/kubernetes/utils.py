@@ -1732,15 +1732,6 @@ def detect_accelerator_resource(
         bool: True if the cluster has GPU_RESOURCE_KEY or TPU_RESOURCE_KEY
             resource, False otherwise.
     """
-    return _detect_accelerator_resource(context,
-                                        _allowed_nodes_cache_key(context))
-
-
-@annotations.lru_cache(scope='request', maxsize=10)
-def _detect_accelerator_resource(
-        context: Optional[str],
-        allowed_nodes_key: str) -> Tuple[bool, Set[str]]:
-    del allowed_nodes_key  # Only part of the cache key.
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
     nodes = get_kubernetes_nodes(context=context)
@@ -1751,10 +1742,6 @@ def _detect_accelerator_resource(
                        NEURON_RESOURCE_KEY in cluster_resources)
 
     return has_accelerator, cluster_resources
-
-
-detect_accelerator_resource.cache_clear = (  # type: ignore[attr-defined]
-    _detect_accelerator_resource.cache_clear)
 
 
 @dataclasses.dataclass
