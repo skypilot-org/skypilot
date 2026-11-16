@@ -731,11 +731,7 @@ def _reader_rechecked() -> _ReaderRechecked:
     ctx = context_lib.get()
     if ctx is None:
         return _process_reader_rechecked()
-    rechecked = ctx.get_var(_READER_RECHECKED_VAR)
-    if rechecked is None:
-        rechecked = {}
-        ctx.set_var(_READER_RECHECKED_VAR, rechecked)
-    return rechecked
+    return ctx.vars.setdefault(_READER_RECHECKED_VAR, {})
 
 
 # Without a context the process runs one request at a time, and clears this
