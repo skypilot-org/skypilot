@@ -65,6 +65,7 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
@@ -780,6 +781,7 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
                     f'{user.name!r} ({user.id}): {request.method} '
                     f'{request.url.path} (request ID: {request_id})')
         request.state.impersonator = caller
+        caller_usage.set_impersonator(caller)
         request.state.auth_user = models.User(id=user.id, name=user.name)
         return None
 
@@ -4497,10 +4499,31 @@ async def complete_storage_name(request: fastapi.Request,
     return await asyncio.to_thread(_complete)
 
 
+def _readable_volume_names_start_with(auth_user: Optional[models.User],
+                                      incomplete: str) -> List[str]:
+    """Volume names to complete: only those `sky volumes ls` would show."""
+    workspaces_filter = None
+    if auth_user is not None:
+        # Read-only visibility comes from the workspace config, which this
+        # process does not reload per request.
+        common.refresh_workspace_state_for_sync_handler()
+        workspaces = set(
+            skypilot_config.get_nested(('workspaces',), default_value={}))
+        workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+        workspaces_filter = (
+            permission.permission_service.get_accessible_workspace_names(
+                auth_user.id,
+                workspaces,
+                action=workspace_constants.WORKSPACE_ACTION_READ))
+    return global_user_state.get_volume_names_start_with(
+        incomplete, workspaces_filter=workspaces_filter)
+
+
 @app.get('/api/completion/volume_name')
-async def complete_volume_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_volume_names_start_with, incomplete)
+async def complete_volume_name(request: fastapi.Request,
+                               incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_volume_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/api_request')

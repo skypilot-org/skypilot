@@ -27,6 +27,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -710,11 +711,11 @@ def _unstored_enabled_cloud_names(workspace: str,
         return ()
 
 
-# One plain dict per request: it holds state rather than a recomputable result,
-# so nothing may expire or evict an entry before the request ends.
-@annotations.lru_cache(scope='request', maxsize=1)
-def _reader_rechecked(
-) -> Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]:
+_ReaderRechecked = Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]
+_READER_RECHECKED_VAR = 'check.reader_rechecked'
+
+
+def _reader_rechecked() -> _ReaderRechecked:
     """Clouds that non-storing callers' re-checks found enabled in this request.
 
     Keyed by workspace, capability and config fingerprint. `recheck_clouds`
@@ -722,7 +723,21 @@ def _reader_rechecked(
     without it being stored. Reads only look up, so they add no entries. This
     relies on the re-check and those reads running in one request in one
     process under one config, as they do within `Optimizer.optimize`.
+
+    It holds state rather than a recomputable result, so nothing may expire,
+    evict or clear an entry before the request ends: it lives in the request's
+    context, which requests sharing the process do not share.
     """
+    ctx = context_lib.get()
+    if ctx is None:
+        return _process_reader_rechecked()
+    return ctx.vars.setdefault(_READER_RECHECKED_VAR, {})
+
+
+# Without a context the process runs one request at a time, and clears this
+# at each request start.
+@annotations.lru_cache(scope='request', maxsize=1)
+def _process_reader_rechecked() -> _ReaderRechecked:
     return {}
 
 
