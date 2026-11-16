@@ -227,7 +227,10 @@ def test_health_probes_are_not_usage():
     assert _series(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL) == []
 
 
-def test_schedule_request_marks_the_http_call():
+@pytest.mark.parametrize(
+    'entrypoint',
+    [executor.schedule_request_async, executor.prepare_request_async])
+def test_creating_a_request_marks_the_http_call(entrypoint):
     call, token = caller_usage.begin_http_call()
     try:
         with mock.patch.object(executor,
@@ -235,9 +238,8 @@ def test_schedule_request_marks_the_http_call():
                                side_effect=RuntimeError('stop')):
             with pytest.raises(RuntimeError):
                 asyncio.run(
-                    executor.schedule_request_async('r', 'status',
-                                                    payloads.RequestBody(),
-                                                    lambda: None))
+                    entrypoint('r', 'status', payloads.RequestBody(),
+                               lambda: None))
     finally:
         caller_usage.end_http_call(token)
     assert call.scheduled_request

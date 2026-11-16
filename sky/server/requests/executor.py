@@ -1664,6 +1664,7 @@ async def prepare_request_async(
     auth_user: Optional[models.User] = None,
 ) -> api_requests.Request:
     """Prepare a request for execution."""
+    caller_usage.mark_request_scheduled()
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
     return await _create_request_async(request_id, request_name, request_body,
                                        func, request_cluster_name,
