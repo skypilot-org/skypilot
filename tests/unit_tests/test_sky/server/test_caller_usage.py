@@ -1,6 +1,7 @@
 """Usage by caller: labels, the per-process cap and where calls are counted."""
 # pylint: disable=protected-access
 import asyncio
+import contextvars
 from unittest import mock
 
 import fastapi
@@ -326,3 +327,59 @@ def test_daemon_requests_are_not_counted():
                                     'sky.status', 'long'):
         pass
     assert _series(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL) == []
+
+
+class _Impersonating:
+    """Stands in for ImpersonationMiddleware: _SA acting as alice."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] == 'http':
+            state = scope.setdefault('state', {})
+            state['impersonator'] = _SA
+            state['auth_user'] = models.User(id='ab12cd34', name='alice')
+        await self.app(scope, receive, send)
+
+
+def test_an_impersonated_call_is_attributed_to_the_impersonator():
+    app = fastapi.FastAPI()
+
+    @app.get('/items/{item_id}')
+    def get_item(item_id: str):  # pylint: disable=unused-variable
+        return {'id': item_id}
+
+    app.add_middleware(_Impersonating)
+    app.add_middleware(metrics.PrometheusMiddleware)
+    TestClient(app).get('/items/abc')
+    counter = metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL
+    assert _sample(counter, caller_id=_SA.id, caller='agent') == 1
+    assert _sample(counter, caller_id='ab12cd34') == 0
+
+
+def _stamped(impersonator, body):
+
+    def stamp():
+        if impersonator is not None:
+            caller_usage.set_impersonator(impersonator)
+        executor.stamp_request_body(body,
+                                    models.User(id='ab12cd34', name='alice'))
+        return body
+
+    return contextvars.copy_context().run(stamp)
+
+
+def test_an_impersonated_request_is_attributed_to_the_impersonator():
+    body = _stamped(_SA, payloads.RequestBody())
+    assert (body.impersonator_id, body.impersonator_name) == (_SA.id, 'agent')
+    assert executor._caller_of('ab12cd34', body) == caller_usage.Caller(
+        _SA.id, 'agent', 'service_account')
+
+
+def test_a_client_sent_impersonator_is_overwritten():
+    body = payloads.RequestBody()
+    body.impersonator_id = 'sa-forged'
+    body = _stamped(None, body)
+    assert body.impersonator_id is None
+    assert executor._caller_of('ab12cd34', body).id == 'ab12cd34'

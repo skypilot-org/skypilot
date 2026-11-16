@@ -2508,6 +2508,7 @@ def _record_caller_usage(request: fastapi.Request,
                          http_call: caller_usage.HttpCall, start_time: float,
                          body_bytes: Optional[int]) -> None:
     caller = caller_usage.caller_of_user(
+        getattr(request.state, 'impersonator', None) or
         getattr(request.state, 'auth_user', None))
     headers = request.headers
     caller_usage.record_client(caller, headers.get('X-SkyPilot-Client-Type'),

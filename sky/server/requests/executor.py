@@ -1469,6 +1469,10 @@ def _execute_with_config_override(func: Callable,
 
 def _caller_of(user_id: str,
                request_body: payloads.RequestBody) -> caller_usage.Caller:
+    impersonator_id = getattr(request_body, 'impersonator_id', None)
+    if impersonator_id:
+        return caller_usage.caller_of(impersonator_id,
+                                      request_body.impersonator_name)
     return caller_usage.caller_of(
         user_id, request_body.env_vars.get(constants.USER_ENV_VAR))
 
@@ -1650,6 +1654,9 @@ def stamp_request_body(request_body: payloads.RequestBody,
     # Same again for whether the request came from loopback; it decides which
     # client env vars and config overrides the worker honors.
     request_body.from_loopback = loopback.get_request_from_loopback()
+    impersonator = caller_usage.impersonator()
+    request_body.impersonator_id = impersonator.id if impersonator else None
+    request_body.impersonator_name = impersonator.name if impersonator else None
     return user_id
 
 

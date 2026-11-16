@@ -57,6 +57,19 @@ def caller_of_user(user: Optional[models.User]) -> Caller:
     return caller_of(user.id, user.name)
 
 
+# The account behind an impersonated HTTP call; usage is attributed to it.
+_impersonator: contextvars.ContextVar[Optional[models.User]] = (
+    contextvars.ContextVar('caller_usage_impersonator', default=None))
+
+
+def set_impersonator(user: models.User) -> None:
+    _impersonator.set(user)
+
+
+def impersonator() -> Optional[models.User]:
+    return _impersonator.get()
+
+
 class _Admitted:
     """Label keys this process records as is, up to a cap."""
 
