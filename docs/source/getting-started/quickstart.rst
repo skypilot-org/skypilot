@@ -4,7 +4,7 @@
 Quickstart
 ==========
 
-Prefer to have an agent walk you through this guide? Ask it:
+Prefer to have an agent walk you through this guide? Simply use this prompt:
 
 .. code-block:: text
 
