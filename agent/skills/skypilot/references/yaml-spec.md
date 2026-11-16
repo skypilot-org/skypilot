@@ -418,7 +418,7 @@ resources:
 
 ### ``resources.accelerator_args``
 
-Additional accelerator metadata (optional); only used for TPU node and TPU VM.
+Additional accelerator metadata (optional); only used for TPUs.
 
 Example usage:
 
@@ -437,6 +437,15 @@ resources:
   accelerator_args:
     tpu_name: mytpu
     tpu_vm: false
+```
+
+- To request a TPU v6e multi-host slice of 8 chips (two 4-chip VMs on one `2x4` slice) on GKE instead of one 8-chip VM. Only supported with `tpu-v6e-8` on Kubernetes. Larger slices (`tpu-v6e-16` and up) are always multi-host and do not need it:
+
+```yaml
+resources:
+  accelerators: tpu-v6e-8
+  accelerator_args:
+    multi_host: true
 ```
 
 By default, the value for `runtime_version` is decided based on which is requested and should work for either case. If passing in an incompatible version, GCP will throw an error during provisioning.

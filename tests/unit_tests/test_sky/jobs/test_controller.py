@@ -31,7 +31,10 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 import sky
 from sky import exceptions
+from sky import global_user_state
+from sky import skypilot_config
 from sky import task as task_lib
+from sky.backends import backend_utils
 from sky.jobs import constants as jobs_constants
 from sky.jobs import controller as controller_module
 from sky.jobs import job_group_networking
@@ -46,6 +49,7 @@ from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
+from sky.utils.db import db_utils
 from sky.utils.plugin_extensions import LogDeliverySource
 
 
@@ -1009,6 +1013,30 @@ class TestTaskCleanup:
             teardown.call_count == controller_module._STORAGE_TEARDOWN_ATTEMPTS)
 
     @pytest.mark.asyncio
+    async def test_one_unconstructable_mount_does_not_stop_the_rest(
+            self, cleanup_patches):
+        """Each non-persistent mount is constructed on its own: one that
+        raises does not keep the next from being constructed for teardown."""
+        refused = MagicMock(persistent=False)
+        refused.construct.side_effect = exceptions.StorageWorkspaceError('no')
+        mine = MagicMock(persistent=False)
+        kept = MagicMock(persistent=True)
+        task = self._make_task()
+        task.metadata = {}
+        task.storage_mounts = {'/a': refused, '/b': mine, '/c': kept}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag):
+            await manager._cleanup(job_id=1)
+
+        mine.construct.assert_called_once_with()
+        kept.construct.assert_not_called()
+        (cleanup_patches['backend'].return_value.teardown_ephemeral_storage.
+         assert_called_once_with(task))
+
+    @pytest.mark.asyncio
     async def test_record_gone_pool_job_cancels_the_known_submission(
             self, cleanup_patches):
         """A pool job's worker and pool-side job ID live in the missing
@@ -1378,8 +1406,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-1-test-job') as mock_gen_name, \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[{'handle': mock_handle}]) as mock_get_cl:
+             patch('sky.jobs.controller.global_user_state.get_cluster_from_name',
+                   return_value={'handle': mock_handle}) as mock_get_cl:
 
             await ControllerManager._download_logs_for_cancelled_job(
                 manager,
@@ -1390,11 +1418,9 @@ class TestDownloadLogsForCancelledJob:
                 pool=None)
 
             mock_gen_name.assert_called_once_with('test-job', job_id)
-            mock_get_cl.assert_called_once_with(
-                cluster_names=['sky-managed-1-test-job'],
-                refresh=common.StatusRefreshMode.NONE,
-                all_users=True,
-                _include_is_managed=True)
+            mock_get_cl.assert_called_once_with('sky-managed-1-test-job',
+                                                include_user_info=False,
+                                                summary_response=True)
             controller.download_log_and_stream.assert_called_once_with(
                 task_id, mock_handle, None)
 
@@ -1412,8 +1438,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_state'
                    '.get_pool_submit_info_async',
                    return_value=('pool-cluster-1', 42)) as mock_pool_info, \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[{'handle': mock_handle}]):
+             patch('sky.jobs.controller.global_user_state.get_cluster_from_name',
+                   return_value={'handle': mock_handle}):
 
             await ControllerManager._download_logs_for_cancelled_job(
                 manager,
@@ -1429,7 +1455,7 @@ class TestDownloadLogsForCancelledJob:
 
     @pytest.mark.asyncio
     async def test_cluster_not_found_skips_download(self):
-        """When get_clusters returns empty, log download is skipped."""
+        """When the cluster has no record, log download is skipped."""
         manager = self._make_manager()
         controller = MagicMock()
         job_id = 3
@@ -1443,8 +1469,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-3-test-job'), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[]):
+             patch('sky.jobs.controller.global_user_state.get_cluster_from_name',
+                   return_value=None):
 
             await ControllerManager._download_logs_for_cancelled_job(
                 manager,
@@ -1469,7 +1495,7 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_state'
                    '.get_pool_submit_info_async',
                    return_value=(None, None)) as mock_pool_info, \
-             patch('sky.jobs.controller.backend_utils.get_clusters'
+             patch('sky.jobs.controller.global_user_state.get_cluster_from_name'
                    ) as mock_get_cl:
 
             await ControllerManager._download_logs_for_cancelled_job(
@@ -1509,8 +1535,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-5-test-job'), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[{'handle': mock_handle}]):
+             patch('sky.jobs.controller.global_user_state.get_cluster_from_name',
+                   return_value={'handle': mock_handle}):
 
             # Should NOT raise - exceptions are caught per-task
             await ControllerManager._download_logs_for_cancelled_job(
@@ -1544,20 +1570,19 @@ class TestDownloadLogsForCancelledJob:
         mock_handle_0 = MagicMock()
         mock_handle_2 = MagicMock()
 
-        def get_clusters_side_effect(cluster_names, **kwargs):
-            name = cluster_names[0]
+        def get_cluster_side_effect(name, **kwargs):
             if 'job-a' in name:
-                return [{'handle': mock_handle_0}]
+                return {'handle': mock_handle_0}
             elif 'job-c' in name:
-                return [{'handle': mock_handle_2}]
-            return []
+                return {'handle': mock_handle_2}
+            return None
 
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    side_effect=lambda name, jid: f'sky-managed-{jid}-{name}'
                    ), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   side_effect=get_clusters_side_effect):
+             patch('sky.jobs.controller.global_user_state.get_cluster_from_name',
+                   side_effect=get_cluster_side_effect):
 
             # task 1 already succeeded, so only tasks 0 and 2 are active
             await ControllerManager._download_logs_for_cancelled_job(
@@ -1592,13 +1617,12 @@ class TestDownloadLogsForCancelledJob:
         mock_handle_0 = MagicMock()
         mock_handle_1 = MagicMock()
 
-        def get_clusters_side_effect(cluster_names, **kwargs):
-            name = cluster_names[0]
+        def get_cluster_side_effect(name, **kwargs):
             if 'job-a' in name:
-                return [{'handle': mock_handle_0}]
+                return {'handle': mock_handle_0}
             elif 'job-b' in name:
-                return [{'handle': mock_handle_1}]
-            return []
+                return {'handle': mock_handle_1}
+            return None
 
         # Task 0 fails, task 1 succeeds
         call_count = [0]
@@ -1614,8 +1638,8 @@ class TestDownloadLogsForCancelledJob:
                    '.generate_managed_job_cluster_name',
                    side_effect=lambda name, jid: f'sky-managed-{jid}-{name}'
                    ), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   side_effect=get_clusters_side_effect):
+             patch('sky.jobs.controller.global_user_state.get_cluster_from_name',
+                   side_effect=get_cluster_side_effect):
 
             # Should NOT raise despite task 0 failing
             await ControllerManager._download_logs_for_cancelled_job(
@@ -1632,6 +1656,117 @@ class TestDownloadLogsForCancelledJob:
                 0, mock_handle_0, None)
             controller.download_log_and_stream.assert_any_call(
                 1, mock_handle_1, None)
+
+
+class TestDownloadLogsFromNamedCluster:
+    """The SUCCEEDED and CANCELLED log downloads find the cluster by name.
+
+    They must see every cluster that `terminate_cluster` sees. A lookup
+    filtered by the workspaces the job's user can read (as
+    `backend_utils.get_clusters` does) could miss a live cluster, skip the
+    download, and then teardown deleted the cluster and its logs.
+    """
+
+    class _Handle:
+        launched_resources = None
+
+    @pytest.fixture
+    def state_db(self, tmp_path, monkeypatch):
+        """A fresh cluster state DB under tmp_path."""
+        monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+        # The migration lock lives under ~/.sky/locks; give each test its own
+        # so parallel test workers do not time out on a shared lock.
+        monkeypatch.setenv('HOME', str(tmp_path))
+        monkeypatch.setattr(
+            global_user_state, '_db_manager',
+            db_utils.DatabaseManager('state',
+                                     global_user_state.create_table,
+                                     post_init_fn=lambda _: global_user_state.
+                                     _sqlite_supports_returning()))
+        return global_user_state
+
+    def _launch(self, state_db, name, workspace):
+        with skypilot_config.local_active_workspace_ctx(workspace):
+            state_db.add_or_update_cluster(cluster_name=name,
+                                           cluster_handle=self._Handle(),
+                                           requested_resources=set(),
+                                           ready=True,
+                                           is_managed=True)
+
+    def test_finds_cluster_hidden_by_workspace_filter(self, state_db,
+                                                      monkeypatch):
+        """A cluster outside the readable workspaces still gets its logs."""
+        self._launch(state_db, 'job-cluster', 'ws-team')
+        # The job's user can only read 'default' in this process.
+        monkeypatch.setattr(backend_utils.workspaces_core,
+                            'get_accessible_workspace_names',
+                            lambda **kwargs: {'default'})
+        # The old, filtered lookup misses the live cluster...
+        assert backend_utils.get_clusters(cluster_names=['job-cluster'],
+                                          refresh=common.StatusRefreshMode.NONE,
+                                          all_users=True,
+                                          _include_is_managed=True) == []
+        # ...and terminate_cluster's lookup still sees it.
+        assert state_db.get_cluster_from_name('job-cluster') is not None
+
+        seen = {}
+
+        def _download(task_id, handle, job_id_on_cluster):
+            seen['args'] = (task_id, handle, job_id_on_cluster)
+            seen['workspace'] = skypilot_config.get_active_workspace()
+
+        controller = MagicMock()
+        controller.download_log_and_stream.side_effect = _download
+        assert controller_module._download_logs_from_named_cluster(
+            controller, 0, 'job-cluster', 5)
+        task_id, handle, job_id_on_cluster = seen['args']
+        assert (task_id, job_id_on_cluster) == (0, 5)
+        assert isinstance(handle, self._Handle)
+        # The download runs in the cluster's workspace, and the pin does
+        # not leak past it.
+        assert seen['workspace'] == 'ws-team'
+        assert skypilot_config.get_active_workspace() == 'default'
+
+    def test_missing_cluster_returns_false(self, state_db):
+        controller = MagicMock()
+        assert not controller_module._download_logs_from_named_cluster(
+            controller, 0, 'no-such-cluster', None)
+        controller.download_log_and_stream.assert_not_called()
+
+    def test_workspace_pin_released_on_download_error(self, state_db):
+        self._launch(state_db, 'job-cluster', 'ws-team')
+        controller = MagicMock()
+        controller.download_log_and_stream.side_effect = RuntimeError('boom')
+        with pytest.raises(RuntimeError, match='boom'):
+            controller_module._download_logs_from_named_cluster(
+                controller, 0, 'job-cluster', None)
+        assert skypilot_config.get_active_workspace() == 'default'
+
+    @pytest.mark.asyncio
+    async def test_cancelled_path_downloads_hidden_cluster(
+            self, state_db, monkeypatch):
+        """End to end through `_download_logs_for_cancelled_job`."""
+        self._launch(state_db, 'sky-managed-9-train', 'ws-team')
+        monkeypatch.setattr(backend_utils.workspaces_core,
+                            'get_accessible_workspace_names',
+                            lambda **kwargs: {'default'})
+        manager = MagicMock(spec=ControllerManager)
+        manager._download_log_from_cluster = (
+            ControllerManager._download_log_from_cluster.__get__(
+                manager, ControllerManager))
+        controller = MagicMock()
+        mock_task = MagicMock()
+        mock_task.name = 'train'
+        mock_dag = MagicMock()
+        mock_dag.tasks = [mock_task]
+        with patch(
+                'sky.jobs.controller.managed_job_utils'
+                '.generate_managed_job_cluster_name',
+                return_value='sky-managed-9-train'):
+            await ControllerManager._download_logs_for_cancelled_job(
+                manager, controller, 9, task_ids=[0], dag=mock_dag, pool=None)
+        controller.download_log_and_stream.assert_called_once()
+        assert controller.download_log_and_stream.call_args.args[0] == 0
 
 
 class TestDownloadLogAndStreamLoggingAgentGate:
@@ -4885,3 +5020,86 @@ class TestRecoveryCountsInFull:
 
         names = [c[0] for c in calls.mock_calls]
         assert names == ['count_in_full', 'recover', 'update_cost_units']
+
+
+# ---------------------------------------------------------------------------
+# Healthy-job shortcut and multi-host TPU slices
+# ---------------------------------------------------------------------------
+
+
+def _tpu_task(accelerators, num_nodes=1, **kwargs):
+    import sky
+    task = sky.Task(num_nodes=num_nodes)
+    task.set_resources(
+        sky.Resources(infra='k8s/ctx', accelerators=accelerators, **kwargs))
+    return task
+
+
+@pytest.mark.parametrize('accelerators,kwargs,num_nodes,expected', [
+    ('H100:8', {}, 1, 1),
+    ('H100:8', {}, 2, 2),
+    ('tpu-v6e-8', {}, 1, 1),
+    ('tpu-v6e-8', {
+        'accelerator_args': {
+            'multi_host': True
+        }
+    }, 1, 2),
+    ('tpu-v6e-16', {}, 1, 4),
+    ('tpu-v6e-16', {}, 2, 8),
+])
+def test_task_cluster_num_nodes(accelerators, kwargs, num_nodes, expected):
+    from sky.jobs import controller as controller_module
+    task = _tpu_task(accelerators, num_nodes, **kwargs)
+    assert controller_module._task_cluster_num_nodes(task) == expected
+    # The handle's launched resources take precedence over the request.
+    handle = MagicMock()
+    handle.launched_resources = list(task.resources)[0]
+    assert controller_module._task_cluster_num_nodes(task, handle) == expected
+    single = _tpu_task('tpu-v6e-8')
+    handle.launched_resources = list(single.resources)[0]
+    assert controller_module._task_cluster_num_nodes(task, handle) == num_nodes
+
+
+class _StopMonitoring(Exception):
+    pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('accelerators,checks_cluster', [
+    ('H100:8', False),
+    ('tpu-v6e-16', True),
+])
+async def test_running_single_slice_job_checks_cluster_status(
+        monkeypatch, accelerators, checks_cluster):
+    """A RUNNING single-node job skips the cluster status check, but one
+    multi-host TPU slice spans several pods and must be checked."""
+    from sky.jobs import controller as controller_module
+    from sky.jobs import runtime as managed_job_runtime
+    from sky.skylet import job_lib
+
+    controller = controller_module.JobController.__new__(
+        controller_module.JobController)
+    controller._job_id = 42
+    controller._backend = MagicMock()
+    controller._update_live_log_links = AsyncMock(return_value=True)
+    monkeypatch.setattr(managed_job_runtime, 'is_registered', lambda: False)
+    # Two polls, then stop: without the check the loop keeps polling.
+    monkeypatch.setattr(
+        controller_module.asyncio, 'sleep',
+        AsyncMock(side_effect=[None, None, _StopMonitoring()]))
+    monkeypatch.setattr(controller_module, 'check_network_connection',
+                        AsyncMock())
+    monkeypatch.setattr(
+        controller_module.managed_job_utils, 'get_job_status',
+        AsyncMock(return_value=(job_lib.JobStatus.RUNNING, None)))
+    refresh = MagicMock(side_effect=_StopMonitoring())
+    monkeypatch.setattr(controller_module.backend_utils,
+                        'refresh_cluster_status_handle', refresh)
+    with pytest.raises(_StopMonitoring):
+        await controller._monitor_one_task_impl(0,
+                                                _tpu_task(accelerators),
+                                                'cluster',
+                                                MagicMock(),
+                                                MagicMock(),
+                                                callback_func=AsyncMock())
+    assert refresh.called == checks_cluster

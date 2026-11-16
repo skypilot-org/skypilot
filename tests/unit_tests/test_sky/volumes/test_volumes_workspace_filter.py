@@ -11,6 +11,7 @@ import sqlalchemy
 
 from sky import global_user_state
 from sky import models
+from sky.utils import resource_checker
 from sky.utils import status_lib
 from sky.volumes.server import core as volumes_core
 from sky.workspaces import constants as workspace_constants
@@ -215,3 +216,57 @@ def test_get_volume_names_applies_the_same_filters(isolated_database):
 
     assert names == ['vol-a']
     assert global_user_state.get_volume_names(workspaces_filter=set()) == []
+
+
+def test_get_volume_owners_skips_the_handle(isolated_database):
+    """A corrupt handle must not fail the workspace resource check."""
+    _add('vol-a', workspace='ws-a')
+    _add('vol-a-ephemeral', workspace='ws-a', is_ephemeral=True)
+    _add('vol-b', workspace='ws-b')
+    with global_user_state._db_manager.get_engine().begin() as conn:
+        conn.execute(global_user_state.volume_table.update().values(
+            handle=b'not a pickle'))
+
+    owners = global_user_state.get_volume_owners(is_ephemeral=False,
+                                                 workspaces_filter={'ws-a'})
+
+    assert [(o['name'], o['workspace']) for o in owners] == [('vol-a', 'ws-a')]
+    assert set(owners[0]) == {'name', 'workspace', 'user_hash'}
+    # And the workspace check's volume lister goes through it.
+    assert [v['name'] for v in resource_checker._list_volumes(['ws-a'], None)
+           ] == ['vol-a']
+
+
+def test_set_volume_workspace_moves_only_the_named_volumes(isolated_database):
+    _add('vol-a', workspace='ws-a')
+    _add('vol-b', workspace='ws-a')
+
+    global_user_state.set_volume_workspace(['vol-a', 'gone'], 'ws-b')
+
+    assert global_user_state.get_volume_names(workspaces_filter={'ws-b'}) == [
+        'vol-a'
+    ]
+    assert global_user_state.get_volume_names(workspaces_filter={'ws-a'}) == [
+        'vol-b'
+    ]
+
+
+def test_set_volume_workspace_chunks_and_skips_rows_already_there(
+        isolated_database, monkeypatch):
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    for i in range(5):
+        _add(f'vol-{i}', workspace='ws-b' if i == 0 else 'ws-a')
+    statements = []
+    sqlalchemy.event.listen(global_user_state._db_manager.get_engine(),
+                            'before_cursor_execute',
+                            lambda *args: statements.append(args[2]))
+
+    global_user_state.set_volume_workspace([f'vol-{i}' for i in range(5)],
+                                           'ws-b')
+
+    assert len(
+        global_user_state.get_volume_names(workspaces_filter={'ws-b'})) == 5
+    updates = [s for s in statements if s.startswith('UPDATE')]
+    assert len(updates) == 3
+    # vol-0 was already in ws-b, so no row is rewritten for it.
+    assert all('IS DISTINCT FROM' in s or 'IS NOT' in s for s in updates)
