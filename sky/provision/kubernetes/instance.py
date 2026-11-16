@@ -2931,7 +2931,65 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    raise NotImplementedError()
+    """Stop a Kubernetes cluster by deleting its pods and services.
+
+    Unlike `terminate_instances`, this retains the cluster's
+    PersistentVolumeClaim(s): only the pods (and their services) are deleted,
+    so any state on a persistent volume survives and is reattached when the
+    cluster is restarted with `sky start`.
+
+    Note: a pod's ephemeral (non-PV) filesystem is lost on stop.
+
+    Raises:
+        NotImplementedError: The
+            `kubernetes.allow_unmanaged_cluster_destructive_stop` flag is off
+            for the context, or the cluster is high-availability. The
+            provisioner's failover turns this into StopFailoverError and keeps
+            the pods.
+    """
+    assert provider_config is not None, cluster_name_on_cloud
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+
+    # `sky stop` is gated earlier, but a failed relaunch of a cluster that was
+    # once up also stops it, and that path never checks the flag. The flag is
+    # keyed by the named context; `context` is None for in-cluster auth.
+    if not kubernetes_utils.allow_unmanaged_cluster_destructive_stop(
+            provider_config.get('context')):
+        raise NotImplementedError(
+            'Stopping clusters is not supported on Kubernetes.')
+
+    # High-availability clusters are backed by a Deployment that would
+    # immediately recreate any deleted pod, so stopping is not meaningful here.
+    if is_high_availability_cluster_by_kubectl(cluster_name_on_cloud, context,
+                                               namespace):
+        raise NotImplementedError(
+            'Stopping high-availability Kubernetes clusters is not supported.')
+
+    pods = kubernetes_utils.filter_pods(namespace, context,
+                                        ray_tag_filter(cluster_name_on_cloud),
+                                        None)
+
+    def _stop_pod_thread(pod_info):
+        pod_name, pod = pod_info
+        if _is_head(pod) and worker_only:
+            return
+        # `_terminate_node` deletes the pod and its services but never deletes
+        # PersistentVolumeClaims, which is exactly the stop semantics we want.
+        logger.debug(f'stop_instances: deleting pod {pod_name}')
+        _terminate_node(namespace,
+                        context,
+                        pod_name,
+                        is_head=_is_head(pod),
+                        has_resource_claims=_pod_has_resource_claims(pod))
+
+    subprocess_utils.run_in_parallel(_stop_pod_thread, list(pods.items()),
+                                     _NUM_THREADS)
+
+    if not worker_only:
+        # Fallback service cleanup by label selector, in case pods were
+        # already gone. PVCs are intentionally left intact.
+        _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
 def _delete_services(name_prefix: str,

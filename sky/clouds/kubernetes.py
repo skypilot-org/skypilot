@@ -468,6 +468,13 @@ class Kubernetes(clouds.Cloud):
                         f'(context {context!r}) gives it no credentials. '
                         'Tear the cluster down with `sky down`, or use another '
                         'remote_identity.')
+            # Allow `sky stop` if the destructive-stop flag is enabled for the
+            # context. The pod is deleted on stop; only PersistentVolume-backed
+            # state survives and is reattached on restart.
+            if kubernetes_utils.allow_unmanaged_cluster_destructive_stop(
+                    context):
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.STOP, None)
             # Allow spot instances if supported by the cluster
             try:
                 # Run spot label check and network type detection concurrently
