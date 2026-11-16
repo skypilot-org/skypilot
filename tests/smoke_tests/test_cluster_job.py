@@ -3712,10 +3712,28 @@ def test_azure_spot_instance_verification():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_auto_retry
 @pytest.mark.gcp
 def test_stop_gcp_spot():
     """Test GCP spot can be stopped, autostopped, restarted."""
     name = smoke_tests_utils.get_cluster_name()
+
+    def wait_for_stopped(timeout):
+        command = smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+            cluster_name=name,
+            cluster_status=[sky.ClusterStatus.STOPPED],
+            timeout=timeout)
+        command = command.replace(
+            'current_status=$(sky status', 'refresh_started=$SECONDS; '
+            'echo "DIAGNOSTIC refresh_start=$SECONDS" >&2; '
+            'current_status=$(sky status', 1)
+        command = command.replace('--refresh | awk',
+                                  '--refresh | tee /dev/stderr | awk', 1)
+        return command.replace(
+            'if [[ "$current_status"',
+            'echo "DIAGNOSTIC refresh_elapsed=$((SECONDS - refresh_started)) '
+            'status=<$current_status>" >&2; if [[ "$current_status"', 1)
+
     test = smoke_tests_utils.Test(
         'stop_gcp_spot',
         [
@@ -3726,19 +3744,13 @@ def test_stop_gcp_spot():
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 2 --status',
             f'sky autostop {name} -i0 -y',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=90),
+            wait_for_stopped(90),
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 3 --status',
             # -i option at launch should go through:
             f'sky launch -c {name} -i0 -y',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=120),
+            wait_for_stopped(120),
         ],
         f'sky down -y {name}',
     )
