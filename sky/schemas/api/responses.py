@@ -190,6 +190,12 @@ class StorageRecord(ResponseBaseModel):
     store: List[data.StoreType]
     last_use: str
     status: status_lib.StorageStatus
+    # Optional so an older server's response still validates; storage that
+    # predates the recording of its creator has no user.
+    user_hash: Optional[str] = None
+    user_name: Optional[str] = None
+    workspace: Optional[str] = None
+    workspace_name: Optional[str] = None
 
 
 # TODO (syang) figure out which fields are always present

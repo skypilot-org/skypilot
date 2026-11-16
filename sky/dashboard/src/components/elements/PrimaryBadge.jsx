@@ -13,9 +13,9 @@ export const PrimaryBadge = ({ showTooltip = true, className = '' }) => {
         inline-flex items-center gap-0.5
         px-1.5 py-0.5
         text-[10px] font-semibold uppercase tracking-wide
-        bg-gradient-to-r from-emerald-50 to-teal-50
-        text-emerald-700
-        border border-emerald-200
+        bg-gradient-to-r from-emerald-tint to-teal-tint
+        text-emerald-fg-strong
+        border border-emerald-line
         rounded
         shadow-sm
         cursor-help
@@ -25,7 +25,7 @@ export const PrimaryBadge = ({ showTooltip = true, className = '' }) => {
     >
       {/* Star icon - simple SVG for "primary" concept */}
       <svg
-        className="w-2.5 h-2.5 text-emerald-500"
+        className="w-2.5 h-2.5 text-emerald-fg-soft"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-hidden="true"

@@ -685,6 +685,15 @@ class Kubernetes(clouds.Cloud):
                     continue
             regions = filtered_regions
 
+        tpu_multi_host_shape = None
+        if resources is not None and resources.accelerators and len(
+                resources.accelerators) == 1:
+            acc, acc_count = next(iter(resources.accelerators.items()))
+            tpu_multi_host_shape = kubernetes_utils.get_tpu_multi_host_shape(
+                acc, acc_count,
+                kubernetes_utils.multi_host_requested(
+                    resources.accelerator_args))
+
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
         # kubernetes cluster/context).
@@ -702,10 +711,14 @@ class Kubernetes(clouds.Cloud):
                 ephemeral_storage_gb = (resources.disk_size
                                         if resources is not None and
                                         resources.disk_size_specified else None)
+                fit_kwargs = ({
+                    'tpu_multi_host_shape': tpu_multi_host_shape
+                } if tpu_multi_host_shape is not None else {})
                 fits, reason = kubernetes_utils.check_instance_fits(
                     context,
                     instance_type,
-                    ephemeral_storage_gb=ephemeral_storage_gb)
+                    ephemeral_storage_gb=ephemeral_storage_gb,
+                    **fit_kwargs)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
                 if (unreachable_errors is not None and
@@ -752,7 +765,9 @@ class Kubernetes(clouds.Cloud):
                 kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
             logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
             if autoscaler.can_create_new_instance_of_type(
-                    context, instance_type):
+                    context, instance_type,
+                    *((tpu_multi_host_shape,)
+                      if tpu_multi_host_shape is not None else ())):
                 logger.debug(f'Kubernetes cluster {context} can be '
                              'autoscaled to create instance type '
                              f'{instance_type}. Including {context} '
@@ -973,8 +988,18 @@ class Kubernetes(clouds.Cloud):
         # Optionally populate accelerator information.
         acc_type = k.accelerator_type
         acc_count = k.accelerator_count
+        tpu_multi_host_shape = None
         if acc_type is not None and is_tpu_on_gke(acc_type):
+            tpu_multi_host_shape = kubernetes_utils.get_tpu_multi_host_shape(
+                acc_type, acc_count,
+                kubernetes_utils.multi_host_requested(
+                    resources.accelerator_args))
             acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
+            if tpu_multi_host_shape is not None:
+                # One pod per VM of the slice, each taking all of its VM's
+                # chips; the cluster has one pod per VM per slice (see
+                # kubernetes_utils.tpu_vms_per_slice()).
+                acc_count = tpu_multi_host_shape.chips_per_vm
         else:
             acc_count = acc_count or 0
 
@@ -1014,7 +1039,19 @@ class Kubernetes(clouds.Cloud):
         avoid_label_keys = None
 
         # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
-        if acc_count > 0 and acc_type is not None:
+        tpu_chips_per_vm = None
+        if tpu_multi_host_shape is not None:
+            # A multi-host slice is selected by its type, its whole-slice
+            # topology and the chips on each VM.
+            k8s_acc_label_key = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
+            k8s_acc_label_values = [tpu_multi_host_shape.accelerator]
+            k8s_topology_label_key = (
+                kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY)
+            k8s_topology_label_value = tpu_multi_host_shape.topology
+            tpu_chips_per_vm = tpu_multi_host_shape.chips_per_vm
+            tpu_requested = True
+            k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+        elif acc_count > 0 and acc_type is not None:
             (k8s_acc_label_key, k8s_acc_label_values, k8s_topology_label_key,
              k8s_topology_label_value) = (
                  kubernetes_utils.get_accelerator_label_key_values(
@@ -1484,7 +1521,8 @@ class Kubernetes(clouds.Cloud):
                 topology_label_value=k8s_topology_label_value,
                 spot_label_key=spot_label_key,
                 spot_label_value=spot_label_value,
-                enable_flex_start=enable_flex_start),
+                enable_flex_start=enable_flex_start,
+                tpu_chips_per_vm=tpu_chips_per_vm),
             'k8s_service_account_name': k8s_service_account_name,
             # Gates the provisioner-only roles: only a controller pod
             # provisions, and only in non-consolidation deployments --
@@ -1735,8 +1773,29 @@ class Kubernetes(clouds.Cloud):
                                  from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
+            per_pod_acc_count = acc_count
+            if kubernetes_utils.is_tpu_on_gke(acc_type):
+                normalized, chips = kubernetes_utils.normalize_tpu_accelerator(
+                    acc_type, acc_count)
+                if normalized != acc_type and acc_count > 1:
+                    # tpu-v6e-16 names one 16-chip slice; a count after it
+                    # is ambiguous (use num_nodes for several slices).
+                    return resources_utils.FeasibleResources(
+                        [], [], f'{acc_type}:{acc_count} is not supported on '
+                        f'Kubernetes: {acc_type} already names a slice of '
+                        f'{chips} chips. Use num_nodes to request several '
+                        'slices.')
+                shape = kubernetes_utils.get_tpu_multi_host_shape(
+                    acc_type, acc_count,
+                    kubernetes_utils.multi_host_requested(
+                        resources.accelerator_args))
+                if shape is not None:
+                    # A multi-host slice runs one pod per VM; size each pod
+                    # for its VM's chips.
+                    per_pod_acc_count = shape.chips_per_vm
             if resources.cpus is None:
-                gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
+                gpu_task_cpus = (self._DEFAULT_NUM_VCPUS_WITH_GPU *
+                                 per_pod_acc_count)
             # Special handling to bump up memory multiplier for GPU instances
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
@@ -1803,6 +1862,18 @@ class Kubernetes(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Kubernetes."""
+        return cls.check_contexts_compute_credentials(None)
+
+    @classmethod
+    def check_contexts_compute_credentials(
+        cls, contexts: Optional[List[str]]
+    ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        """Checks compute access to `contexts`, or to every allowed context.
+
+        Returns whether any checked context is usable, and a dict mapping each
+        checked context to its status, or a string reason when the check
+        cannot run. An empty `contexts` checks no context.
+        """
         # Check for port forward dependencies
         logger.debug(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
@@ -1812,26 +1883,27 @@ class Kubernetes(clouds.Cloud):
                 [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
             return (False, formatted)
 
-        # Test using python API
-        try:
-            existing_allowed_contexts = cls.existing_allowed_contexts()
-        except ImportError as e:
-            return (False,
-                    f'{common_utils.format_exception(e, use_bracket=True)}')
-        if not existing_allowed_contexts:
-            if skypilot_config.loaded_config_path() is None:
-                check_skypilot_config_msg = ''
-            else:
-                check_skypilot_config_msg = (
-                    ' and check "allowed_contexts" in your '
-                    f'{skypilot_config.loaded_config_path()} file.')
-            return (False, 'No available context found in kubeconfig. '
-                    'Check if you have a valid kubeconfig file' +
-                    check_skypilot_config_msg)
+        if contexts is None:
+            # Test using python API
+            try:
+                contexts = cls.existing_allowed_contexts()
+            except ImportError as e:
+                return (False,
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+            if not contexts:
+                if skypilot_config.loaded_config_path() is None:
+                    check_skypilot_config_msg = ''
+                else:
+                    check_skypilot_config_msg = (
+                        ' and check "allowed_contexts" in your '
+                        f'{skypilot_config.loaded_config_path()} file.')
+                return (False, 'No available context found in kubeconfig. '
+                        'Check if you have a valid kubeconfig file' +
+                        check_skypilot_config_msg)
 
         ctx2text = {}
         success = False
-        for context in existing_allowed_contexts:
+        for context in contexts:
             suc, text = cls._check_single_context(context)
             success = success or suc
             ctx2text[context] = text

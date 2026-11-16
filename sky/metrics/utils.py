@@ -554,6 +554,14 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     ['name'],
 )
 
+# Thread start waits for the GIL, so a start on the event loop stalls it
+# under contention; on_loop="true" should stay flat once a process is warm.
+SKY_APISERVER_THREADS_STARTED_TOTAL = prom.Counter(
+    'sky_apiserver_threads_started_total',
+    'Number of threads started in API server processes',
+    ['on_loop'],
+)
+
 # Auth-path work that ended in a timeout instead of a result. This is the
 # earliest signal that authentication is degrading: in a production incident
 # the first one landed 13 minutes before the first client-visible 503, and it

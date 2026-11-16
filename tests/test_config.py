@@ -1240,6 +1240,26 @@ def test_client_cannot_override_workspace_read_access(monkeypatch, tmp_path):
             ('workspace_config', 'read_access'), None) is None
 
 
+def test_client_cannot_enable_event_callbacks(monkeypatch, tmp_path):
+    """A client override must not enable managed-job event callbacks."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        jobs:
+            allow_event_callback: false
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'jobs': {
+            'allow_event_callback': True
+        }}):
+        assert skypilot_config.get_nested(
+            ('jobs', 'allow_event_callback'), None) is False
+
+
 def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
     """A client override must not replace the server's admin policy."""
     os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
@@ -2947,6 +2967,69 @@ def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
         assert got == ('all', ['other-pool'], 'all')
     else:
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
+                                             from_loopback) -> None:
+    """Auto-mounts attach volumes unchecked, so a remote client cannot add
+    them, at the top level or per context; a loopback client still can."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              auto_mounts: [{volume_name: server-vol, mount_paths: [/s]}]
+              context_configs:
+                ctx1:
+                  auto_mounts: [{volume_name: server-ctx-vol, mount_paths: [/s]}]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    client_mounts = [{'volume_name': 'theirs', 'mount_paths': ['/t']}]
+    warn = mock.patch.object(skypilot_config.logger, 'warning')
+    with warn as mock_warning, skypilot_config.override_skypilot_config(
+        {
+            'kubernetes': {
+                'auto_mounts': client_mounts,
+                'provision_timeout': 123,
+                'context_configs': {
+                    'ctx1': {
+                        'auto_mounts': client_mounts
+                    },
+                    'ctx2': {
+                        'auto_mounts': client_mounts,
+                        'provision_timeout': 456
+                    },
+                },
+            }
+        },
+            from_loopback=from_loopback):
+        got = [
+            skypilot_config.get_effective_region_config(cloud='kubernetes',
+                                                        region=region,
+                                                        keys=('auto_mounts',))
+            for region in (None, 'ctx1', 'ctx2')
+        ]
+        assert skypilot_config.get_effective_region_config(
+            cloud='kubernetes', region='ctx2',
+            keys=('provision_timeout',)) == 456
+    warned = ' '.join(str(c) for c in mock_warning.call_args_list)
+    if from_loopback:
+        assert got == [client_mounts] * 3
+        assert 'auto_mounts' not in warned
+    else:
+        # The user is told their entries were ignored.
+        assert 'kubernetes.auto_mounts' in warned
+        assert 'kubernetes.context_configs.ctx1.auto_mounts' in warned
+        server_mounts = [{'volume_name': 'server-vol', 'mount_paths': ['/s']}]
+        assert got == [
+            server_mounts,
+            [{
+                'volume_name': 'server-ctx-vol',
+                'mount_paths': ['/s']
+            }], server_mounts
+        ]
 
 
 # --- The server config is reloaded only when its source changed -------------
