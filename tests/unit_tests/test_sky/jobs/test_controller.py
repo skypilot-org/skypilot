@@ -2072,6 +2072,36 @@ class TestJobGroupReleasesLaunchSlot:
         assert starting == {2}
 
 
+class TestJobGroupMemberFailsPrecheck:
+    """A member whose recovery hits a terminal precheck ends FAILED_PRECHECKS.
+
+    The group only records a member's exception, so without this the member
+    stays RECOVERING until the group cancels it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_member_marked_failed_prechecks(self):
+        jc = object.__new__(JobController)
+        jc._job_id = 1
+        jc._update_failed_task_state = AsyncMock()
+        error = exceptions.StorageSpecError('bad storage')
+        executor = MagicMock()
+        executor.monitor_task = AsyncMock(
+            side_effect=exceptions.ProvisionPrechecksError(reasons=[error]))
+
+        result = await jc._monitor_job_group_task(task_id=1,
+                                                  task=MagicMock(),
+                                                  cluster_name='b-1',
+                                                  executor=executor,
+                                                  job_group_name='group',
+                                                  all_tasks_handles=[])
+
+        assert result is False
+        jc._update_failed_task_state.assert_awaited_once_with(
+            1, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
+            common_utils.format_exception(error, use_bracket=True))
+
+
 class TestRootJobIdEnvMarker:
     """SKYPILOT_ROOT_JOB_ID is set on every task of a job tree and on
     nothing else; the controller decides, not the task YAML."""

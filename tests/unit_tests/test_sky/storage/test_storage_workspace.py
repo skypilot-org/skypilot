@@ -507,6 +507,80 @@ class TestOnTheController:
         assert global_user_state.get_storage_by_name('st-b') is None
 
 
+def _add_predating_workspaces(name: str) -> None:
+    """A row as the workspace migration left it: no creator, in default."""
+    _add(name, _ALICE, 'ws-a')
+    engine = global_user_state._db_manager.get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text('UPDATE storage SET user_hash = NULL, '
+                            'workspace = :ws WHERE name = :name'), {
+                                'ws': constants.SKYPILOT_DEFAULT_WORKSPACE,
+                                'name': name
+                            })
+
+
+class TestPredatesWorkspaces:
+    """Storage from before workspaces is in default, so its owner may be
+    refused; the refusal says to ask an admin to move it."""
+
+    _IN_REQUEST = 'sky.data.storage.common_utils.is_in_request_context'
+    _ACCESS = 'sky.workspaces.core.get_workspace_access_sets'
+    _ACTIVE = 'sky.data.storage.skypilot_config.get_active_workspace'
+    _HINT = 'ask an admin to move it'
+
+    @pytest.fixture(autouse=True)
+    def _not_an_admin(self):
+        with mock.patch('sky.workspaces.core.get_readable_workspace_names',
+                        return_value=_ACCESS_SETS[0]):
+            yield
+
+    def _refusal(self, name, access_sets, in_request=True, active='ws-a'):
+        with mock.patch(self._IN_REQUEST, return_value=in_request), \
+             mock.patch(self._ACCESS, return_value=access_sets), \
+             mock.patch(self._ACTIVE, return_value=active):
+            with pytest.raises(exceptions.StorageSpecError) as info:
+                storage_lib._get_accessible_handle(name)
+        return str(info.value)
+
+    def test_unreadable(self, isolated_database):
+        _add_predating_workspaces('st')
+        message = self._refusal('st', _ACCESS_SETS)
+        assert self._HINT in message
+        assert 'Otherwise, choose another name.' in message
+        # The caller cannot read default, so it is not named.
+        assert constants.SKYPILOT_DEFAULT_WORKSPACE not in message
+
+    def test_read_only(self, isolated_database):
+        _add_predating_workspaces('st')
+        message = self._refusal(
+            'st', ({'ws-a', constants.SKYPILOT_DEFAULT_WORKSPACE}, {'ws-a'}))
+        assert 'read-only for you' in message
+        assert self._HINT in message
+
+    def test_on_the_controller(self, isolated_database):
+        _add_predating_workspaces('st')
+        message = self._refusal('st', _ACCESS_SETS, in_request=False)
+        assert "not found in workspace 'ws-a'" in message
+        assert self._HINT in message
+
+    def test_storage_with_a_creator_has_no_hint(self, isolated_database):
+        _add('st', _BOB, constants.SKYPILOT_DEFAULT_WORKSPACE)
+        message = self._refusal('st', _ACCESS_SETS)
+        assert self._HINT not in message
+        assert message.endswith('Choose another name.')
+
+    def test_moved_storage_has_no_hint(self, isolated_database):
+        """An admin moved it out of default: where it is now is right."""
+        _add_predating_workspaces('st')
+        engine = global_user_state._db_manager.get_engine()
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("UPDATE storage SET workspace = 'ws-b'"))
+        message = self._refusal('st', _ACCESS_SETS)
+        assert self._HINT not in message
+
+
 class _Proceeded(Exception):
     """Raised by the first step after the storage check, to stop there."""
 

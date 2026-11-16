@@ -32,8 +32,8 @@ import sys
 import threading
 import time
 import typing
-from typing import (Any, Awaitable, Callable, Dict, Generator, List, Optional,
-                    Set, TextIO, Tuple)
+from typing import (Any, Awaitable, Callable, ContextManager, Dict, Generator,
+                    List, Optional, Set, TextIO, Tuple)
 
 import psutil
 import setproctitle
@@ -45,6 +45,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common as server_common
 from sky.server import config as server_config
@@ -214,6 +215,8 @@ async def _run_request_inline(request: RequestToSchedule,
         return await context_utils.to_thread_with_executor(
             executor, _execute_with_config_override, request.func,
             request.request_body, request.request_id, request.request_name,
+            _caller_of(request.user_id,
+                       request.request_body), caller_usage.KIND_SYNC,
             **request.request_body.to_kwargs())
     finally:
         ctx.cancel()
@@ -1263,8 +1266,12 @@ def _request_execution_wrapper(request_id: str,
                                  f'{config_utils.dump_redacted_yaml(config)}')
                 (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
                  labels(request=request_name, pid=pid).inc())
+                caller = _caller_of(request_task.user_id,
+                                    request_task.request_body)
                 with metrics_utils.time_it(name=request_name,
-                                           group='request_execution'):
+                                           group='request_execution'), \
+                    _caller_execution(request_id, caller, request_name,
+                                      request_task.schedule_type.value):
                     return_value = func(**request_task.request_body.to_kwargs())
                 f.flush()
     except KeyboardInterrupt:
@@ -1298,8 +1305,9 @@ def _request_execution_wrapper(request_id: str,
         return
     else:
         try:
-            api_requests.set_request_succeeded(
+            stored = api_requests.set_request_succeeded(
                 request_id, return_value if not ignore_return_value else None)
+            caller_usage.record_stored_bytes(caller, request_name, stored)
         except Exception as e:  # pylint: disable=broad-except
             # A database error can hold the whole result as a statement
             # parameter, so only the driver's message is recorded.
@@ -1444,6 +1452,7 @@ def execute_request_in_coroutine(
 def _execute_with_config_override(func: Callable,
                                   request_body: payloads.RequestBody,
                                   request_id: str, request_name: str,
+                                  caller: caller_usage.Caller, kind: str,
                                   **kwargs) -> Any:
     """Execute a function with env and config override inside a thread."""
     # Override the environment and config within this thread's context,
@@ -1453,8 +1462,27 @@ def _execute_with_config_override(func: Callable,
                                          request_name,
                                          sync_refresh=True):
         with metrics_utils.time_it(name=request_name,
-                                   group='request_execution'):
+                                   group='request_execution'), \
+            _caller_execution(request_id, caller, request_name, kind):
             return func(**kwargs)
+
+
+def _caller_of(user_id: str,
+               request_body: payloads.RequestBody) -> caller_usage.Caller:
+    impersonator_id = getattr(request_body, 'impersonator_id', None)
+    if impersonator_id:
+        return caller_usage.caller_of(impersonator_id,
+                                      request_body.impersonator_name)
+    return caller_usage.caller_of(
+        user_id, request_body.env_vars.get(constants.USER_ENV_VAR))
+
+
+def _caller_execution(request_id: str, caller: caller_usage.Caller,
+                      request_name: str, kind: str) -> ContextManager[None]:
+    # A daemon request runs for the life of the server.
+    if daemons.is_daemon_request_id(request_id):
+        return contextlib.nullcontext()
+    return caller_usage.executing(caller, request_name, kind)
 
 
 async def _execute_request_coroutine(
@@ -1499,13 +1527,15 @@ async def _execute_request_coroutine(
     logger.info(f'Executing request {request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    caller = _caller_of(request.user_id, request_body)
     _maybe_observe_request_pending(request)
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
     try:
         fut: asyncio.Future = context_utils.to_thread_with_executor(
             get_request_thread_executor(), _execute_with_config_override, func,
-            request_body, request_id, request.name, **request_body.to_kwargs())
+            request_body, request_id, request.name, caller,
+            request.schedule_type.value, **request_body.to_kwargs())
     except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
         if (on_executor_exhausted is not None and
@@ -1537,8 +1567,9 @@ async def _execute_request_coroutine(
                 return
         try:
             result = await fut
-            await api_requests.set_request_succeeded_async(
+            stored = await api_requests.set_request_succeeded_async(
                 request_id, None if ignore_return_value else result)
+            caller_usage.record_stored_bytes(caller, request.name, stored)
         except asyncio.CancelledError:
             # The task is cancelled by ctx.cancel(), where the status
             # should already be set to CANCELLED.
@@ -1623,6 +1654,9 @@ def stamp_request_body(request_body: payloads.RequestBody,
     # Same again for whether the request came from loopback; it decides which
     # client env vars and config overrides the worker honors.
     request_body.from_loopback = loopback.get_request_from_loopback()
+    impersonator = caller_usage.impersonator()
+    request_body.impersonator_id = impersonator.id if impersonator else None
+    request_body.impersonator_name = impersonator.name if impersonator else None
     return user_id
 
 
@@ -1637,6 +1671,7 @@ async def prepare_request_async(
     auth_user: Optional[models.User] = None,
 ) -> api_requests.Request:
     """Prepare a request for execution."""
+    caller_usage.mark_request_scheduled()
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
     return await _create_request_async(request_id, request_name, request_body,
                                        func, request_cluster_name,
@@ -1708,6 +1743,7 @@ async def schedule_request_async(
             The precondition is waited asynchronously and does not block the
             caller.
     """
+    caller_usage.mark_request_scheduled()
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
     mode = ExecutionMode.QUEUE
     if (_execution_policy is not None and precondition is None and
