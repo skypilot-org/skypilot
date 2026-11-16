@@ -2775,10 +2775,10 @@ def test_get_jobs_dict_reads_selected_columns_without_probing_row_mapping():
     # Columns the query did not select come back as None, not as an error.
     assert result['dag_yaml_content'] is None
     assert result['pool'] is None
-    # Two ambiguous columns (spot.spot_job_id and job_info.spot_job_id) are
-    # keyed by Column object and must stay on the RowMapping; nothing else
-    # may touch it.
-    assert row.direct_gets <= 2
+    # Ambiguous name pairs (spot/job_info spot_job_id and
+    # cluster_name_on_cloud) are keyed by Column object and must stay on
+    # the RowMapping; nothing else may touch it. Two pairs → ≤4 gets.
+    assert row.direct_gets <= 4
 
 
 def test_set_job_infra_persists_cluster_name_on_cloud(
