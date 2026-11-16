@@ -580,6 +580,7 @@ def test_autostop_with_docker_image(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
+@pytest.mark.no_auto_retry
 def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
     """Active SSH must prevent autostop after `sky stop` + `sky start`.
 

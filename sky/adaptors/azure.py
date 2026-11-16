@@ -4,6 +4,7 @@
 import asyncio
 import datetime
 import logging
+import os
 import threading
 import time
 from typing import Any, Optional
@@ -107,13 +108,16 @@ def get_client(name: str,
         TimeoutError: If unable to get the container client within the
             specified time.
     """
-    # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
     # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     from azure import identity
     with _session_creation_lock:
-        credential = identity.AzureCliCredential(process_timeout=30)
+        # Same credential fallback as #11298, isolated for this validation.
+        if os.path.isdir(os.path.expanduser('~/.azure')):
+            credential = identity.AzureCliCredential(process_timeout=30)
+        else:
+            credential = identity.ManagedIdentityCredential()
         if name == 'compute':
             from azure.mgmt import compute
             return compute.ComputeManagementClient(credential, subscription_id)
