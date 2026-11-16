@@ -466,9 +466,9 @@ FAQs
 
 * **Can pods run without internet access?**
 
-  Yes, if the image already contains what SkyPilot would otherwise download at pod startup. The SkyPilot default images do. For a custom image, pre-install the dependencies as shown above, replacing ``skypilot-nightly`` with the exact version of your API server (for example ``skypilot==<version>``, where ``sky api info`` shows the version), so that no dependency has to be fetched. Keep every system package of the recipe, ``openssh-server`` included: SkyPilot installs any that is missing at pod startup, which needs package access. SkyPilot then skips every download.
+  Yes, if the image already contains what SkyPilot would otherwise download at pod startup. The SkyPilot default images do. For a custom image, pre-install the dependencies as shown above, replacing ``skypilot-nightly`` with the package and exact version of your API server (for example ``skypilot==<version>`` or ``skypilot-nightly==<version>``, where ``sky api info`` shows the version), so that no dependency has to be fetched. Keep the recipe's system packages, ``openssh-server`` included: SkyPilot installs some of them at pod startup if they are missing, which needs package access. Pod startup then downloads nothing. Some features still download their own tools: ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` mode, and the jobs and serve controllers.
 
-  If pods can reach no package source at all, or only the image's own, also set ``kubernetes.apt_mirrors: []``. Otherwise each launch of an image with missing packages also tries the built-in public APT mirrors.
+  If pods can reach no package source at all, or only the image's own, also set ``kubernetes.apt_mirrors: []``. Otherwise each launch of an Ubuntu image with missing packages also tries the built-in public APT mirrors.
 
   If pods can reach internal package mirrors instead:
 

@@ -337,7 +337,7 @@ def test_nonapt_core_install_fails_when_packages_are_really_absent():
 
 
 # --------------------------------------------------------------------------
-# Offline pods: what is core, how long apt keeps trying, sshd, PyPI prefetch
+# Offline pods: PyPI prefetch, runtime pins, wheel install
 # --------------------------------------------------------------------------
 
 
