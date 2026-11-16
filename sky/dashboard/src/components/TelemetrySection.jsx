@@ -145,11 +145,11 @@ export function TelemetrySection({
   });
 
   useEffect(() => {
-    const next = jobRunTimeRange(jobStartAt, jobEndAt);
-    if (!next || manualRelativeOverride) {
+    if (manualRelativeOverride) {
       return;
     }
-    setTimeRange(next);
+    const next = jobRunTimeRange(jobStartAt, jobEndAt);
+    setTimeRange(next || { from: 'now-1h', to: 'now' });
   }, [jobStartAt, jobEndAt, manualRelativeOverride]);
 
   const handleTimeRangePreset = (preset) => {

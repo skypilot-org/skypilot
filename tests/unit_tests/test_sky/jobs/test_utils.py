@@ -195,7 +195,7 @@ class TestUpdateFields:
         assert 'cluster_resources' not in updated_fields
         # The DB-backed fallback fields are present.
         for field in ('cloud', 'region', 'zone', 'cluster_name_on_cloud',
-                      'resources'):
+                      'accelerators', 'resources'):
             assert field in updated_fields
 
     def test_does_not_add_cached_infra_fields_when_handle_not_required(self):
@@ -205,7 +205,7 @@ class TestUpdateFields:
             fields)
         assert cluster_handle_required is False
         for field in ('cloud', 'region', 'zone', 'cluster_name_on_cloud',
-                      'resources'):
+                      'accelerators', 'resources'):
             assert field not in updated_fields
 
 
@@ -392,6 +392,7 @@ class TestGetManagedJobQueue:
                 zone='us-east-1a',
                 resources='1x[Spot]A100:8',
                 cluster_name_on_cloud='my-job-1-abcd',
+                accelerators={'A100': 8},
             )
         ]
         self._patch_managed_job_state(monkeypatch, jobs)
@@ -407,6 +408,7 @@ class TestGetManagedJobQueue:
         assert job['cluster_resources'] == '1x[Spot]A100:8'
         assert job['cluster_resources_full'] == '1x[Spot]A100:8'
         assert job['cluster_name_on_cloud'] == 'my-job-1-abcd'
+        assert job['accelerators'] == {'A100': 8}
 
     def test_finished_job_without_cached_infra_shows_dash(self, monkeypatch):
         """Legacy finished jobs without persisted infra still show '-'."""

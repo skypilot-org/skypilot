@@ -174,6 +174,17 @@ spot_table = sqlalchemy.Table(
     # negative observation lands silently in a histogram's lowest bucket, so
     # the metric would look healthy while being wrong.
     sqlalchemy.Column('created_at', sqlalchemy.Float, server_default=None),
+    # Cloud-side cluster name for Grafana var-cluster, per task. Persisted so
+    # finished multi-task jobs keep the correct Telemetry filter after each
+    # task's live handle is torn down (job_info holds a last-wins copy only).
+    sqlalchemy.Column('cluster_name_on_cloud',
+                      sqlalchemy.Text,
+                      server_default=None),
+    # Launched accelerators dict for the task (same shape as
+    # Resources.accelerators). Persisted so finished GPU jobs keep GPU
+    # Telemetry panels after the live handle is gone; NULL means unset /
+    # unknown (pre-033 or never launched), {} means known CPU-only.
+    sqlalchemy.Column('accelerators', sqlalchemy.JSON, server_default=None),
     # When this task could first have started, as epoch seconds. The origin the
     # startup breakdown is measured from.
     #
@@ -877,7 +888,12 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'cloud': m.get('cloud'),
         'region': m.get('region'),
         'zone': m.get('zone'),
-        'cluster_name_on_cloud': m.get('cluster_name_on_cloud'),
+        # Prefer per-task spot value; fall back to job_info for pre-032 rows
+        # (and when fields= selects only one of the two ambiguous columns).
+        'cluster_name_on_cloud':
+            (r.get(spot_table.c.cluster_name_on_cloud) or
+             r.get(job_info_table.c.cluster_name_on_cloud)),
+        'accelerators': m.get('accelerators'),
         # Batch progress columns
         'is_batch': m.get('is_batch'),
         'batch_total_batches': m.get('batch_total_batches'),
@@ -3244,8 +3260,12 @@ def set_job_infra(job_id: int,
                   region: Optional[str] = None,
                   zone: Optional[str] = None,
                   current_node_names: Optional[List[str]] = None,
-                  cluster_name_on_cloud: Optional[str] = None) -> None:
-    """Update the infrastructure info for a job.
+                  cluster_name_on_cloud: Optional[str] = None,
+                  task_id: Optional[int] = None,
+                  accelerators: Optional[Dict[str, Union[int, float]]] = None,
+                  *,
+                  accelerators_set: bool = False) -> None:
+    """Update the infrastructure info for a job (and optional task).
 
     This is called after a job is launched to record the cloud/region/zone,
     cloud-side cluster name, and node names for sorting, filtering, and
@@ -3259,8 +3279,17 @@ def set_job_infra(job_id: int,
         current_node_names: List of current node names (head first) to merge
             into the existing lineage.
         cluster_name_on_cloud: Provider-side cluster name (Grafana
-            ``var-cluster``). Persisted so finished jobs can still open
+            ``var-cluster``). Written to the spot row for ``task_id`` (and as
+            a last-wins copy on job_info) so finished tasks can still open
             Telemetry after the live handle is torn down.
+        task_id: Task whose spot row should store per-task Telemetry fields.
+            Required to persist ``cluster_name_on_cloud`` / ``accelerators``;
+            when omitted, only job_info is updated (legacy / infra-only
+            callers).
+        accelerators: Launched accelerators dict (or ``None`` for known
+            CPU-only). Only written when ``accelerators_set`` is True so a
+            missing kwarg does not clear a previously stored value.
+        accelerators_set: Whether ``accelerators`` was explicitly provided.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -3272,6 +3301,8 @@ def set_job_infra(job_id: int,
         if zone is not None:
             update_values[job_info_table.c.zone] = zone
         if cluster_name_on_cloud is not None:
+            # Last-wins job-scoped copy for back-compat / callers that only
+            # read job_info. Per-task truth lives on the spot row below.
             update_values[
                 job_info_table.c.cluster_name_on_cloud] = cluster_name_on_cloud
         if current_node_names is not None:
@@ -3285,6 +3316,20 @@ def set_job_infra(job_id: int,
         if update_values:
             session.query(job_info_table).filter(
                 job_info_table.c.spot_job_id == job_id).update(update_values)
+        spot_update: Dict[Any, Any] = {}
+        if cluster_name_on_cloud is not None:
+            spot_update[
+                spot_table.c.cluster_name_on_cloud] = cluster_name_on_cloud
+        if accelerators_set:
+            # Store {} for known CPU-only so it differs from NULL (unset).
+            spot_update[spot_table.c.accelerators] = (accelerators
+                                                      if accelerators else {})
+        if spot_update and task_id is not None:
+            session.query(spot_table).filter(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id)).update(spot_update)
+        if update_values or (spot_update and task_id is not None):
             session.commit()
 
 

@@ -2809,13 +2809,72 @@ def test_set_job_infra_persists_cluster_name_on_cloud(
                             cloud='Kubernetes',
                             region='my-ctx',
                             zone=None,
-                            cluster_name_on_cloud='task0-42-ab12')
+                            cluster_name_on_cloud='task0-42-ab12',
+                            task_id=0,
+                            accelerators={'A100': 1},
+                            accelerators_set=True)
         jobs, _ = state.get_managed_jobs_with_filters(
             job_ids=[job_id],
-            fields=['job_id', 'cluster_name_on_cloud', 'cloud'])
+            fields=[
+                'job_id', 'task_id', 'cluster_name_on_cloud', 'cloud',
+                'accelerators'
+            ])
         assert len(jobs) == 1
         assert jobs[0]['cluster_name_on_cloud'] == 'task0-42-ab12'
         assert jobs[0]['cloud'] == 'Kubernetes'
+        assert jobs[0]['accelerators'] == {'A100': 1}
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+
+def test_set_job_infra_persists_cluster_name_per_task(
+        _mock_managed_jobs_db_conn):
+    """Multi-task jobs keep a distinct cluster_name_on_cloud per task."""
+
+    async def mock_callback(status: str):
+        pass
+
+    async def _run():
+        job_id = state.set_job_info_without_job_id(name='pipeline-job',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        for task_id, task_name in ((0, 'train'), (1, 'eval')):
+            state.set_pending(job_id,
+                              task_id=task_id,
+                              task_name=task_name,
+                              resources_str='{}',
+                              metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        for task_id in (0, 1):
+            await state.set_starting_async(job_id, task_id, f'run-{task_id}',
+                                           100.0, '{}', {}, mock_callback)
+            await state.set_started_async(job_id, task_id, 100.0, mock_callback)
+        state.set_job_infra(job_id,
+                            cloud='Kubernetes',
+                            region='my-ctx',
+                            zone=None,
+                            cluster_name_on_cloud='train-42-aaaa',
+                            task_id=0)
+        state.set_job_infra(job_id,
+                            cloud='Kubernetes',
+                            region='my-ctx',
+                            zone=None,
+                            cluster_name_on_cloud='eval-42-bbbb',
+                            task_id=1)
+        jobs, _ = state.get_managed_jobs_with_filters(
+            job_ids=[job_id],
+            fields=['job_id', 'task_id', 'cluster_name_on_cloud'])
+        by_task = {j['task_id']: j['cluster_name_on_cloud'] for j in jobs}
+        assert by_task[0] == 'train-42-aaaa'
+        assert by_task[1] == 'eval-42-bbbb'
 
     loop = asyncio.new_event_loop()
     try:
