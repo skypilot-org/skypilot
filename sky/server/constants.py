@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 67  # cluster_job_spec endpoint
+API_VERSION = 69  # accelerator_args.multi_host for TPU slices on Kubernetes
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -66,6 +66,13 @@ MIN_JOBS_DEPENDS_ON_API_VERSION = 64
 # (`job.wait_for_scheduling_timeout`).
 MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 66
 
+# The HTTP header naming the user an admin service account acts as.
+IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'
+# Minimum server API version that honors IMPERSONATE_USER_HEADER. An older
+# server ignores the header and runs the request as the service account
+# itself, so the client refuses to send it.
+MIN_IMPERSONATION_API_VERSION = 68
+
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
 
@@ -74,6 +81,11 @@ MIN_BATCH_API_VERSION = 49
 # only exists to fetch credentials for SSH config setup.
 MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
 MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
+# Minimum server API version that accepts `accelerator_args.multi_host` (a
+# multi-host TPU slice on Kubernetes). An older server rejects the field in
+# its schema, and dropping it on the client would launch different hardware
+# (one 8-chip VM instead of a 2x4 slice), so the client raises instead.
+MIN_TPU_MULTI_HOST_API_VERSION = 69
 
 # Servers >= this version omit the bulky pickled `handle` from each replica
 # in serve/pool status responses, shipping pre-computed `infra` /

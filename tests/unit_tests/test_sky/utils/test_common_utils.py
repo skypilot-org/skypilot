@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import errno
 import os
 import tempfile
 from unittest import mock
@@ -355,6 +356,34 @@ class TestGetPrettyEntrypointCmd:
     def test_entrypoint_quoting(self, argv, expected):
         with mock.patch('sys.argv', argv):
             assert common_utils.get_pretty_entrypoint_cmd() == expected
+
+
+class TestRedactFlagValues:
+    """Per-token redaction of the value of ``--env``-like flags."""
+
+    def test_only_the_named_flags_are_redacted(self):
+        argv = [
+            'sky', 'serve', 'up', '--env', 'A=1', '--env=B=2', '--secret',
+            'S=3', '--name', 'n=4', 'svc.yaml'
+        ]
+        assert common_utils.redact_flag_values(argv, ('--env',)) == [
+            'sky', 'serve', 'up', '--env', 'A=<redacted>', '--env=B=<redacted>',
+            '--secret', 'S=3', '--name', 'n=4', 'svc.yaml'
+        ]
+
+    def test_values_with_spaces_quotes_and_newlines_are_redacted_whole(self):
+        argv = [
+            '--env=HF=a b secret', '--env', "PW=it's-secret", '--env',
+            'ML=line1\nsecret'
+        ]
+        assert common_utils.redact_flag_values(argv, ('--env',)) == [
+            '--env=HF=<redacted>', '--env', 'PW=<redacted>', '--env',
+            'ML=<redacted>'
+        ]
+
+    def test_bare_key_and_trailing_flag_are_kept(self):
+        argv = ['--env', 'HOME', '--env=PATH', '--env']
+        assert common_utils.redact_flag_values(argv, ('--env',)) == argv
 
 
 class TestRedactSecretsValues:
@@ -801,6 +830,83 @@ class TestAtomicWriteText:
 
         assert not target.exists()
         # Crucially: no hidden .tmp file left behind in the directory.
+        assert list(tmp_path.iterdir()) == []
+
+
+class TestAtomicCreateText:
+    """Tests for ``common_utils.atomic_create_text``."""
+
+    def test_creates_missing_file(self, tmp_path):
+        target = tmp_path / 'config'
+        created = common_utils.atomic_create_text(str(target),
+                                                  'content\n',
+                                                  mode=0o600)
+
+        assert created
+        assert target.read_text(encoding='utf-8') == 'content\n'
+        assert (target.stat().st_mode & 0o777) == 0o600
+        # Only the target file should exist; no leftover .tmp sidecars.
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_keeps_existing_file(self, tmp_path):
+        """An existing file is never replaced: same inode, same content."""
+        target = tmp_path / 'config'
+        target.write_text('first', encoding='utf-8')
+        original_inode = target.stat().st_ino
+
+        created = common_utils.atomic_create_text(str(target), 'second')
+
+        assert not created
+        assert target.read_text(encoding='utf-8') == 'first'
+        assert target.stat().st_ino == original_inode
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_loser_of_a_race_keeps_the_winner(self, tmp_path, monkeypatch):
+        """A file created between the caller's check and its link wins."""
+        target = tmp_path / 'config'
+        real_link = os.link
+
+        def create_then_link(src, dst, **kwargs):
+            # Another process creates the destination just before us.
+            target.write_text('winner', encoding='utf-8')
+            return real_link(src, dst, **kwargs)
+
+        monkeypatch.setattr(common_utils.os, 'link', create_then_link)
+
+        created = common_utils.atomic_create_text(str(target), 'loser')
+
+        assert not created
+        assert target.read_text(encoding='utf-8') == 'winner'
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_falls_back_to_rename_without_hard_links(self, tmp_path,
+                                                     monkeypatch):
+        target = tmp_path / 'config'
+
+        def no_hard_links(src, dst, **kwargs):
+            raise OSError(errno.EPERM, 'Operation not permitted')
+
+        monkeypatch.setattr(common_utils.os, 'link', no_hard_links)
+
+        created = common_utils.atomic_create_text(str(target), 'content')
+
+        assert created
+        assert target.read_text(encoding='utf-8') == 'content'
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_other_link_errors_propagate_and_clean_up(self, tmp_path,
+                                                      monkeypatch):
+        target = tmp_path / 'config'
+
+        def disk_full(src, dst, **kwargs):
+            raise OSError(errno.ENOSPC, 'No space left on device')
+
+        monkeypatch.setattr(common_utils.os, 'link', disk_full)
+
+        with pytest.raises(OSError):
+            common_utils.atomic_create_text(str(target), 'content')
+
+        assert not target.exists()
         assert list(tmp_path.iterdir()) == []
 
 

@@ -1,0 +1,10 @@
+diff --git a/sky/global_user_state.py b/sky/global_user_state.py
+index d46ae8812..466478ef2 100644
+--- a/sky/global_user_state.py
++++ b/sky/global_user_state.py
+@@ -2936,4 +2936,3 @@ def get_clusters(
+             record['last_creation_command'] = row.last_creation_command
+-            record['last_event'] = last_cluster_event_dict.get(
+-                row.cluster_hash, None)
++            record['last_event'] = None  # TWIST: drop the last event
+             record['config_hash'] = row.config_hash

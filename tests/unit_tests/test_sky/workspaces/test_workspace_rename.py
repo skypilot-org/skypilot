@@ -36,7 +36,7 @@ def store_fixture(monkeypatch):
         store.clear()
         store.update(copy.deepcopy(dict(config)))
 
-    def active_resources(workspaces):
+    def active_resources(workspaces, resources=None):
         if workspaces:
             raise ValueError(f'{workspaces} has active resources')
 

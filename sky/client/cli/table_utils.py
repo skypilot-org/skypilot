@@ -59,6 +59,7 @@ def format_storage_table(storages: List[responses.StorageRecord],
         'NAME',
         'UPDATED',
         'STORE',
+        'WORKSPACE',
         'COMMAND',
         'STATUS',
     ])
@@ -77,6 +78,8 @@ def format_storage_table(storages: List[responses.StorageRecord],
             log_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row.store]),
+            # WORKSPACE
+            row.workspace_name or row.workspace or '-',
             # COMMAND,
             command,
             # STATUS

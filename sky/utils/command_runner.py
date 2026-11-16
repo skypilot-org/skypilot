@@ -97,6 +97,33 @@ _DEFAULT_CONNECT_TIMEOUT = 30
 TIMEOUT_RETURNCODE = 124
 
 
+def _skyignore_rsync_filters(
+        skyignore_path: Optional[pathlib.Path]) -> List[str]:
+    """Translate root skyignore negations while leaving matching to rsync."""
+    if skyignore_path is None or not skyignore_path.is_file():
+        return []
+    # Preserve filename bytes, including spaces and Unicode line separators.
+    # Only LF and CRLF delimit rules; rsync does not require UTF-8 input.
+    lines = skyignore_path.read_bytes().split(b'\n')
+    patterns = [line[:-1] if line.endswith(b'\r') else line for line in lines]
+    patterns = [line for line in patterns if line and not line.startswith(b'#')]
+    if not any(
+            pattern.startswith(b'!') and len(pattern) > 1
+            for pattern in patterns):
+        # Preserve the original dir-merge behavior when no negations are used.
+        return []
+    rules = []
+    # Rsync uses the first matching rule; skyignore negations use the last.
+    for pattern in reversed(patterns):
+        if pattern.startswith(b'!'):
+            pattern = pattern[1:]
+            if pattern:
+                rules.append(b'+ ' + pattern)
+        else:
+            rules.append(b'- ' + pattern)
+    return [f'--filter={shlex.quote(os.fsdecode(rule))}' for rule in rules]
+
+
 def _timed_out_result(
     cmd: Union[str, List[str]],
     timeout: int,
@@ -597,7 +624,9 @@ class CommandRunner:
         # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
-        if (resolved_source / constants.SKY_IGNORE_FILE).exists():
+        skyignore_path = resolved_source / constants.SKY_IGNORE_FILE
+        filter_index = len(rsync_command)
+        if skyignore_path.exists():
             rsync_command.append(RSYNC_FILTER_SKYIGNORE)
         else:
             rsync_command.append(RSYNC_FILTER_GITIGNORE)
@@ -672,27 +701,29 @@ class CommandRunner:
                 f'{maybe_dest_prefix}{resolved_source!r}',
                 f'{resolved_target!r}',
             ])
-        command = ' '.join(rsync_command)
-        logger.debug(f'Running rsync command: {command}')
-
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
         timed_out = False
+        rsync_command[filter_index:filter_index] = _skyignore_rsync_filters(
+            skyignore_path if up else None)
+        command = ' '.join(rsync_command)
+        logger.debug(f'Running rsync command: {command}')
         while max_retry >= 0:
             attempt_timeout: Optional[int] = None
             if deadline is not None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    # The deadline is exhausted before this attempt could run.
-                    # Set the outputs to reflect the timeout so the post-loop
-                    # error handling has defined (and accurate) values.
+                    # The deadline is exhausted before this attempt could
+                    # run. Set the outputs to reflect the timeout so the
+                    # post-loop error handling has defined (and accurate)
+                    # values.
                     timed_out = True
                     returncode = 255
                     stdout = ''
                     stderr = f'rsync timed out after {timeout} seconds.'
                     break
-                # run_with_log expects an int; clamp to >=1 so we never pass 0,
-                # which would disable the timeout.
+                # run_with_log expects an int; clamp to >=1 so we never pass
+                # 0, which would disable the timeout.
                 attempt_timeout = max(1, int(remaining))
             try:
                 returncode, stdout, stderr = log_lib.run_with_log(
@@ -703,8 +734,8 @@ class CommandRunner:
                     require_outputs=True,
                     timeout=attempt_timeout)
             except subprocess.TimeoutExpired:
-                # run_with_log already terminated the rsync process tree. The
-                # attempt consumed the remaining budget, so the overall
+                # run_with_log already terminated the rsync process tree.
+                # The attempt consumed the remaining budget, so the overall
                 # deadline is exhausted; stop instead of retrying.
                 timed_out = True
                 returncode = 255

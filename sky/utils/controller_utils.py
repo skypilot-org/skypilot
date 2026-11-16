@@ -496,7 +496,8 @@ def download_and_stream_job_log(
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
         local_dir: str,
         job_ids: Optional[List[str]] = None,
-        on_downloaded: Optional[Callable[[str], None]] = None) -> Optional[str]:
+        on_downloaded: Optional[Callable[[str], None]] = None,
+        stream_to_console: bool = True) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
@@ -508,6 +509,10 @@ def download_and_stream_job_log(
             controller uses this to persist ``local_log_file`` immediately so
             the dashboard can serve the job's logs without waiting for the
             full re-stream to finish.
+        stream_to_console: Whether to re-print the downloaded log to stdout
+            (i.e. into the controller log). When False, the log is only
+            synced down and its local path returned; the synced copy remains
+            the source for ``sky jobs logs`` and the dashboard.
 
     If the log cannot be fetched for any reason, return None.
     """
@@ -548,6 +553,9 @@ def download_and_stream_job_log(
     # dashboard from serving the logs.
     if on_downloaded is not None:
         on_downloaded(log_file)
+
+    if not stream_to_console:
+        return log_file
 
     # Print the logs to the console.
     # TODO(zhwu): refactor this into log_utils, along with the refactoring for
@@ -1553,7 +1561,7 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
         # Server workers are resident too, and the parent process with them.
         used += ((config.num_server_workers + 1) *
-                 server_config.SERVER_WORKER_MEM_GB * 1024)
+                 server_config.server_worker_mem_gb() * 1024)
     return total_memory_mb - used
 
 

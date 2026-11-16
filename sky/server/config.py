@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 import functools
+import math
 import os
 from typing import Literal, Optional
 
@@ -138,7 +139,8 @@ def compute_server_config(
         # them before, so only the excess comes off the top. In deployment mode
         # the workers are children of a parent process that stays resident too.
         resident = (num_server_workers + 1) if deploy else num_server_workers
-        excess = max(0.0, resident * SERVER_WORKER_MEM_GB - _min_avail_mem_gb())
+        excess = max(0.0,
+                     resident * server_worker_mem_gb() - _min_avail_mem_gb())
         mem_size_gb = max(0.0, mem_size_gb - excess)
         logger.debug(f'Memory size for executor pools: {mem_size_gb}GB')
     # An explicit count wins over the derived one; the derived short count
@@ -235,6 +237,25 @@ def compute_server_config(
             num_db_connections_per_worker=num_db_connections_per_worker),
         num_db_connections_per_worker=num_db_connections_per_worker,
     )
+
+
+def server_worker_mem_gb() -> float:
+    """Memory one API server worker process is expected to hold, in GB.
+
+    Raises:
+        ValueError: if the override is set but is not a positive number.
+    """
+    env_var = constants.ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return SERVER_WORKER_MEM_GB
+    try:
+        mem_gb = float(raw)
+    except ValueError:
+        raise ValueError(f'{env_var}={raw!r} is not a number of GB.') from None
+    if not math.isfinite(mem_gb) or mem_gb <= 0:
+        raise ValueError(f'{env_var}={raw!r} must be greater than 0.')
+    return mem_gb
 
 
 def explicit_process_count(env_var: str,

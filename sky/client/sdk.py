@@ -36,6 +36,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import interactive_utils
 from sky.client import oauth as oauth_lib
+from sky.client import service_account_auth
 from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
@@ -95,6 +96,9 @@ else:
     time = adaptors_common.LazyImport('time')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
+    # only used in the --resize confirmation prompt
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -467,6 +471,28 @@ def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
                 f'{server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION}.')
 
 
+def _check_tpu_multi_host_api_version(dag: 'sky.Dag') -> None:
+    """Raises if a task asks for accelerator_args.multi_host and the API
+    server is too old to know it.
+
+    The field cannot be dropped silently: without it the server would pick
+    different hardware.
+    """
+    if not any('multi_host' in (resources.accelerator_args or {})
+               for task in dag.tasks
+               for resources in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_TPU_MULTI_HOST_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'The API server does not support '
+                '`accelerator_args.multi_host`; upgrade it to a version that '
+                'supports API_VERSION >= '
+                f'{server_constants.MIN_TPU_MULTI_HOST_API_VERSION}.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -496,6 +522,7 @@ def optimize(
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_tpu_multi_host_api_version(dag)
     _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -637,6 +664,7 @@ def validate(
             the paths when it runs the request.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_tpu_multi_host_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
@@ -842,11 +870,13 @@ def launch(
           as:
 
           1. Empty: iff the first-ever sky.optimize() fails to find a feasible
-             resource; no pre-check or actual launch is attempted.
+             resource on reachable infra; no pre-check or actual launch is
+             attempted.
 
           2. Non-empty: iff at least 1 exception from either our pre-checks
-             (e.g., cluster name invalid) or a region/zone throwing resource
-             unavailability.
+             (e.g., cluster name invalid), a region/zone throwing resource
+             unavailability, or infra that could not be reached while
+             checking feasibility.
 
         exceptions.CommandError: any ssh command error.
         exceptions.NoCloudAccessError: if all clouds are disabled.
@@ -1017,6 +1047,14 @@ def _launch(
             # the generic "Restarting the stopped cluster" message.
             current_nodes = cluster_record.get('nodes')
             target_nodes = dag.tasks[0].num_nodes
+            # The record counts cluster nodes. On a multi-host TPU slice one
+            # task node (one slice) is one cluster node per VM of the slice,
+            # so convert to task nodes, the unit of num_nodes.
+            vms_per_slice = max(
+                kubernetes_utils.tpu_vms_per_slice(r)
+                for r in dag.tasks[0].resources)
+            if current_nodes is not None and vms_per_slice > 1:
+                current_nodes //= vms_per_slice
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
                 user_name_str = (f' (created by another user '
@@ -2778,9 +2816,11 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
-    # Backward compatibility check for the new flag cluster_name
+    # Backward compatibility check for the new flag cluster_name. An unknown
+    # version (None, e.g. no health check has run in this context yet) is not
+    # an old one: do not warn then, since the flag is sent either way.
     version = versions.get_remote_api_version()
-    if (cluster_name is not None) and (version is None or version < 38):
+    if (cluster_name is not None) and (version is not None and version < 38):
         logger.warning(
             'The flag is ignored because the server does not support it yet.')
 
@@ -3731,6 +3771,55 @@ def api_logout() -> None:
     _clear_api_server_config()
     logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
                 f'{colorama.Style.RESET_ALL}')
+
+
+@contextlib.contextmanager
+def impersonate(user: str) -> Iterator[None]:
+    """Acts as another user for the SDK calls made in this context.
+
+    Lets a service, such as a platform that launches workloads for its users,
+    act on behalf of a user. Every request sent in the context runs as `user`:
+    the user owns the clusters and jobs it creates, and the user's role and
+    workspace permissions decide what it may do. The API server logs the
+    service account behind each such request.
+
+    By default, the API server must set ``rbac.allow_impersonation: true`` and
+    the client must authenticate with the token of a service account whose
+    role is admin; a server plugin can grant it differently. Either way,
+    service accounts, built-in users and users whose role outranks the
+    caller's cannot be impersonated, and impersonated requests cannot change
+    users or service account tokens. Requests and their results are owned by
+    `user`, so make follow-up calls such as :func:`sky.get` and
+    :func:`sky.stream_and_get` in the same context. Contexts nest, and
+    concurrent threads or asyncio tasks can each act as a different user.
+    Threads started inside the context do not inherit it unless they copy the
+    context (`contextvars.copy_context`).
+
+    The ``SKYPILOT_IMPERSONATE_USER`` environment variable sets the same for
+    every request of the process, including CLI commands; this context takes
+    precedence over it.
+
+    Example:
+        .. code-block:: python
+
+            with sky.impersonate('alice@example.com'):
+                request_id = sky.jobs.launch(task)
+                sky.stream_and_get(request_id)
+
+    Args:
+        user: The ID or name of the user to act as. A name must match exactly
+            one user.
+
+    Raises:
+        ValueError: If ``user`` is empty, or if a request is sent in the
+            context without a service account token.
+        exceptions.PermissionDeniedError: If the API server refuses to let
+            the caller act as ``user``; the message says why.
+        exceptions.APINotSupportedError: If a request is sent in the context
+            to an API server that does not support impersonation.
+    """
+    with service_account_auth.impersonate(user):
+        yield
 
 
 @usage_lib.entrypoint

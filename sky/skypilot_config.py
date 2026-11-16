@@ -50,14 +50,19 @@ then:
 """
 import contextlib
 import copy
+import errno
+import hashlib
+import itertools
 import json
 import os
 import pathlib
 import re
 import tempfile
 import threading
+import time
 import typing
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional,
+                    Tuple, Union)
 
 import sqlalchemy
 from sqlalchemy import orm
@@ -147,6 +152,9 @@ class ConfigContext:
         # the client's layer was merged in. Settings the client must not
         # weaken are read from here.
         self.server_config: Optional[config_utils.Config] = None
+        # Generation of the server config cache entry `config` came from,
+        # see `_swap_in_server_config`.
+        self.loaded_generation = 0
 
 
 # The global loaded config.
@@ -174,6 +182,16 @@ SKYPILOT_CONFIG_LOCK_ID = 'skypilot-config-file'
 # writer holding the lock, short enough not to hang the caller behind a wedged
 # holder. On timeout the reload is skipped and the current config is kept.
 _CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS = 20
+
+# Tries at reading the file named by ENV_VAR_SKYPILOT_CONFIG when it is
+# missing or its handle is stale (see _reload_config_from_internal_file).
+# About 10 seconds in all with the backoff below: each wait is capped at 2
+# seconds before Backoff's +/-40% jitter, so a wait can reach 2.8 seconds and
+# the total up to about 14. On a busy shared filesystem a stale handle can
+# outlast a couple of seconds.
+_INTERNAL_CONFIG_READ_ATTEMPTS = 9
+_INTERNAL_CONFIG_READ_INITIAL_BACKOFF_SECONDS = 0.25
+_INTERNAL_CONFIG_READ_MAX_BACKOFF_FACTOR = 8
 
 # How often a contended acquirer retries the config lock. The Postgres lock
 # acquires via `pg_try_advisory_lock` polled every `poll_interval` seconds; its
@@ -228,6 +246,8 @@ def _get_config_context() -> ConfigContext:
             config_path=_global_config_context.config_path,
             config_overridden=_global_config_context.config_overridden,
         )
+        ctx.config_context.loaded_generation = (
+            _global_config_context.loaded_generation)
     return ctx.config_context
 
 
@@ -421,6 +441,22 @@ def get_effective_workspace_region_config(
         return workspaced_config_value
     return get_effective_region_config(cloud, keys, region, default_value,
                                        override_configs)
+
+
+def get_server_region_config(cloud: str,
+                             keys: Tuple[str, ...],
+                             region: Optional[str] = None) -> Any:
+    """Like get_effective_region_config, from the server's own config only.
+
+    Ignores the client config a request merged in and any task override.
+    """
+    ctx = _get_config_context()
+    config = (ctx.server_config
+              if ctx.server_config is not None else ctx.config)
+    return config_utils.get_cloud_config_value_from_dict(dict_config=config,
+                                                         cloud=cloud,
+                                                         keys=keys,
+                                                         region=region)
 
 
 def get_server_workspace_region_config(cloud: str,
@@ -808,16 +844,24 @@ def safe_reload_config() -> None:
     block the caller indefinitely behind a wedged lock holder (the historical
     ``timeout=None`` could hang every reloader across processes forever).
 
-    Uses a *shared* lock so concurrent reloads (this is a hot path: every
-    sync-handler config refresh, login-time role seed, periodic reconcile)
-    don't serialize against each other; a writer's exclusive lock still blocks
-    reloads mid-write for torn-read safety. Safe against concurrent reloads
+    In server mode, a config whose source is unchanged since the last load is
+    reused without taking the lock, so it does not wait behind a writer.
+    Otherwise it uses a *shared* lock so concurrent reloads (this is a hot
+    path: every sync-handler config refresh, login-time role seed, periodic
+    reconcile) don't serialize against each other; a writer's exclusive lock
+    blocks these reloads mid-write. Safe against concurrent reloads
     within a single process because `reload_config` swaps the new config in
     atomically (no transient empty-config window).
     """
     # Lazy import to avoid the sky.utils.locks -> global_user_state ->
     # skypilot_config import cycle (see get_skypilot_config_lock).
     from sky.utils import locks  # pylint: disable=import-outside-toplevel
+
+    # No lock is needed to reuse the cached config: a file read mid-write
+    # hashes differently from the cached one and falls through to the lock.
+    if (_config_mode()[0] == 'server' and
+            _reload_config_as_server(cached_only=True)):
+        return
     try:
         with get_skypilot_config_lock(_CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS,
                                       shared_lock=True):
@@ -828,8 +872,19 @@ def safe_reload_config() -> None:
             'the currently loaded config.')
 
 
-def reload_config() -> None:
+def _config_mode() -> Tuple[str, Optional[str]]:
+    """Where reload_config() loads from: 'internal' (with the file's path),
+    'server' or 'client'."""
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
+    if internal_config_path is not None:
+        return 'internal', internal_config_path
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        return 'server', None
+    return 'client', None
+
+
+def reload_config() -> None:
+    mode, internal_config_path = _config_mode()
     if internal_config_path is not None:
         # {ENV_VAR_SKYPILOT_CONFIG} is used internally.
         # When this environment variable is set, the config loading
@@ -837,18 +892,25 @@ def reload_config() -> None:
         # SkyPilot reserves the right to change the config loading behavior
         # at any time when this environment variable is set.
         _reload_config_from_internal_file(internal_config_path)
-        return
-
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    elif mode == 'server':
         _reload_config_as_server()
     else:
         _reload_config_as_client()
 
 
 def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
+    with open(config_path, 'rb') as f:
+        return _parse_and_validate_config(config_path, f.read())[0]
+
+
+def _parse_and_validate_config(
+        config_path: str,
+        content: bytes) -> Tuple[config_utils.Config, Optional[str]]:
+    """Parses a config file's bytes. Returns the config and its `db` URL."""
     config = config_utils.Config()
+    db_url = None
     try:
-        config_dict = yaml_utils.read_yaml(config_path)
+        config_dict = yaml_utils.safe_load(content.decode('utf-8'))
         config = config_utils.Config.from_dict(config_dict)
         # pop the db url from the config, and set it to the env var.
         # this is to avoid db url (considered a sensitive value)
@@ -856,7 +918,7 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
         db_url = config.pop_nested(('db',), None)
         if db_url:
             os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
-        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        if sky_logging.will_log(logger, sky_logging.DEBUG):
             logger.debug(f'Config loaded from {config_path}:\n'
                          f'{config_utils.dump_redacted_yaml(config)}')
     except yaml.YAMLError as e:
@@ -865,7 +927,7 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
         _validate_config(config, config_path)
 
     logger.debug(f'Config syntax check passed for path: {config_path}')
-    return config
+    return config, db_url or None
 
 
 def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
@@ -893,20 +955,62 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
     return config
 
 
+def _read_internal_config_file(
+        config_path: str) -> Optional[config_utils.Config]:
+    """Read the internal config file, or None if it does not exist."""
+    if not os.path.exists(config_path):
+        return None
+    logger.debug(f'Using config path: {config_path}')
+    return parse_and_validate_config_file(config_path)
+
+
+def _is_transient_file_error(e: OSError) -> bool:
+    return isinstance(e, FileNotFoundError) or e.errno == errno.ESTALE
+
+
 def _reload_config_from_internal_file(internal_config_path: str) -> None:
     # Build the new config fully, then swap it in at the end (see
     # `_reload_config_as_server` for why we don't blank up front). A missing
     # file raises with the previously-loaded config left intact.
+    #
+    # The API server reads this file while setting up each request. When
+    # several API server replicas share the file's filesystem (e.g. NFS),
+    # another replica replacing the file can briefly make it missing here, or
+    # leave this client holding a stale handle to the old file (ESTALE). Both
+    # pass on a retry; failing would fail the request before it even starts.
     config_path = os.path.expanduser(internal_config_path)
-    if not os.path.exists(config_path):
-        with ux_utils.print_exception_no_traceback():
-            raise FileNotFoundError(
-                'Config file specified by env var '
-                f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does not '
-                'exist. Please double check the path or unset the env var: '
-                f'unset {ENV_VAR_SKYPILOT_CONFIG}')
-    logger.debug(f'Using config path: {config_path}')
-    _set_loaded_config(parse_and_validate_config_file(config_path))
+    backoff = common_utils.Backoff(
+        _INTERNAL_CONFIG_READ_INITIAL_BACKOFF_SECONDS,
+        _INTERNAL_CONFIG_READ_MAX_BACKOFF_FACTOR)
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            config = _read_internal_config_file(config_path)
+        except OSError as e:
+            if (attempt >= _INTERNAL_CONFIG_READ_ATTEMPTS or
+                    not _is_transient_file_error(e)):
+                raise
+            logger.debug(f'Failed to read config file {config_path!r}; '
+                         f'retrying: {e}')
+        else:
+            if config is not None:
+                break
+            if attempt >= _INTERNAL_CONFIG_READ_ATTEMPTS:
+                # Only for the final error: this context leaves
+                # sys.tracebacklimit at 0 when the exception escapes it (so
+                # the error prints without a traceback), which a retried miss
+                # must not do to the rest of the process.
+                with ux_utils.print_exception_no_traceback():
+                    raise FileNotFoundError(
+                        'Config file specified by env var '
+                        f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does '
+                        'not exist. Please double check the path or unset the '
+                        f'env var: unset {ENV_VAR_SKYPILOT_CONFIG}')
+            logger.debug(f'Config file {config_path!r} does not exist; '
+                         'retrying.')
+        time.sleep(backoff.current_backoff())
+    _set_loaded_config(config)
     _set_loaded_config_path(config_path)
 
 
@@ -922,8 +1026,52 @@ def _create_table(engine: sqlalchemy.engine.Engine):
 _db_manager = db_utils.DatabaseManager(db_name='config',
                                        create_table_fn=_create_table)
 
+# The last server config load: (fingerprint, config, db URL popped from the
+# file, generation). Replaced by one assignment, so a lock-free reader never
+# pairs a new fingerprint with an old config.
+_server_config_cache: Optional[Tuple[Tuple[Optional[str], Optional[str],
+                                           Optional[str], Optional[str], bool],
+                                     config_utils.Config, Optional[str],
+                                     int]] = None
+# Numbers cache entries in the order they are published. A full load that
+# holds the config lock reads and publishes with writers locked out, so a later
+# entry holds data at least as new. A load without it can publish older data
+# under a later number; the next reload replaces that entry, whose fingerprint
+# no longer matches the sources.
+_server_config_generations = itertools.count(1)
+_server_config_swap_lock = threading.Lock()
 
-def _reload_config_as_server() -> None:
+
+def _read_config_yaml_value() -> Optional[str]:
+    with orm.Session(_db_manager.get_engine()) as session:
+        row = session.query(config_yaml_table).filter_by(
+            key=API_SERVER_CONFIG_KEY).first()
+    return row.value if row else None
+
+
+def _swap_in_server_config(generation: int, config: config_utils.Config,
+                           path: Optional[str]) -> None:
+    """Sets the loaded config unless this context holds a later cache entry's.
+
+    The reuse path reads its sources without the config lock, so a writer can
+    commit and another load swap in the new config before this one swaps.
+    The caller holds `_server_config_swap_lock`.
+    """
+    config_context = _get_config_context()
+    if generation >= config_context.loaded_generation:
+        config_context.config = config
+        _set_loaded_config_path(path)
+        config_context.loaded_generation = generation
+
+
+def _reload_config_as_server(cached_only: bool = False) -> bool:
+    """Loads the server config, reusing the last load if its source is
+    unchanged. With `cached_only`, only that reuse is tried.
+
+    Returns:
+        Whether the config was loaded.
+    """
+    global _server_config_cache
     # Build the new config fully, then swap it in with a single
     # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
     # `get_nested` reads without the config lock (hot path), so a transient
@@ -931,35 +1079,67 @@ def _reload_config_as_server() -> None:
     # `rbac.get_default_role()` fall back to admin. On any exception below the
     # previously-loaded config is left in place (stale is safer than empty).
     server_config_path = _resolve_server_config_path()
-    server_config = _get_config_from_path(server_config_path)
-    # Get the db url from the env var. _get_config_from_path should have moved
-    # the db url specified in config file to the env var.
-    db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+    # Validation turns strict once plugins load, so a parse from before then
+    # must not be reused after.
+    strict = not schemas._allow_additional_properties()  # pylint: disable=protected-access
+    content = None
+    file_hash = None
+    if server_config_path is not None:
+        with open(server_config_path, 'rb') as f:
+            content = f.read()
+        file_hash = hashlib.sha256(content).hexdigest()
 
+    cache = _server_config_cache
+    if cache is not None and cache[0][:2] == (server_config_path, file_hash):
+        fingerprint, cached_config, file_db_url, generation = cache
+        if file_db_url:
+            # Executors restore os.environ after each request, which can drop
+            # the URL the first parse of this file set.
+            os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = file_db_url
+        db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+        db_value = _read_config_yaml_value() if db_url else None
+        if (server_config_path, file_hash, db_url, db_value,
+                strict) == fingerprint:
+            config = copy.deepcopy(cached_config)
+            with _server_config_swap_lock:
+                _swap_in_server_config(generation, config, server_config_path)
+            return True
+    if cached_only:
+        return False
+
+    server_config = config_utils.Config()
+    file_db_url = None
+    if server_config_path is not None:
+        assert content is not None
+        server_config, file_db_url = _parse_and_validate_config(
+            server_config_path, content)
+    # The parse above moved a db url specified in the config file to the env
+    # var.
+    db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+    db_value = None
     if db_url:
         if len(server_config.keys()) > 1:
             raise ValueError(
                 'If db config is specified, no other config is allowed')
         logger.debug('retrieving config from database')
-
-        def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
-            with orm.Session(_db_manager.get_engine()) as session:
-                row = session.query(config_yaml_table).filter_by(
-                    key=key).first()
-            if row:
-                db_config = config_utils.Config(yaml_utils.safe_load(row.value))
-                db_config.pop_nested(('db',), None)
-                return db_config
-            return None
-
-        db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
-        if db_config:
-            server_config = overlay_skypilot_config(server_config, db_config)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        db_value = _read_config_yaml_value()
+        if db_value is not None:
+            db_config = config_utils.Config(yaml_utils.safe_load(db_value))
+            db_config.pop_nested(('db',), None)
+            if db_config:
+                server_config = overlay_skypilot_config(server_config,
+                                                        db_config)
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{config_utils.dump_redacted_yaml(server_config)}')
-    _set_loaded_config(server_config)
-    _set_loaded_config_path(server_config_path)
+    config = copy.deepcopy(server_config)
+    with _server_config_swap_lock:
+        generation = next(_server_config_generations)
+        _server_config_cache = ((server_config_path, file_hash, db_url,
+                                 db_value, strict), server_config, file_db_url,
+                                generation)
+        _swap_in_server_config(generation, config, server_config_path)
+    return True
 
 
 def _reload_config_as_client() -> None:
@@ -980,7 +1160,7 @@ def _reload_config_as_client() -> None:
     for override in overrides:
         overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(
             f'client config (before task and CLI overrides): \n'
             f'{config_utils.dump_redacted_yaml(overlaid_client_config)}')
@@ -1107,6 +1287,19 @@ def override_skypilot_config(
         if value != original_config.get_nested(
             (cloud_name, 'ssh_proxy_command'), default_value=None):
             disallowed_diff_keys.append(f'{cloud_name}.ssh_proxy_command')
+    if not from_loopback:
+        # The per-context form of ('kubernetes', 'auto_mounts') above.
+        context_configs = override_configs.get_nested(
+            ('kubernetes', 'context_configs'), default_value=None)
+        if not isinstance(context_configs, dict):
+            # Malformed; the schema check below reports it.
+            context_configs = {}
+        for context_name in context_configs:
+            key = ('kubernetes', 'context_configs', context_name, 'auto_mounts')
+            value = override_configs.pop_nested(key, default_value=None)
+            if (value is not None and value != original_config.get_nested(
+                    key, default_value=None)):
+                disallowed_diff_keys.append('.'.join(key))
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
     if disallowed_diff_keys:
@@ -1568,6 +1761,25 @@ def get_effective_queue_admission_timeout(
     return int(value)
 
 
+def get_effective_kai_value(
+        key: Literal['queue', 'preemptibility', 'topology',
+                     'required_topology_level', 'preferred_topology_level'],
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns a ``kubernetes.kai.<key>`` value, or None if unset.
+
+    Resolved with the same scope precedence as :func:`get_effective_queue_name`
+    (workspace over global, context over cloud), with ``override_configs`` (a
+    task's ``config`` block) merged in at every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='kubernetes',
+                                              property_keys=[('kai', key)],
+                                              region=region,
+                                              workspace=workspace,
+                                              override_configs=override_configs)
+
+
 def get_effective_namespace(
         cloud: str,
         region: Optional[str] = None,
@@ -1602,7 +1814,7 @@ def register_queue_name_key(key: Tuple[str, ...]) -> None:
 
 @contextlib.contextmanager
 def remove_queue_name_from_config() -> Iterator[None]:
-    """Removes the local_queue_name from the config."""
+    """Removes the local_queue_name and the KAI config from the config."""
     config = to_dict()
 
     def pop_if_set(keys: Tuple[str, ...]) -> None:
@@ -1615,6 +1827,8 @@ def remove_queue_name_from_config() -> Iterator[None]:
                 # anything reading the config file pointed to by
                 # SKYPILOT_CONFIG while the override is active).
                 config.pop_nested(keys + queue_key, None)
+        # The whole block: its other keys are rejected without a KAI queue.
+        config.pop_nested(keys + ('kai',), None)
 
     def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
         for context_name, _ in config.get_nested((*keys, 'context_configs'),
@@ -1680,7 +1894,7 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         list of key-value pairs.
     """
     parsed_config = _compose_cli_config(cli_config)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'applying following CLI overrides: \n'
                      f'{config_utils.dump_redacted_yaml(parsed_config)}')
     _set_loaded_config(
@@ -1763,7 +1977,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)
-        yaml_utils.dump_yaml(global_config_path, dict(config))
+        # Replaced, not truncated: readers reload this file without the lock.
+        yaml_utils.dump_yaml_atomic(global_config_path, dict(config))
 
         if config_map_utils.is_running_in_kubernetes():
             # In Kubernetes, sync the PVC config to ConfigMap for user

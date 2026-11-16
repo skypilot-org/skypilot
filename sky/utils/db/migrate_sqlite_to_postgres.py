@@ -238,6 +238,10 @@ def source_tables(sky_dir: pathlib.Path) -> Dict[str, pathlib.Path]:
                 # Alembic version tables are written by init_target().
                 if name.startswith(('sqlite_', 'alembic_version')):
                     continue
+                # Seeded by the schema migration; the target's own triggers
+                # bump it as casbin_rule rows are copied.
+                if name == 'rbac_policy_version':
+                    continue
                 if name in tables:
                     raise ValueError(f'Table {name} exists in two databases.')
                 tables[name] = sky_dir / relative

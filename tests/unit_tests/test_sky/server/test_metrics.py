@@ -1420,6 +1420,40 @@ def test_workspace_usage_collector_gpus_sum_over_nodes():
     assert samples['sky_clusters_gpus_in_flight'][gpu_key] == 48.0
 
 
+def test_workspace_usage_collector_counts_tpu_slices_once():
+    """A multi-host TPU slice on Kubernetes has one pod per VM, while
+    launched_resources describes the whole slice: count its chips once."""
+    from sky import resources as resources_lib
+    clusters = []
+    for accelerators, kwargs, launched_nodes in [
+        ('tpu-v6e-8', {
+            'accelerator_args': {
+                'multi_host': True
+            }
+        }, 2),
+        ('tpu-v6e-16', {}, 8),
+    ]:
+        row = _make_cluster_row(workspace='ws',
+                                user_hash='u',
+                                status_name='UP',
+                                cloud_str='Kubernetes',
+                                launched_nodes=launched_nodes)
+        row['handle'].launched_resources = resources_lib.Resources(
+            infra='k8s/ctx', accelerators=accelerators, **kwargs)
+        clusters.append(row)
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    gpus = {
+        dict(key)['gpu_type']: value
+        for key, value in samples['sky_clusters_gpus_in_flight'].items()
+    }
+    # One tpu-v6e-8 slice on 2 pods, and two tpu-v6e-16 slices on 8 pods.
+    # The count is per slice, as for the same request on GCP.
+    assert gpus == {'tpu-v6e-8': 1.0, 'tpu-v6e-16': 2.0}
+
+
 def test_workspace_usage_collector_cpu_only_cluster_emits_no_gpu():
     """Clusters without accelerators emit no sky_clusters_gpus_in_flight row."""
     clusters = [
@@ -2223,3 +2257,21 @@ def _histogram_count(histogram):
             if sample.name.endswith('_count'):
                 return sample.value
     return 0.0
+
+
+def test_federation_targets_leave_out_known_unreachable_contexts(monkeypatch):
+    """A context a registered check names is neither federated nor probed for
+    being the local cluster."""
+    monkeypatch.setattr(
+        metrics.kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS',
+        [lambda context: 'proxy is down' if context == 'down' else None])
+    monkeypatch.setattr(metrics.skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(metrics.core, 'get_all_contexts',
+                        lambda: ['up', 'down'])
+    split = MagicMock(return_value=([], ['up']))
+    monkeypatch.setattr(metrics.metrics_utils, 'split_local_remote_contexts',
+                        split)
+    monkeypatch.setattr(metrics.metrics_utils, 'get_slurm_metrics_clusters',
+                        lambda: [])
+    assert metrics._FederationTargets()._prologue() == (['up'], [])
+    split.assert_called_once_with(['up'])

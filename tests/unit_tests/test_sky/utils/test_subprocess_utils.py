@@ -1,4 +1,5 @@
 """Unit tests for subprocess_utils.py."""
+import contextvars
 import logging
 import multiprocessing
 import signal
@@ -165,6 +166,20 @@ def test_with_low_cpu_count(mock_startable, mock_sleep, mock_cpu_count):
     # Start 1 at a time
     expected_started_counts = [1, 2, 3, 4]
     assert batch_sizes == expected_started_counts
+
+
+def test_parallel_threads_follow_the_cpu_limit(mock_cpu_count):
+    # A 22-CPU container on a 32-core host gets 21 threads, not 31.
+    mock_cpu_count.return_value = 22
+    with mock.patch('os.cpu_count', return_value=32):
+        assert subprocess_utils.get_parallel_threads() == 21
+        assert subprocess_utils.get_parallel_threads('kubernetes') == 84
+
+
+def test_parallel_threads_keep_the_floor_of_four(mock_cpu_count):
+    # get_cpu_count() floors a fractional limit, so 0.5 CPU reports 0.
+    mock_cpu_count.return_value = 0
+    assert subprocess_utils.get_parallel_threads() == 4
 
 
 def _ignore_sigterm():
@@ -513,3 +528,19 @@ class TestKillChildrenProcessesTolerates(unittest.TestCase):
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+
+
+_CALLER_VAR: contextvars.ContextVar[str] = contextvars.ContextVar(
+    'caller_var', default='unset')
+
+
+def test_run_in_parallel_runs_in_caller_context():
+    """Each call sees the caller's context variables."""
+    token = _CALLER_VAR.set('caller')
+    try:
+        values = subprocess_utils.run_in_parallel(lambda _: _CALLER_VAR.get(),
+                                                  list(range(8)),
+                                                  num_threads=4)
+    finally:
+        _CALLER_VAR.reset(token)
+    assert values == ['caller'] * 8

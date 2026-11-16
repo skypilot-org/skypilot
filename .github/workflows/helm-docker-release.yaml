@@ -27,6 +27,9 @@ on:
         default: 'skypilot-nightly'
 
 jobs:
+  # nightly-build.yml runs docker-build, publish-helm and the two smoke tests
+  # below as its own top-level jobs, so it can notify downstream as soon as the
+  # image is pushed. Keep the two copies in sync.
   set-package:
     runs-on: ubuntu-latest
     outputs:

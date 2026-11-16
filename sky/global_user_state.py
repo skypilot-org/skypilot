@@ -171,6 +171,13 @@ storage_table = sqlalchemy.Table(
     sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
+    # Who created the storage and in which workspace, recorded the same way
+    # as for volumes. Rows written before these columns existed have no
+    # creator and sit in the default workspace.
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('workspace',
+                      sqlalchemy.Text,
+                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
 )
 
 volume_table = sqlalchemy.Table(
@@ -325,6 +332,34 @@ CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
 # 'unhealthy') so it can show the underlying problem instead of a misleading
 # "LAUNCHING". Keep in sync with the event reason written in backend_utils.
 ABNORMAL_STATUS_REASON_PREFIX = 'Cluster is abnormal because'
+
+# What a status refresh records when it removes a cluster whose nodes are gone
+# (the suffix of every such event), and the start of the event a user's
+# `sky down` / `sky stop` records. A cluster's last event prefers these over a
+# later refresh's status events: they say what ended it.
+CLUSTER_REMOVED_BY_REFRESH = 'Cluster removed by SkyPilot status refresh.'
+# Other removals: a cluster without a YAML file, a failed provision, and the
+# line servers wrote for a removal before CLUSTER_REMOVED_BY_REFRESH.
+CLUSTER_REMOVED_NO_YAML = (
+    'Cluster has no YAML file. Removing the cluster from cache.')
+PROVISION_FAILED_PREFIX = 'Provision failed: '
+_LEGACY_REMOVAL_PREFIX = 'All nodes terminated'
+
+
+def user_action_event_prefix(action: str) -> str:
+    """'Cluster was terminated by user' / 'Cluster was stopped by user'."""
+    return f'Cluster was {action} by user'
+
+
+def is_unhealthy_init_reason(reason: Optional[str]) -> bool:
+    """Whether an INIT cluster's latest event marks it unhealthy.
+
+    Takes the latest STATUS_CHANGE / LAUNCH_PROGRESS reason; anything else
+    means the cluster is launching.
+    """
+    return reason is not None and reason.startswith(
+        ABNORMAL_STATUS_REASON_PREFIX)
+
 
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
@@ -773,6 +808,18 @@ def _user_upsert_session(
             dbapi_conn.execute(f'PRAGMA busy_timeout = {previous_ms}')
 
 
+def set_user_password(user_id: str, password: str) -> bool:
+    """Sets an existing user's password hash. Returns False, and creates no
+    user, if the user does not exist."""
+    engine = _db_manager.get_engine()
+    with _user_upsert_session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(user_table).where(
+                user_table.c.id == user_id).values(password=password))
+        session.commit()
+        return result.rowcount > 0
+
+
 @metrics_lib.time_me
 def add_or_update_user(
     user: models.User,
@@ -957,9 +1004,15 @@ def get_user(user_id: str) -> Optional[models.User]:
 @metrics_lib.time_me
 def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
     engine = _db_manager.get_engine()
+    ids = sorted(user_ids)
+    rows = []
     with orm.Session(engine) as session:
-        rows = session.query(user_table).filter(
-            user_table.c.id.in_(user_ids)).all()
+        # Chunked IN; see _CLUSTER_IN_QUERY_CHUNK_SIZE.
+        for offset in range(0, len(ids), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = ids[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows.extend(
+                session.query(user_table).filter(
+                    user_table.c.id.in_(batch)).all())
     return {
         row.id: models.User(
             id=row.id,
@@ -1455,23 +1508,60 @@ def get_last_cluster_event(cluster_hash: str,
     return row.reason
 
 
+def _last_event_priority(exists: Any, status: Any, launched_at: Any) -> Any:
+    """Rank of an event as a cluster's last event; lowest wins, then newest.
+
+    0: TERMINAL. 1: what ended the cluster -- for a cluster no longer in the
+    cluster table, the user's `sky down` or a removal (status refresh, failed
+    provision); for a STOPPED one, the user's `sky stop` since its last launch.
+    A status refresh can run during or after these (teardown refreshes first)
+    and write a later status event; that must not replace what ended it.
+    2: any other event.
+
+    `exists`, `status` and `launched_at` describe the cluster's row: columns
+    of `cluster_table` outer-joined on cluster_hash, or bound values.
+    """
+    event = cluster_event_table.c
+    removed = sqlalchemy.and_(
+        sqlalchemy.not_(exists),
+        sqlalchemy.or_(
+            event.reason.like(f'{user_action_event_prefix("terminated")}%'),
+            event.reason.like(f'%{CLUSTER_REMOVED_BY_REFRESH}'),
+            event.reason.like(f'{_LEGACY_REMOVAL_PREFIX}%'),
+            event.reason.like(f'{PROVISION_FAILED_PREFIX}%'),
+            event.reason == CLUSTER_REMOVED_NO_YAML))
+    stopped = sqlalchemy.and_(
+        status == status_lib.ClusterStatus.STOPPED.value,
+        event.reason.like(f'{user_action_event_prefix("stopped")}%'),
+        event.transitioned_at >= launched_at)
+    return sqlalchemy.case(
+        (event.type == ClusterEventType.TERMINAL.value, 0),
+        (sqlalchemy.and_(event.type == ClusterEventType.STATUS_CHANGE.value,
+                         sqlalchemy.or_(removed, stopped)), 1),
+        else_=2)
+
+
 def get_terminal_or_last_status_change_event(
-        cluster_hash: str) -> Optional[str]:
+        cluster_hash: str, status: Optional[str],
+        launched_at: Optional[int]) -> Optional[str]:
+    """The last event of a cluster in the cluster table.
+
+    `status` and `launched_at` are from the cluster's row; passed in, rather
+    than joined, as clusters.cluster_hash has no index.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        # Order by type (TERMINAL first, STATUS_CHANGE after),
-        # then by transitioned_at desc.
-        # Use a CASE expression for ordering type.
-        type_priority = sqlalchemy.case(
-            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
-            else_=1)
-        row = session.query(cluster_event_table).filter(
+        row = session.query(cluster_event_table.c.reason).filter(
             cluster_event_table.c.cluster_hash == cluster_hash,
             cluster_event_table.c.type.in_([
                 ClusterEventType.TERMINAL.value,
                 ClusterEventType.STATUS_CHANGE.value
-            ])).order_by(type_priority,
-                         cluster_event_table.c.transitioned_at.desc()).first()
+            ])).order_by(
+                _last_event_priority(
+                    sqlalchemy.true(),
+                    sqlalchemy.literal(status, sqlalchemy.Text),
+                    sqlalchemy.literal(launched_at, sqlalchemy.Integer)),
+                cluster_event_table.c.transitioned_at.desc()).first()
     if row is None:
         return None
     return row.reason
@@ -1482,30 +1572,28 @@ def _get_last_or_terminal_cluster_event_multiple(
     """Returns the last or terminal cluster event for each cluster."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
-        type_priority = sqlalchemy.case(
-            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
-            else_=1)
-
-        # Use ROW_NUMBER to rank events within each cluster_hash,
-        # ordered by type priority (TERMINAL first) then by transitioned_at
-        # (latest first)
+        # Use ROW_NUMBER to rank events within each cluster_hash, by
+        # _last_event_priority() and then by transitioned_at (latest first).
         row_number = sqlalchemy.func.row_number().over(
             partition_by=cluster_event_table.c.cluster_hash,
             order_by=[
-                type_priority,
+                _last_event_priority(cluster_table.c.name.isnot(None),
+                                     cluster_table.c.status,
+                                     cluster_table.c.launched_at),
                 cluster_event_table.c.transitioned_at.desc()
             ]).label('rn')
 
         # Subquery to get all events with their rank
         ranked_events = session.query(
             cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
-            row_number).filter(
-                cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                cluster_event_table.c.type.notin_([
-                    ClusterEventType.DEBUG.value,
-                    ClusterEventType.LAUNCH_PROGRESS.value,
-                ])).subquery()
+            row_number).outerjoin(
+                cluster_table, cluster_table.c.cluster_hash ==
+                cluster_event_table.c.cluster_hash).filter(
+                    cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+                    cluster_event_table.c.type.in_([
+                        ClusterEventType.TERMINAL.value,
+                        ClusterEventType.STATUS_CHANGE.value,
+                    ])).subquery()
 
         # Select only the top-ranked event for each cluster
         rows = session.query(
@@ -2599,6 +2687,49 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
+def _latest_init_reasons(rows: List[Any]) -> Dict[str, str]:
+    """Newest launch/status-change reason per INIT row, keyed by hash."""
+    init_cluster_hashes = {
+        row.cluster_hash
+        for row in rows
+        if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
+    }
+    return get_last_cluster_event_of_type_multiple(
+        init_cluster_hashes,
+        [ClusterEventType.STATUS_CHANGE, ClusterEventType.LAUNCH_PROGRESS])
+
+
+def _shared_record_fields(handle: Any, status: status_lib.ClusterStatus,
+                          node_names_json: Optional[str],
+                          init_reason: Optional[str]) -> Dict[str, Any]:
+    """Record fields every cluster record shape carries.
+
+    Shared by get_clusters, get_cluster_from_name and get_clusters_from_names
+    so that a refreshed record (built by get_cluster_from_name) keeps the
+    fields a list call returns.
+    """
+    launched = getattr(handle, 'launched_resources', None)
+    priority = launched.priority if launched is not None else None
+    # init_kind disambiguates the overloaded INIT state: 'launching'
+    # (actively provisioning) vs 'unhealthy' (flipped to INIT by an
+    # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
+    is_init = status is status_lib.ClusterStatus.INIT
+    init_kind = None
+    if is_init:
+        init_kind = (status_lib.INIT_KIND_UNHEALTHY
+                     if is_unhealthy_init_reason(init_reason) else
+                     status_lib.INIT_KIND_LAUNCHING)
+    return {
+        'priority':
+            (priority if priority is not None else constants.DEFAULT_PRIORITY),
+        'priority_class':
+            (launched.priority_class if launched is not None else None),
+        'node_names': common_utils.get_display_node_names(node_names_json),
+        'init_kind': init_kind,
+        'init_status_reason': init_reason if is_init else None,
+    }
+
+
 @db_retries.retry
 @metrics_lib.time_me
 @context_utils.cancellation_guard
@@ -2625,11 +2756,13 @@ def get_cluster_from_name(
         cluster_table.c.config_hash,
         cluster_table.c.workspace,
         cluster_table.c.is_managed,
+        cluster_table.c.node_names,
     ]
     if not summary_response:
         query_fields.extend([
             cluster_table.c.last_creation_yaml,
             cluster_table.c.last_creation_command,
+            cluster_table.c.links,
         ])
     with orm.Session(engine) as session:
         query = session.query(*query_fields)
@@ -2641,14 +2774,17 @@ def get_cluster_from_name(
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
     if not summary_response:
-        last_event = get_terminal_or_last_status_change_event(row.cluster_hash)
+        last_event = get_terminal_or_last_status_change_event(
+            row.cluster_hash, row.status, row.launched_at)
+    handle = pickle.loads(row.handle)
+    status = status_lib.ClusterStatus[row.status]
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
         'launched_at': row.launched_at,
-        'handle': pickle.loads(row.handle),
+        'handle': handle,
         'last_use': row.last_use,
-        'status': status_lib.ClusterStatus[row.status],
+        'status': status,
         'autostop': row.autostop,
         'to_down': bool(row.to_down),
         'owner': _load_owner(row.owner),
@@ -2659,11 +2795,15 @@ def get_cluster_from_name(
         'workspace': row.workspace,
         'is_managed': bool(row.is_managed),
         'config_hash': row.config_hash,
+        **_shared_record_fields(
+            handle, status, row.node_names,
+            _latest_init_reasons([row]).get(row.cluster_hash)),
     }
     if not summary_response:
         record['last_creation_yaml'] = row.last_creation_yaml
         record['last_creation_command'] = row.last_creation_command
         record['last_event'] = last_event
+        record['links'] = row.links if isinstance(row.links, dict) else {}
     if include_user_info:
         record['user_hash'] = user_hash
         record['user_name'] = user_name
@@ -2726,38 +2866,47 @@ def get_clusters_from_names(
         cluster_table.c.config_hash,
         cluster_table.c.workspace,
         cluster_table.c.is_managed,
+        cluster_table.c.node_names,
     ]
+    rows = []
     with orm.Session(engine) as session:
         for offset in range(0, len(cluster_names),
                             _CLUSTER_IN_QUERY_CHUNK_SIZE):
             batch = cluster_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
-            rows = session.query(*query_fields).filter(
-                cluster_table.c.name.in_(batch)).all()
-            for row in rows:
-                record: Dict[str, Any] = {
-                    'name': row.name,
-                    'launched_at': row.launched_at,
-                    'handle': pickle.loads(row.handle),
-                    'last_use': row.last_use,
-                    'status': status_lib.ClusterStatus[row.status],
-                    'autostop': row.autostop,
-                    'to_down': bool(row.to_down),
-                    'owner': _load_owner(row.owner),
-                    'metadata': json.loads(row.metadata),
-                    'cluster_hash': row.cluster_hash,
-                    'cluster_ever_up': bool(row.cluster_ever_up),
-                    'status_updated_at': row.status_updated_at,
-                    'workspace': row.workspace,
-                    'is_managed': bool(row.is_managed),
-                    'config_hash': row.config_hash,
-                }
-                if include_user_info:
-                    user_hash = _get_user_hash_or_current_user(row.user_hash)
-                    user = get_user(user_hash)
-                    record['user_hash'] = user_hash
-                    record['user_name'] = (user.name
-                                           if user is not None else None)
-                result[row.name] = record
+            rows.extend(
+                session.query(*query_fields).filter(
+                    cluster_table.c.name.in_(batch)).all())
+    # Outside the session: this opens its own, and holding two pool
+    # connections per call would be wasteful.
+    init_reasons = _latest_init_reasons(rows)
+    for row in rows:
+        handle = pickle.loads(row.handle)
+        status = status_lib.ClusterStatus[row.status]
+        record: Dict[str, Any] = {
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': handle,
+            'last_use': row.last_use,
+            'status': status,
+            'autostop': row.autostop,
+            'to_down': bool(row.to_down),
+            'owner': _load_owner(row.owner),
+            'metadata': json.loads(row.metadata),
+            'cluster_hash': row.cluster_hash,
+            'cluster_ever_up': bool(row.cluster_ever_up),
+            'status_updated_at': row.status_updated_at,
+            'workspace': row.workspace,
+            'is_managed': bool(row.is_managed),
+            'config_hash': row.config_hash,
+            **_shared_record_fields(handle, status, row.node_names,
+                                    init_reasons.get(row.cluster_hash)),
+        }
+        if include_user_info:
+            user_hash = _get_user_hash_or_current_user(row.user_hash)
+            user = get_user(user_hash)
+            record['user_hash'] = user_hash
+            record['user_name'] = (user.name if user is not None else None)
+        result[row.name] = record
     return result
 
 
@@ -2870,17 +3019,10 @@ def get_clusters(
     # `_get_cluster_and_validate` in server.py). The helper
     # short-circuits on an empty set, so this is a no-op when no INIT
     # clusters are in the result.
-    init_cluster_hashes = {
-        row.cluster_hash
-        for row in rows
-        if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
-    }
     # Newest launch/status-change event per INIT cluster. Its reason both tells
     # an actively-launching cluster apart from one stuck in an abnormal state
     # (see ABNORMAL_STATUS_REASON_PREFIX) and provides the message to display.
-    latest_init_event_dict = get_last_cluster_event_of_type_multiple(
-        init_cluster_hashes,
-        [ClusterEventType.STATUS_CHANGE, ClusterEventType.LAUNCH_PROGRESS])
+    latest_init_event_dict = _latest_init_reasons(rows)
 
     # get last cluster event for each row
     if not summary_response:
@@ -2889,19 +3031,13 @@ def get_clusters(
 
     for row in rows:
         handle = pickle.loads(row.handle)
-        priority = (handle.launched_resources.priority
-                    if handle.launched_resources is not None else None)
-        priority_class = (handle.launched_resources.priority_class
-                          if handle.launched_resources is not None else None)
+        status = status_lib.ClusterStatus[row.status]
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
             'launched_at': row.launched_at,
             'handle': handle,
-            'status': status_lib.ClusterStatus[row.status],
-            'priority': priority
-                        if priority is not None else constants.DEFAULT_PRIORITY,
-            'priority_class': priority_class,
+            'status': status,
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
             'cluster_hash': row.cluster_hash,
@@ -2913,24 +3049,12 @@ def get_clusters(
             'workspace': row.workspace,
             'is_managed': False
                           if exclude_managed_clusters else bool(row.is_managed),
-            'node_names': common_utils.get_display_node_names(row.node_names),
+            # Outside the summary_response gate: both the list page and the
+            # detail page show the INIT badge/banner.
+            **_shared_record_fields(
+                handle, status, row.node_names,
+                latest_init_event_dict.get(row.cluster_hash)),
         }
-        # init_kind / init_status_reason are populated outside the
-        # summary_response gate so both the list page (summary_response=True)
-        # and detail page (summary_response=False) get the badge/banner data.
-        # init_kind disambiguates the overloaded INIT state: 'launching'
-        # (actively provisioning) vs 'unhealthy' (flipped to INIT by an
-        # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
-        if record['status'] is status_lib.ClusterStatus.INIT:
-            latest_reason = latest_init_event_dict.get(row.cluster_hash)
-            record['init_kind'] = (
-                status_lib.INIT_KIND_UNHEALTHY if latest_reason is not None and
-                latest_reason.startswith(ABNORMAL_STATUS_REASON_PREFIX) else
-                status_lib.INIT_KIND_LAUNCHING)
-            record['init_status_reason'] = latest_reason
-        else:
-            record['init_kind'] = None
-            record['init_status_reason'] = None
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
@@ -3419,6 +3543,8 @@ def add_or_update_storage(storage_name: str,
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
     last_use = common_utils.get_current_command()
+    user_hash = common_utils.get_current_user().id
+    active_workspace = skypilot_config.get_active_workspace()
 
     def status_check(status):
         return status in status_lib.StorageStatus
@@ -3439,14 +3565,22 @@ def add_or_update_storage(storage_name: str,
             handle=handle,
             last_use=last_use,
             launched_at=storage_launched_at,
-            status=storage_status.value)
+            status=storage_status.value,
+            user_hash=user_hash,
+            workspace=active_workspace)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[storage_table.c.name],
             set_={
                 storage_table.c.handle: handle,
                 storage_table.c.last_use: last_use,
                 storage_table.c.launched_at: storage_launched_at,
-                storage_table.c.status: storage_status.value
+                storage_table.c.status: storage_status.value,
+                # A re-registration keeps the original creator and
+                # workspace: only a row that never had a creator takes the
+                # current user, so authorization cannot be reassigned by
+                # writing the same name again.
+                storage_table.c.user_hash: sqlalchemy.func.coalesce(
+                    storage_table.c.user_hash, user_hash),
             })
         session.execute(do_update_stmt)
         session.commit()
@@ -3531,38 +3665,81 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
 
 
 @metrics_lib.time_me
-def get_storage_names_start_with(starts_with: str) -> List[str]:
+def get_storage_names_start_with(
+        starts_with: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+    """Storage names with the given prefix, optionally in some workspaces.
+
+    ``workspaces_filter`` works as in ``get_storage``: None means every
+    workspace, an empty set matches nothing.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(storage_table).filter(
-            storage_table.c.name.like(f'{starts_with}%')).all()
+        query = session.query(storage_table.c.name).filter(
+            storage_table.c.name.like(f'{starts_with}%'))
+        if workspaces_filter is not None:
+            query = query.filter(
+                storage_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
     return [row.name for row in rows]
 
 
-@metrics_lib.time_me
-def get_storage() -> List[Dict[str, Any]]:
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        rows = session.query(storage_table).all()
-    records = []
-    for row in rows:
-        # TODO: use namedtuple instead of dict
-        records.append({
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'last_use': row.last_use,
-            'status': status_lib.StorageStatus[row.status],
-        })
-    return records
+def _storage_record_from_row(row: Any) -> Dict[str, Any]:
+    # TODO: use namedtuple instead of dict
+    return {
+        'name': row.name,
+        'launched_at': row.launched_at,
+        'handle': pickle.loads(row.handle),
+        'last_use': row.last_use,
+        'status': status_lib.StorageStatus[row.status],
+        'user_hash': row.user_hash,
+        'workspace': row.workspace,
+    }
 
 
 @metrics_lib.time_me
-def get_volume_names_start_with(starts_with: str) -> List[str]:
+def get_storage(
+        workspaces_filter: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+    """Gets storage records, optionally limited to some workspaces.
+
+    Args:
+        workspaces_filter: If given, only storage in these workspaces is
+            returned. An empty set therefore returns nothing, while None
+            means the whole table.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(volume_table).filter(
-            volume_table.c.name.like(f'{starts_with}%')).all()
+        query = session.query(storage_table)
+        if workspaces_filter is not None:
+            query = query.filter(
+                storage_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
+    return [_storage_record_from_row(row) for row in rows]
+
+
+@metrics_lib.time_me
+def get_storage_by_name(storage_name: str) -> Optional[Dict[str, Any]]:
+    """The record for one storage, in the same shape as ``get_storage``."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(storage_table).filter_by(name=storage_name).first()
+    if row is None:
+        return None
+    return _storage_record_from_row(row)
+
+
+@metrics_lib.time_me
+def get_volume_names_start_with(
+        starts_with: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = session.query(volume_table.c.name).filter(
+            volume_table.c.name.like(f'{starts_with}%'))
+        if workspaces_filter is not None:
+            query = query.filter(
+                volume_table.c.workspace.in_(workspaces_filter))
+        rows = query.all()
     return [row.name for row in rows]
 
 
@@ -3673,6 +3850,25 @@ def get_volume_names(
         row.name for row in _query_volumes([volume_table.c.name], is_ephemeral,
                                            workspaces_filter, volume_names)
     ]
+
+
+def get_volume_owners(
+    is_ephemeral: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Name, workspace and user_hash of each volume the filters allow.
+
+    Like `get_volume_names`, it skips unpickling the handle, so a corrupt
+    handle cannot fail the caller.
+    """
+    columns = [
+        volume_table.c.name, volume_table.c.workspace, volume_table.c.user_hash
+    ]
+    return [{
+        'name': row.name,
+        'workspace': row.workspace,
+        'user_hash': row.user_hash,
+    } for row in _query_volumes(columns, is_ephemeral, workspaces_filter, None)]
 
 
 @metrics_lib.time_me
@@ -3831,6 +4027,24 @@ def update_volume_status(name: str,
             update_dict[volume_table.c.usedby_clusters] = json.dumps(
                 usedby_clusters)
         session.query(volume_table).filter_by(name=name).update(update_dict)
+        session.commit()
+
+
+@metrics_lib.time_me
+def set_volume_workspace(names: List[str], workspace: str) -> None:
+    """Move volumes to ``workspace``, e.g. along with the resource using them.
+
+    Names with no row, and rows already in ``workspace``, are left alone.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        for offset in range(0, len(names), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            session.query(volume_table).filter(
+                volume_table.c.name.in_(batch),
+                volume_table.c.workspace.is_distinct_from(workspace)).update(
+                    {volume_table.c.workspace: workspace},
+                    synchronize_session=False)
         session.commit()
 
 

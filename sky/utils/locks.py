@@ -161,6 +161,14 @@ class FileLock(DistributedLock):
         return self._filelock.is_locked
 
 
+def postgres_lock_key(lock_id: str) -> int:
+    """Return the advisory lock key that :class:`PostgresLock` uses for
+    ``lock_id``."""
+    hash_digest = hashlib.sha256(lock_id.encode('utf-8')).digest()
+    # Take first 8 bytes and convert to int, ensure positive 64-bit
+    return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
+
+
 class PostgresLock(DistributedLock):
     """PostgreSQL advisory lock implementation.
 
@@ -191,17 +199,10 @@ class PostgresLock(DistributedLock):
                 advisory lock (default).
         """
         super().__init__(lock_id, timeout, poll_interval)
-        # Convert string lock_id to integer for postgres advisory locks
-        self._lock_key = self._string_to_lock_key(lock_id)
+        self._lock_key = postgres_lock_key(lock_id)
         self._shared_lock = shared_lock
         self._acquired = False
         self._connection: Optional[sqlalchemy.pool.PoolProxiedConnection] = None
-
-    def _string_to_lock_key(self, s: str) -> int:
-        """Convert string to a 64-bit integer for advisory lock key."""
-        hash_digest = hashlib.sha256(s.encode('utf-8')).digest()
-        # Take first 8 bytes and convert to int, ensure positive 64-bit
-        return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
     @db_retries.retry
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
@@ -209,13 +210,14 @@ class PostgresLock(DistributedLock):
         # Session-scoped advisory locks hold one connection across their whole
         # lifetime, which is unsafe through a transaction-mode pooler (the
         # backend can change between statements). Use a direct engine so the
-        # lock connection bypasses any configured pooler; when none is
-        # configured this is the same engine global_user_state uses.
-        engine = db_utils.get_engine(None, direct=True)
+        # lock connection bypasses any configured pooler. Keep it out of the
+        # state pool too: long-lived lock holders
+        # must not consume the connections needed for metadata under the lock.
+        engine = db_utils.get_lock_engine()
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
-        # Borrow a dedicated connection from the pool. Idempotent under
+        # Borrow a dedicated connection from the engine. Idempotent under
         # retry: raw_connection() either returns a checked-out conn or
         # raises with nothing taken — no partial state, no leak.
         connection = engine.raw_connection()
@@ -236,11 +238,7 @@ class PostgresLock(DistributedLock):
         if self._acquired:
             return AcquireReturnProxy(self)
 
-        self._connection = self._get_connection()
-        cursor = self._connection.cursor()
-
         start_time = time.time()
-
         if self._shared_lock:
             lock_func = 'pg_try_advisory_lock_shared'
         else:
@@ -248,6 +246,9 @@ class PostgresLock(DistributedLock):
 
         try:
             while True:
+                self._connection = self._get_connection()
+                assert self._connection is not None
+                cursor = self._connection.cursor()
                 cursor.execute(f'SELECT {lock_func}(%s)', (self._lock_key,))
                 result = cursor.fetchone()[0]
 
@@ -268,6 +269,7 @@ class PostgresLock(DistributedLock):
                         f'{self.lock_id} within {self.timeout} '
                         f'seconds')
 
+                self._close_connection()
                 time.sleep(self.poll_interval)
 
         except Exception:

@@ -258,6 +258,10 @@ class TestIsTransient:
     def test_follows_cause_chain(self):
         assert retries.is_transient(_wrapped(_make_op_error()))
 
+    def test_pool_checkout_timeout_is_transient(self):
+        assert retries.is_transient(
+            sqlalchemy.exc.TimeoutError('pool exhausted', None, None))
+
     def test_sqlalchemy_wrapper_around_asyncpg_error(self):
         assert retries.is_transient(
             _asyncpg_dbapi_error(
@@ -279,6 +283,20 @@ class TestIsTransient:
     def test_bare_network_error_counts_only_at_top_level(self):
         assert retries.is_transient(ConnectionResetError('reset'))
         assert not retries.is_transient(_wrapped(ConnectionResetError('reset')))
+
+
+class TestPoolCheckoutTimeout:
+
+    def test_retry_does_not_retry_pool_checkout_timeout(self):
+
+        @retries.retry
+        def fn():
+            raise sqlalchemy.exc.TimeoutError('pool exhausted', None, None)
+
+        with mock.patch.object(retries.time, 'sleep') as sleep:
+            with pytest.raises(sqlalchemy.exc.TimeoutError):
+                fn()
+        sleep.assert_not_called()
 
 
 class TestDeadlineBudget:
