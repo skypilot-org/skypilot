@@ -2831,6 +2831,33 @@ def test_set_job_infra_persists_cluster_name_on_cloud(
         loop.close()
 
 
+def test_cluster_name_on_cloud_job_info_fallback_with_fields(
+        _mock_managed_jobs_db_conn):
+    """Field-selected queries still see job_info-only cluster names.
+
+    set_job_infra without task_id writes only job_info. Requesting
+    fields=['cluster_name_on_cloud'] must select both columns so the
+    spot→job_info fallback in the row mapper still works.
+    """
+    job_id = state.set_job_info_without_job_id(name='legacy-telemetry',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    state.set_job_infra(job_id, cluster_name_on_cloud='train-42-ab12')
+    jobs_all, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+    assert jobs_all[0]['cluster_name_on_cloud'] == 'train-42-ab12'
+    jobs_fields, _ = state.get_managed_jobs_with_filters(
+        job_ids=[job_id], fields=['job_id', 'cluster_name_on_cloud'])
+    assert jobs_fields[0]['cluster_name_on_cloud'] == 'train-42-ab12'
+
+
 def test_set_job_infra_persists_cluster_name_per_task(
         _mock_managed_jobs_db_conn):
     """Multi-task jobs keep a distinct cluster_name_on_cloud per task."""

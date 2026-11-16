@@ -2464,8 +2464,16 @@ def build_managed_jobs_with_filters_no_status_query(
             spot_table.c.spot_job_id.in_(non_terminal_job_ids_subquery))
     if not count_only and not status_count and not infra_options and fields:
         # Resolve requested field names to explicit ColumnElements from
-        # the joined tables.
-        selected_columns = [_map_response_field_to_db_column(f) for f in fields]
+        # the joined tables. cluster_name_on_cloud lives on both spot
+        # (per-task) and job_info (legacy / last-wins); selecting only the
+        # spot column would drop the job_info fallback for pre-032 rows.
+        selected_columns: List[Any] = []
+        for field in fields:
+            if field == 'cluster_name_on_cloud':
+                selected_columns.append(spot_table.c.cluster_name_on_cloud)
+                selected_columns.append(job_info_table.c.cluster_name_on_cloud)
+            else:
+                selected_columns.append(_map_response_field_to_db_column(field))
         query = query.with_only_columns(*selected_columns)
     if job_ids is not None:
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))
