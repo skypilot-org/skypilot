@@ -4,12 +4,15 @@ Usage:
     python fetch_daytona.py
 
 Reads the public Daytona GPU pricing feed (no authentication required)
-and generates the SkyPilot catalog. GPU instance types are generated per
-GPU type and count (1-8) using Daytona's representative sandbox shapes:
-8 vCPUs per GPU, 100 GiB memory per GPU for datacenter GPUs and 50 GiB
-per GPU for consumer GPUs. CPU instance types cover common CPU-only
-sandbox shapes. Disk is billed separately at a per-GiB rate and is not
-part of the catalog price.
+and generates the SkyPilot catalog. Every GPU type in the feed is
+orderable, so the feed alone decides which GPUs are offered: a new
+Daytona GPU appears in the catalog on the next refresh without code
+changes. GPU instance types are named `<count>x-<Daytona GPU type>`
+(e.g. `2x-RTX-PRO-6000`) for counts 1-8, using Daytona's representative
+sandbox shapes: 8 vCPUs per GPU and 100 GiB memory per GPU (50 GiB for
+GPUs with at most 32 GiB of GPU memory, i.e. consumer cards). CPU
+instance types cover common CPU-only sandbox shapes. Disk is billed
+separately at a per-GiB rate and is not part of the catalog price.
 
 GPU sandboxes run in Daytona's shared GPU fleet, represented by the
 `earth` region. CPU sandboxes run in shared regions (`us`, `eu`).
@@ -19,7 +22,7 @@ import csv
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -36,53 +39,49 @@ CPUS_PER_GPU = 8
 MEMORY_PER_GPU_GIB = 100
 CONSUMER_MEMORY_PER_GPU_GIB = 50
 
-# Maps Daytona GPU type identifiers to SkyPilot accelerator names,
-# manufacturer and GPU memory (GiB). B200 is intentionally absent: it is
-# priced on the rate card ahead of launch and not yet orderable.
-GPU_TYPES: Dict[str, Dict[str, Any]] = {
-    'B300': {
-        'acc_name': 'B300',
-        'manufacturer': 'NVIDIA',
-        'gpu_memory_gb': 288,
-        'memory_per_gpu': MEMORY_PER_GPU_GIB,
-    },
-    'H200': {
-        'acc_name': 'H200',
-        'manufacturer': 'NVIDIA',
-        'gpu_memory_gb': 141,
-        'memory_per_gpu': MEMORY_PER_GPU_GIB,
-    },
-    'H100': {
-        'acc_name': 'H100',
-        'manufacturer': 'NVIDIA',
-        'gpu_memory_gb': 80,
-        'memory_per_gpu': MEMORY_PER_GPU_GIB,
-    },
-    'RTX-PRO-6000': {
-        'acc_name': 'RTXPRO6000',
-        'manufacturer': 'NVIDIA',
-        'gpu_memory_gb': 96,
-        'memory_per_gpu': MEMORY_PER_GPU_GIB,
-    },
-    'RTX-5090': {
-        'acc_name': 'RTX5090',
-        'manufacturer': 'NVIDIA',
-        'gpu_memory_gb': 32,
-        'memory_per_gpu': CONSUMER_MEMORY_PER_GPU_GIB,
-    },
-    'RTX-4090': {
-        'acc_name': 'RTX4090',
-        'manufacturer': 'NVIDIA',
-        'gpu_memory_gb': 24,
-        'memory_per_gpu': CONSUMER_MEMORY_PER_GPU_GIB,
-    },
-    'MI355X': {
-        'acc_name': 'MI355X',
-        'manufacturer': 'AMD',
-        'gpu_memory_gb': 288,
-        'memory_per_gpu': MEMORY_PER_GPU_GIB,
-    },
+CONSUMER_GPU_MAX_MEMORY_GIB = 32
+
+# GPU hardware specs (manufacturer, GPU memory in GiB) keyed by SkyPilot
+# accelerator name. This is spec metadata only, not an allowlist: feed
+# entries that carry `vendor` and `memoryGiB` need no entry here.
+GPU_SPECS: Dict[str, Tuple[str, int]] = {
+    'B300': ('NVIDIA', 288),
+    'B200': ('NVIDIA', 180),
+    'H200': ('NVIDIA', 141),
+    'H100': ('NVIDIA', 80),
+    'A100': ('NVIDIA', 80),
+    'RTXPRO6000': ('NVIDIA', 96),
+    'L40S': ('NVIDIA', 48),
+    'L40': ('NVIDIA', 48),
+    'L4': ('NVIDIA', 24),
+    'RTX5090': ('NVIDIA', 32),
+    'RTX4090': ('NVIDIA', 24),
+    'MI355X': ('AMD', 288),
+    'MI325X': ('AMD', 256),
+    'MI300X': ('AMD', 192),
 }
+
+
+def accelerator_name(daytona_type: str) -> str:
+    """Maps a Daytona GPU type to a SkyPilot accelerator name.
+
+    Daytona separates words with dashes (`RTX-PRO-6000`); SkyPilot uses
+    the joined form (`RTXPRO6000`).
+    """
+    return daytona_type.replace('-', '').replace('_', '').upper()
+
+
+def gpu_metadata(gpu: Dict[str, Any]) -> Optional[Tuple[str, str, int]]:
+    """Returns (accelerator name, manufacturer, GPU memory GiB) for a feed
+    GPU entry, or None if its hardware specs are unknown."""
+    acc_name = accelerator_name(gpu['type'])
+    manufacturer, memory = GPU_SPECS.get(acc_name, (None, None))
+    manufacturer = gpu.get('vendor') or manufacturer
+    memory = gpu.get('memoryGiB') or memory
+    if manufacturer is None or memory is None:
+        return None
+    return acc_name, str(manufacturer).upper(), int(memory)
+
 
 # CPU-only sandbox shapes: (vCPUs, memory GiB).
 CPU_SHAPES = ((2, 8), (4, 16), (8, 32), (16, 64))
@@ -119,7 +118,6 @@ def fetch_pricing() -> Dict[str, Any]:
 def create_catalog(output_path: str = 'daytona/vms.csv') -> None:
     """Creates the Daytona catalog CSV file."""
     pricing = fetch_pricing()
-    gpu_rates = {gpu['type']: gpu for gpu in pricing['gpus']}
     on_demand = pricing['resources']['onDemand']
     spot = pricing['resources']['spot']
 
@@ -138,29 +136,35 @@ def create_catalog(output_path: str = 'daytona/vms.csv') -> None:
             'GpuInfo',
         ])
 
-        # GPU instance types: <count>x-<ACC_NAME> in the shared GPU fleet.
-        for daytona_type, info in GPU_TYPES.items():
-            rates = gpu_rates.get(daytona_type)
-            if rates is None:
+        # GPU instance types: <count>x-<Daytona GPU type> in the shared
+        # GPU fleet. The instance type carries the identifier the sandbox
+        # create API expects, so the provisioner needs no mapping.
+        for gpu in pricing['gpus']:
+            metadata = gpu_metadata(gpu)
+            if metadata is None:
                 logger.warning(
-                    'GPU type %s not found in the pricing feed, '
-                    'skipping.', daytona_type)
+                    'No hardware specs for Daytona GPU type %s; add it to '
+                    'GPU_SPECS (or publish vendor/memoryGiB in the feed). '
+                    'Skipping.', gpu['type'])
                 continue
+            acc_name, manufacturer, gpu_memory_gb = metadata
+            memory_per_gpu = (CONSUMER_MEMORY_PER_GPU_GIB
+                              if gpu_memory_gb <= CONSUMER_GPU_MAX_MEMORY_GIB
+                              else MEMORY_PER_GPU_GIB)
             for count in range(1, MAX_GPU_COUNT + 1):
                 vcpus = CPUS_PER_GPU * count
-                memory = info['memory_per_gpu'] * count
-                price = (count * rates['onDemandPricePerHour'] +
+                memory = memory_per_gpu * count
+                price = (count * gpu['onDemandPricePerHour'] +
                          vcpus * on_demand['vcpuPerHour'] +
                          memory * on_demand['memoryGiBPerHour'])
-                spot_price = (count * rates['spotPricePerHour'] +
+                spot_price = (count * gpu['spotPricePerHour'] +
                               vcpus * spot['vcpuPerHour'] +
                               memory * spot['memoryGiBPerHour'])
-                gpu_info = make_gpu_info_json(info['acc_name'],
-                                              info['manufacturer'], count,
-                                              info['gpu_memory_gb'])
+                gpu_info = make_gpu_info_json(acc_name, manufacturer, count,
+                                              gpu_memory_gb)
                 writer.writerow([
-                    f'{count}x-{info["acc_name"]}',
-                    info['acc_name'],
+                    f'{count}x-{gpu["type"]}',
+                    acc_name,
                     count,
                     vcpus,
                     memory,
