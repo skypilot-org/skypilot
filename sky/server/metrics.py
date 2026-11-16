@@ -16,6 +16,7 @@ from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
 import psutil
+import starlette.convertors
 import starlette.types
 import uvicorn
 
@@ -2487,8 +2488,10 @@ class PrometheusMiddleware:
 
 
 # Route handlers left out of caller usage: /api/get is counted by the request
-# it returns, and health probes are not usage.
-_CALLER_USAGE_SKIPPED_PATHS = frozenset({'/api/get', '/api/health'})
+# it returns; health probes and dashboard pages are not API usage.
+_CALLER_USAGE_SKIPPED_PATHS = frozenset(
+    {'/api/get', '/api/health', '/dashboard'})
+_CALLER_USAGE_SKIPPED_PREFIXES = ('/dashboard/',)
 
 
 def _content_length(headers) -> Optional[int]:
@@ -2519,13 +2522,21 @@ def _record_caller_usage(request: fastapi.Request,
     if http_call.scheduled_request or not _reached_router(request):
         return
     raw_path = request.scope.get('path', '')
-    if raw_path in _CALLER_USAGE_SKIPPED_PATHS or _is_streaming_api(raw_path):
+    if (raw_path in _CALLER_USAGE_SKIPPED_PATHS or
+            raw_path.startswith(_CALLER_USAGE_SKIPPED_PREFIXES) or
+            _is_streaming_api(raw_path)):
         return
     route = request.scope.get('route')
     if not isinstance(route, fastapi.routing.APIRoute):
         return
+    path_params = request.scope.get('path_params') or {}
+    spanning = [
+        str(path_params.get(param, ''))
+        for param, convertor in route.param_convertors.items()
+        if isinstance(convertor, starlette.convertors.PathConvertor)
+    ]
     name = (f'{request.method} ' +
-            caller_usage.route_template(raw_path, route.path_format))
+            caller_usage.route_template(raw_path, route.path_format, spanning))
     caller_usage.record_execution(caller, name, caller_usage.KIND_HANDLER,
                                   time.time() - start_time)
     caller_usage.record_returned_bytes(caller, name, body_bytes)

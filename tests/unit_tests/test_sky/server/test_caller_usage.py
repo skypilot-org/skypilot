@@ -155,6 +155,12 @@ def test_route_template(path, path_format, template):
     assert caller_usage.route_template(path, path_format) == template
 
 
+def test_route_template_with_a_path_parameter():
+    assert caller_usage.route_template(
+        '/pools/p1/files/a/b/c', '/{pool}/files/{file_path}',
+        ['a/b/c']) == ('/pools/{pool}/files/{file_path}')
+
+
 class _AuthUser:
     """Stands in for the auth middlewares: sets request.state.auth_user."""
 
@@ -175,7 +181,19 @@ def _app() -> fastapi.FastAPI:
     def pool_status(pool_name: str):  # pylint: disable=unused-variable
         return {'pool': pool_name}
 
+    @pools.get('/{pool_name}/files/{file_path:path}')
+    def pool_file(pool_name: str, file_path: str):  # pylint: disable=unused-variable
+        return {'pool': pool_name, 'file': file_path}
+
     app.include_router(pools, prefix='/ssh_node_pools')
+
+    @app.get('/files/{file_path:path}')
+    def get_file(file_path: str):  # pylint: disable=unused-variable
+        return {'file': file_path}
+
+    @app.get('/dashboard/{full_path:path}')
+    def dashboard(full_path: str):  # pylint: disable=unused-variable
+        return {'page': full_path}
 
     @app.get('/items/{item_id}')
     def get_item(item_id: str):  # pylint: disable=unused-variable
@@ -231,6 +249,23 @@ def test_an_included_route_keeps_its_prefix():
     assert _sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
                    kind='handler',
                    name='GET /ssh_node_pools/{pool_name}/status') == 1
+
+
+def test_path_parameters_spanning_segments_are_one_route():
+    client = TestClient(_app())
+    client.get('/files/a/b/c')
+    client.get('/files/d')
+    client.get('/ssh_node_pools/p1/files/x/y/z')
+    counter = metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL
+    assert _sample(counter, name='GET /files/{file_path}') == 2
+    assert _sample(
+        counter, name='GET /ssh_node_pools/{pool_name}/files/{file_path}') == 1
+    assert len(_series(counter)) == 2
+
+
+def test_dashboard_pages_are_not_usage():
+    TestClient(_app()).get('/dashboard/jobs/12345')
+    assert _series(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL) == []
 
 
 def test_a_route_that_scheduled_a_request_is_not_a_handler_call():

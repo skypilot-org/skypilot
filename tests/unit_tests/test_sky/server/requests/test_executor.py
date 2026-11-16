@@ -21,6 +21,8 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import skypilot_config
+from sky.metrics import utils as metrics_utils
+from sky.server import caller_usage
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
@@ -3267,3 +3269,93 @@ def test_stamp_sets_authenticated_from_auth_user():
 def test_to_kwargs_drops_authenticated():
     body = payloads.RequestBody(env_vars={}, authenticated=True)
     assert 'authenticated' not in body.to_kwargs()
+
+
+_CALLER_COUNTERS = (
+    metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+    metrics_utils.SKY_APISERVER_CALLER_EXECUTION_SECONDS_TOTAL,
+    metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL)
+
+
+@pytest.fixture()
+def caller_usage_enabled(monkeypatch):
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(caller_usage, '_caller_names',
+                        caller_usage._Admitted(caller_usage.MAX_CALLER_NAMES))  # pylint: disable=protected-access
+    for counter in _CALLER_COUNTERS:
+        counter.clear()
+    yield
+    for counter in _CALLER_COUNTERS:
+        counter.clear()
+
+
+def _caller_sample(counter, **labels) -> float:
+    return sum(sample.value
+               for family in counter.collect()
+               for sample in family.samples
+               if sample.name.endswith('_total') and all(
+                   sample.labels.get(k) == v for k, v in labels.items()))
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_a_queued_request(mock_fd_operations,
+                                                mock_global_user_state,
+                                                mock_skypilot_config,
+                                                caller_usage_enabled):
+    body = payloads.RequestBody()
+    body.env_vars[constants.USER_ENV_VAR] = 'alice'
+    req = requests_lib.Request(request_id='caller-usage-queued',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=body,
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    executor._request_execution_wrapper('caller-usage-queued',
+                                        ignore_return_value=False)
+
+    labels = dict(caller='alice', caller_id='test-user', name='test')
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          kind='long',
+                          **labels) == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL,
+        **labels) == len('"success"')
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_an_in_process_request(in_process_env,
+                                                     caller_usage_enabled):
+    request = await _prepare_in_process('caller-usage-in-process')
+    await executor.schedule_prepared_request(request, in_process=True)
+    await _wait_in_process_tasks()
+
+    labels = dict(caller_id='user-1', name='sky.test.in_process')
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          kind='short',
+                          **labels) == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL, **
+        labels) > 0
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_an_inline_request(in_process_env,
+                                                 caller_usage_enabled):
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    async def policy(request):
+        await executor.run_request_inline(request, pool)
+        return executor.ExecutionMode.HANDLED
+
+    await _schedule_with_policy('caller-usage-inline', policy)
+    pool.shutdown(wait=True)
+
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          caller_id='user-1',
+                          name='sky.test.in_process',
+                          kind='sync') == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL) == 0

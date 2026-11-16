@@ -3,14 +3,15 @@
 Each process records at most MAX_CALLER_NAMES distinct (caller, name) pairs
 and MAX_CLIENTS distinct client label sets; anything beyond is recorded under
 the caller 'other', so the series count stays bounded however many users and
-request names a deployment has.
+request names a deployment has. The bound is per process: the series exported
+from all of a server's processes, including exited ones, can exceed it.
 """
 import contextlib
 import contextvars
 import re
 import threading
 import time
-from typing import Iterator, NamedTuple, Optional, Set, Tuple
+from typing import Iterable, Iterator, NamedTuple, Optional, Set, Tuple
 
 from sky import models
 from sky.metrics import utils as metrics_utils
@@ -237,13 +238,17 @@ def mark_request_scheduled() -> None:
         call.scheduled_request = True
 
 
-def route_template(path: str, route_path_format: str) -> str:
+def route_template(
+    path: str, route_path_format: str,
+    spanning_values: Iterable[str] = ()) -> str:
     """The full route path of a request that matched route_path_format.
 
     FastAPI 0.16x matches an included router's own route, whose path_format
     lacks the prefix given to include_router; the prefix is the leading
     segments of the request path that the route's path does not cover.
+    spanning_values are the request's values of `{name:path}` parameters,
+    which path_format writes as one segment.
     """
-    if ':path}' in route_path_format:
-        return route_path_format
-    return path.rsplit('/', route_path_format.count('/'))[0] + route_path_format
+    segments = route_path_format.count('/') + sum(
+        value.count('/') for value in spanning_values)
+    return path.rsplit('/', segments)[0] + route_path_format
