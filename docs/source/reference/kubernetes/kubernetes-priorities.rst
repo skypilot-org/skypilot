@@ -136,7 +136,7 @@ The low priority job will be in ``RECOVERING`` state. SkyPilot will automaticall
 
   $ sky jobs queue
   Fetching managed job statuses...
-  Managed jobs
+  Your managed jobs
   In progress tasks: 1 RECOVERING, 1 RUNNING
   ID  NAME             RESOURCES  SUBMITTED   TOT. DURATION  #RECOVERIES  STATUS
   2   sky-0232-romilb  1x[CPU:4]  5 mins ago  5m 35s         0            RUNNING
@@ -148,8 +148,8 @@ Once the high priority job finishes, the low priority job will start running aga
 
   $ sky jobs queue
   Fetching managed job statuses...
-  Managed jobs
-  No in-progress managed jobs.
+  Your managed jobs
+  No in-progress managed jobs owned by you.
   ID  NAME             RESOURCES  SUBMITTED    TOT. DURATION  #RECOVERIES  STATUS
   2   sky-0232-romilb  1x[CPU:4]  23 mins ago  17m 22s        0            SUCCEEDED
   1   sky-0d6f-romilb  1x[CPU:4]  25 mins ago  23m 47s        1            RUNNING

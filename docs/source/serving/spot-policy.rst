@@ -83,7 +83,7 @@ When the service is up, we can check the status of the service and the replicas 
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS      REPLICAS  ENDPOINT
     http-server  1        1m 17s  NO_REPLICA  0/4       54.227.229.217:30001
 
@@ -100,7 +100,7 @@ When the required number of spot replicas are not available, SkyServe will provi
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1        1m 17s  READY   2/4       54.227.229.217:30001
 
@@ -117,7 +117,7 @@ When the spot replicas are ready, SkyServe will automatically scale down on-dema
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1        3m 59s  READY   2/2       54.227.229.217:30001
 
@@ -132,7 +132,7 @@ In the event of spot instance interruptions (e.g. replica 1), SkyServe will auto
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1        7m 2s   READY   1/3       54.227.229.217:30001
 
@@ -148,7 +148,7 @@ Eventually, when the spot availability is back, SkyServe will automatically scal
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1        10m 5s  READY   2/3       54.227.229.217:30001
 

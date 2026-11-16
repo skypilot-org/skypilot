@@ -612,7 +612,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
   $ sky jobs queue
 
   Fetching managed job statuses...
-  Managed jobs
+  Your managed jobs
   In progress jobs: 1 RECOVERING
   ID  TASK  NAME      REQUESTED                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
   8         pipeline  -                            50 mins ago  47m 45s        -             1            RECOVERING
@@ -857,10 +857,10 @@ To see your current jobs controller, use :code:`sky status -u`.
   sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=4, m6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
 
   All users' managed jobs
-  No in-progress managed jobs.
+  No in-progress managed jobs accessible to you.
 
   Accessible services
-  No live services.
+  No live services accessible to you.
 
 In this example, you can see the jobs controller (:code:`sky-jobs-controller-919df126`) is an m6i.xlarge on AWS, which is the default size.
 

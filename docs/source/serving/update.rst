@@ -52,7 +52,7 @@ We can use :code:`sky serve status http-server` to check the status of the servi
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1        1m 41s  READY   2/2       44.206.240.249:30002
 
@@ -97,7 +97,7 @@ SkyServe will trigger launching three new replicas.
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  2        6m 15s  READY   2/5       44.206.240.249:30002
 
@@ -116,7 +116,7 @@ Whenever a new replica is ready, the traffic will be redirected to both old and 
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1,2        10m 4s  READY   3/5       44.206.240.249:30002
 
@@ -135,7 +135,7 @@ Once the total number of both old and new replicas exceeds the requested number,
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1,2        10m 4s  READY   3/5       44.206.240.249:30002
 
@@ -154,7 +154,7 @@ Eventually, we will only have new replicas ready to serve user requests.
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME   STATUS  REPLICAS  ENDPOINT
     http-server  2        11m 42s  READY   3/3       44.206.240.249:30002
 
@@ -206,7 +206,7 @@ SkyServe will trigger launching three new replicas.
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  2        6m 15s  READY   2/5       44.206.240.249:30002
 
@@ -225,7 +225,7 @@ When a new replica is ready, the traffic will still be redirected to old replica
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  1        10m 4s  READY   3/5       44.206.240.249:30002
 
@@ -244,7 +244,7 @@ Once the total number of new replicas satisfies the requirements, traffics will 
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
     http-server  2        10m 4s  READY   3/5       44.206.240.249:30002
 
@@ -262,7 +262,7 @@ Eventually, same as the rolling update, we will only have new replicas ready to 
 
     $ sky serve status http-server
 
-    Services
+    Accessible services
     NAME         VERSION  UPTIME   STATUS  REPLICAS  ENDPOINT
     http-server  2        11m 42s  READY   3/3       44.206.240.249:30002
 

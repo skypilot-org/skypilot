@@ -1887,6 +1887,10 @@ def _handle_jobs_queue_request(
             max_jobs=max_num_jobs_to_show,
             status_counts=status_counts,
         )
+    if msg.startswith('No in-progress managed jobs.'):
+        scope = 'accessible to you' if show_user else 'owned by you'
+        msg = msg.replace('No in-progress managed jobs.',
+                          f'No in-progress managed jobs {scope}.', 1)
     return num_in_progress_jobs, msg
 
 
@@ -1941,9 +1945,8 @@ def _handle_services_request(
                     all_users=True))
             if (not records or
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
-                controller = (
-                    controller_utils.Controllers.SKY_SERVE_CONTROLLER.value)
-                msg = controller.default_hint_if_non_existent
+                msg = ('No live services.' if show_endpoint else
+                       f'No live {noun}s accessible to you.')
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
@@ -1974,6 +1977,8 @@ def _handle_services_request(
         else:
             msg = serve_lib.format_service_table(service_records, show_all,
                                                  pool)
+            if not service_records:
+                msg = f'No existing {noun}s accessible to you.'
             service_not_found_msg = ''
             if service_names is not None:
                 for service_name in service_names:
@@ -6369,6 +6374,9 @@ def jobs_queue(verbose: bool,
                output_format: str = 'table'):
     """Show statuses of managed jobs.
 
+    By default, show jobs owned by you. Use --all-users to include jobs owned
+    by other users that you have access to.
+
     Each managed jobs can have one of the following statuses:
 
     - ``PENDING``: Job is waiting for a free slot on the jobs controller to be
@@ -6558,8 +6566,9 @@ def jobs_queue(verbose: bool,
         in_progress_only_hint = ''
     else:
         in_progress_only_hint = ' (showing in-progress jobs only)'
+    owner_scope = 'All users\'' if all_users else 'Your'
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Managed jobs{colorama.Style.RESET_ALL}'
+               f'{owner_scope} managed jobs{colorama.Style.RESET_ALL}'
                f'{in_progress_only_hint}\n{msg}')
     if max_num_jobs_to_show and num_jobs and max_num_jobs_to_show < num_jobs:
         click.echo(
@@ -7001,7 +7010,7 @@ def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
     """Show statuses of pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
-    provided, show all pools' status.
+    provided, show all pools you have access to, including other users' pools.
     """
     pool_names_to_query: Optional[List[str]] = pool_names
     if not pool_names:
@@ -7016,7 +7025,7 @@ def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
                                           is_called_by_user=True)
 
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Pools{colorama.Style.RESET_ALL}')
+               f'Accessible pools{colorama.Style.RESET_ALL}')
     click.echo(msg)
 
 
@@ -7784,8 +7793,9 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str],
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
-    provided, show all services' status. If --endpoint is specified, output
-    the endpoint of the service only.
+    provided, show all services you have access to, including other users'
+    services. If --endpoint is specified, output the endpoint of the service
+    only.
 
     Each service can have one of the following statuses:
 
@@ -7889,7 +7899,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str],
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Services{colorama.Style.RESET_ALL}')
+                   f'Accessible services{colorama.Style.RESET_ALL}')
     click.echo(msg)
 
 
