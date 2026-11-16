@@ -887,9 +887,10 @@ def test_cluster_count_is_rendered_once_for_old_and_new_handles(stored_count):
         'resources': resource,
         'num_nodes': 4
     })
-    for display in [handle_str, cost_str]:
-        assert display.count('num_nodes=4') == 1
-        assert '4x ' not in display
+    assert handle_str.count('num_nodes=4') == 1
+    assert '4x ' not in handle_str
+    assert cost_str == f'4x {resource.copy(num_nodes=None)}'
+    assert 'num_nodes=' not in cost_str
     task = task_lib.Task().set_resources(resource.copy(num_nodes=8))
     with mock.patch.object(cloud_vm_ray_backend.global_user_state,
                            'get_status_from_cluster_name',

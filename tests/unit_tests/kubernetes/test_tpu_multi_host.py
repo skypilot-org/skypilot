@@ -186,7 +186,7 @@ def test_cost_report_counts_slices():
                                         accelerators='tpu-v6e-8',
                                         accelerator_args={'multi_host': True})
     record = {'num_nodes': 4, 'resources': resources}
-    assert 'num_nodes=2' in status_utils._get_resources_for_cost_report(record)
+    assert status_utils._get_resources_for_cost_report(record).startswith('2x ')
 
 
 def test_start_provisions_task_nodes_not_pods():
