@@ -850,16 +850,16 @@ To see your current jobs controller, use :code:`sky status -u`.
 
   $ sky status -u --refresh
 
-  Clusters
+  All users' clusters
   NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
   my-cluster-1                  AWS (us-east-1)   1x(cpus=16, m6i.4xlarge, ...)              STOPPED  -         1 week ago
   my-other-cluster              GCP (us-central1) 1x(cpus=16, n2-standard-16, ...)           STOPPED  -         1 week ago
   sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=4, m6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
 
-  Managed jobs
+  All users' managed jobs
   No in-progress managed jobs.
 
-  Services
+  Accessible services
   No live services.
 
 In this example, you can see the jobs controller (:code:`sky-jobs-controller-919df126`) is an m6i.xlarge on AWS, which is the default size.

@@ -2149,7 +2149,8 @@ def status(verbose: bool,
     with pools and services you have access to (including other users'). Use
     ``--all-users`` to also include other users' clusters and managed jobs
     that you have access to. Pools and services are unaffected by this flag.
-    If CLUSTERS is given, filter the clusters by name.
+    If CLUSTERS is given, show matching clusters you have access to, regardless
+    of ownership.
 
     If --ip is specified, show the IP address of the head node of the cluster.
     Only available when CLUSTERS contains exactly one cluster, e.g.
@@ -2415,8 +2416,9 @@ def status(verbose: bool,
     _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
     owner_scope = 'All users\'' if all_users else 'Your'
+    cluster_scope = 'Accessible' if clusters else owner_scope
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'{owner_scope} clusters'
+               f'{cluster_scope} clusters'
                f'{colorama.Style.RESET_ALL}')
 
     num_pending_autostop = 0

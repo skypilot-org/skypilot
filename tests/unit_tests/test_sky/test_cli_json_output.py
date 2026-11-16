@@ -146,8 +146,8 @@ class TestStatusJsonOutput:
         result = runner.invoke(command.status, ['-o', 'json'])
 
         assert result.exit_code == 0, result.output
-        assert 'Clusters' not in result.output
-        assert 'Managed jobs' not in result.output
+        assert 'Your clusters' not in result.output
+        assert 'Your managed jobs' not in result.output
 
     def _install_streaming_stubs(self, monkeypatch, records):
         """Let the real `_get_cluster_records_and_set_ssh_config` run.
