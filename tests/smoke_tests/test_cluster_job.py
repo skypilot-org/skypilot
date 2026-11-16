@@ -3687,10 +3687,27 @@ def test_azure_spot_instance_verification():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_auto_retry
 @pytest.mark.gcp
 def test_stop_gcp_spot():
     """Test GCP spot can be stopped, autostopped, restarted."""
     name = smoke_tests_utils.get_cluster_name()
+
+    def wait_for_stopped(timeout):
+        command = smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+            cluster_name=name,
+            cluster_status=[sky.ClusterStatus.STOPPED],
+            timeout=timeout)
+        original = f'current_status=$(sky status {name} --refresh | awk'
+        capture = (
+            f'status_started=$SECONDS; raw_status=$(sky status {name} --refresh); '
+            'status_exit=$?; '
+            'printf "DIAGNOSTIC elapsed=%s cli_exit=%s raw=%q\\n" '
+            '"$((SECONDS - status_started))" "$status_exit" "$raw_status" >&2; '
+            'current_status=$(printf "%s\\n" "$raw_status" | awk')
+        assert original in command
+        return command.replace(original, capture, 1)
+
     test = smoke_tests_utils.Test(
         'stop_gcp_spot',
         [
@@ -3701,19 +3718,13 @@ def test_stop_gcp_spot():
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 2 --status',
             f'sky autostop {name} -i0 -y',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=90),
+            wait_for_stopped(90),
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 3 --status',
             # -i option at launch should go through:
             f'sky launch -c {name} -i0 -y',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=120),
+            wait_for_stopped(120),
         ],
         f'sky down -y {name}',
     )
