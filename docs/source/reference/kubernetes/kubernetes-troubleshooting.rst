@@ -53,7 +53,7 @@ We will use the SkyPilot default image :code:`us-docker.pkg.dev/sky-dev-465/skyp
     # Once you have verified that the pod is running, you can delete it
     $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
 
-If your pod does not start, check the pod's logs for errors with :code:`kubectl describe skytest` and :code:`kubectl logs skytest`.
+If your pod does not start, check the pod's logs for errors with :code:`kubectl describe pod skytest` and :code:`kubectl logs skytest`.
 
 Step A2 - Can SkyPilot access your cluster?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -185,7 +185,7 @@ Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks
 .. code-block:: bash
 
     # Replace the GPU type from the sky gpus list output in the task launch command
-    $ sky launch -y -c mygpucluster --infra k8s --gpu <gpu-type>:1 -- "nvidia-smi"
+    $ sky launch -y -c mygpucluster --infra k8s --gpus <gpu-type>:1 -- "nvidia-smi"
 
     # Task should run and print the nvidia-smi output to the console
 
@@ -200,7 +200,7 @@ starting with "To view detailed progress: ...".
 Verifying ports support
 -----------------------
 
-If you are trying to run a task that requires ports to be opened, make sure you have followed the instructions in :ref:_kubernetes-ports`
+If you are trying to run a task that requires ports to be opened, make sure you have followed the instructions in :ref:`kubernetes-ports`
 to configure SkyPilot and your cluster to use the desired method (LoadBalancer service or Nginx Ingress) for port support.
 
 In this section, we will first verify that your cluster has ports support and services launched by SkyPilot can be accessed.
@@ -269,7 +269,7 @@ To verify that your cluster supports Nginx Ingress, we will create an example in
 
         # Once you have verified that the service is accessible, you can delete it
         $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
-        $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/ingress_test_svc.yaml
+        $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/ingress_test.yaml
 
 If your IP is not acquired, check the service's status with :code:`kubectl describe svc ingress-nginx-controller -n ingress-nginx`.
 Your ingress's service must be of type :code:`LoadBalancer` or :code:`NodePort` and must have an external IP.
