@@ -67,7 +67,10 @@ def test_caller_types():
     assert caller_usage.caller_of('ab12cd34', None) == caller_usage.Caller(
         'ab12cd34', 'ab12cd34', 'user')
     assert caller_usage.caller_of(constants.SKYPILOT_SYSTEM_USER_ID,
-                                  'x').type == 'system'
+                                  'root') == caller_usage.Caller(
+                                      constants.SKYPILOT_SYSTEM_USER_ID,
+                                      constants.SKYPILOT_SYSTEM_USER_ID,
+                                      'system')
 
 
 def test_pairs_beyond_the_cap_are_recorded_as_other(monkeypatch):

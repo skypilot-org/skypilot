@@ -41,8 +41,9 @@ def caller_of(user_id: Optional[str], user_name: Optional[str]) -> Caller:
     if not user_id:
         return ANONYMOUS
     if user_id == constants.SKYPILOT_SYSTEM_USER_ID:
-        caller_type = 'system'
-    elif models.User(id=user_id).is_service_account():
+        # The request env carries the server process's own user name.
+        return Caller(user_id, user_id, 'system')
+    if models.User(id=user_id).is_service_account():
         caller_type = 'service_account'
     else:
         caller_type = 'user'
@@ -73,10 +74,6 @@ class _Admitted:
                 return False
             self._keys.add(key)
             return True
-
-    def clear(self) -> None:
-        with self._lock:
-            self._keys.clear()
 
 
 _caller_names = _Admitted(MAX_CALLER_NAMES)
