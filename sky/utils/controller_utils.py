@@ -606,10 +606,6 @@ def shared_controller_vars_to_fill(
     if not local_user_config:
         local_user_config_path = None
     else:
-        # Remove admin_policy from local_user_config so that it is not applied
-        # again on the controller. This is required since admin_policy is not
-        # installed on the controller.
-        local_user_config.pop('admin_policy', None)
         # Remove allowed_contexts from local_user_config since the controller
         # may be running in a Kubernetes cluster with in-cluster auth and may
         # not have kubeconfig available to it. This is the typical case since
@@ -634,6 +630,9 @@ def shared_controller_vars_to_fill(
         else:
             consolidated = _is_consolidation_mode(pool=False)
         if not consolidated:
+            # Dedicated controllers can't import the admin policy.
+            # A consolidated one's launches get the policy from this config.
+            local_user_config.pop('admin_policy', None)
             # A dedicated controller may run an older wheel that rejects
             # workspace names. A consolidated one (same version as the server)
             # keeps them, so its config matches the server's and its requests

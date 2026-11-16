@@ -657,14 +657,19 @@ def test_get_cloud_dependencies_installation_commands_cudo_only(
     assert 'cudoctl' in combined_commands
 
 
-def _controller_config(consolidated, user_config, monkeypatch):
-    """The config a jobs controller gets for `user_config`."""
+def _controller_config(consolidated,
+                       user_config,
+                       monkeypatch,
+                       controller_type='jobs'):
+    """The config a controller gets for `user_config`."""
     monkeypatch.setattr(
         'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
         lambda controller: [])
     monkeypatch.setattr('sky.utils.controller_utils.is_jobs_consolidation_mode',
                         lambda: consolidated)
-    controller = controller_utils.Controllers.from_type('jobs')
+    monkeypatch.setattr('sky.utils.controller_utils._is_consolidation_mode',
+                        lambda pool: consolidated)
+    controller = controller_utils.Controllers.from_type(controller_type)
     result = controller_utils.shared_controller_vars_to_fill(
         controller, '/remote/path/to/config', user_config)
     saved_config = yaml_utils.read_yaml(result['local_user_config_path'])
@@ -737,6 +742,19 @@ def test_controller_config_keeps_an_id_over_a_clashing_name(
     with skypilot_config.replace_skypilot_config_in_process(
             config_utils.Config(saved_config)):
         assert skypilot_config.get_active_workspace() == 'team-a'
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_admin_policy(consolidated: bool,
+                                        controller_type: str, monkeypatch):
+    """Only a consolidated controller, which runs in the API server where the
+    policy is installed, keeps the admin policy."""
+    saved_config = _controller_config(consolidated,
+                                      {'admin_policy': 'my_policy.Policy'},
+                                      monkeypatch, controller_type)
+
+    assert ('admin_policy' in saved_config) == consolidated
 
 
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
