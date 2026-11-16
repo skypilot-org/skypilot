@@ -167,13 +167,14 @@ def ttl_cache(scope: Literal['global', 'request'], *ttl_cache_args,
     """
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
+        # TTLCache is not thread-safe: concurrent misses or a concurrent clear
+        # raise KeyError.
+        cached_func = cachetools.cached(cachetools.TTLCache(
+            *ttl_cache_args, **ttl_cache_kwargs),
+                                        lock=threading.Lock())(func)
         if scope == 'global':
-            return cachetools.cached(
-                cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
-        else:
-            cached_func = cachetools.cached(
-                cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
-            return _register_functions_need_reload_cache(cached_func)
+            return cached_func
+        return _register_functions_need_reload_cache(cached_func)
 
     return decorator
 
