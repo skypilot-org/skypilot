@@ -2453,7 +2453,7 @@ class TestParentJobLinks:
             job_ids=job_ids)
         return {
             j['job_id']:
-            (j['root_job_id'], j['parent_job_id'], j['parent_task_id'])
+                (j['root_job_id'], j['parent_job_id'], j['parent_task_id'])
             for j in jobs
         }
 
@@ -2781,8 +2781,8 @@ def test_get_jobs_dict_reads_selected_columns_without_probing_row_mapping():
     assert row.direct_gets <= 2
 
 
-
-def test_set_job_infra_persists_cluster_name_on_cloud(_mock_managed_jobs_db_conn):
+def test_set_job_infra_persists_cluster_name_on_cloud(
+        _mock_managed_jobs_db_conn):
     """set_job_infra stores cluster_name_on_cloud for finished-job Telemetry."""
 
     async def mock_callback(status: str):
@@ -2811,7 +2811,8 @@ def test_set_job_infra_persists_cluster_name_on_cloud(_mock_managed_jobs_db_conn
                             zone=None,
                             cluster_name_on_cloud='task0-42-ab12')
         jobs, _ = state.get_managed_jobs_with_filters(
-            job_ids=[job_id], fields=['job_id', 'cluster_name_on_cloud', 'cloud'])
+            job_ids=[job_id],
+            fields=['job_id', 'cluster_name_on_cloud', 'cloud'])
         assert len(jobs) == 1
         assert jobs[0]['cluster_name_on_cloud'] == 'task0-42-ab12'
         assert jobs[0]['cloud'] == 'Kubernetes'
