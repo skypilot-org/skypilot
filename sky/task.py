@@ -1,6 +1,7 @@
 """Task: a coarse-grained stage in an application."""
 import collections
 import dataclasses
+import functools
 import json
 import os
 import re
@@ -316,6 +317,13 @@ def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
         docker_config['password'] = '<redacted>'
 
 
+@functools.lru_cache(maxsize=1)
+def warn_legacy_num_nodes() -> None:
+    """Warn once when a client uses deprecated task-level node counts."""
+    logger.warning('Task-level num_nodes is deprecated; set num_nodes on '
+                   'Resources or inside YAML resources instead.')
+
+
 def _normalize_resource_num_nodes(
     resources: Union[List['resources_lib.Resources'],
                      Set['resources_lib.Resources']],
@@ -518,6 +526,8 @@ class Task:
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
+        if num_nodes is not None:
+            warn_legacy_num_nodes()
         self._service: Optional[service_spec.SkyServiceSpec] = None
 
         # Resources that this task cannot run on.
@@ -866,7 +876,6 @@ class Task:
             run=config.pop('run', None),
             workdir=config.pop('workdir', None),
             setup=config.pop('setup', None),
-            num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
             secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
@@ -877,6 +886,9 @@ class Task:
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
+
+        # Loading saved/wire YAML is silent; the client warns on user input.
+        task.num_nodes = config.pop('num_nodes', None)
 
         # Append managed refs from secrets: field (secrets:NAME entries)
         # pylint: disable=protected-access
@@ -1017,7 +1029,10 @@ class Task:
             resources_config['volumes'] = volumes
         resources = resources_lib.Resources.from_yaml_config(resources_config)
         if task._num_nodes is not None and any(
-                r._num_nodes is not None for r in resources):
+                config.get('num_nodes') is not None
+                for config in [resources_config] +
+                resources_config.get('any_of', []) +
+                resources_config.get('ordered', [])):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'num_nodes is set on both the task and its resources. '
@@ -1230,7 +1245,7 @@ class Task:
     @property
     def num_nodes(self) -> int:
         """Deprecated compatibility accessor for a selected or uniform count."""
-        logger.warning('Task.num_nodes is deprecated; use Resources.num_nodes.')
+        warn_legacy_num_nodes()
         if self.best_resources is not None:
             return self.best_resources.num_nodes
         counts = {r.num_nodes for r in self.resources}
@@ -1252,10 +1267,6 @@ class Task:
             resources = type(resources)(
                 r.copy(num_nodes=None) for r in resources)
         normalized = _normalize_resource_num_nodes(resources, num_nodes)
-        if num_nodes is not None:
-            logger.warning(
-                'Task(num_nodes=...) and task-level YAML num_nodes are '
-                'deprecated; set num_nodes on Resources instead.')
         self._num_nodes = num_nodes
         self.resources = normalized
 
@@ -1518,7 +1529,8 @@ class Task:
 
     def get_resource_config(self) -> Dict[str, Any]:
         return _resources_to_config(self.resources,
-                                    factor_out_common_fields=True)
+                                    factor_out_common_fields=True,
+                                    omit_num_nodes=self._num_nodes is not None)
 
     @property
     def service(self) -> Optional[service_spec.SkyServiceSpec]:
@@ -2151,13 +2163,9 @@ class Task:
         add_if_not_none('name', self.name)
 
         tmp_resource_config = _resources_to_config(
-            self.resources, redact_secrets=redact_secrets)
-        if self._num_nodes is not None:
-            # Legacy requests keep their count at task level on the wire.
-            for candidate in ([tmp_resource_config] +
-                              tmp_resource_config.get('any_of', []) +
-                              tmp_resource_config.get('ordered', [])):
-                candidate.pop('num_nodes', None)
+            self.resources,
+            redact_secrets=redact_secrets,
+            omit_num_nodes=self._num_nodes is not None)
 
         add_if_not_none('resources', tmp_resource_config)
 
@@ -2179,8 +2187,7 @@ class Task:
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
 
-        # Only a count set on the task itself: resources carry their own, if
-        # any, and the two cannot be combined.
+        # Legacy requests retain their task-level count on the wire.
         add_if_not_none('num_nodes', self._num_nodes)
         add_if_not_none('job', self.job, no_empty=True)
 
@@ -2368,19 +2375,21 @@ def _plain(value: Any) -> Any:
 def _resources_to_config(resources: Union[List['resources_lib.Resources'],
                                           Set['resources_lib.Resources']],
                          factor_out_common_fields: bool = False,
-                         redact_secrets: bool = False) -> Dict[str, Any]:
-
-    if len(resources) > 1:
-        resource_list: List[Dict[str, Union[str, int]]] = []
-        for r in resources:
-            resource_list.append(
-                r.to_yaml_config(redact_secrets=redact_secrets))
+                         redact_secrets: bool = False,
+                         omit_num_nodes: bool = False) -> Dict[str, Any]:
+    resource_list = [
+        r.to_yaml_config(redact_secrets=redact_secrets) for r in resources
+    ]
+    if omit_num_nodes:
+        # Legacy wire and stored job configs keep the count at task level.
+        for config in resource_list:
+            config.pop('num_nodes', None)
+    if len(resource_list) > 1:
         group_key = 'ordered' if isinstance(resources, list) else 'any_of'
         if factor_out_common_fields:
             return _factor_out_common_resource_fields(resource_list, group_key)
         return {group_key: resource_list}
-    else:
-        return list(resources)[0].to_yaml_config(redact_secrets=redact_secrets)
+    return resource_list[0]
 
 
 def _factor_out_common_resource_fields(configs: List[Dict[str, Union[str,

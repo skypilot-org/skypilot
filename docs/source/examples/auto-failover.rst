@@ -318,7 +318,7 @@ different number of nodes than before. Make sure the job can resume from its che
 How :code:`num_nodes` settings combine:
 
 - Set :code:`num_nodes` either at the top level of the task or inside :code:`resources`, not both; setting it in both
-  places is an error.
+  places in a YAML is an error. The SDK accepts matching counts for compatibility.
 - Inside :code:`resources`, a :code:`num_nodes` set directly under :code:`resources` (next to :code:`ordered` /
   :code:`any_of`) applies to all candidates, and a candidate's own :code:`num_nodes` overrides it. A candidate without
   a :code:`num_nodes` runs on 1 node.

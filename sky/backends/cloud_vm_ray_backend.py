@@ -2109,8 +2109,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ))
 
     def __repr__(self):
-        launched_resources = self.launched_resources.copy(
+        launched_resources = (self.launched_resources.copy(
             num_nodes=self.launched_task_nodes)
+                              if self.launched_resources is not None else
+                              f'{self.launched_task_nodes}x None')
         return (f'ResourceHandle('
                 f'\n\tcluster_name={self.cluster_name},'
                 f'\n\tcluster_name_on_cloud={self.cluster_name_on_cloud},'
@@ -4707,14 +4709,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # ready (which is not used for setup anyway).
             matched_resource = backend_utils.get_task_resources_for_cluster(
                 handle, task)
-            if matched_resource is None:
-                task_copy.set_resources(
-                    type(task.resources)(
-                        resources_lib.Resources(num_nodes=r.num_nodes)
-                        for r in task.resources))
-                matched_resource = backend_utils.get_task_resources_for_cluster(
-                    handle, task_copy)
-                assert matched_resource is not None, (task_copy, handle)
+            # launch already checked fit; exec does not run detached setup.
+            assert matched_resource is not None, (task, handle)
             valid_resource = resources_lib.Resources(
                 num_nodes=matched_resource.num_nodes)
 

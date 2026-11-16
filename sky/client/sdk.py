@@ -472,9 +472,7 @@ def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
 
 
 def _check_resources_num_nodes_api_version(dag: 'sky.Dag') -> None:
-    resource_configs = [
-        task.to_yaml_config()['resources'] for task in dag.tasks
-    ]
+    resource_configs = [task.get_resource_config() for task in dag.tasks]
     if not any('num_nodes' in config or any(
             'num_nodes' in candidate for candidate in config.get('any_of', []) +
             config.get('ordered', [])) for config in resource_configs):

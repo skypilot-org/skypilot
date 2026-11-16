@@ -1,6 +1,7 @@
 """Unit tests for `num_nodes` set on resources (e.g., per any_of candidate)."""
 import asyncio
 import pickle
+import threading
 from unittest import mock
 
 import pytest
@@ -152,14 +153,17 @@ def test_num_nodes_on_task_and_resources_rejected_in_sdk():
         'accelerators': 'H100:8'
     }, [4]),
 ])
-def test_cli_num_nodes_overrides_where_set(tmp_path, resources_config,
-                                           expected):
+@pytest.mark.parametrize('header', [False, True])
+def test_cli_num_nodes_overrides_where_set(tmp_path, resources_config, expected,
+                                           header):
     yaml_path = tmp_path / 'task.yaml'
     yaml_path.write_text(
         dag_utils.yaml_utils.dump_yaml_str({
             'resources': resources_config,
             'run': 'echo hi'
         }))
+    if header:
+        yaml_path.write_text('name: pipeline\n---\n' + yaml_path.read_text())
     task = command._make_task_or_dag_from_entrypoint_with_overrides(  # pylint: disable=protected-access
         entrypoint=(str(yaml_path),),
         num_nodes=4)
@@ -764,6 +768,18 @@ def test_recovery_remembers_requested_count_on_a_larger_cluster(on_task):
     executor.cluster_name = 'recover-count'
     executor.job_id = 1
     executor.dag = mock.MagicMock(tasks=[task])
+    loop_thread = threading.get_ident()
+    match_request = backend_utils.get_task_resources_for_cluster
+    copy_launched = launched.copy
+
+    def match_in_thread(*args):
+        assert threading.get_ident() != loop_thread
+        return match_request(*args)
+
+    def copy_in_thread(**kwargs):
+        assert threading.get_ident() != loop_thread
+        return copy_launched(**kwargs)
+
     with mock.patch.object(recovery_strategy.StrategyExecutor, '_launch',
                            new=mock.AsyncMock(return_value=1.0)), \
             mock.patch.object(recovery_strategy.global_user_state,
@@ -771,7 +787,10 @@ def test_recovery_remembers_requested_count_on_a_larger_cluster(on_task):
             mock.patch.object(cloud_vm_ray_backend.global_user_state,
                               'get_status_from_cluster_name',
                               side_effect=AssertionError('Unexpected state read')), \
-            mock.patch.object(recovery_strategy.state, 'set_job_infra'):
+            mock.patch.object(recovery_strategy.state, 'set_job_infra'), \
+            mock.patch.object(backend_utils, 'get_task_resources_for_cluster',
+                              side_effect=match_in_thread), \
+            mock.patch.object(launched, 'copy', side_effect=copy_in_thread):
         asyncio.run(executor._launch())
     assert executor._launched_resources.num_nodes == 2
 
@@ -810,20 +829,48 @@ def test_legacy_and_matching_resource_count_in_sdk():
 
 
 @pytest.mark.parametrize('source', ['constructor', 'setter', 'getter', 'yaml'])
-def test_legacy_count_deprecation_is_logged(source):
-    with mock.patch.object(task_lib.logger, 'warning') as warning:
-        if source == 'constructor':
-            task_lib.Task(num_nodes=2)
-        elif source == 'yaml':
-            _task_from_config({'num_nodes': 2})
-        else:
-            task = task_lib.Task()
-            if source == 'setter':
-                task.num_nodes = 2
-            else:
-                _ = task.num_nodes
-        warning.assert_called_once()
-        assert 'deprecated' in warning.call_args.args[0]
+def test_legacy_count_deprecation_warns_once_at_user_input(source):
+    task_lib.warn_legacy_num_nodes.cache_clear()
+    try:
+        with mock.patch.object(task_lib.logger, 'warning') as warning:
+            for _ in range(2):
+                if source == 'constructor':
+                    task_lib.Task(num_nodes=2)
+                elif source == 'yaml':
+                    _task_from_config({'num_nodes': 2})
+                else:
+                    task = task_lib.Task()
+                    if source == 'setter':
+                        task.num_nodes = 2
+                    else:
+                        _ = task.num_nodes
+            assert warning.call_count == (1 if source
+                                          in {'constructor', 'getter'} else 0)
+    finally:
+        task_lib.warn_legacy_num_nodes.cache_clear()
+
+
+@pytest.mark.parametrize('legacy_yaml', [False, True])
+@pytest.mark.parametrize('header', [False, True])
+def test_cli_warns_for_legacy_yaml_but_not_the_node_count_flag(
+        tmp_path, legacy_yaml, header):
+    config = {'resources': {'cpus': 2}, 'run': 'echo hi'}
+    if legacy_yaml:
+        config['num_nodes'] = 2
+    path = tmp_path / 'nodes.yaml'
+    path.write_text(dag_utils.yaml_utils.dump_yaml_str(config))
+    if header:
+        path.write_text('name: pipeline\n---\n' + path.read_text())
+    task_lib.warn_legacy_num_nodes.cache_clear()
+    try:
+        with mock.patch.object(task_lib.logger, 'warning') as warning:
+            for _ in range(2):
+                task = command._make_task_or_dag_from_entrypoint_with_overrides(
+                    entrypoint=(str(path),), num_nodes=4)
+            assert next(iter(task.resources)).num_nodes == 4
+            assert warning.call_count == (1 if legacy_yaml else 0)
+    finally:
+        task_lib.warn_legacy_num_nodes.cache_clear()
 
 
 @pytest.mark.parametrize('stored_count', [None, 4])
@@ -855,11 +902,8 @@ def test_cluster_count_is_rendered_once_for_old_and_new_handles(stored_count):
     assert '4x ' not in existing
 
 
-@pytest.mark.parametrize('hardware_matches', [False, True])
-def test_setup_only_exec_preserves_count_without_checking_hardware(
-        hardware_matches):
-    second = (resources_lib.Resources(cpus=2, num_nodes=4) if hardware_matches
-              else resources_lib.Resources(accelerators='B200:8', num_nodes=4))
+def test_setup_only_exec_preserves_matching_count_and_clears_demands():
+    second = resources_lib.Resources(cpus=2, num_nodes=4)
     task = task_lib.Task(setup='echo setup',
                          resources=[
                              resources_lib.Resources(accelerators='H100:8',
@@ -881,5 +925,46 @@ def test_setup_only_exec_preserves_count_without_checking_hardware(
         assert backend._execute(handle, task) == 1
     submitted = execute.call_args.args[1]
     selected = next(iter(submitted.resources))
-    assert selected.num_nodes == (4 if hardware_matches else 2)
+    assert selected.num_nodes == 4
     assert selected.accelerators is None
+
+
+def test_handle_repr_with_missing_resources():
+    handle = mock.MagicMock(launched_resources=None, launched_task_nodes=2)
+    assert 'launched_resources=2x None' in (
+        cloud_vm_ray_backend.CloudVmRayResourceHandle.__repr__(handle))
+
+
+@pytest.mark.parametrize('count', [None, 1, 4])
+def test_legacy_stored_job_resources_keep_the_old_schema(count):
+    task = task_lib.Task(num_nodes=count).set_resources(
+        [resources_lib.Resources(cpus=2),
+         resources_lib.Resources(cpus=4)])
+    config = task.get_resource_config()
+    assert 'num_nodes' not in config
+    assert all('num_nodes' not in r for r in config.get('ordered', []))
+
+
+def test_recovery_unexpected_match_failure_keeps_launched_resources():
+    launched = resources_lib.Resources(infra='aws/us-east-1',
+                                       instance_type='m5.large',
+                                       num_nodes=4)
+    task = task_lib.Task().set_resources(launched.copy(num_nodes=2))
+    handle = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayResourceHandle,
+                            launched_resources=launched,
+                            launched_nodes=4,
+                            cached_cluster_info=None)
+    executor = recovery_strategy.FailoverStrategyExecutor.__new__(
+        recovery_strategy.FailoverStrategyExecutor)
+    executor.cluster_name = 'recover-count'
+    executor.job_id = 1
+    executor.dag = mock.MagicMock(tasks=[task])
+    with mock.patch.object(recovery_strategy.StrategyExecutor, '_launch',
+                           new=mock.AsyncMock(return_value=1.0)), \
+            mock.patch.object(recovery_strategy.global_user_state,
+                              'get_handle_from_cluster_name', return_value=handle), \
+            mock.patch.object(backend_utils, 'get_task_resources_for_cluster',
+                              return_value=None), \
+            mock.patch.object(recovery_strategy.state, 'set_job_infra'):
+        assert asyncio.run(executor._launch()) == 1.0
+    assert executor._launched_resources is launched

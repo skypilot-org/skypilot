@@ -240,7 +240,7 @@ class Resources:
           num_nodes: the number of nodes to launch when these resources are
             chosen. Defaults to one unless the Task supplies a legacy count.
             Setting it on each ``any_of``/``ordered`` candidate lets them
-            differ in node count (e.g., 1x H200:8 vs 2x H100:8); the optimizer then
+            differ in node count (e.g., 1x H200:8 vs 2x H100:8). The optimizer
             compares the total cost of each candidate. A legacy task-level
             count, if supplied in the SDK, must match this count.
           use_spot: whether to use spot instances. If None, defaults to

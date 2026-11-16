@@ -2124,11 +2124,12 @@ class FailoverStrategyExecutor(StrategyExecutor):
             if launched_resources is not None:
                 # A reused cluster may have more capacity than this task runs
                 # on. Recovery retries the matched request, not that capacity.
-                matched = backend_utils.get_task_resources_for_cluster(
-                    handle, self.dag.tasks[0])
-                assert matched is not None, (handle, self.dag.tasks[0])
-                launched_resources = launched_resources.copy(
-                    num_nodes=matched.num_nodes)
+                matched = await asyncio.to_thread(
+                    backend_utils.get_task_resources_for_cluster, handle,
+                    self.dag.tasks[0])
+                if matched is not None:
+                    launched_resources = await asyncio.to_thread(
+                        launched_resources.copy, num_nodes=matched.num_nodes)
             self._launched_resources = launched_resources
 
             # Persist infra info to database for sorting/filtering
