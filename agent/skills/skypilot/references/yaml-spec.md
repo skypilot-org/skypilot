@@ -22,8 +22,6 @@ name: my-task
 
 workdir: ~/my-task-code
 
-num_nodes: 4
-
 job:
   wait_for_scheduling_timeout: 2h
 
@@ -32,6 +30,7 @@ resources:
   infra: aws
 
   # Hardware.
+  num_nodes: 4
   accelerators: H100:8
   accelerator_args:
     runtime_version: tpu-vm-base
@@ -181,13 +180,31 @@ workdir:
 ### ``num_nodes``
 
 Number of nodes (optional; defaults to 1) to launch including the head node.
-
-A task can set this to a smaller value than the size of a cluster.
+Set `num_nodes` under `resources`. A task can request fewer nodes than the
+size of an existing cluster.
 
 ```yaml
-num_nodes: 4
-
+resources:
+  num_nodes: 4
 ```
+
+Candidates in `resources.any_of` or `resources.ordered` can each specify a
+different count. A count at the top of `resources` supplies the default for
+candidates that omit it; otherwise they request one node.
+
+```yaml
+resources:
+  ordered:
+    - accelerators: B200:8
+      num_nodes: 2
+    - accelerators: H100:8
+      num_nodes: 4
+```
+
+The task-level `num_nodes` field remains supported for compatibility but is
+deprecated. It cannot be combined with `resources.num_nodes` or a count on a
+candidate in the same YAML.
+
 
 
 ### ``job``
