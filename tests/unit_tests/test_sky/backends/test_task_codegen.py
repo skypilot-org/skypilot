@@ -8,14 +8,19 @@ for various configurations. The expected outputs are stored in:
 To update snapshots when intentional changes are made:
     UPDATE_SNAPSHOT=1 pytest tests/unit_tests/test_sky/backends/test_task_codegen.py
 """
+import contextlib
+import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
 from sky.backends import task_codegen
 from sky.provision.slurm import utils as slurm_utils
+from sky.skylet import autostop_lib
+from sky.skylet import job_lib
 
 TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'ray_codegen'
 SLURM_TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'slurm_codegen'
@@ -335,3 +340,112 @@ class TestRcloneFlushScript:
                                 capture_output=True,
                                 check=False)
         assert result.returncode == expected_code
+
+
+PBS_TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'pbs_codegen'
+
+
+def _pbs_codegen(num_nodes: int, setup_cmd=None) -> str:
+    codegen = task_codegen.PbsCodeGen('12345.pbs', {'CPU': 8.0, 'GPU': 2.0})
+    codegen.add_prologue(job_id=2)
+    resources_dict = {'CPU': 4.0, 'GPU': 1.0}
+    task_env_vars = {
+        'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2',
+        'MODEL_NAME': 'resnet50',
+    }
+    codegen.add_setup(
+        num_nodes,
+        resources_dict=resources_dict,
+        stable_cluster_internal_ips=['node1', 'node2'][:num_nodes],
+        env_vars=task_env_vars,
+        log_dir='/sky/logs',
+        setup_cmd=setup_cmd,
+    )
+    codegen.add_task(
+        num_nodes,
+        bash_script='python train.py',
+        task_name='train_task',
+        resources_dict={
+            'CPU': 4.0,
+            'GPU': 1.0
+        },
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
+    codegen.add_epilogue()
+    return codegen.build()
+
+
+def test_pbs_single_node_with_gpu():
+    """Single-node GPU job with setup commands on PBS."""
+    result = _pbs_codegen(1, setup_cmd='pip install torch')
+    assert_codegen_matches_snapshot('pbs_single_node_with_gpu',
+                                    result,
+                                    testdata_dir=PBS_TESTDATA_DIR)
+
+
+def test_pbs_multi_node():
+    result = _pbs_codegen(2)
+    assert_codegen_matches_snapshot('pbs_multi_node',
+                                    result,
+                                    testdata_dir=PBS_TESTDATA_DIR)
+
+
+def test_pbs_codegen_compiles_and_runs_single_node(tmp_path, monkeypatch):
+    """Execute the generated driver end to end on this machine.
+
+    Rank 0 runs locally, so a one-node cluster needs no ssh: the driver
+    reads the node files the batch script would have written, reserves its
+    resource slot, runs setup and the task through the PBS executor, and
+    records the return codes.
+    """
+    home = tmp_path / 'home'
+    (home / '.sky_sshd').mkdir(parents=True)
+    (home / '.sky').mkdir()
+    runtime_dir = tmp_path / 'runtime'
+    (runtime_dir / '.sky').mkdir(parents=True)
+    (home / '.sky_nodes').write_text('localhost\n')
+    (home / '.sky_sshd' /
+     'rank0.port').write_text(f'localhost 2222 {runtime_dir}\n')
+    (runtime_dir / '.sky' / 'python_path').write_text(sys.executable)
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setenv('SKY_RUNTIME_DIR', str(runtime_dir))
+
+    codegen = task_codegen.PbsCodeGen('12345.pbs', {'CPU': 8.0, 'GPU': 0.0})
+    codegen.add_prologue(job_id=7)
+    codegen.add_setup(1,
+                      resources_dict={'CPU': 1.0},
+                      stable_cluster_internal_ips=['localhost'],
+                      env_vars={'FOO': 'bar'},
+                      log_dir=str(tmp_path / 'logs'),
+                      setup_cmd='echo setup-ran-$FOO')
+    codegen.add_task(1,
+                     bash_script='echo task-ran-$FOO-rank-$SKYPILOT_NODE_RANK',
+                     task_name='t',
+                     resources_dict={'CPU': 1.0},
+                     log_dir=str(tmp_path / 'logs' / 'tasks'),
+                     env_vars={'FOO': 'bar'})
+    codegen.add_epilogue()
+    code = codegen.build()
+
+    statuses = []
+    monkeypatch.setattr(job_lib, 'set_status',
+                        lambda job_id, status: statuses.append(status))
+    monkeypatch.setattr(job_lib, 'set_job_started', lambda job_id: None)
+    monkeypatch.setattr(job_lib, 'set_exit_codes', lambda job_id, codes: None)
+    monkeypatch.setattr(job_lib.scheduler, 'schedule_step', lambda: None)
+    monkeypatch.setattr(autostop_lib, 'set_last_active_time_to_now',
+                        lambda: None)
+    out = io.StringIO()
+    namespace = {'__name__': '__sky_pbs_driver__'}
+    with contextlib.redirect_stdout(out):
+        exec(compile(code, 'driver', 'exec'), namespace)  # pylint: disable=exec-used
+    output = out.getvalue()
+    assert 'setup-ran-bar' in output
+    assert 'task-ran-bar-rank-0' in output
+    assert namespace['returncodes'] == [0]
+    assert statuses[-1] == job_lib.JobStatus.SUCCEEDED
+    # The slot was released.
+    assert (runtime_dir / '.sky' / 'pbs_task_slots.json').read_text() == '{}'
+    assert (tmp_path / 'logs' / 'setup-head.log').exists()
+    assert (tmp_path / 'logs' / 'tasks' / 'run.log').exists()

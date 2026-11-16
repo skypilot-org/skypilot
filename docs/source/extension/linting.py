@@ -70,6 +70,7 @@ ALLOWED_TERMS = {
 # Add multi-word terms that should be treated as a single entity
 MULTI_WORD_TERMS = {
     'Lambda Cloud',
+    'PBS Pro',
     'Weights & Biases',
     'Rancher Kubernetes Engine',
     'Google Cloud',

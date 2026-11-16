@@ -17,6 +17,7 @@ logger = sky_logging.init_logger(__name__)
 # plugin that redirects a session elsewhere reports its own value.
 SSH_PATH_PORT_FORWARD = 'portforward'
 SSH_PATH_SLURM = 'slurm'
+SSH_PATH_PBS = 'pbs'
 SSH_PATH_REDIRECTED = 'redirected'
 
 # Hook for plugins to inject SSH redirect logic. When set, it is called after

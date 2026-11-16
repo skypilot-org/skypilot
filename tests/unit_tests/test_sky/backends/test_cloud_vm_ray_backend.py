@@ -97,6 +97,31 @@ def test_slurm_exec_cpu_demand_uses_cluster_allocation():
     assert demands['CPU'] == 8.0
 
 
+def test_pbs_cpu_demand_uses_requested_cpus():
+    allocated = resources.Resources(cloud=clouds.PBS(),
+                                    instance_type='8CPU--32GB')
+    handle = MagicMock()
+    handle.launched_resources = allocated
+    test_task = task.Task(resources=resources.Resources(cpus='4'))
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 4.0
+
+
+def test_pbs_exec_cpu_demand_uses_cluster_allocation():
+    handle = MagicMock()
+    handle.launched_resources = resources.Resources(cloud=clouds.PBS(),
+                                                    instance_type='8CPU--32GB')
+    test_task = task.Task(resources=resources.Resources())
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 8.0
+
+
 class TestCloudVmRayBackendTaskRedaction:
     """Tests for CloudVmRayBackend usage of redacted task configs."""
 
