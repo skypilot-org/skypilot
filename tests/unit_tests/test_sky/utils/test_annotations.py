@@ -131,11 +131,13 @@ class TestKeepIfOnSyncRefresh:
 
 
 class TestTtlCacheConcurrency:
-    """Request-scoped caches are shared by the requests of a process."""
+    """TTL caches are shared by the threads of a process."""
 
     def test_concurrent_misses_and_clears_do_not_raise(self):
 
-        @annotations.ttl_cache(scope='request',
+        # Global scope: a request-scoped cache would stay registered, and a
+        # cache broken by this test would fail every later request-level clear.
+        @annotations.ttl_cache(scope='global',
                                maxsize=1,
                                ttl=0.001,
                                timer=time.time)
@@ -151,10 +153,11 @@ class TestTtlCacheConcurrency:
                 try:
                     cached((i + n) % 4)
                     if n % 7 == 0:
-                        # What each request start does to this cache.
+                        # What each request start does to a request-scoped
+                        # cache.
                         cached.cache_clear()
                 except Exception as e:  # pylint: disable=broad-except
-                    errors.append(e)
+                    errors.append(repr(e))
                 n += 1
 
         threads = [
