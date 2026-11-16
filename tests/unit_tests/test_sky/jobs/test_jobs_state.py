@@ -2453,7 +2453,7 @@ class TestParentJobLinks:
             job_ids=job_ids)
         return {
             j['job_id']:
-                (j['root_job_id'], j['parent_job_id'], j['parent_task_id'])
+            (j['root_job_id'], j['parent_job_id'], j['parent_task_id'])
             for j in jobs
         }
 
