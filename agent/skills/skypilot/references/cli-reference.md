@@ -109,7 +109,7 @@ Show clusters.
 - `--show-services`, `--no-show-services` — Also show sky serve services, if any.
 - `--show-pools`, `--no-show-pools` — Also show pools, if any.
 - `CLUSTERS` — text
-- `--all-users`, `-u` — Show all clusters, including those not owned by the current user.
+- `--all-users`, `-u` — Show clusters and managed jobs from all users that you have access to.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ### `sky stop`
