@@ -24,7 +24,7 @@ jest.mock('@/plugins/PluginProvider', () => ({
 }));
 
 import { fireEvent, render, screen } from '@testing-library/react';
-import { ClusterJobs } from '@/components/jobs';
+import { ClusterJobs, isJobGroup } from '@/components/jobs';
 
 const LONG_NAME =
   'train-llama-70b-on-the-whole-of-common-crawl-with-a-very-long-name';
@@ -82,5 +82,31 @@ describe('ClusterJobs long job names', () => {
     renderClusterJobs([job(1, 'quick')]);
 
     expect(screen.queryByText('... show more')).toBeNull();
+  });
+});
+
+describe('isJobGroup', () => {
+  const task = (execution, isJobGroup) => ({
+    id: 2,
+    execution,
+    is_job_group: isJobGroup,
+  });
+
+  it('does not treat a serial pipeline as a JobGroup', () => {
+    expect(isJobGroup([task('serial', false), task('serial', false)])).toBe(
+      false
+    );
+  });
+
+  it('treats parallel execution as a JobGroup', () => {
+    expect(isJobGroup([task('parallel', true), task('parallel', true)])).toBe(
+      true
+    );
+    expect(isJobGroup([task('parallel', true)])).toBe(true);
+  });
+
+  it('guesses from the task count when execution is not reported', () => {
+    expect(isJobGroup([task(), task()])).toBe(true);
+    expect(isJobGroup([task()])).toBe(false);
   });
 });
