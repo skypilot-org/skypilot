@@ -21,10 +21,12 @@ from sky.utils import yaml_utils
 # test cluster. Remove this when consolidation mode is enabled by default or
 # we have an option to not allow shared env tests.
 
+# Stream provisioning errors even when the launch exceeds the test timeout.
 _LAUNCH_POOL_AND_CHECK_SUCCESS = (
-    's=$(sky jobs pool apply -p {pool_name} {pool_yaml} -y); '
-    'echo "$s"; '
-    'echo; echo; echo "$s" | grep "Successfully created pool"')
+    'set -o pipefail; '
+    'sky jobs pool apply -p {pool_name} {pool_yaml} -y 2>&1 | '
+    'tee /tmp/sky-pool-control-{pool_name}.log && '
+    'grep "Successfully created pool" /tmp/sky-pool-control-{pool_name}.log')
 
 _LAUNCH_JOB_AND_CHECK_SUCCESS = (
     's=$(sky jobs launch --pool {pool_name} {job_yaml} -d -y); '
