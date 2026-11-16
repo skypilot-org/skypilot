@@ -452,6 +452,12 @@ def _stream_task_logs_to_controller_log() -> bool:
         ('jobs', 'controller', 'stream_task_logs_to_controller_log'), True)
 
 
+def _precheck_failure_reason(e: exceptions.ProvisionPrechecksError) -> str:
+    return '; '.join(
+        common_utils.format_exception(reason, use_bracket=True)
+        for reason in e.reasons)
+
+
 def _user_job_failure_reason(job_id: int) -> str:
     """Failure reason for a failed user job, pointing at the log that holds
     the task output."""
@@ -2599,29 +2605,38 @@ class JobController:
         # strategy first refusal at owning the per-task monitor loop so
         # both code paths behave consistently. Strategies that return
         # None fall through to `_monitor_one_task` below unchanged.
-        result = await executor.monitor_task(
-            task_id=task_id,
-            task=task,
-            cluster_name=cluster_name,
-            job_id_on_pool_cluster=None,
-            cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
-            force_transit_to_recovering=force_transit_to_recovering,
-            on_recovery=on_recovery,
-            emergency_reattach=emergency_reattach,
-        )
-        if result is not None:
-            return result
-        return await self._monitor_one_task(
-            task_id=task_id,
-            task=task,
-            cluster_name=cluster_name,
-            executor=executor,
-            job_id_on_pool_cluster=None,
-            cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
-            force_transit_to_recovering=force_transit_to_recovering,
-            on_recovery=on_recovery,
-            emergency_reattach=emergency_reattach,
-        )
+        try:
+            result = await executor.monitor_task(
+                task_id=task_id,
+                task=task,
+                cluster_name=cluster_name,
+                job_id_on_pool_cluster=None,
+                cleanup_cluster_on_success=False,  # JobGroup cleans up at end
+                force_transit_to_recovering=force_transit_to_recovering,
+                on_recovery=on_recovery,
+                emergency_reattach=emergency_reattach,
+            )
+            if result is not None:
+                return result
+            return await self._monitor_one_task(
+                task_id=task_id,
+                task=task,
+                cluster_name=cluster_name,
+                executor=executor,
+                job_id_on_pool_cluster=None,
+                cleanup_cluster_on_success=False,  # JobGroup cleans up at end
+                force_transit_to_recovering=force_transit_to_recovering,
+                on_recovery=on_recovery,
+                emergency_reattach=emergency_reattach,
+            )
+        except exceptions.ProvisionPrechecksError as e:
+            # A recovery that cannot succeed. The group only records a
+            # member's exception, so fail the member here.
+            logger.error(f'Provision prechecks failed for task {task_id}')
+            await self._update_failed_task_state(
+                task_id, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
+                _precheck_failure_reason(e))
+            return False
 
     async def _run_job_group(self) -> bool:
         """Run a JobGroup with parallel execution.
@@ -3310,9 +3325,7 @@ class JobController:
                     # when this exception can occur.
                     logger.error(f'Provision prechecks failed for '
                                  f'task {task_id}')
-                    failure_reason = ('; '.join(
-                        common_utils.format_exception(reason, use_bracket=True)
-                        for reason in e.reasons))
+                    failure_reason = _precheck_failure_reason(e)
                     logger.error(failure_reason)
                     await self._update_failed_task_state(
                         task_id,
