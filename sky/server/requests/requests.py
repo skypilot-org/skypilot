@@ -187,6 +187,12 @@ def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
     return orjson.dumps(None).decode('utf-8')
 
 
+def _entrypoint_name(entrypoint: Callable[..., Any]) -> str:
+    # An execution policy may record a wrapper, e.g. a functools.partial,
+    # that has no __name__.
+    return getattr(entrypoint, '__name__', type(entrypoint).__name__)
+
+
 def validate_fields(fields: Optional[List[str]]) -> None:
     """Validates a caller-supplied column list for a request query.
 
@@ -251,6 +257,10 @@ class Request:
     finished_at: Optional[float] = None
     # Blob ID of uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
+    # UTF-8 size of the serialized return value as last written by to_row().
+    stored_result_size: Optional[int] = dataclasses.field(default=None,
+                                                          compare=False,
+                                                          repr=False)
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -317,6 +327,10 @@ class Request:
         # version; that is a wire-only concern. to_row() feeds the database, so
         # always persist the true status regardless of the request context.
         payload.status = self.status.value
+        stored = payload.return_value or ''
+        # isascii() is O(1); only a result with non-ASCII text is encoded.
+        self.stored_result_size = (len(stored) if stored.isascii() else len(
+            stored.encode('utf-8')))
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -348,7 +362,7 @@ class Request:
         return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
-            entrypoint=self.entrypoint.__name__,
+            entrypoint=_entrypoint_name(self.entrypoint),
             request_body=_request_body_for_display(self.request_body,
                                                    self.user_id,
                                                    caller_user_id),
@@ -494,7 +508,7 @@ def encode_requests(
         payload = payloads.RequestPayload(
             request_id=request.request_id,
             name=request.name,
-            entrypoint=request.entrypoint.__name__
+            entrypoint=_entrypoint_name(request.entrypoint)
             if request.entrypoint is not None else '',
             request_body=_request_body_for_display(
                 request.request_body, request.user_id, caller_user_id)
@@ -1312,34 +1326,45 @@ async def set_request_failed_if_pending_async(request_id: str,
         return True
 
 
-def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
+def set_request_succeeded(request_id: str,
+                          result: Optional[Any]) -> Optional[int]:
+    """Set a request to succeeded and populate the result.
+
+    Returns:
+        The length of the stored serialized result.
+    """
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+    return request_task.stored_result_size
 
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_succeeded_async(request_id: str,
-                                      result: Optional[Any]) -> None:
+                                      result: Optional[Any]) -> Optional[int]:
     """Set a request to succeeded and populate the result.
 
     A request that already finished, e.g. cancelled while its thread was still
     running, keeps its status.
+
+    Returns:
+        The length of the stored serialized result, None if nothing was
+        stored.
     """
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
         if request_task.status in RequestStatus.finished_status():
-            return
+            return None
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+    return request_task.stored_result_size
 
 
 @metrics_lib.time_me_async

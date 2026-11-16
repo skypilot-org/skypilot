@@ -228,6 +228,50 @@ SKY_APISERVER_REQUEST_GET_DURATION_SECONDS = prom.Histogram(
     buckets=_LATENCY_BUCKETS,
 )
 
+# Usage by caller, recorded through sky/server/caller_usage.py, which bounds
+# the distinct (caller, name) pairs per process. `name` is the request name
+# (sky.jobs.queue_v2) or, for a route handler that schedules no request, the
+# method and route path. `kind` is long/short (request executed from the queue
+# or in-process), sync (request executed inline for a synchronous call) or
+# handler (route handler).
+_CALLER_LABELS = ['caller', 'caller_id', 'caller_type', 'name']
+
+SKY_APISERVER_CALLER_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_calls_total',
+    'Requests executed and route handler calls, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_EXECUTION_SECONDS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_execution_seconds_total',
+    'Seconds spent executing requests and route handlers, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_stored_result_bytes_total',
+    'Encoded request result bytes written to the request store, by caller',
+    _CALLER_LABELS,
+)
+
+SKY_APISERVER_CALLER_RETURNED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_returned_result_bytes_total',
+    'Response body bytes returned with a request result or by a route '
+    'handler, by caller',
+    _CALLER_LABELS,
+)
+
+# HTTP calls by caller and client: X-SkyPilot-Client-Type, User-Agent family
+# and the declared X-SkyPilot-API-Version ('none' when absent).
+SKY_APISERVER_CALLER_CLIENT_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_client_calls_total',
+    'API server HTTP calls, by caller and client',
+    [
+        'caller', 'caller_id', 'caller_type', 'client_type', 'ua_family',
+        'api_version'
+    ],
+)
+
 # Aggregated across all worker processes — the prometheus_client multiprocess
 # collector sums per-process histograms automatically. For per-process
 # visibility, see SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS below.

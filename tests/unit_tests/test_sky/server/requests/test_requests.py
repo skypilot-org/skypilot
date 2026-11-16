@@ -9,6 +9,7 @@ from typing import List, Optional
 import unittest.mock as mock
 
 import filelock
+import orjson
 import pytest
 
 from sky import core
@@ -114,9 +115,11 @@ async def test_set_request_succeeded(isolated_database, test_async):
     await requests.create_if_not_exists_async(request)
     result = {'key': 'value', 'number': 42}
     if test_async:
-        await requests.set_request_succeeded_async('test-request-1', result)
+        stored = await requests.set_request_succeeded_async(
+            'test-request-1', result)
     else:
-        requests.set_request_succeeded('test-request-1', result)
+        stored = requests.set_request_succeeded('test-request-1', result)
+    assert stored == len(orjson.dumps(result))
 
     # Get the updated request
     if test_async:
@@ -2485,3 +2488,17 @@ async def test_kill_requests_unscoped_cancels_all(isolated_database):
     cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
                                        user_id=None)
     assert set(cancelled) == {'shutdown-a', 'shutdown-b'}
+
+
+def test_stored_result_size_counts_utf8_bytes():
+    request = requests.Request(request_id='test-request-utf8',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               user_id='test-user')
+    result = {'name': '名字'}
+    request.set_return_value(result)
+    request.to_row()
+    assert request.stored_result_size == len(orjson.dumps(result))
