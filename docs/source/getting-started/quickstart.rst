@@ -4,7 +4,7 @@
 Quickstart
 ==========
 
-SkyPilot can be set up with the steps below, or ask your agents to do so:
+Prefer to have an agent walk you through this guide? Ask it:
 
 .. code-block:: text
 
