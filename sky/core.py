@@ -2119,6 +2119,17 @@ def get_all_contexts() -> List[str]:
     return sorted(list(set(kube_contexts + ssh_contexts)))
 
 
+def get_workspace_contexts() -> List[str]:
+    """Kubernetes and SSH node pool contexts the active workspace allows.
+
+    Unlike ``get_all_contexts``, SSH node pools other workspaces own are left
+    out, so this is safe to return to any user.
+    """
+    kube_contexts = clouds.Kubernetes.existing_allowed_contexts()
+    ssh_contexts = clouds.SSH.allowed_node_pool_contexts()
+    return sorted(set(kube_contexts + ssh_contexts))
+
+
 def create_debug_dump(request_ids: Optional[List[str]] = None,
                       cluster_names: Optional[List[str]] = None,
                       managed_job_ids: Optional[List[int]] = None,

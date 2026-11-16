@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from sky import core
 from sky.clouds import ssh
 from sky.utils import resources_utils
 
@@ -630,6 +631,31 @@ class TestSSHCheckSingleContextForwardsCloud(unittest.TestCase):
         mock_check_credentials.assert_called_once_with('ssh-some-ctx',
                                                        run_optional_checks=True,
                                                        cloud='ssh')
+
+
+def test_allowed_node_pool_contexts_keeps_pools_not_set_up():
+    # Unlike existing_allowed_contexts, no kubeconfig context is needed.
+    with patch.object(ssh.SSH,
+                      'get_ssh_node_pool_contexts',
+                      return_value=['ssh-a', 'ssh-b', 'ssh-c']), \
+         patch('sky.skypilot_config.get_workspace_cloud',
+               return_value={'allowed_node_pools': ['a', 'c']}), \
+         patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+               return_value=[]):
+        assert ssh.SSH.allowed_node_pool_contexts() == ['ssh-a', 'ssh-c']
+
+
+def test_workspace_contexts_drop_disallowed_pools_all_contexts_does_not():
+    # get_all_contexts also feeds metrics federation, which keeps every pool.
+    with patch.object(ssh.SSH,
+                      'get_ssh_node_pool_contexts',
+                      return_value=['ssh-a', 'ssh-b']), \
+         patch('sky.skypilot_config.get_workspace_cloud',
+               return_value={'allowed_node_pools': ['a']}), \
+         patch('sky.clouds.Kubernetes.existing_allowed_contexts',
+               return_value=['k8s-1']):
+        assert core.get_workspace_contexts() == ['k8s-1', 'ssh-a']
+        assert core.get_all_contexts() == ['k8s-1', 'ssh-a', 'ssh-b']
 
 
 if __name__ == '__main__':
