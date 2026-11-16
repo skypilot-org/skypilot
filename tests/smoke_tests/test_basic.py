@@ -580,6 +580,7 @@ def test_autostop_with_docker_image(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
+@pytest.mark.no_auto_retry
 def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
     """Active SSH must prevent autostop after `sky stop` + `sky start`.
 
@@ -592,6 +593,20 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
     """
     name = smoke_tests_utils.get_cluster_name()
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
+
+    def wait_for_stop_with_logs():
+        wait_command = smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+            cluster_name=name,
+            cluster_status=[sky.ClusterStatus.STOPPED],
+            timeout=autostop_timeout)
+        return (
+            f'( {wait_command} ); wait_result=$?; '
+            'if [ "$wait_result" -ne 0 ]; then '
+            'echo "DIAGNOSTIC skylet logs after stop timeout"; '
+            f'timeout 30s ssh -o BatchMode=yes -o ConnectTimeout=10 {name} '
+            "'tail -n 400 ~/.sky/skylet.log /tmp/sky/.sky/skylet.log' || true; "
+            'fi; exit "$wait_result"')
+
     test = smoke_tests_utils.Test(
         'test_autostop_ssh_alive_after_stop_start',
         [
@@ -647,10 +662,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
             f'wait $SSH_PID 2>/dev/null; exit $rc',
 
             # SSH closed; cluster eventually autostops normally.
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
+            wait_for_stop_with_logs(),
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud) +
