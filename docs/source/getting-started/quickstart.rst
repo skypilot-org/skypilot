@@ -4,9 +4,11 @@
 Quickstart
 ==========
 
-.. tip::
+SkyPilot can be set up with the steps below, or ask your agents to do so:
 
-   SkyPilot can be set up with the steps below, or ask your agents to do so: ``Read https://docs.skypilot.ai/en/latest/getting-started/quickstart.html.md and walk me through the SkyPilot Quickstart.``
+.. code-block:: text
+
+   Read https://docs.skypilot.ai/en/latest/getting-started/quickstart.html.md and walk me through the SkyPilot Quickstart.
 
 This guide will walk you through:
 
