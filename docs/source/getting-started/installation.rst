@@ -6,6 +6,10 @@
 Installation
 ============
 
+.. tip::
+
+   SkyPilot can be set up with the steps below, or ask your agents to do so: ``Read https://docs.skypilot.ai/en/latest/getting-started/installation.html.md and walk me through SkyPilot setup.``
+
 Install SkyPilot
 ----------------
 
