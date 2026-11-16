@@ -4,3 +4,11 @@ CVE-2025-47907
 # Go stdlib CVE in kubectl/gcloud-crc32c/nebius binaries - requires Go 1.24.13+
 # which is not yet available in any released kubectl or gcloud SDK version
 CVE-2025-68121
+
+# kin-openapi GHSA in the bundled nebius CLI binary: the vulnerable code is
+# kin-openapi's server-side openapi3filter ValidationHandler middleware,
+# which the nebius CLI (a client binary invoked by SkyPilot) does not use.
+# Fixed upstream in kin-openapi 0.144.0, but no released Nebius CLI is built
+# with it yet - latest stable 0.12.306 still ships v0.133.0. Remove this
+# entry once Nebius ships a CLI built with kin-openapi >= 0.144.0.
+GHSA-r277-6w6q-xmqw

@@ -468,6 +468,199 @@ def test_terminate_instances_worker_only_wait_times_out():
     assert any('still present' in m for m in warn_calls)
 
 
+def test_terminate_instances_full_teardown_waits_before_delete_cluster():
+    """Full teardown must not delete the GPU cluster while instances are
+    still attached: Nebius refuses that delete and delete_cluster only
+    logs the refusal at debug level, leaking the cluster. The GPU cluster
+    may only be deleted once the instance list is empty."""
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    listings = {'n': 0}
+    attached_at_delete = []
+
+    def fake_filter(*_args, **_kwargs):
+        listings['n'] += 1
+        # Terminate-loop listing and the first wait poll still see the
+        # head (delete in flight); later listings see it gone. The SG
+        # cleanup in the finally block polls again and also sees empty.
+        if listings['n'] <= 2:
+            return {'i-head': head}
+        return {}
+
+    def fake_delete_cluster(*_args, **_kwargs):
+        attached_at_delete.append(listings['n'])
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove') as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster',
+                           side_effect=fake_delete_cluster) as mock_del_cluster, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group'), \
+         mock.patch('time.sleep') as mock_sleep:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+    mock_remove.assert_called_once_with('i-head')
+    mock_del_cluster.assert_called_once()
+    # delete_cluster ran only after a listing came back empty (the third
+    # listing): one terminate-loop listing, one poll that still saw the
+    # head, one poll that saw it gone.
+    assert attached_at_delete == [3]
+    assert mock_sleep.call_count == 1
+
+
+def test_terminate_instances_full_teardown_delete_attempted_when_wait_fails():
+    """If the wait cannot confirm termination because the instance
+    listing itself fails, the GPU cluster delete is still attempted (as
+    before the wait existed): Nebius refuses the delete while instances
+    are attached, but skipping it could orphan a GPU cluster whose
+    instances are already gone."""
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    listings = {'n': 0}
+
+    def fake_filter(*_args, **_kwargs):
+        listings['n'] += 1
+        if listings['n'] == 1:
+            return {'i-head': head}
+        if listings['n'] == 2:
+            raise RuntimeError('list RPC failed')
+        return {}
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove'), \
+         mock.patch.object(nebius_utils, 'delete_cluster') as mock_del_cluster, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep'), \
+         mock.patch.object(nebius_instance, 'logger') as mock_logger:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+    mock_del_cluster.assert_called_once()
+    warn_calls = [c.args[0] for c in mock_logger.warning.call_args_list]
+    assert any('Could not confirm' in m for m in warn_calls)
+    mock_del_sg.assert_called_once_with('sg-2')
+
+
+def test_terminate_instances_full_teardown_unconfirmed_delete_rejected():
+    """If the wait cannot confirm termination AND Nebius rejects the
+    GPU cluster delete (instances still attached), the teardown must
+    fail rather than report success: post-teardown cleanup would drop
+    the cluster record and orphan the GPU cluster. The SG cleanup in
+    the finally block still runs."""
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    listings = {'n': 0}
+
+    def fake_filter(*_args, **_kwargs):
+        listings['n'] += 1
+        if listings['n'] == 1:
+            return {'i-head': head}
+        if listings['n'] == 2:
+            raise RuntimeError('list RPC failed')
+        return {}
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove'), \
+         mock.patch.object(nebius_utils, 'delete_cluster',
+                           side_effect=RuntimeError(
+                               'Failed to delete GPU cluster')) as mock_del, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep'), \
+         pytest.raises(RuntimeError, match='Failed to delete GPU cluster'):
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+    mock_del.assert_called_once()
+    mock_del_sg.assert_called_once_with('sg-2')
+
+
+class _FakeNebiusRequestError(Exception):
+    """Stand-in for the Nebius SDK request error type."""
+
+
+def _run_delete_cluster(sync_side_effects):
+    """Run utils.delete_cluster with the Nebius adaptor fully mocked.
+
+    Returns the adaptor mock so tests can assert on the calls made.
+    """
+    service = mock.MagicMock()
+    with mock.patch.object(nebius_utils, 'nebius') as mock_nebius:
+        mock_nebius.compute.return_value.GpuClusterServiceClient.\
+            return_value = service
+        mock_nebius.sdk.return_value = object()
+        mock_nebius.request_error.return_value = _FakeNebiusRequestError
+        mock_nebius.sync_call.side_effect = sync_side_effects
+        nebius_utils.delete_cluster('mycluster',
+                                    'eu-north1',
+                                    project_id='proj-abc')
+    return mock_nebius
+
+
+def test_delete_cluster_missing_cluster_is_noop():
+    """Most clusters have no GPU cluster: get_by_name reporting
+    not-found means there is nothing to delete, not an error."""
+    mock_nebius = _run_delete_cluster(
+        [_FakeNebiusRequestError('rpc error: code = NotFound')])
+    # Only the lookup ran; no delete was attempted.
+    assert mock_nebius.sync_call.call_count == 1
+
+
+def test_delete_cluster_lookup_error_raises():
+    """A lookup failure other than not-found (e.g. a transient or auth
+    error) must not be mistaken for 'no GPU cluster': that would
+    report teardown success and orphan an existing GPU cluster."""
+    with pytest.raises(RuntimeError, match='Failed to look up GPU cluster'):
+        _run_delete_cluster([_FakeNebiusRequestError('rpc error: unavailable')])
+
+
+def test_delete_cluster_success():
+    cluster = mock.MagicMock()
+    cluster.metadata.id = 'gpu-1'
+    mock_nebius = _run_delete_cluster([cluster, None])
+    # Lookup + delete both ran.
+    assert mock_nebius.sync_call.call_count == 2
+
+
+def test_delete_cluster_deleted_concurrently_is_success():
+    """The GPU cluster disappearing between the lookup and the delete
+    (e.g. a concurrent teardown) is already the desired end state."""
+    cluster = mock.MagicMock()
+    cluster.metadata.id = 'gpu-1'
+    _run_delete_cluster(
+        [cluster,
+         _FakeNebiusRequestError('rpc error: code = NotFound')])
+
+
+def test_delete_cluster_rejected_delete_raises():
+    """A delete Nebius rejects (instances still attached) must surface
+    as an error, not be logged and swallowed as 'does not exist'."""
+    cluster = mock.MagicMock()
+    cluster.metadata.id = 'gpu-1'
+    with pytest.raises(RuntimeError, match='Failed to delete GPU cluster'):
+        _run_delete_cluster([
+            cluster,
+            _FakeNebiusRequestError('FAILED_PRECONDITION: attached'),
+        ])
+
+
 def test_terminate_instances_noop_for_legacy_cluster_sg():
     """If no SG exists for the cluster (pre-PR launch), terminate cleanly
     skips the SG-delete branch."""
@@ -497,8 +690,9 @@ def test_terminate_instances_waits_for_termination_before_sg_delete():
     """
     order = []
     # _filter_instances: first call (terminate loop) returns one RUNNING
-    # instance; the wait-for-termination poll then sees one DELETING
-    # instance and finally an empty cluster.
+    # instance; the wait before delete_cluster then sees one DELETING
+    # instance and finally an empty cluster; the SG cleanup's own wait
+    # polls once more and sees the empty cluster right away.
     filter_results = iter([
         {
             'i-1': {
@@ -512,6 +706,7 @@ def test_terminate_instances_waits_for_termination_before_sg_delete():
                 'status': 'DELETING'
             }
         },
+        {},
         {},
     ])
 
@@ -543,8 +738,9 @@ def test_terminate_instances_waits_for_termination_before_sg_delete():
     assert order == [
         ('filter', 1),  # terminate loop enumerates the cluster
         ('remove', 'i-1'),
-        ('filter', 1),  # wait poll: still DELETING
-        ('filter', 0),  # wait poll: drained
+        ('filter', 1),  # pre-delete_cluster wait poll: still DELETING
+        ('filter', 0),  # pre-delete_cluster wait poll: drained
+        ('filter', 0),  # SG cleanup wait poll: already drained
         ('delete_sg', 'sg-2'),
     ]
 
@@ -655,9 +851,11 @@ def test_terminate_instances_sg_cleanup_error_does_not_mask_failure():
 
 
 def test_terminate_instances_sg_delete_proceeds_on_wait_timeout():
-    """If instances never drain within the bounded wait, we still take a
-    best-effort shot at the SG delete (its internal retry may catch a
-    late detach) instead of silently skipping it."""
+    """If instances never drain within the bounded wait, the teardown
+    raises (so the GPU cluster is not deleted too early and silently
+    leaked), but we still take a best-effort shot at the SG delete (its
+    internal retry may catch a late detach) instead of silently
+    skipping it."""
     filter_calls = {'n': 0}
 
     def fake_filter(*_args, **_kwargs):
@@ -667,22 +865,26 @@ def test_terminate_instances_sg_delete_proceeds_on_wait_timeout():
     with mock.patch.object(nebius_instance, '_filter_instances',
                            side_effect=fake_filter), \
          mock.patch.object(nebius_utils, 'remove'), \
-         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'delete_cluster') as mock_del_cluster, \
          mock.patch.object(nebius_utils, 'get_project_by_region',
                            return_value='proj-abc'), \
          mock.patch.object(nebius_utils, 'get_security_group_by_name',
                            return_value='sg-2'), \
          mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
          mock.patch('time.sleep'), \
-         mock.patch.object(nebius_instance, 'logger') as mock_logger:
+         mock.patch.object(nebius_instance, 'logger') as mock_logger, \
+         pytest.raises(RuntimeError, match='Timed out waiting for the '
+                                           'instances of mycluster'):
         nebius_instance.terminate_instances(
             'mycluster',
             provider_config={'region': 'eu-north1'},
             worker_only=False,
         )
 
+    mock_del_cluster.assert_not_called()
     mock_del_sg.assert_called_once_with('sg-2')
-    # Terminate-loop listing + the full bounded wait.
+    # Terminate-loop listing + the full bounded wait; the SG cleanup
+    # skips its own wait when termination failed.
     # pylint: disable-next=protected-access
     assert filter_calls['n'] == 1 + nebius_instance._TERMINATION_POLL_ATTEMPTS
     warn_calls = [c.args[0] for c in mock_logger.warning.call_args_list]

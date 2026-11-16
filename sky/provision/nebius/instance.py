@@ -397,6 +397,42 @@ def terminate_instances(
                         f'Timed out waiting for the worker instances of '
                         f'{cluster_name_on_cloud} to terminate.')
         else:
+            # Wait for all instances to be gone before deleting the GPU
+            # cluster. Instance deletion is async, and Nebius refuses to
+            # delete a GPU cluster while instances are still attached;
+            # delete_cluster logs that refusal only at debug level, so
+            # deleting right away silently leaks the cluster (and its
+            # fabric is then reused unchecked by later launches). Raise on
+            # timeout, as the worker_only path does, so the caller does
+            # not treat the teardown as complete while the GPU cluster
+            # may still exist.
+            try:
+                instances_terminated = _wait_for_instances_terminated(
+                    provider_config['region'], cluster_name_on_cloud,
+                    project_id)
+            except Exception as e:  # pylint: disable=broad-except
+                # The wait could not confirm termination (e.g. the
+                # instance-listing RPC failed). Fall through to the
+                # delete attempt anyway, as the code did before this
+                # wait existed: skipping it can orphan a GPU cluster
+                # whose instances are already gone (a later status
+                # refresh may drop the cluster record, leaving no
+                # teardown path for the GPU cluster). The attempt is
+                # safe to make unconfirmed because delete_cluster now
+                # raises when Nebius rejects the delete (instances
+                # still attached), so this path cannot silently report
+                # success with the GPU cluster left behind either.
+                logger.warning(
+                    f'Could not confirm that the instances of '
+                    f'{cluster_name_on_cloud} terminated: '
+                    f'{common_utils.format_exception(e, use_bracket=False)} '
+                    f'Attempting to delete the GPU cluster anyway.')
+                instances_terminated = True
+            if not instances_terminated:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Timed out waiting for the instances of '
+                        f'{cluster_name_on_cloud} to terminate.')
             utils.delete_cluster(cluster_name_on_cloud,
                                  provider_config['region'],
                                  project_id=project_id)

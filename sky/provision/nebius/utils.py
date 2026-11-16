@@ -430,7 +430,19 @@ def delete_security_group(sg_id: str) -> None:
 def delete_cluster(name: str,
                    region: str,
                    project_id: Optional[str] = None) -> None:
-    """Delete a GPU cluster."""
+    """Delete a GPU cluster.
+
+    A GPU cluster that does not exist is a no-op: most clusters have
+    none (the lookup reports not-found), and one that disappears
+    between the lookup and the delete is already in the desired state.
+    Any other failure — a lookup error, or a delete Nebius rejects
+    e.g. because instances are still attached — raises RuntimeError
+    instead of being logged and swallowed. The only caller is
+    teardown; reporting success there would drop the cluster record
+    in post-teardown cleanup and orphan the GPU cluster with no
+    teardown path left to remove it. The not-found checks mirror
+    delete_security_group above.
+    """
     if project_id is None:
         project_id = get_project_by_region(region)
     service = nebius.compute().GpuClusterServiceClient(nebius.sdk())
@@ -440,14 +452,29 @@ def delete_cluster(name: str,
                 parent_id=project_id,
                 name=name,
             )))
-        cluster_id = cluster.metadata.id
-        logger.debug(f'Found GPU Cluster : {cluster_id}.')
+    except nebius.request_error() as e:
+        msg = str(e).lower()
+        if 'not found' in msg or 'not_found' in msg or 'notfound' in msg:
+            logger.debug('GPU Cluster does not exist.')
+            return
+        raise RuntimeError(
+            f'Failed to look up GPU cluster {name!r}: '
+            f'{common_utils.format_exception(e, use_bracket=False)}') from e
+    cluster_id = cluster.metadata.id
+    logger.debug(f'Found GPU Cluster : {cluster_id}.')
+    try:
         nebius.sync_call(
             service.delete(
                 nebius.compute().DeleteGpuClusterRequest(id=cluster_id)))
-        logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
-    except nebius.request_error():
-        logger.debug('GPU Cluster does not exist.')
+    except nebius.request_error() as e:
+        msg = str(e).lower()
+        if 'not found' in msg or 'not_found' in msg or 'notfound' in msg:
+            logger.debug(f'GPU Cluster {cluster_id} is already gone.')
+            return
+        raise RuntimeError(
+            f'Failed to delete GPU cluster {name!r} ({cluster_id}): '
+            f'{common_utils.format_exception(e, use_bracket=False)}') from e
+    logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
 
 
 def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
