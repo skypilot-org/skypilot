@@ -307,9 +307,22 @@ def _export_container_env_command(
     runtime and of the user's environment, which run other Pythons.
     """
     shell_variables = shlex.quote('^declare -x (PWD|OLDPWD|SHLVL|HOME|TERM|_)=')
-    drop_pkg = shlex.quote('/^declare -x PYTHONPATH=/ s#/pkg/?:?##')
+    # Drops the entries that are exactly /pkg or /pkg/ from PYTHONPATH, and
+    # nothing else: a path that merely contains /pkg/ (e.g. /opt/pkg/lib) is
+    # the image's own.
+    drop_pkg = shlex.quote(
+        r'/^declare -x PYTHONPATH=/ {'
+        r' v = $0;'
+        r' sub(/^declare -x PYTHONPATH="/, "", v); sub(/"$/, "", v);'
+        r' n = split(v, entries, ":"); out = "";'
+        r' for (i = 1; i <= n; i++) {'
+        r'  if (entries[i] != "" && entries[i] != "/pkg" &&'
+        r' entries[i] != "/pkg/") {'
+        r'   out = out (out == "" ? "" : ":") entries[i] } }'
+        r' print "declare -x PYTHONPATH=\"" out "\""; next }'
+        r' { print }')
     return (f'{{ export -p | grep -v -E {shell_variables} | '
-            f'sed -E {drop_pkg} || true; }} > {shlex.quote(profile_path)}')
+            f'awk {drop_pkg} || true; }} > {shlex.quote(profile_path)}')
 
 
 def get_ssh_start_command(public_key: str) -> str:

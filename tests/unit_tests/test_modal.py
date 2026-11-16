@@ -2266,6 +2266,33 @@ def test_modal_ssh_sessions_get_the_container_environment(tmp_path):
     assert 'declare -x PYTHONPATH="/root/"' in profile.read_text()
 
 
+@pytest.mark.parametrize(
+    'pythonpath,expected',
+    [
+        ('/pkg/:/root/', '/root/'),
+        ('/pkg', ''),
+        ('/usr/lib:/pkg/', '/usr/lib'),
+        ('/a:/pkg/:/b', '/a:/b'),
+        # Paths that merely contain /pkg/ are the image's own.
+        ('/opt/pkg/lib:/x', '/opt/pkg/lib:/x'),
+        ('/home/app/mypkg/src', '/home/app/mypkg/src'),
+    ])
+def test_modal_ssh_sessions_drop_only_modals_pkg_from_pythonpath(
+        tmp_path, pythonpath, expected):
+    # pylint: disable=protected-access
+    profile = tmp_path / 'modal_container_env.sh'
+    command = modal_utils._export_container_env_command(str(profile))
+
+    subprocess.run(['bash', '-c', command],
+                   check=True,
+                   env={
+                       'PATH': os.environ['PATH'],
+                       'PYTHONPATH': pythonpath
+                   })
+
+    assert f'declare -x PYTHONPATH="{expected}"' in profile.read_text()
+
+
 def test_modal_wait_for_nodes(fake_modal, monkeypatch):
     monkeypatch.setattr(modal_utils, '_POLL_INTERVAL_SECONDS', 0)
     fake_modal.add_cluster(nodes={0: _node(), 1: _node(port=2223)})
@@ -2526,6 +2553,16 @@ def test_modal_adaptor_follows_config_file_changes(tmp_path, monkeypatch):
     assert token_id() is None
 
 
+def _patch_client_cache_setter(monkeypatch, modal_sdk, setter):
+    """Replaces modal's classmethod that drops the cached API client.
+
+    It is `set_env_client` up to modal 1.6.3 and `_set_env_client` from 1.6.4.
+    """
+    name = ('set_env_client' if hasattr(modal_sdk.Client, 'set_env_client') else
+            '_set_env_client')
+    monkeypatch.setattr(modal_sdk.Client, name, setter)
+
+
 def test_modal_adaptor_first_access_reads_a_config_written_after_import(
         tmp_path, monkeypatch):
     # Other code in an API server worker (a plugin, say) can import modal
@@ -2543,8 +2580,7 @@ def test_modal_adaptor_first_access_reads_a_config_written_after_import(
     monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
     monkeypatch.delenv('MODAL_PROFILE', raising=False)
     dropped_clients = []
-    monkeypatch.setattr(modal_sdk.Client, 'set_env_client',
-                        dropped_clients.append)
+    _patch_client_cache_setter(monkeypatch, modal_sdk, dropped_clients.append)
     path.write_text('[uploaded]\ntoken_id = "ak-uploaded"\nactive = true\n')
     # pylint: disable=protected-access
     lazy_modal = modal_adaptor._ModalImport()
@@ -2647,13 +2683,81 @@ def test_modal_adaptor_publishes_new_config_after_reload(tmp_path, monkeypatch):
         del client
 
     monkeypatch.setattr(modal_sdk.config, '_read_user_config', observed_read)
-    monkeypatch.setattr(modal_sdk.Client, 'set_env_client',
-                        observed_set_env_client)
+    _patch_client_cache_setter(monkeypatch, modal_sdk, observed_set_env_client)
     path.write_text('[default]\ntoken_id = "ak-second"\nactive = true\n')
 
     assert lazy_modal.config_version() == 1
     assert seen == [old_signature, old_signature]
     assert lazy_modal._config_signature != old_signature
+
+
+def _fake_modal_module(path, setter_names):
+    """A stand-in for the modal module, so these tests need no modal SDK."""
+
+    class _Config:
+        user_config_path = str(path)
+        _user_config: dict = {}
+        _profile = 'default'
+
+        @staticmethod
+        def _read_user_config():
+            return {'default': {'token_id': path.read_text()}}
+
+        @staticmethod
+        def _config_active_profile():
+            return 'default'
+
+    dropped = []
+    client_attrs = {name: staticmethod(dropped.append) for name in setter_names}
+    client = type('Client', (), client_attrs)
+    return SimpleNamespace(config=_Config, Client=client), dropped
+
+
+@pytest.mark.parametrize('setter_name', ['set_env_client', '_set_env_client'])
+def test_modal_adaptor_reload_drops_client_under_either_modal_name(
+        tmp_path, setter_name):
+    # modal 1.6.4 renamed Client.set_env_client to _set_env_client.
+    from sky.adaptors import modal as modal_adaptor
+    path = tmp_path / 'modal.toml'
+    path.write_text('ak-first')
+    module, dropped = _fake_modal_module(path, [setter_name])
+    # pylint: disable=protected-access
+    lazy_modal = modal_adaptor._ModalImport()
+
+    lazy_modal._refresh_config(module)
+    assert dropped == [None]
+    assert lazy_modal._config_version == 0
+
+    path.write_text('ak-second')
+    lazy_modal._refresh_config(module)
+    assert dropped == [None, None]
+    assert lazy_modal._config_version == 1
+    assert module.config._user_config == {'default': {'token_id': 'ak-second'}}
+
+
+def test_modal_adaptor_reload_without_a_client_setter_leaves_config_alone(
+        tmp_path, caplog):
+    # If a later modal drops both names, the reload must not swap the config
+    # behind a stale client, and the problem must be visible once.
+    from sky.adaptors import modal as modal_adaptor
+    path = tmp_path / 'modal.toml'
+    path.write_text('ak-first')
+    module, _ = _fake_modal_module(path, [])
+    old_config = module.config._user_config
+    # pylint: disable=protected-access
+    lazy_modal = modal_adaptor._ModalImport()
+
+    for _ in range(3):
+        lazy_modal._refresh_config(module)
+
+    assert module.config._user_config is old_config
+    assert lazy_modal._config_version == 0
+    assert lazy_modal._config_signature is modal_adaptor._UNSET
+    warnings = [
+        r for r in caplog.records
+        if 'Failed to reload the Modal config' in r.getMessage()
+    ]
+    assert len(warnings) <= 1
 
 
 def test_modal_catalog_prices_follow_catalog_rates(tmp_path, monkeypatch):

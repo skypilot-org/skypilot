@@ -2,7 +2,7 @@
 
 import os
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -12,6 +12,22 @@ logger = sky_logging.init_logger(__name__)
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Modal. '
                          'Try running: pip install "skypilot[modal]"')
 _UNSET = object()
+
+
+def _client_cache_setter(module: Any) -> Callable[[Any], None]:
+    """modal's setter for the cached API client built from its config.
+
+    modal has no public API for this. The classmethod is `set_env_client` up
+    to modal 1.6.3 and `_set_env_client` from 1.6.4 on; use whichever exists.
+
+    Raises:
+        AttributeError: neither exists. Looked up before the config is
+            touched, so a failed reload does not leave a new config behind an
+            old client.
+    """
+    client_cls = module.Client
+    return (getattr(client_cls, 'set_env_client', None) or
+            getattr(client_cls, '_set_env_client'))
 
 
 class _ModalImport(common.LazyImport):
@@ -30,6 +46,7 @@ class _ModalImport(common.LazyImport):
         super().__init__('modal', import_error_message=_IMPORT_ERROR_MESSAGE)
         self._config_signature: Any = _UNSET
         self._config_version = 0
+        self._reload_failure_logged = False
         self._config_lock = threading.Lock()
 
     def __getattr__(self, name: str) -> Any:
@@ -67,15 +84,23 @@ class _ModalImport(common.LazyImport):
             # modal has no public reload API. If these internals change, keep
             # the config modal already loaded rather than break every access.
             try:
+                set_client_cache = _client_cache_setter(module)
                 # pylint: disable=protected-access
                 config._user_config = config._read_user_config()
                 config._profile = (os.environ.get('MODAL_PROFILE') or
                                    config._config_active_profile())
-                module.Client.set_env_client(None)
+                set_client_cache(None)
             except Exception:  # pylint: disable=broad-except
                 # Leave the signature unchanged so the next access retries.
-                logger.debug('Failed to reload the Modal config.',
-                             exc_info=True)
+                # Warned once: every access retries, and a debug-only message
+                # hid a modal release that renamed one of these internals.
+                if not self._reload_failure_logged:
+                    self._reload_failure_logged = True
+                    logger.warning(
+                        'Failed to reload the Modal config; '
+                        'changes to the Modal token are not picked '
+                        'up until the API server restarts.',
+                        exc_info=True)
                 return
             if not first_access:
                 # Nothing was derived from the config before the first access.
