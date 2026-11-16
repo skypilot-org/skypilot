@@ -448,6 +448,7 @@ FAQs
     # Install system dependencies
     RUN apt update -y && \
         apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl wget -y && \
+        apt install fuse3 -y && \
         rm -rf /var/lib/apt/lists/*
 
     # Install SkyPilot python dependencies into a dedicated runtime venv.
@@ -465,7 +466,7 @@ FAQs
 
 * **Can pods run without internet access?**
 
-  Yes, if the image already contains what SkyPilot would otherwise download at pod startup. The SkyPilot default images do. For a custom image, pre-install the dependencies as shown above, replacing ``skypilot-nightly`` with the exact version of your API server (for example ``skypilot==<version>``, where ``sky api info`` shows the version), so that no dependency has to be fetched. SkyPilot then skips every download. An image that lacks ``openssh-server`` still launches, but ``ssh <cluster>`` does not work.
+  Yes, if the image already contains what SkyPilot would otherwise download at pod startup. The SkyPilot default images do. For a custom image, pre-install the dependencies as shown above, replacing ``skypilot-nightly`` with the exact version of your API server (for example ``skypilot==<version>``, where ``sky api info`` shows the version), so that no dependency has to be fetched. Keep every system package of the recipe, ``openssh-server`` included: SkyPilot installs any that is missing at pod startup, which needs package access. SkyPilot then skips every download.
 
   If pods can reach no package source at all, or only the image's own, also set ``kubernetes.apt_mirrors: []``. Otherwise each launch of an image with missing packages also tries the built-in public APT mirrors.
 
