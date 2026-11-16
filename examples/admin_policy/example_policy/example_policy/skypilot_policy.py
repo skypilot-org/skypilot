@@ -3,7 +3,7 @@ import logging
 import shlex
 import subprocess
 import threading
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import cachetools
 
@@ -700,3 +700,102 @@ class SlurmFilesystemRoutingPolicy(sky.AdminPolicy):
         config = user_request.skypilot_config
         config.set_nested(('slurm', 'allowed_clusters'), allowed)
         return sky.MutatedUserRequest(user_request.task, config)
+
+
+class CriticalityTierPolicy(sky.AdminPolicy):
+    """Example policy: choose spot or on-demand capacity by criticality tier.
+
+    Each task can carry a ``criticality`` label in its resources. The tier
+    decides the capacity of its GPU resources:
+
+    - ``critical``: on-demand only.
+    - ``standard``: spot first, then on-demand when no spot capacity is
+      available (an ordered list of resources). Managed jobs keep this order
+      when they recover from a preemption.
+
+    Tasks without the label and CPU-only resources are left unchanged. Labels
+    are matched case-insensitively. An unknown tier, or different tiers on
+    the resources of one task, rejects the request.
+
+    Admins can change the mapping through the class attributes. A label is
+    looked up in ON_DEMAND_TIERS, then SPOT_ONLY_TIERS, then SPOT_FIRST_TIERS,
+    and the first match wins. For example, add ``preemptible`` to
+    SPOT_ONLY_TIERS for tasks that may wait for spot capacity, as in
+    ``UseSpotForGpuPolicy``. Set WIDEN_PINNED_ZONE to let critical tasks
+    fail over to other zones of their region when a zone is pinned.
+
+    With no task labelled ``critical``, labelling every task ``standard``
+    gives spot with on-demand fallback everywhere.
+    """
+
+    LABEL_KEY = 'criticality'
+    ON_DEMAND_TIERS: Tuple[str, ...] = ('critical',)
+    SPOT_ONLY_TIERS: Tuple[str, ...] = ()
+    SPOT_FIRST_TIERS: Tuple[str, ...] = ('standard',)
+    WIDEN_PINNED_ZONE = False
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Sets spot or on-demand capacity from the task's tier label."""
+        task = user_request.task
+        tier = cls._get_tier(task)
+        if tier is None:
+            return sky.MutatedUserRequest(task, user_request.skypilot_config)
+        mode = cls._capacity(tier)
+
+        spot, on_demand, unchanged = [], [], []
+        for r in task.resources:
+            if not r.accelerators:
+                unchanged.append(r)
+            elif mode == 'on_demand':
+                zone = None if cls.WIDEN_PINNED_ZONE else r.zone
+                on_demand.append(r.copy(use_spot=False, zone=zone))
+            elif mode == 'spot_only':
+                spot.append(r.copy(use_spot=True))
+            else:
+                spot.append(r.copy(use_spot=True))
+                on_demand.append(r.copy(use_spot=False))
+
+        # Spot candidates come before on-demand ones. Resources have no value
+        # equality, so drop duplicates by their YAML config.
+        new_resources: List[sky.Resources] = []
+        seen: List[Dict] = []
+        for r in spot + on_demand + unchanged:
+            config = r.to_yaml_config()
+            if config not in seen:
+                seen.append(config)
+                new_resources.append(r)
+        if mode == 'spot_first' and spot:
+            task.set_resources(new_resources)
+        else:
+            task.set_resources(type(task.resources)(new_resources))
+        return sky.MutatedUserRequest(
+            task=task, skypilot_config=user_request.skypilot_config)
+
+    @classmethod
+    def _capacity(cls, tier: str) -> str:
+        """Maps a known tier to on_demand, spot_only or spot_first."""
+        for mode, tiers in (('on_demand', cls.ON_DEMAND_TIERS),
+                            ('spot_only', cls.SPOT_ONLY_TIERS),
+                            ('spot_first', cls.SPOT_FIRST_TIERS)):
+            if tier in (t.lower() for t in tiers):
+                return mode
+        known = cls.ON_DEMAND_TIERS + cls.SPOT_ONLY_TIERS + cls.SPOT_FIRST_TIERS
+        raise ValueError(f'Unknown {cls.LABEL_KEY!r} label {tier!r}. '
+                         f'Use one of: {", ".join(known)}.')
+
+    @classmethod
+    def _get_tier(cls, task: 'sky.Task') -> Optional[str]:
+        """Returns the task's tier, or None if no resource is labelled."""
+        tiers = {
+            r.labels[cls.LABEL_KEY].lower()
+            for r in task.resources
+            if r.labels and r.labels.get(cls.LABEL_KEY)
+        }
+        if not tiers:
+            return None
+        if len(tiers) > 1:
+            raise ValueError(f'Resources of one task have different '
+                             f'{cls.LABEL_KEY!r} labels: {sorted(tiers)}.')
+        return tiers.pop()

@@ -965,6 +965,96 @@ def test_slurm_filesystem_routing_policy(add_example_policy_paths, task):
     assert ('cluster-b', required) in slurm_policy._filesystem_cache
 
 
+def test_criticality_tier_policy(add_example_policy_paths, task):
+    from example_policy.skypilot_policy import CriticalityTierPolicy
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+
+    # No label: the request is unchanged.
+    task.set_resources([sky.Resources(accelerators={'V100': 1})])
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [False]
+
+    # critical: on-demand. A pinned zone is kept unless the admin widens it.
+    def pinned_critical():
+        task.set_resources({
+            sky.Resources(infra='aws/us-east-1/us-east-1a',
+                          accelerators={'V100': 1},
+                          use_spot=True,
+                          labels={'criticality': 'critical'})
+        })
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+        (r,) = dag.tasks[0].resources
+        return r
+
+    r = pinned_critical()
+    assert not r.use_spot and r.zone == 'us-east-1a'
+    assert r.labels['criticality'] == 'critical'
+    with mock.patch.object(CriticalityTierPolicy, 'WIDEN_PINNED_ZONE', True):
+        r = pinned_critical()
+    assert not r.use_spot and r.region == 'us-east-1' and r.zone is None
+
+    # standard: an ordered list, spot first, then on-demand. Spot and
+    # on-demand copies of one GPU request collapse to one of each, and
+    # CPU-only resources are unchanged and come last.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'standard'}),
+        sky.Resources(accelerators={'V100': 1},
+                      use_spot=True,
+                      labels={'criticality': 'standard'}),
+        sky.Resources(cpus='4+', labels={'criticality': 'standard'}),
+    })
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    resources = dag.tasks[0].resources
+    assert isinstance(resources, list)
+    assert [(bool(r.accelerators), r.use_spot) for r in resources
+           ] == [(True, True), (True, False), (False, False)]
+
+    # Labels are matched case-insensitively, also across resources.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'Standard'}),
+        sky.Resources(accelerators={'A100': 1},
+                      labels={'criticality': 'STANDARD'}),
+    })
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources
+           ] == [True, True, False, False]
+
+    # Listing a tier only in SPOT_ONLY_TIERS makes it wait for spot.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'standard'})
+    })
+    with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                           ('standard',)):
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [True]
+
+    # Admins can add their own tier names.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'preemptible'})
+    })
+    with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                           ('preemptible',)):
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [True]
+
+    # Unknown tiers and conflicting tiers are rejected.
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy, match='Unknown'):
+        _load_task_and_apply_policy(task, config_path)
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'critical'}),
+        sky.Resources(accelerators={'A100': 1},
+                      labels={'criticality': 'standard'}),
+    })
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match='different'):
+        _load_task_and_apply_policy(task, config_path)
+
+
 def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
                                                        task):
     """Test consistency between server-side and client-side execution.
