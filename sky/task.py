@@ -318,22 +318,6 @@ def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
         docker_config['password'] = '<redacted>'
 
 
-def _check_num_nodes_set_once(
-        task_num_nodes: int,
-        resources: Iterable['resources_lib.Resources']) -> None:
-    """Raises if `num_nodes` is set on both a task and its resources."""
-    resources_num_nodes = sorted(
-        {r.num_nodes for r in resources if r.num_nodes_specified})
-    if resources_num_nodes:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'num_nodes is set on both the task ({task_num_nodes}) and '
-                f'its resources ({", ".join(map(str, resources_num_nodes))}). '
-                'Set it in one place only: either at the top level of the '
-                'task, or in `resources` (once for all candidates, or per '
-                '`any_of`/`ordered` candidate).')
-
-
 def _normalize_resource_num_nodes(
     resources: Union[List['resources_lib.Resources'],
                      Set['resources_lib.Resources']],
@@ -343,7 +327,17 @@ def _normalize_resource_num_nodes(
     # This is the compatibility boundary that binds internal count provenance.
     # pylint: disable=protected-access
     if legacy_num_nodes is not None:
-        _check_num_nodes_set_once(legacy_num_nodes, resources)
+        explicit_counts = sorted(
+            {r.num_nodes for r in resources if r.num_nodes_specified})
+        if explicit_counts:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'num_nodes is set on both the task ({legacy_num_nodes}) '
+                    'and its resources '
+                    f'({", ".join(map(str, explicit_counts))}). '
+                    'Set it in one place only: either at the top level of the '
+                    'task, or in `resources` (once for all candidates, or per '
+                    '`any_of`/`ordered` candidate).')
     normalized = []
     for resource in resources:
         # Preserve specialized resources such as the optimizer's DummyResources
@@ -2367,9 +2361,6 @@ class Task:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
             s += f'\n  outputs: {self.outputs}'
-        counts = sorted({r.num_nodes for r in self.resources})
-        if counts != [1]:
-            s += f'\n  nodes: {counts[0] if len(counts) == 1 else counts}'
         if len(self.resources) > 1:
             resources_str = ('{' + ', '.join(
                 r.repr_with_region_zone for r in self.resources) + '}')

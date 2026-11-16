@@ -603,8 +603,8 @@ class Resources:
             ports = f', ports={self.ports}'
 
         num_nodes = ''
-        if self._num_nodes_specified:
-            num_nodes = f', num_nodes={self._num_nodes}'
+        if self.num_nodes != 1 or self.num_nodes_specified:
+            num_nodes = f', num_nodes={self.num_nodes}'
 
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
@@ -1080,6 +1080,7 @@ class Resources:
                     f'num_nodes should be a positive int. Got: {num_nodes!r}')
         self._num_nodes = num_nodes
         self._num_nodes_specified = num_nodes is not None
+        self._cached_repr = None
 
     def _set_autostop_config(
         self,
@@ -2271,7 +2272,7 @@ class Resources:
             self._docker_image is None,
             self._ports is None,
             self._docker_login_config is None,
-            not self._num_nodes_specified,
+            self.num_nodes == 1 and not self._num_nodes_specified,
         ])
 
     def __add__(self, other: Optional['Resources']) -> Optional['Resources']:

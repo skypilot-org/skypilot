@@ -363,8 +363,8 @@ class Optimizer:
                         # TODO: different policies can be applied here for
                         # whether to choose reserved instances.
                         estimated_cost_or_time = cost_per_node * max(
-                            (resources).num_nodes -
-                            num_available_reserved_nodes, 0)
+                            resources.num_nodes - num_available_reserved_nodes,
+                            0)
                     else:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
@@ -408,9 +408,8 @@ class Optimizer:
                     fuzzy_candidates_str = (
                         f'\nTry one of these offered accelerators: {cyan}'
                         f'{fuzzy_candidates}{reset}')
-                node_resources_reprs = ', '.join(f'{(r).num_nodes}x ' +
-                                                 r.repr_with_region_zone
-                                                 for r in node.resources)
+                node_resources_reprs = ', '.join(
+                    r.repr_with_region_zone for r in node.resources)
                 hints_concat = '\n'.join([
                     f'{bold}Resource: {repr(resource)}{reset}\n' +
                     '\n'.join(hint_list)
@@ -717,7 +716,7 @@ class Optimizer:
                 execution_time = node.estimate_runtime(resources)
 
             cost_per_node = resources.get_cost(execution_time)
-            total_cost += cost_per_node * (resources).num_nodes
+            total_cost += cost_per_node * resources.num_nodes
 
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress costs for multi-node clusters
@@ -855,8 +854,7 @@ class Optimizer:
         ])
 
         def _get_resources_named_tuple(resources: 'resources_lib.Resources',
-                                       num_nodes: int, cost_str: str,
-                                       chosen: bool) -> Row:
+                                       cost_str: str, chosen: bool) -> Row:
 
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
@@ -882,7 +880,7 @@ class Optimizer:
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(str(num_nodes), infra,
+            row = Row(str(resources.num_nodes), infra,
                       _instance_type_str(resources) + spot, vcpus, mem,
                       str(accelerators), cost_str, chosen_str)
 
@@ -918,7 +916,7 @@ class Optimizer:
             best_plan_rows = []
             for t, r in ordered_best_plan.items():
                 assert t.name is not None, t
-                best_plan_rows.append([t.name, str((r).num_nodes)] +
+                best_plan_rows.append([t.name, str(r.num_nodes)] +
                                       _get_resources_element_list(r))
             logger.info(
                 f'{colorama.Style.BRIGHT}Best plan: {colorama.Style.RESET_ALL}')
@@ -945,7 +943,7 @@ class Optimizer:
             task_str = (f'for task {task.name!r} ' if num_tasks > 1 else '')
             # Resources candidates may set their own node counts; if they
             # differ, show the count per row instead of in the header.
-            candidate_num_nodes = {(r).num_nodes for r in task.resources}
+            candidate_num_nodes = {r.num_nodes for r in task.resources}
             show_nodes_column = len(candidate_num_nodes) > 1
             if num_tasks > 1:
                 # Add a new line for better readability, when there are multiple
@@ -989,18 +987,18 @@ class Optimizer:
                 else:
                     cost_str = f'{cost / 3600:.2f}'
 
-                row = _get_resources_named_tuple(resources,
-                                                 (resources).num_nodes,
-                                                 cost_str,
+                row = _get_resources_named_tuple(resources, cost_str,
                                                  resources == best_plan[task])
                 rows.append(row)
 
             # NOTE: we've converted the cost to a string above, so we should
             # convert it back to float for sorting.
             if isinstance(task.resources, list):
-                accelerator_spot_list = [(str(
-                    (r).num_nodes), r.get_accelerators_str() + r.get_spot_str())
-                                         for r in list(task.resources)]
+                accelerator_spot_list = [
+                    (str(r.num_nodes),
+                     r.get_accelerators_str() + r.get_spot_str())
+                    for r in list(task.resources)
+                ]
 
                 def sort_key(row, accelerator_spot_list=accelerator_spot_list):
                     accelerator_index = accelerator_spot_list.index(
@@ -1394,7 +1392,7 @@ class Optimizer:
 
             row = [
                 task.name,
-                str((best_resources).num_nodes), infra,
+                str(best_resources.num_nodes), infra,
                 display_instance_type + spot, vcpus, mem,
                 str(accelerators)
             ]
@@ -1474,7 +1472,7 @@ class Optimizer:
 
         if minimize_cost:
             hourly_cost = resources.get_cost(runtime)
-            return hourly_cost * (resources).num_nodes
+            return hourly_cost * resources.num_nodes
         return runtime
 
     @staticmethod
@@ -2029,7 +2027,7 @@ def _fill_in_launchable_resources(
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
 
-        num_nodes = (resources).num_nodes
+        num_nodes = resources.num_nodes
         feasible_list = subprocess_utils.run_in_parallel(
             lambda cloud, r=resources, n=num_nodes:
             (cloud, cloud.get_feasible_launchable_resources(r, n)),
@@ -2066,12 +2064,9 @@ def _fill_in_launchable_resources(
         if not launchable[resources]:
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])
-            num_node_str = ''
-            if num_nodes > 1:
-                num_node_str = f'{num_nodes}x '
             if not (quiet or resources.no_missing_accel_warnings):
                 logger.info(
-                    f'No resource satisfying {num_node_str}'
+                    f'No resource satisfying '
                     f'{resources.repr_with_region_zone} on {clouds_str}.')
                 if all_fuzzy_candidates:
                     logger.info('Did you mean: '

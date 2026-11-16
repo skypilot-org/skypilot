@@ -4896,12 +4896,9 @@ class TestNewTaskCountsInFull:
         jc.starting_lock = asyncio.Lock()
         jc.starting_signal = MagicMock()
         jc._monitor_one_task = AsyncMock(return_value=True)
-        task = MagicMock()
-        task.name = 'task1'
-        task.metadata = {}
-        task.run = 'echo hi'
-        task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
-        task.resources = None
+        task = task_lib.Task(name='task1',
+                             run='echo hi',
+                             envs={constants.TASK_ID_ENV_VAR: 'tid'})
         costs_at_launch = []
 
         async def launch():

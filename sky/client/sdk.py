@@ -1065,8 +1065,10 @@ def _launch(
             # should show a resize-aware prompt (and note the restart), not
             # the generic "Restarting the stopped cluster" message.
             current_nodes = cluster_record.get('nodes')
-            counts = {r.num_nodes for r in dag.tasks[0].resources}
-            target_nodes = next(iter(counts)) if len(counts) == 1 else None
+            candidate_num_nodes = sorted(
+                {r.num_nodes for r in dag.tasks[0].resources})
+            target_nodes = (candidate_num_nodes[0]
+                            if len(candidate_num_nodes) == 1 else None)
             # The record counts cluster nodes. On a multi-host TPU slice one
             # task node (one slice) is one cluster node per VM of the slice,
             # so convert to task nodes, the unit of num_nodes.
@@ -1087,8 +1089,6 @@ def _launch(
             # Resources candidates may set their own node counts. The
             # cluster is resized to the count of the candidate that matches
             # its hardware, which only the server works out.
-            candidate_num_nodes = sorted(
-                set([r.num_nodes for r in dag.tasks[0].resources]))
             if len(candidate_num_nodes) > 1:
                 from_str = (f'from {current_nodes} node(s) '
                             if current_nodes is not None else '')

@@ -390,11 +390,13 @@ def test_failover_same_region_retry_keeps_node_count(on_task):
     executor = recovery_strategy.FailoverStrategyExecutor.__new__(
         recovery_strategy.FailoverStrategyExecutor)
     executor.dag = mock.MagicMock(tasks=[task])
-    executor._launched_resources = resources_lib.Resources(  # pylint: disable=protected-access
+    # The successful launch records the matched request, including its
+    # legacy-input provenance. Recovery only changes placement fields.
+    matched = next(r for r in task.resources if r.num_nodes == 2)
+    executor._launched_resources = matched.copy(  # pylint: disable=protected-access
         cloud=clouds.AWS(),
         region='us-east-1',
-        instance_type='p5.48xlarge',
-        num_nodes=2)
+        instance_type='p5.48xlarge')
     retried = []
 
     async def fake_launch(**kwargs):
@@ -412,25 +414,73 @@ def test_failover_same_region_retry_keeps_node_count(on_task):
     assert retried_num_nodes == 2
 
 
-def test_task_resources_str_shows_node_count_range():
-    task = task_lib.Task()
-    task.set_resources({
-        resources_lib.Resources(accelerators='H100:8', num_nodes=2),
-        resources_lib.Resources(accelerators='A100:8', num_nodes=4),
+def test_task_resources_str_pairs_node_counts_with_accelerators():
+    task = task_lib.Task().set_resources({
+        resources_lib.Resources(accelerators='B200:8', num_nodes=2),
+        resources_lib.Resources(accelerators='H100:8', num_nodes=4),
     })
-    assert backend_utils.get_task_resources_str(task).startswith('2-4x[')
-    chosen = next(r for r in task.resources if r.num_nodes == 4)
-    task.best_resources = chosen
-    assert backend_utils.get_task_resources_str(task).startswith('4x[')
-    assert backend_utils.get_task_num_nodes_str(task,
-                                                all_candidates=True) == '2-4'
-    # Candidates that agree show their single count.
-    task = task_lib.Task(num_nodes=3)
-    task.set_resources({
+    assert backend_utils.get_task_resources_str(task) == (
+        '2x[B200:8], 4x[H100:8]')
+    task.best_resources = next(r for r in task.resources if r.num_nodes == 4)
+    assert backend_utils.get_task_resources_str(task) == '4x[H100:8]'
+
+
+def test_task_resources_str_keeps_uniform_legacy_alternatives_compact():
+    task = task_lib.Task(num_nodes=3).set_resources({
         resources_lib.Resources(accelerators='H100:8'),
         resources_lib.Resources(accelerators='A100:8'),
     })
-    assert backend_utils.get_task_resources_str(task).startswith('3x[')
+    assert backend_utils.get_task_resources_str(task) == '3x[A100:8, H100:8]'
+
+
+def test_task_resources_str_preserves_ordered_count_preferences():
+    task = task_lib.Task().set_resources([
+        resources_lib.Resources(accelerators='H100:8', num_nodes=4),
+        resources_lib.Resources(accelerators='B200:8', num_nodes=2),
+    ])
+    assert backend_utils.get_task_resources_str(task) == (
+        '4x[H100:8], 2x[B200:8]')
+
+
+def test_task_resources_str_does_not_merge_same_gpu_at_different_counts():
+    task = task_lib.Task().set_resources({
+        resources_lib.Resources(accelerators='H100:8', num_nodes=2),
+        resources_lib.Resources(accelerators='H100:8', num_nodes=4),
+    })
+    assert backend_utils.get_task_resources_str(task) == (
+        '2x[H100:8], 4x[H100:8]')
+
+
+def test_task_resources_str_cpu_candidates_and_spot_counts():
+    task = task_lib.Task().set_resources({
+        resources_lib.Resources(cpus=4, num_nodes=2),
+        resources_lib.Resources(cpus=8, num_nodes=4, use_spot=True),
+    })
+    assert backend_utils.get_task_resources_str(
+        task, is_managed_job=True) == ('2x[CPU:4], 4x[CPU:8][Spot]')
+    task.best_resources = next(r for r in task.resources if r.num_nodes == 4)
+    assert backend_utils.get_task_resources_str(
+        task, is_managed_job=True) == ('4x[CPU:8][Spot]')
+
+
+def test_task_resources_str_uniform_cpu_minimum_and_spot_summary():
+    task = task_lib.Task(num_nodes=2).set_resources({
+        resources_lib.Resources(cpus=4),
+        resources_lib.Resources(cpus=8, use_spot=True),
+    })
+    assert backend_utils.get_task_resources_str(
+        task, is_managed_job=True) == ('2x[CPU:4.0+][On-demand|Spot]')
+
+
+def test_resources_repr_includes_inherited_count_and_invalidates_cached_repr():
+    resource = resources_lib.Resources(accelerators='H100:8')
+    original_repr = repr(resource)
+    task = task_lib.Task(num_nodes=4).set_resources(resource)
+    assert 'num_nodes=4' in repr(next(iter(task.resources)))
+    assert 'num_nodes=4' in repr(task.resources)
+    assert 'num_nodes=4' in repr(task)
+    assert repr(resource) == original_repr
+    assert 'num_nodes=4' in repr(task_lib.Task(num_nodes=4))
 
 
 def test_resize_uses_count_of_candidate_matching_cluster():
