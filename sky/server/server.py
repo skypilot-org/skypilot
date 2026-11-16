@@ -4468,10 +4468,38 @@ async def download_debug_dump(
 
 
 # === Internal APIs ===
+def _completion_workspaces_filter(
+        auth_user: Optional[models.User]) -> Optional[Set[str]]:
+    """Workspaces whose names `sky status` / `sky volumes ls` would show.
+
+    None (no authenticated user) means every workspace.
+    """
+    if auth_user is None:
+        return None
+    # Read-only visibility comes from the workspace config, which this
+    # process does not reload per request.
+    common.refresh_workspace_state_for_sync_handler()
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}))
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return permission.permission_service.get_accessible_workspace_names(
+        auth_user.id,
+        workspaces,
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def _readable_cluster_names_start_with(auth_user: Optional[models.User],
+                                       incomplete: str) -> List[str]:
+    """Cluster names to complete: only those `sky status -u` would show."""
+    return global_user_state.get_cluster_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
+
+
 @app.get('/api/completion/cluster_name')
-async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_cluster_names_start_with, incomplete)
+async def complete_cluster_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_cluster_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/storage_name')
@@ -4500,21 +4528,8 @@ async def complete_storage_name(request: fastapi.Request,
 def _readable_volume_names_start_with(auth_user: Optional[models.User],
                                       incomplete: str) -> List[str]:
     """Volume names to complete: only those `sky volumes ls` would show."""
-    workspaces_filter = None
-    if auth_user is not None:
-        # Read-only visibility comes from the workspace config, which this
-        # process does not reload per request.
-        common.refresh_workspace_state_for_sync_handler()
-        workspaces = set(
-            skypilot_config.get_nested(('workspaces',), default_value={}))
-        workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
-        workspaces_filter = (
-            permission.permission_service.get_accessible_workspace_names(
-                auth_user.id,
-                workspaces,
-                action=workspace_constants.WORKSPACE_ACTION_READ))
     return global_user_state.get_volume_names_start_with(
-        incomplete, workspaces_filter=workspaces_filter)
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
 
 
 @app.get('/api/completion/volume_name')

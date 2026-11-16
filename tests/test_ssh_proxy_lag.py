@@ -510,7 +510,7 @@ async def test_endpoint_download(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_completion_cluster(monitor):
+async def test_endpoint_completion_cluster(monitor, mock_request):
     """Test /api/completion/cluster_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/cluster_name")
 
@@ -521,7 +521,7 @@ async def test_endpoint_completion_cluster(monitor):
                                side_effect=create_blocking_mock([],
                                                                 delay=0.02)):
             try:
-                await server.complete_cluster_name('test')
+                await server.complete_cluster_name(mock_request, 'test')
             except:
                 pass
 
