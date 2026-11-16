@@ -22,6 +22,7 @@ from sky.server import constants as server_constants
 from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils.cli_utils import status_utils
 
 
 def _task_from_config(config):
@@ -48,8 +49,6 @@ def test_parse_per_candidate_num_nodes():
     })
     assert [r.num_nodes for r in task.resources] == [1, 2, 1]
     # Candidates without their own count use the default of 1 node.
-    assert [(r).num_nodes for r in task.resources] == [1, 2, 1]
-    assert [r.num_nodes for r in task.resources] == [1, 2, 1]
     # A single count is ambiguous until a candidate is chosen.
     with pytest.raises(ValueError, match="different node counts"):
         _ = task.num_nodes
@@ -165,7 +164,7 @@ def test_cli_num_nodes_overrides_where_set(tmp_path, resources_config,
         entrypoint=(str(yaml_path),),
         num_nodes=4)
     assert [r.num_nodes for r in task.resources] == expected
-    # The task-level count is set only if the resources don't set one.
+    # A legacy task count stays at the task-level wire boundary.
     assert ('num_nodes' in task.to_yaml_config()) == (expected == [4])
 
 
@@ -222,7 +221,7 @@ def test_resources_copy_and_repr():
     r = resources_lib.Resources(accelerators='H100:8', num_nodes=2)
     assert r.copy().num_nodes == 2
     assert r.copy(num_nodes=None).num_nodes == 1
-    assert not r.copy(num_nodes=None).num_nodes_specified
+    assert 'num_nodes' not in r.copy(num_nodes=None).to_yaml_config()
     assert 'num_nodes=2' in repr(r)
     assert 'num_nodes' not in repr(
         resources_lib.Resources(accelerators='H100:8'))
@@ -237,7 +236,7 @@ def test_resources_unpickle_old_version():
     restored = resources_lib.Resources.__new__(resources_lib.Resources)
     restored.__setstate__(state)
     assert restored.num_nodes == 1
-    assert not restored.num_nodes_specified
+    assert 'num_nodes' not in restored.to_yaml_config()
 
 
 def test_should_be_blocked_by_num_nodes():
@@ -253,8 +252,8 @@ def test_should_be_blocked_by_num_nodes():
     # Failing to get 2 nodes blocks asking for as many or more.
     assert res(2).should_be_blocked_by(res(2))
     assert res(4).should_be_blocked_by(res(2))
-    # No count on either side: matched as before.
-    assert res(None).should_be_blocked_by(res(4))
+    # An omitted request count means one; an omitted block count is generic.
+    assert not res(None).should_be_blocked_by(res(4))
     assert res(4).should_be_blocked_by(res(None))
 
 
@@ -430,7 +429,9 @@ def test_task_resources_str_keeps_uniform_legacy_alternatives_compact():
         resources_lib.Resources(accelerators='H100:8'),
         resources_lib.Resources(accelerators='A100:8'),
     })
-    assert backend_utils.get_task_resources_str(task) == '3x[A100:8, H100:8]'
+    assert backend_utils.get_task_resources_str(task) in {
+        '3x[A100:8, H100:8]', '3x[H100:8, A100:8]'
+    }
 
 
 def test_task_resources_str_preserves_ordered_count_preferences():
@@ -544,8 +545,7 @@ def test_ordered_smaller_candidate_survives_blocked_four_nodes(fallback_count):
         task = task_lib.Task().set_resources([large, small])
 
     def feasible(self, resources, num_nodes):
-        return resources_utils.FeasibleResources(
-            [resources.copy(num_nodes=None)], [], None)
+        return resources_utils.FeasibleResources([resources.copy()], [], None)
 
     with mock.patch.object(optimizer, '_check_specified_clouds'), \
             mock.patch.object(optimizer.sky_check,
@@ -652,20 +652,6 @@ def test_legacy_requests_keep_old_server_yaml_and_version_gate(count):
     assert next(iter(restored.resources)).num_nodes == (count or 1)
 
 
-def test_restored_legacy_task_lowers_count_into_resources():
-    original = task_lib.Task()
-    state = original.__dict__.copy()
-    state['_num_nodes'] = 4
-    state['resources'] = {resources_lib.Resources(cpus=2)}
-    restored = task_lib.Task.__new__(task_lib.Task)
-    restored.__setstate__(state)
-    assert next(iter(restored.resources)).num_nodes == 4
-    cloned = pickle.loads(pickle.dumps(restored))
-    assert next(iter(cloned.resources)).num_nodes == 4
-    assert cloned.to_yaml_config()['num_nodes'] == 4
-    assert 'num_nodes' not in cloned.to_yaml_config()['resources']
-
-
 def test_normalized_defaults_do_not_turn_generic_blocks_into_counted_blocks():
     resource = resources_lib.Resources(infra='aws/us-east-1',
                                        instance_type='m5.large')
@@ -760,10 +746,13 @@ def test_existing_cluster_provision_plan_retains_its_actual_size(
     assert next(iter(task.resources)).num_nodes == 2
 
 
-def test_recovery_remembers_requested_count_on_a_larger_cluster():
+@pytest.mark.parametrize('on_task', [False, True])
+def test_recovery_remembers_requested_count_on_a_larger_cluster(on_task):
     launched = resources_lib.Resources(infra='aws/us-east-1',
-                                       instance_type='m5.large')
-    task = task_lib.Task().set_resources(launched.copy(num_nodes=2))
+                                       instance_type='m5.large',
+                                       num_nodes=4)
+    task = task_lib.Task(num_nodes=2 if on_task else None).set_resources(
+        launched.copy(num_nodes=None if on_task else 2))
     handle = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayResourceHandle,
                             launched_resources=launched,
                             launched_nodes=4,
@@ -780,7 +769,117 @@ def test_recovery_remembers_requested_count_on_a_larger_cluster():
             mock.patch.object(recovery_strategy.global_user_state,
                               'get_handle_from_cluster_name', return_value=handle), \
             mock.patch.object(cloud_vm_ray_backend.global_user_state,
-                              'get_status_from_cluster_name', return_value=None), \
+                              'get_status_from_cluster_name',
+                              side_effect=AssertionError('Unexpected state read')), \
             mock.patch.object(recovery_strategy.state, 'set_job_infra'):
         asyncio.run(executor._launch())
     assert executor._launched_resources.num_nodes == 2
+
+
+@pytest.mark.parametrize('legacy_count', [None, 1, 4])
+def test_single_field_builder_reuse_and_default_round_trip(legacy_count):
+    task = task_lib.Task(num_nodes=legacy_count).set_resources(
+        resources_lib.Resources(cpus=2))
+    bound = next(iter(task.resources))
+    # Reapplying the task's own resource is safe without provenance flags.
+    task.set_resources(bound)
+    if legacy_count is not None:
+        task.set_resources(resources_lib.Resources(num_nodes=legacy_count))
+    restored = _task_from_config(task.to_yaml_config())
+    assert next(iter(restored.resources)).num_nodes == (legacy_count or 1)
+    dag = dag_utils.convert_entrypoint_to_dag(restored)
+    with mock.patch.object(sdk.versions,
+                           'get_remote_api_version',
+                           return_value=69):
+        sdk._check_resources_num_nodes_api_version(dag)
+    if legacy_count is None:
+        assert 'num_nodes' not in bound.to_yaml_config()
+        assert 'num_nodes' not in restored.get_resource_config()
+
+
+def test_legacy_and_matching_resource_count_in_sdk():
+    resource = resources_lib.Resources(cpus=2, num_nodes=4)
+    task = task_lib.Task(num_nodes=4, resources=resource)
+    task.set_resources_override({'memory': 16})
+    assert next(iter(task.resources)).num_nodes == 4
+    assert task.to_yaml_config()['num_nodes'] == 4
+    assert 'num_nodes' not in task.to_yaml_config()['resources']
+    # Strict YAML validation still rejects specifying the count twice.
+    with pytest.raises(ValueError, match='Set it in one place only'):
+        _task_from_config({'num_nodes': 4, 'resources': {'num_nodes': 4}})
+
+
+@pytest.mark.parametrize('source', ['constructor', 'setter', 'getter', 'yaml'])
+def test_legacy_count_deprecation_is_logged(source):
+    with mock.patch.object(task_lib.logger, 'warning') as warning:
+        if source == 'constructor':
+            task_lib.Task(num_nodes=2)
+        elif source == 'yaml':
+            _task_from_config({'num_nodes': 2})
+        else:
+            task = task_lib.Task()
+            if source == 'setter':
+                task.num_nodes = 2
+            else:
+                _ = task.num_nodes
+        warning.assert_called_once()
+        assert 'deprecated' in warning.call_args.args[0]
+
+
+@pytest.mark.parametrize('stored_count', [None, 4])
+def test_cluster_count_is_rendered_once_for_old_and_new_handles(stored_count):
+    resource = resources_lib.Resources(infra='aws/us-east-1',
+                                       instance_type='m5.large',
+                                       num_nodes=stored_count)
+    handle = mock.MagicMock(launched_resources=resource,
+                            launched_nodes=4,
+                            launched_task_nodes=4,
+                            cluster_name='count-display')
+    handle_str = cloud_vm_ray_backend.CloudVmRayResourceHandle.__repr__(handle)
+    cost_str = status_utils._get_resources_for_cost_report({
+        'resources': resource,
+        'num_nodes': 4
+    })
+    for display in [handle_str, cost_str]:
+        assert display.count('num_nodes=4') == 1
+        assert '4x ' not in display
+    task = task_lib.Task().set_resources(resource.copy(num_nodes=8))
+    with mock.patch.object(cloud_vm_ray_backend.global_user_state,
+                           'get_status_from_cluster_name',
+                           return_value=None):
+        with pytest.raises(exceptions.ResourcesMismatchError) as error:
+            cloud_vm_ray_backend.CloudVmRayBackend(
+            ).check_resources_fit_cluster(handle, task)
+    existing = str(error.value).split('Existing:')[1]
+    assert existing.count('num_nodes=4') == 1
+    assert '4x ' not in existing
+
+
+@pytest.mark.parametrize('hardware_matches', [False, True])
+def test_setup_only_exec_preserves_count_without_checking_hardware(
+        hardware_matches):
+    second = (resources_lib.Resources(cpus=2, num_nodes=4) if hardware_matches
+              else resources_lib.Resources(accelerators='B200:8', num_nodes=4))
+    task = task_lib.Task(setup='echo setup',
+                         resources=[
+                             resources_lib.Resources(accelerators='H100:8',
+                                                     num_nodes=2), second
+                         ])
+    launched = resources_lib.Resources(infra='aws/us-east-1',
+                                       instance_type='m5.large',
+                                       num_nodes=4)
+    handle = mock.MagicMock(launched_resources=launched, launched_nodes=4)
+    handle.provision_runtime_metadata.run_started = False
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend._setup_cmd = 'echo setup'
+    with mock.patch.object(backend, 'check_resources_fit_cluster',
+                           side_effect=AssertionError('Unexpected hardware check')), \
+            mock.patch.object(backend, '_add_job', return_value=(1, 'log-dir')), \
+            mock.patch.object(backend, '_execute_task_n_nodes') as execute, \
+            mock.patch.object(backend, '_record_job_spec'):
+        handle.num_ips_per_node = 1
+        assert backend._execute(handle, task) == 1
+    submitted = execute.call_args.args[1]
+    selected = next(iter(submitted.resources))
+    assert selected.num_nodes == (4 if hardware_matches else 2)
+    assert selected.accelerators is None

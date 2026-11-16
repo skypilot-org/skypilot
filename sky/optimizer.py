@@ -2033,14 +2033,6 @@ def _fill_in_launchable_resources(
             (cloud, cloud.get_feasible_launchable_resources(r, n)),
             clouds_list)
         for cloud, feasible_resources in feasible_list:
-            # Bind every launchable before block filtering, including implicit
-            # one-node defaults and legacy task counts. Cloud adapters often
-            # reconstruct Resources and do not know the request's provenance.
-            feasible_resources.resources_list = [
-                r.copy(num_nodes=resources.num_nodes,
-                       _num_nodes_specified=resources.num_nodes_specified)
-                for r in feasible_resources.resources_list
-            ]
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
                 resource_hints[resources].append(feasible_resources.hint)

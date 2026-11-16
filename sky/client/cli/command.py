@@ -1127,10 +1127,12 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if num_nodes is not None:
         # `num_nodes` is set either on the task or in its resources; override
         # it where the task sets it.
-        if any(r.num_nodes_specified for r in task.resources):
-            task.set_resources_override({'num_nodes': num_nodes})
-        else:
+        if ('num_nodes' in task.to_yaml_config() or
+                not any('num_nodes' in r.to_yaml_config()
+                        for r in task.resources)):
             task.num_nodes = num_nodes
+        else:
+            task.set_resources_override({'num_nodes': num_nodes})
     if name is not None:
         task.name = name
     return task

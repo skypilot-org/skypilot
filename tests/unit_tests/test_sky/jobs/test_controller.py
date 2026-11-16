@@ -3126,7 +3126,7 @@ class TestRuntimeCursorReads:
                 raise self._StopLoop()
             return job_lib.JobStatus.RUNNING, None
 
-        handle = MagicMock()
+        handle = MagicMock(launched_nodes=1)
         with patch.object(controller_module.backend_utils,
                           'async_check_network_connection', new=AsyncMock()), \
              patch.object(controller_module.global_user_state,
@@ -5067,12 +5067,15 @@ def test_task_cluster_num_nodes(accelerators, kwargs, num_nodes, expected):
     task = _tpu_task(accelerators, num_nodes, **kwargs)
     assert controller_module._task_cluster_num_nodes(task) == expected
     # The handle's launched resources take precedence over the request.
-    handle = MagicMock()
+    handle = MagicMock(launched_nodes=expected)
     handle.launched_resources = list(task.resources)[0]
     assert controller_module._task_cluster_num_nodes(task, handle) == expected
     single = _tpu_task('tpu-v6e-8')
     handle.launched_resources = list(single.resources)[0]
-    assert controller_module._task_cluster_num_nodes(task, handle) == num_nodes
+    # The controller monitors the whole cluster, even for a smaller task.
+    handle.launched_nodes = num_nodes + 3
+    assert controller_module._task_cluster_num_nodes(task,
+                                                     handle) == num_nodes + 3
 
 
 class _StopMonitoring(Exception):

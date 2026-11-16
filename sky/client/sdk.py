@@ -472,9 +472,12 @@ def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
 
 
 def _check_resources_num_nodes_api_version(dag: 'sky.Dag') -> None:
-    if not any(r.num_nodes_specified
-               for task in dag.tasks
-               for r in task.resources):
+    resource_configs = [
+        task.to_yaml_config()['resources'] for task in dag.tasks
+    ]
+    if not any('num_nodes' in config or any(
+            'num_nodes' in candidate for candidate in config.get('any_of', []) +
+            config.get('ordered', [])) for config in resource_configs):
         return
     remote_api_version = versions.get_remote_api_version()
     if (remote_api_version is None or remote_api_version <

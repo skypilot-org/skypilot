@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 38  # add _num_nodes_specified.
+    _VERSION = 37  # add _num_nodes.
 
     def __init__(
         self,
@@ -239,11 +239,10 @@ class Resources:
             takes precedence over cloud, region, and zone parameters.
           num_nodes: the number of nodes to launch when these resources are
             chosen. Defaults to one unless the Task supplies a legacy count.
-            Setting it on
-            each candidate of ``any_of``/``ordered`` lets candidates differ in
-            node count (e.g., 1x H200:8 vs 2x H100:8); the optimizer then
-            compares the total cost of each candidate. Cannot be combined
-            with a ``num_nodes`` set on the task.
+            Setting it on each ``any_of``/``ordered`` candidate lets them
+            differ in node count (e.g., 1x H200:8 vs 2x H100:8); the optimizer then
+            compares the total cost of each candidate. A legacy task-level
+            count, if supplied in the SDK, must match this count.
           use_spot: whether to use spot instances. If None, defaults to
             False.
           job_recovery: the job recovery strategy to use for the managed
@@ -603,7 +602,7 @@ class Resources:
             ports = f', ports={self.ports}'
 
         num_nodes = ''
-        if self.num_nodes != 1 or self.num_nodes_specified:
+        if self._num_nodes is not None:
             num_nodes = f', num_nodes={self.num_nodes}'
 
         if self._instance_type is not None:
@@ -678,15 +677,6 @@ class Resources:
         its resource candidates before they are used.
         """
         return self._num_nodes if self._num_nodes is not None else 1
-
-    @property
-    def num_nodes_specified(self) -> bool:
-        """Whether the count was explicitly supplied on these resources.
-
-        Counts lowered from legacy Task input do not require the new resource
-        field on the wire. Generic resource filters also keep an unset count.
-        """
-        return self._num_nodes_specified
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -1079,7 +1069,6 @@ class Resources:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes!r}')
         self._num_nodes = num_nodes
-        self._num_nodes_specified = num_nodes is not None
         self._cached_repr = None
 
     def _set_autostop_config(
@@ -2229,7 +2218,6 @@ class Resources:
         If a field in `blocked` is None, it should be considered as a wildcard
         for that field.
         """
-        # pylint: disable=protected-access
         assert self.cloud is not None, 'Cloud must be specified'
         is_matched = True
         if (blocked.cloud is not None and
@@ -2250,8 +2238,8 @@ class Resources:
         # A failure to get N nodes does not rule out getting fewer nodes of the
         # same type in the same place, so a blocked entry with a node count
         # only blocks candidates asking for at least as many nodes.
-        if (blocked._num_nodes is not None and self._num_nodes is not None and
-                self.num_nodes < blocked.num_nodes):
+        blocked_num_nodes = blocked._num_nodes  # pylint: disable=protected-access
+        if blocked_num_nodes is not None and self.num_nodes < blocked_num_nodes:
             is_matched = False
         return is_matched
 
@@ -2272,7 +2260,7 @@ class Resources:
             self._docker_image is None,
             self._ports is None,
             self._docker_login_config is None,
-            self.num_nodes == 1 and not self._num_nodes_specified,
+            self._num_nodes is None,
         ])
 
     def __add__(self, other: Optional['Resources']) -> Optional['Resources']:
@@ -2373,10 +2361,6 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
-        num_nodes_specified = override.pop(
-            '_num_nodes_specified',
-            (override['num_nodes'] is not None
-             if 'num_nodes' in override else self._num_nodes_specified))
 
         current_override_configs = self._cluster_config_overrides
         if current_override_configs is None:
@@ -2472,7 +2456,6 @@ class Resources:
         )
         resources.set_kubernetes_identity(self._kubernetes_identity)
         resources.set_remote_identity_none_at_launch(self._remote_identity_none)
-        resources._num_nodes_specified = num_nodes_specified  # pylint: disable=protected-access
         assert not override
         return resources
 
@@ -3180,8 +3163,6 @@ class Resources:
             state['_hooks'] = hooks or None
 
         self.__dict__.update(state)
-        if version < 38:
-            self._num_nodes_specified = self._num_nodes is not None
 
 
 class LaunchableResources(Resources):

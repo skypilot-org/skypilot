@@ -1,13 +1,11 @@
 """Task: a coarse-grained stage in an application."""
 import collections
-import copy
 import dataclasses
 import json
 import os
 import re
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
-import warnings
 
 import colorama
 from pydantic import SecretStr
@@ -323,35 +321,19 @@ def _normalize_resource_num_nodes(
                      Set['resources_lib.Resources']],
     legacy_num_nodes: Optional[int],
 ) -> Union[List['resources_lib.Resources'], Set['resources_lib.Resources']]:
-    """Bind legacy/default counts without changing resource input provenance."""
-    # This is the compatibility boundary that binds internal count provenance.
-    # pylint: disable=protected-access
-    if legacy_num_nodes is not None:
-        explicit_counts = sorted(
-            {r.num_nodes for r in resources if r.num_nodes_specified})
-        if explicit_counts:
+    """Lower legacy Task input into resources, leaving unset defaults alone."""
+    if legacy_num_nodes is None:
+        return resources
+    for resource in resources:
+        # Matching counts can come from an earlier call to this boundary.
+        count = resource._num_nodes  # pylint: disable=protected-access
+        if count is not None and count != legacy_num_nodes:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'num_nodes is set on both the task ({legacy_num_nodes}) '
-                    'and its resources '
-                    f'({", ".join(map(str, explicit_counts))}). '
-                    'Set it in one place only: either at the top level of the '
-                    'task, or in `resources` (once for all candidates, or per '
-                    '`any_of`/`ordered` candidate).')
-    normalized = []
-    for resource in resources:
-        # Preserve specialized resources such as the optimizer's DummyResources
-        # and never mutate a Resources shared by several task builders.
-        bound = copy.copy(resource)
-        bound._set_num_nodes(resource.num_nodes if legacy_num_nodes is None or
-                             resource.num_nodes_specified else legacy_num_nodes)
-        # A bound resource reused in a new Task must carry its count on the
-        # wire even if it originally inherited that count from another Task.
-        bound._num_nodes_specified = (resource.num_nodes_specified or
-                                      (legacy_num_nodes is None and
-                                       resource.num_nodes != 1))
-        normalized.append(bound)
-    return type(resources)(normalized)
+                    'num_nodes is set on both the task and its resources. '
+                    'Set it in one place only, or use matching counts.')
+    return type(resources)(
+        r.copy(num_nodes=legacy_num_nodes) for r in resources)
 
 
 class Task:
@@ -443,7 +425,7 @@ class Task:
             nodes get the same command, or a lambda, with the semantics
             documented above. Alternatively, resources may set their own
             ``num_nodes`` (e.g., per ``any_of``/``ordered`` candidate); the
-            two cannot be combined.
+            legacy task count must match any count already set on resources.
           file_mounts: An optional dict of ``{remote_path: (local_path|cloud
             URI)}``, where remote means the VM(s) on which this Task will
             eventually run on, and local means the node from which the task is
@@ -1033,8 +1015,14 @@ class Task:
                 '_cluster_config_overrides'] = cluster_config_override
         if volumes:
             resources_config['volumes'] = volumes
-        task.set_resources(
-            resources_lib.Resources.from_yaml_config(resources_config))
+        resources = resources_lib.Resources.from_yaml_config(resources_config)
+        if task._num_nodes is not None and any(
+                r._num_nodes is not None for r in resources):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'num_nodes is set on both the task and its resources. '
+                    'Set it in one place only.')
+        task.set_resources(resources)
 
         service = config.pop('service', None)
         pool = config.pop('pool', None)
@@ -1172,7 +1160,7 @@ class Task:
             volume_mounts.append(volume_mount)
         # Disable certain access modes
         disabled_modes = {}
-        if max([r.num_nodes for r in self.resources]) > 1:
+        if max(r.num_nodes for r in self.resources) > 1:
             disabled_modes[
                 volume_lib.VolumeAccessMode.READ_WRITE_ONCE.value] = (
                     'access mode ReadWriteOnce is not supported for '
@@ -1242,9 +1230,7 @@ class Task:
     @property
     def num_nodes(self) -> int:
         """Deprecated compatibility accessor for a selected or uniform count."""
-        warnings.warn('Task.num_nodes is deprecated; use Resources.num_nodes.',
-                      DeprecationWarning,
-                      stacklevel=2)
+        logger.warning('Task.num_nodes is deprecated; use Resources.num_nodes.')
         if self.best_resources is not None:
             return self.best_resources.num_nodes
         counts = {r.num_nodes for r in self.resources}
@@ -1262,29 +1248,16 @@ class Task:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         resources = self.resources
-        if num_nodes is None and self._num_nodes is not None:
+        if self._num_nodes is not None:
             resources = type(resources)(
-                r if r.num_nodes_specified else r.copy(num_nodes=None)
-                for r in resources)
+                r.copy(num_nodes=None) for r in resources)
         normalized = _normalize_resource_num_nodes(resources, num_nodes)
         if num_nodes is not None:
-            warnings.warn(
+            logger.warning(
                 'Task(num_nodes=...) and task-level YAML num_nodes are '
-                'deprecated; set num_nodes on Resources instead.',
-                DeprecationWarning,
-                stacklevel=2)
+                'deprecated; set num_nodes on Resources instead.')
         self._num_nodes = num_nodes
         self.resources = normalized
-
-    def __setstate__(self, state) -> None:
-        """Lower legacy counts when restoring an older serialized Task."""
-        state = state.copy()
-        explicit = state.pop('_num_nodes_explicit', None)
-        if explicit is False:
-            state['_num_nodes'] = None
-        self.__dict__.update(state)
-        self.resources = _normalize_resource_num_nodes(self.resources,
-                                                       self._num_nodes)
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -2179,6 +2152,12 @@ class Task:
 
         tmp_resource_config = _resources_to_config(
             self.resources, redact_secrets=redact_secrets)
+        if self._num_nodes is not None:
+            # Legacy requests keep their count at task level on the wire.
+            for candidate in ([tmp_resource_config] +
+                              tmp_resource_config.get('any_of', []) +
+                              tmp_resource_config.get('ordered', [])):
+                candidate.pop('num_nodes', None)
 
         add_if_not_none('resources', tmp_resource_config)
 
@@ -2321,7 +2300,7 @@ class Task:
         # Multi-node. Resources candidates may differ in node count; the
         # optimizer checks the feature per candidate, so only require it
         # task-wide if every candidate is multi-node.
-        if min([r.num_nodes for r in self.resources]) > 1:
+        if min(r.num_nodes for r in self.resources) > 1:
             required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
         # Storage mounting
@@ -2391,24 +2370,17 @@ def _resources_to_config(resources: Union[List['resources_lib.Resources'],
                          factor_out_common_fields: bool = False,
                          redact_secrets: bool = False) -> Dict[str, Any]:
 
-    def config_for(resource):
-        config = resource.to_yaml_config(redact_secrets=redact_secrets)
-        # Legacy counts are serialized at task level; implicit one-node
-        # defaults do not require the new resource field on an old server.
-        if not resource.num_nodes_specified:
-            config.pop('num_nodes', None)
-        return config
-
     if len(resources) > 1:
         resource_list: List[Dict[str, Union[str, int]]] = []
         for r in resources:
-            resource_list.append(config_for(r))
+            resource_list.append(
+                r.to_yaml_config(redact_secrets=redact_secrets))
         group_key = 'ordered' if isinstance(resources, list) else 'any_of'
         if factor_out_common_fields:
             return _factor_out_common_resource_fields(resource_list, group_key)
         return {group_key: resource_list}
     else:
-        return config_for(list(resources)[0])
+        return list(resources)[0].to_yaml_config(redact_secrets=redact_secrets)
 
 
 def _factor_out_common_resource_fields(configs: List[Dict[str, Union[str,

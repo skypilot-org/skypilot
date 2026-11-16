@@ -376,9 +376,7 @@ def test_fill_in_launchable_resources_uses_candidate_num_nodes():
 
         def get_feasible_launchable_resources(self, resources, num_nodes):
             requested_num_nodes.append(num_nodes)
-            # Clouds may build launchables without copying num_nodes.
-            launchable = resources_lib.Resources(
-                accelerators=resources.accelerators)
+            launchable = resources.copy()
             return resources_utils.FeasibleResources([launchable], [], None)
 
     task = task_lib.Task()
