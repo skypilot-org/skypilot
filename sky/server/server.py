@@ -65,6 +65,7 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
@@ -780,6 +781,7 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
                     f'{user.name!r} ({user.id}): {request.method} '
                     f'{request.url.path} (request ID: {request_id})')
         request.state.impersonator = caller
+        caller_usage.set_impersonator(caller)
         request.state.auth_user = models.User(id=user.id, name=user.name)
         return None
 
