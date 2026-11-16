@@ -651,17 +651,18 @@ def test_pagination_and_page_size(make_user, seed_job, open_as, uid, twist):
     expect(_job_link(page, names[1]),
            'page 1 must not list my second-oldest job').to_have_count(0)
 
-    # Wait for the page-2 queue response (and its result) before asserting
-    # rows. The footer/URL can flip from client state while the table is
-    # still mid-refresh, which flakes as "page 2 must list my oldest jobs".
+    # Footer/URL can flip from client state while the table is still
+    # mid-refresh (flakes as "page 2 must list my oldest jobs"). Assert
+    # footer/URL first so dom-next-page-dead still fails for that reason,
+    # then wait for the page-2 queue result before row asserts.
     since = page.recorder.mark()
     page.locator('button:has(path[d="M9 18l6-6-6-6"])').first.click()
-    _wait_table_body(page, since, lambda b: b.get('page') == 2,
-                     'the next page must ask for page 2 of jobs')
     expect(_footer(page, 11, 12, 12),
            'the next page must read "11 – 12 of 12"').to_be_visible()
     expect(page, 'the next page must put page=2 in the URL').to_have_url(
         re.compile(r'[?&]page=2(&|$)'))
+    _wait_table_body(page, since, lambda b: b.get('page') == 2,
+                     'the next page must ask for page 2 of jobs')
     expect(
         _jobs_table(page).locator('tbody tr'),
         'page 2 must show exactly two job rows').to_have_count(2)
