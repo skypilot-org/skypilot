@@ -1677,16 +1677,13 @@ class StrategyExecutor:
                                 await self._cancel_remaining_launch_requests(
                                     request_id)
                         else:
-                            # Get task resources from DAG for resource-aware
-                            # scheduling.
-                            task_resources = None
-                            if self.dag.tasks:
-                                task = self.dag.tasks[self.task_id]
-                                task_resources = task.resources
-
+                            # Preserve the task's serialization context when
+                            # the pool records its selected resources.
+                            pool_task = (self.dag.tasks[self.task_id]
+                                         if self.dag.tasks else None)
                             self.cluster_name = await (asyncio.to_thread(
                                 serve_utils.get_next_cluster_name, self.pool,
-                                self.job_id, task_resources))
+                                self.job_id, pool_task))
                             if self.cluster_name is None:
                                 # Classified here rather than by the broad
                                 # except below: that would call the commonest

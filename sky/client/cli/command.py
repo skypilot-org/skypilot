@@ -1131,6 +1131,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     task.set_resources_override(override_params)
 
     if num_nodes is not None:
+        if len({r.num_nodes for r in task.resources}) > 1:
+            logger.warning('Overriding different node counts in resource '
+                           f'candidates with --num-nodes={num_nodes}.')
         # `num_nodes` is set either on the task or in its resources; override
         # it where the task sets it.
         resource_config = task.get_resource_config()

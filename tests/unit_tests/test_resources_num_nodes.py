@@ -19,6 +19,7 @@ from sky.client import sdk
 from sky.client.cli import command
 from sky.jobs import recovery_strategy
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import serve_utils
 from sky.server import constants as server_constants
 from sky.utils import dag_utils
 from sky.utils import resources_utils
@@ -969,3 +970,68 @@ def test_recovery_unexpected_match_failure_keeps_launched_resources():
             mock.patch.object(recovery_strategy.state, 'set_job_infra'):
         assert asyncio.run(executor._launch()) == 1.0
     assert executor._launched_resources is launched
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_pool_selected_resources_preserve_legacy_count_format(tmp_path, legacy):
+    candidates = [
+        resources_lib.Resources(cpus=2,
+                                memory=4,
+                                num_nodes=None if legacy else 4),
+        resources_lib.Resources(cpus=4,
+                                memory=8,
+                                num_nodes=None if legacy else 4),
+    ]
+    task = task_lib.Task(num_nodes=4 if legacy else None, resources=candidates)
+    replica = mock.MagicMock(cluster_name='count-worker', replica_id=1)
+    replica.handle.return_value = None
+    with mock.patch.object(serve_utils, '_get_service_status',
+                           return_value={'pool': True}), \
+            mock.patch.object(serve_utils, 'get_service_filelock_path',
+                              return_value=str(tmp_path / 'pool.lock')), \
+            mock.patch.object(serve_utils, 'get_free_worker_resources',
+                              return_value={'count-worker': resources_lib.Resources(cpus=8, memory=8)}), \
+            mock.patch.object(serve_utils, 'get_ready_replicas',
+                              return_value=[replica]), \
+            mock.patch.object(serve_utils.managed_job_state,
+                              'update_job_full_resources') as update, \
+            mock.patch.object(serve_utils.managed_job_state,
+                              'set_current_cluster_name'):
+        assert serve_utils.get_next_cluster_name('pool', 1,
+                                                 task) == 'count-worker'
+    selected = update.call_args.args[1]
+    assert selected['cpus'] == '2'
+    assert ('num_nodes' in selected) is not legacy
+    if not legacy:
+        assert selected['num_nodes'] == 4
+    assert len(task.resources) == 2
+    assert {r.num_nodes for r in task.resources} == {4}
+
+
+@pytest.mark.parametrize('counts, expected_warning', [([2, 2], False),
+                                                      ([2, 4], True),
+                                                      ([None, 4], True),
+                                                      ([None, None], False)])
+def test_cli_warns_before_overriding_different_candidate_counts(
+        tmp_path, counts, expected_warning):
+    candidates = [{
+        'cpus': 2,
+        **({
+            'num_nodes': n
+        } if n is not None else {})
+    } for n in counts]
+    path = tmp_path / 'task.yaml'
+    path.write_text(
+        dag_utils.yaml_utils.dump_yaml_str({
+            'resources': {
+                'ordered': candidates
+            },
+            'run': 'echo hi'
+        }))
+    with mock.patch.object(command.logger, 'warning') as warning:
+        task = command._make_task_or_dag_from_entrypoint_with_overrides(
+            entrypoint=(str(path),), num_nodes=3)
+    assert {r.num_nodes for r in task.resources} == {3}
+    assert warning.call_count == int(expected_warning)
+    if expected_warning:
+        assert '--num-nodes=3' in warning.call_args.args[0]
