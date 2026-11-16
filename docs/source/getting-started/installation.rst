@@ -210,6 +210,17 @@ See :ref:`sky-api-server-connect` for more details.
 
 See :ref:`sky-api-server-deploy` for detailed instructions on how to deploy a remote API server.
 
+.. _install-skill:
+
+Install SkyPilot skill
+----------------------
+
+Install the :ref:`SkyPilot Skill <skill>` to give your AI agent full SkyPilot expertise. If your agent does not support plugins or ``npx skills``, simply use this prompt:
+
+.. code-block:: text
+
+   Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the SkyPilot skill
+
 .. _verify-cloud-access:
 
 Verify cloud access
