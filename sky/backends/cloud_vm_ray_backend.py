@@ -4699,7 +4699,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             #    creating a cluster only, and ok with the empty run command.
             logger.info('Run commands not specified or empty.')
             return None
-        task_copy = copy.copy(task)
         if task.run is None:
             # If the task has no run command, we still need to execute the
             # generated ray driver program to run the setup command in detached
@@ -4722,6 +4721,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             valid_resource = self.check_resources_fit_cluster(handle,
                                                               task,
                                                               check_ports=True)
+        task_copy = copy.copy(task)
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
         if len(task.resources) > 1:
