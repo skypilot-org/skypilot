@@ -84,9 +84,8 @@ def _check_hostpath_registrable(auth_user: Optional[models.User],
     if (auth_user is not None and
             volume_type == volume_utils.VolumeType.HOSTPATH.value and
             not permission.is_admin(auth_user.id)):
-        raise fastapi.HTTPException(
-            status_code=403,
-            detail='k8s-hostpath volumes can only be registered by an admin.')
+        raise exceptions.PermissionDeniedError(
+            'k8s-hostpath volumes can only be registered by an admin.')
 
 
 @router.post('/delete')
@@ -151,9 +150,11 @@ async def volume_validate(
         request: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
-    await context_utils.to_thread_with_executor(
-        None, _check_hostpath_registrable, request.state.auth_user,
-        volume_validate_body.volume_type)
+    # A 400, not a 403: the SDK only surfaces a synchronous 400 from here.
+    with _volume_errors_as_400():
+        await context_utils.to_thread_with_executor(
+            None, _check_hostpath_registrable, request.state.auth_user,
+            volume_validate_body.volume_type)
     volume_config = {
         'name': volume_validate_body.name,
         'type': volume_validate_body.volume_type,
@@ -192,10 +193,10 @@ async def volume_validate(
 async def volume_apply(request: fastapi.Request,
                        volume_apply_body: payloads.VolumeApplyBody) -> None:
     """Creates or registers a volume."""
-    await context_utils.to_thread_with_executor(None,
-                                                _check_hostpath_registrable,
-                                                request.state.auth_user,
-                                                volume_apply_body.volume_type)
+    with _volume_errors_as_400():
+        await context_utils.to_thread_with_executor(
+            None, _check_hostpath_registrable, request.state.auth_user,
+            volume_apply_body.volume_type)
     volume_cloud = volume_apply_body.cloud
     volume_type = volume_apply_body.volume_type
     volume_config = volume_apply_body.config

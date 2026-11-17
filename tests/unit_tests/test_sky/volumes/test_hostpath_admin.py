@@ -83,7 +83,7 @@ def _client():
 
 
 @pytest.mark.parametrize('volume_type, auth_user, status', [
-    (_HOSTPATH, _ALICE, 403),
+    (_HOSTPATH, _ALICE, 400),
     (_HOSTPATH, _ADMIN, 200),
     (_HOSTPATH, None, 200),
     (_PVC, _ALICE, 200),
@@ -106,6 +106,9 @@ def test_only_an_admin_registers_a_hostpath_volume(monkeypatch, admins,
                                   })
     assert response.status_code == status, response.text
     assert schedule.called == (status == 200)
+    if status == 400:
+        # A serialized error, which the SDK raises (it ignores a 403 here).
+        assert 'PermissionDeniedError' in response.text
 
 
 def test_validate_refuses_a_hostpath_volume_for_a_non_admin(admins):
@@ -119,7 +122,8 @@ def test_validate_refuses_a_hostpath_volume_for_a_non_admin(admins):
                                           'host_path': '/mnt/data'
                                       },
                                   })
-    assert response.status_code == 403
+    assert response.status_code == 400
+    assert 'PermissionDeniedError' in response.text
     assert 'only be registered by an admin' in response.text
 
 

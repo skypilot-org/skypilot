@@ -57,6 +57,7 @@ from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.users import permission
+from sky.users import rbac
 from sky.utils import auth_utils
 from sky.utils import cluster_utils
 from sky.utils import command_runner
@@ -296,8 +297,6 @@ _TUNNEL_OUTPUT_TAIL_LINES = 100
 
 def _caller_is_viewer() -> bool:
     """Return True iff the executor worker is acting for a viewer user."""
-    # pylint: disable=import-outside-toplevel
-    from sky.users import rbac as rbac_mod
     user_id = os.environ.get(constants.USER_ID_ENV_VAR)
     if not user_id:
         return False
@@ -310,8 +309,8 @@ def _caller_is_viewer() -> bool:
     except Exception:  # pylint: disable=broad-except
         return False
     # Admin wins over viewer when both roles are present.
-    return (rbac_mod.RoleName.VIEWER.value in roles and
-            rbac_mod.RoleName.ADMIN.value not in roles)
+    return (rbac.RoleName.VIEWER.value in roles and
+            rbac.RoleName.ADMIN.value not in roles)
 
 
 def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
