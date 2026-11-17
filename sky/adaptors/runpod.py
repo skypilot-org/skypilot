@@ -4,12 +4,14 @@ Talks to the RunPod REST API v2 (https://api.runpod.io/v2). The ``runpod``
 SDK is only used to resolve the API key from ``~/.runpod/config.toml``.
 """
 
+import json as json_lib
 import os
 import time
 from typing import Any, Dict, List, Optional
 import urllib.parse
 
 from sky.adaptors import common
+from sky.utils import annotations
 
 runpod = common.LazyImport(
     'runpod',
@@ -23,6 +25,7 @@ _REST_BASE = 'https://api.runpod.io/v2'
 _MAX_RETRIES = 3
 # Pod creation can take well over 10s and a POST is not retried on timeout.
 _TIMEOUT = 30
+_QUOTE_TIMEOUT = 10
 _RETRY_SLEEP_SECONDS = 1
 _MAX_RETRY_AFTER_SECONDS = 30
 # Repeating one of these after a lost response cannot leave a duplicate
@@ -44,6 +47,47 @@ class RunPodRestError(RuntimeError):
 
     def is_auth_error(self) -> bool:
         return self.status_code in (401, 403)
+
+
+@annotations.ttl_cache(scope='request', maxsize=128, ttl=60)
+def get_gpu_host_quote(gpu_id: str, gpu_count: int, secure: bool, cpus: int,
+                       memory_gb: int,
+                       region: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Cache a bounded host quote for resource selection."""
+    return _get_gpu_host_quote(gpu_id, gpu_count, secure, cpus, memory_gb,
+                               region)
+
+
+def _get_gpu_host_quote(gpu_id: str, gpu_count: int, secure: bool, cpus: int,
+                        memory_gb: int,
+                        region: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Read a fresh host quote without reserving capacity."""
+    fields = [
+        f'gpuCount: {gpu_count}', f'secureCloud: {str(secure).lower()}',
+        f'minVcpuCount: {cpus}', f'minMemoryInGb: {memory_gb}'
+    ]
+    if region is not None:
+        fields.append(f'countryCode: {json_lib.dumps(region)}')
+    query = ('query { gpuTypes(input: {id: ' + json_lib.dumps(gpu_id) + '}) {'
+             ' lowestPrice(input: {' + ', '.join(fields) + '}) {'
+             ' uninterruptablePrice minVcpu minMemory stockStatus '
+             'availableGpuCounts } } }')
+    try:
+        response = requests.post(
+            'https://api.runpod.io/graphql',
+            headers={'Authorization': f'Bearer {_get_api_key()}'},
+            json={'query': query},
+            timeout=_QUOTE_TIMEOUT)
+        response.raise_for_status()
+        result = response.json()
+        if result.get('errors'):
+            return None
+        rows = result['data']['gpuTypes']
+        return rows[0]['lowestPrice'] if len(rows) == 1 else None
+    except Exception:  # pylint: disable=broad-except
+        # Unavailable credentials, transport or malformed data is not an offer.
+        # Avoid logging response/exception text that may contain credentials.
+        return None
 
 
 def _get_api_key() -> str:

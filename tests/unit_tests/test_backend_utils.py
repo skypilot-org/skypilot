@@ -30,6 +30,7 @@ def _restore_environ():
 
 
 # Set env var to test config file.
+@mock.patch.dict(os.environ)
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
@@ -154,6 +155,7 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
 @mock.patch('sky.backends.backend_utils._get_yaml_path_from_cluster_name',
             return_value='/tmp/fake/path')
 @mock.patch('sky.utils.common_utils.fill_template')
+@mock.patch.dict(os.environ)
 def test_write_cluster_config_w_post_provision_runcmd_aws(
         mock_fill_template, *mocks):
     os.environ[
@@ -199,6 +201,7 @@ def test_write_cluster_config_w_post_provision_runcmd_aws(
             return_value=[])
 @mock.patch('sky.utils.common_utils.fill_template',
             wraps=common_utils.fill_template)
+@mock.patch.dict(os.environ)
 def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
         mock_fill_template, *mocks):
     os.environ[

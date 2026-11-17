@@ -29,6 +29,39 @@ GLOBAL_INVALID_LABELS = {
 }
 
 
+@pytest.mark.parametrize(
+    'cloud', [clouds.AWS(), clouds.SSH(),
+              clouds.Kubernetes()])
+@pytest.mark.parametrize('namespace', [None, 'models'])
+@pytest.mark.parametrize('region', ['ctx', 'other'])
+def test_final_deployment_rejects_namespace_on_other_clouds(
+        cloud, namespace, region, monkeypatch):
+    resource = Resources(
+        cloud=cloud,
+        region='ctx',
+        _cluster_config_overrides=({} if namespace is None else {
+            'kubernetes': {
+                'namespace': namespace
+            }
+        }))
+    provider = mock.Mock(side_effect=RuntimeError('provider boundary'))
+    monkeypatch.setattr(type(cloud), 'make_deploy_resources_variables',
+                        provider)
+    if namespace and repr(cloud).lower() != 'kubernetes':
+        error, message = ValueError, 'requires explicit Kubernetes placement'
+    elif namespace and region != 'ctx':
+        error, message = ValueError, 'binds context'
+    else:
+        error, message = RuntimeError, 'provider boundary'
+    with pytest.raises(error, match=message):
+        resource.make_deploy_variables(
+            resources_utils.ClusterName('test', 'test'), clouds.Region(region),
+            None, 1, True)
+    assert provider.called == (namespace is None or
+                               (repr(cloud).lower() == 'kubernetes' and
+                                region == 'ctx'))
+
+
 def test_get_reservations_available_resources():
     mock_cloud = mock.Mock()
     r = Resources(cloud=mock_cloud, instance_type="instance_type")

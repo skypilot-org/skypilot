@@ -314,7 +314,7 @@ async def test_api_login(mock_to_thread, mock_sdk_functions):
 
 
 @pytest.mark.asyncio
-async def test_get_raises_typed_error_from_500_detail():
+async def test_get_raises_typed_error_from_500_detail(monkeypatch):
     """get() must unwrap the 'detail'-nested payload of a 500 response.
 
     A failed request is returned by /api/get as a 500 whose body nests the
@@ -324,6 +324,8 @@ async def test_get_raises_typed_error_from_500_detail():
     typed exception into a generic RuntimeError - breaking callers that
     dispatch on exception type.
     """
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
     detail = {
         'request_id': 'req-1',
         'name': 'launch',

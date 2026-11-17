@@ -164,7 +164,7 @@ def test_format_resource_actual_matches_spec_no_annotation():
 def test_format_resource_unmodified_pod_memory_unit_convention():
     """An unmodified pod must not be reported as a divergence.
 
-    The pod template writes spec memory as decimal G, which reads back
+    Older pod templates wrote spec memory as decimal G, which reads back
     in GiB as spec * (1000^3 / 1024^3). This is a unit convention, not
     an override, so the spec value stays displayed with no annotation.
     """

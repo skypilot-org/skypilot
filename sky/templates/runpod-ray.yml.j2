@@ -40,6 +40,13 @@ available_node_types:
         skypilot:ssh_public_key_content
       Preemptible: {{use_spot}}
       BidPerGPU: {{bid_per_gpu}}
+      {%- if min_vcpu_count is defined %}
+      MinVCPUCount: {{min_vcpu_count}}
+      MinMemoryInGB: {{min_memory_in_gb}}
+      {%- if allowed_cuda_versions is not none %}
+      AllowedCUDAVersions: {{allowed_cuda_versions | tojson}}
+      {%- endif %}
+      {%- endif %}
       {%- if volume_mounts and volume_mounts|length > 0 %}
       VolumeMounts:
       {%- for vm in volume_mounts %}

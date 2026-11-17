@@ -626,8 +626,11 @@ class TestSetPreferredWorkspaceSdkVersionGate(unittest.TestCase):
         original = versions.get_remote_api_version
         versions.get_remote_api_version = lambda: too_old  # type: ignore
         try:
-            with self.assertRaises(exceptions.APINotSupportedError) as cm:
+            with mock.patch('sky.server.common.check_server_healthy_or_start_fn'), \
+                 mock.patch('sky.server.common.make_authenticated_request') as request, \
+                 self.assertRaises(exceptions.APINotSupportedError) as cm:
                 sdk.set_preferred_workspace('team-a')
+            request.assert_not_called()
             self.assertIn('set_preferred_workspace', str(cm.exception))
         finally:
             versions.get_remote_api_version = original  # type: ignore
