@@ -36,6 +36,7 @@ from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
+from sky.server.requests import stored_results
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
@@ -313,15 +314,19 @@ class Request:
                 f'failed; storing None: {common_utils.format_exception(e)}')
             self.return_value = None
 
-    def serialized_return_value(self) -> str:
-        """The return value in the form it is stored and sent."""
-        # Version-aware, for old clients that do not recognize new fields.
-        return return_value_serializers.get_serializer(self.name)(
-            self.return_value)
+    def _resolved_return_value(self) -> Any:
+        if self.has_stored_result:
+            return stored_results.load(self.request_id)
+        return self.return_value
+
+    @property
+    def has_stored_result(self) -> bool:
+        """Whether the result is stored outside the requests table."""
+        return isinstance(self.return_value, stored_results.StoredResult)
 
     def get_return_value(self) -> Any:
         """Get the return value."""
-        return decoders.get_decoder(self.name)(self.return_value)
+        return decoders.get_decoder(self.name)(self._resolved_return_value())
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
@@ -337,12 +342,11 @@ class Request:
             setattr(self, column, getattr(updated, column))
 
     def to_row(self) -> Tuple[Any, ...]:
-        payload = self.encode()
+        payload = self._encode(self._return_value_column(), include_body=True)
         # encode() may downgrade WAITING -> RUNNING for clients on an older API
         # version; that is a wire-only concern. to_row() feeds the database, so
         # always persist the true status regardless of the request context.
         payload.status = self.status.value
-        self.stored_result_size = _stored_size(payload.return_value or '')
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -387,11 +391,52 @@ class Request:
             file_mounts_blob_id=self.file_mounts_blob_id,
         )
 
+    def _return_value_column(self) -> str:
+        """Serialize the return value for the database.
+
+        A result larger than ``stored_results.MAX_IN_ROW_BYTES`` is stored
+        outside the requests table and the column refers to it. Also sets
+        ``stored_result_size``.
+        """
+        if not self.has_stored_result:
+            serialized = return_value_serializers.get_serializer(self.name)(
+                self.return_value)
+            self.stored_result_size = _stored_size(serialized)
+            if (self.stored_result_size <= stored_results.MAX_IN_ROW_BYTES or
+                    not stored_results.store_enabled()):
+                return serialized
+            try:
+                self.return_value = stored_results.store(
+                    self.request_id, self.name, serialized)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to store the result of request '
+                    f'{self.request_id} ({self.name}) outside the requests '
+                    f'table; keeping it in the row: '
+                    f'{common_utils.format_exception(e)}')
+                return serialized
+        self.stored_result_size = self.return_value.size
+        return stored_results.to_column(self.return_value)
+
+    def _serialized_return_value(self) -> str:
+        # Use version-aware serializer to handle backward compatibility for
+        # old clients that don't recognize new fields.
+        serializer = return_value_serializers.get_serializer(self.name)
+        if (self.has_stored_result and
+                serializer is return_value_serializers.default_serializer):
+            # The stored text is already what the default serializer emits.
+            return stored_results.load_text(self.request_id)
+        return serializer(self._resolved_return_value())
+
     def encode(self, include_body: bool = True) -> payloads.RequestPayload:
-        """Serialize the SkyPilot API request for the DB (to_row).
+        """Serialize the SkyPilot API request with its result.
 
         HTTP responses must use encode_for_client() instead.
         """
+        return self._encode(self._serialized_return_value(), include_body)
+
+    def _encode(self, return_value: str,
+                include_body: bool) -> payloads.RequestPayload:
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
@@ -403,7 +448,7 @@ class Request:
                               if include_body else
                               server_constants.EMPTY_PICKLED_VALUE),
                 status=_status_value_for_client(self.status.value),
-                return_value=self.serialized_return_value(),
+                return_value=return_value,
                 error=_serialize_error(self.error),
                 pid=self.pid,
                 created_at=self.created_at,
@@ -463,7 +508,8 @@ class Request:
                 entrypoint=cls._decode_entrypoint(payload.entrypoint),
                 request_body=decoders.decode_and_unpickle(payload.request_body),
                 status=RequestStatus(payload.status),
-                return_value=orjson.loads(payload.return_value),
+                return_value=stored_results.from_column(
+                    orjson.loads(payload.return_value)),
                 error=orjson.loads(payload.error),
                 pid=payload.pid,
                 created_at=payload.created_at,
@@ -1390,10 +1436,12 @@ async def set_request_succeeded_async(request: Request,
 
 
 def _serialize_result(request: Request, result: Any) -> Tuple[str, int]:
+    """The return value column for result, and the size of the result."""
     request = copy.copy(request)
     request.set_return_value(result)
-    stored = request.serialized_return_value()
-    return stored, _stored_size(stored)
+    column = request._return_value_column()  # pylint: disable=protected-access
+    assert request.stored_result_size is not None
+    return column, request.stored_result_size
 
 
 @metrics_lib.time_me_async
@@ -1449,20 +1497,38 @@ async def _cleanup_legacy_directory_if_empty():
 _ORPHAN_LOG_QUERY_CHUNK_SIZE = 500
 
 
+def _log_file_request_id(file_name: str) -> Optional[str]:
+    if not file_name.endswith('.log'):
+        return None
+    request_id = file_name[:-len('.log')]
+    # A live daemon holds its log file open for the lifetime of the server
+    # process; never unlink it.
+    if daemons.is_daemon_request_id(request_id):
+        return None
+    return request_id
+
+
 def _list_stale_log_files(log_dir: pathlib.Path,
                           cutoff: float) -> List[Tuple[str, str, int]]:
     """List (request_id, path, size) of logs written before cutoff."""
-    if not log_dir.is_dir():
+    return _list_stale_files(log_dir, cutoff, _log_file_request_id)
+
+
+def _list_stale_files(
+    directory: Optional[pathlib.Path], cutoff: float,
+    request_id_of: Callable[[str],
+                            Optional[str]]) -> List[Tuple[str, str, int]]:
+    """List (request_id, path, size) of files written before cutoff.
+
+    ``request_id_of`` maps a file name to its request ID, or None to skip it.
+    """
+    if directory is None or not directory.is_dir():
         return []
     stale = []
-    with os.scandir(log_dir) as entries:
+    with os.scandir(directory) as entries:
         for entry in entries:
-            if not entry.name.endswith('.log'):
-                continue
-            request_id = entry.name[:-len('.log')]
-            # A live daemon holds its log file open for the lifetime of the
-            # server process; never unlink it.
-            if daemons.is_daemon_request_id(request_id):
+            request_id = request_id_of(entry.name)
+            if request_id is None:
                 continue
             try:
                 # os.stat, not DirEntry.stat: see _prune_sky_logs in
@@ -1490,24 +1556,28 @@ def _unlink_log_files(files: List[Tuple[str, int]]) -> Tuple[int, int]:
     return removed_files, removed_bytes
 
 
-async def _clean_orphan_request_logs() -> None:
-    """Delete request log files whose request row is already gone.
+async def _clean_orphan_request_files() -> None:
+    """Delete request log files and stored results whose row is already gone.
 
     When several API server instances share one database, each writes its
     request logs to local disk, so the row-driven cleanup above only reaches
     the files that sit on the instance running it. A file left behind on
     another instance outlives the row that names it, after which nothing on
-    the database side can enumerate it.
+    the database side can enumerate it. A stored result is also left behind
+    when its writer dies between storing it and recording it in the row.
 
     A file with no row is already garbage — it cannot be read back through
     the API — so the age cutoff is a grace period against reading a
     directory while a request is being recorded, not a retention period.
     """
     cutoff = time.time() - bs.GC_GRACE_SECONDS
-    listings = await asyncio.gather(*[
-        asyncio.to_thread(_list_stale_log_files, log_dir, cutoff)
-        for log_dir in request_log_dirs()
-    ])
+    listings = await asyncio.gather(
+        *[
+            asyncio.to_thread(_list_stale_log_files, log_dir, cutoff)
+            for log_dir in request_log_dirs()
+        ],
+        asyncio.to_thread(_list_stale_files, stored_results.results_dir(),
+                          cutoff, stored_results.request_id_of))
     # A request writes one file per log directory, so group by request ID to
     # ask the database about each one once.
     stale: Dict[str, List[Tuple[str, int]]] = {}
@@ -1536,7 +1606,7 @@ async def _clean_orphan_request_logs() -> None:
         removed_files += batch_files
         removed_bytes += batch_bytes
     if removed_files:
-        logger.info(f'Cleaned up {removed_files} orphan request log file(s), '
+        logger.info(f'Cleaned up {removed_files} orphan request file(s), '
                     f'{removed_bytes} bytes freed')
 
 
@@ -1613,7 +1683,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
                 f'older than {retention_seconds} seconds '
                 f'in {time.monotonic() - started:.3f}s')
 
-    await _clean_orphan_request_logs()
+    await _clean_orphan_request_files()
 
 
 async def requests_gc_daemon():

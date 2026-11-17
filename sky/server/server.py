@@ -3320,6 +3320,8 @@ async def api_get(request: fastapi.Request,
         raise fastapi.HTTPException(
             status_code=500,
             detail=request_task.encode_for_client().model_dump())
+    if request_task.has_stored_result:
+        return await asyncio.to_thread(request_task.encode_for_client)
     return request_task.encode_for_client()
 
 
