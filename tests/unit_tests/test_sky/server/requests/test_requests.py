@@ -2526,10 +2526,11 @@ def small_in_row_limit(monkeypatch):
     monkeypatch.setattr(requests.stored_results, 'MAX_IN_ROW_BYTES', 1024)
 
 
-def _raw_return_value_column(request_id: str) -> str:
-    request = requests.get_request(request_id)
+def _recorded_return_value(request_id: str):
+    """The return value as recorded in the row, without loading a stored one."""
+    request = requests.get_request(request_id, fields=['return_value'])
     assert request is not None
-    return request.to_row()[requests.REQUEST_COLUMNS.index('return_value')]
+    return request.return_value
 
 
 @pytest.mark.asyncio
@@ -2548,8 +2549,8 @@ async def test_large_result_is_stored_outside_the_row(isolated_database,
     # The usage metrics still see the size of the result itself.
     assert size == len(encoded)
     assert requests.stored_results.result_path('large-req').exists()
-    column = _raw_return_value_column('large-req')
-    assert len(column) < 100, column
+    assert _recorded_return_value('large-req') == (
+        requests.stored_results.StoredResult(size=len(encoded)))
 
     request = requests.get_request('large-req')
     assert request is not None
@@ -2565,7 +2566,7 @@ async def test_small_result_stays_in_the_row(isolated_database,
     requests.set_request_succeeded('small-req', {'ok': True})
 
     assert not requests.stored_results.result_path('small-req').exists()
-    assert _raw_return_value_column('small-req') == '{"ok":true}'
+    assert _recorded_return_value('small-req') == {'ok': True}
     request = requests.get_request('small-req')
     assert request is not None
     assert not request.has_stored_result
@@ -2581,8 +2582,7 @@ async def test_result_stays_in_the_row_when_storing_fails(
                            side_effect=OSError('disk full')):
         requests.set_request_succeeded('fail-req', _LARGE_RESULT)
 
-    assert (_raw_return_value_column('fail-req') == orjson.dumps(
-        _LARGE_RESULT).decode('utf-8'))
+    assert _recorded_return_value('fail-req') == _LARGE_RESULT
     request = requests.get_request('fail-req')
     assert request is not None
     assert request.get_return_value() == _LARGE_RESULT
