@@ -423,8 +423,11 @@ def _apt_loop(updates,
     """Runs the real apt fallback loop against a scripted `apt-get update`.
 
     updates: one entry per `apt-get update` call -- 'zero' (reaches no source),
-    'partial' (reaches one, fails another), 'ok', or 'only-m2' (ok only once
-    the sources point at the m2.example mirror). The fake prints Hit/Get the
+    'partial' (reaches one, fails an Ubuntu archive entry), 'partial-3p'
+    (fails a third-party source instead), 'partial-self' (fails the current
+    source's own archive URL), 'hang' (reaches another repo, then is cut
+    off by the timeout), 'ok', or 'only-m2' (ok only once the sources
+    point at the m2.example mirror). The fake prints Hit/Get the
     way real apt does at each verbosity: none at quiet>=2, behind `\\r`
     progress output at quiet=0 (checked on apt 2.4), plain at quiet=1.
     image_quiet is the image apt.conf's level, which `-o quiet=N` overrides.
@@ -476,7 +479,14 @@ def _apt_loop(updates,
               case "$kind" in
                 ok) hit ;;
                 partial) hit
-                         echo "W: Failed to fetch http://security.ubuntu.com" ;;
+                  echo "Err:2 http://security.ubuntu.com/ubuntu jammy-security InRelease"
+                  echo "W: Failed to fetch http://security.ubuntu.com/ubuntu/dists/jammy-security/InRelease  Could not connect" ;;
+                partial-3p) hit
+                  echo "Err:3 http://192.0.2.1/x ./ InRelease"
+                  echo "W: Failed to fetch http://192.0.2.1/x/./InRelease  Could not connect" ;;
+                hang) echo "Hit:1 http://cuda.example ./ InRelease"; exit 124 ;;
+                partial-self) hit
+                  echo "W: Failed to fetch $host/ubuntu/dists/jammy-updates/InRelease  Could not connect" ;;
                 *) echo "W: Failed to fetch $host" ;;
               esac
               exit 0
@@ -648,6 +658,54 @@ def test_apt_source_that_always_partly_fails_still_installs_optional_ones():
                          install_first='',
                          missing='wget openssh-server patch gcc')
     assert _installed(made) == {'wget', 'openssh-server', 'patch', 'gcc'}
+    assert ok
+
+
+def test_apt_partial_refresh_stops_once_every_package_is_installed():
+    """A partly failing source has no reason to try a mirror if all went in."""
+    made, ok = _apt_loop(['partial'] * 12,
+                         mirrors='m1.example m2.example',
+                         install_first='',
+                         missing='wget')
+    assert _updates(made) == ['http://archive.ubuntu.com'] * 3
+    assert _installed(made) == {'wget'}
+    assert ok
+
+
+def test_apt_third_party_source_failing_does_not_walk_the_mirrors():
+    """A mirror replaces only the Ubuntu archive, so it cannot fix that."""
+    made, ok = _apt_loop(['partial-3p'] * 9,
+                         mirrors='m1.example m2.example',
+                         install_first='',
+                         missing='fuse3',
+                         install_fails='fuse3')
+    assert _updates(made) == ['http://archive.ubuntu.com'] * 3
+    assert ok
+
+
+def test_apt_refresh_cut_off_by_the_timeout_moves_on_for_optional_ones():
+    """A slow archive names no failed URL before the timeout kills apt."""
+    made, ok = _apt_loop(['hang'] * 3 + ['ok'],
+                         mirrors='m1.example',
+                         install_first='',
+                         missing='openssh-server',
+                         install_fails='archive.ubuntu.com/openssh-server')
+    assert _updates(
+        made) == ['http://archive.ubuntu.com'] * 3 + ['http://m1.example']
+    assert 'openssh-server' in _installed(made), made
+    assert ok
+
+
+def test_apt_mirror_failing_its_own_archive_moves_on_for_optional_ones():
+    """The next mirror may carry what the partly failing one could not."""
+    made, ok = _apt_loop(['partial'] * 3 + ['partial-self'] * 3 + ['ok'],
+                         mirrors='m1.example m2.example',
+                         install_first='',
+                         missing='gcc',
+                         install_fails='archive.ubuntu.com/gcc m1.example/gcc')
+    assert _updates(made) == (['http://archive.ubuntu.com'] * 3 +
+                              ['http://m1.example'] * 3 + ['http://m2.example'])
+    assert 'gcc' in _installed(made), made
     assert ok
 
 

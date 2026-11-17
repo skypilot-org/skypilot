@@ -923,6 +923,11 @@ available_node_types:
                 # retries: they may be the only ones an egress allowlist lets
                 # through.
                 APT_ZERO_REACH=false
+                # URLs the last refresh attempt failed to fetch, one per line,
+                # and whether it was cut off by the timeout before apt could
+                # name the source it was still loading.
+                APT_FAILED_URLS=""
+                APT_TIMED_OUT=false
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
                   # do not fail the whole shell; we handle return codes
@@ -933,6 +938,8 @@ available_node_types:
                   local i
                   local reached=false
                   APT_ZERO_REACH=false
+                  APT_FAILED_URLS=""
+                  APT_TIMED_OUT=false
                   for i in $(seq 1 $tries); do
                     # apt-get update returns 0 even when sources fail to fetch,
                     # so we also check output for failure indicators. LC_ALL=C:
@@ -943,7 +950,10 @@ available_node_types:
                     output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get update -o quiet=1 $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
+                    APT_FAILED_URLS=$(echo "$output" | grep -oE '^(Err:[0-9]+|[WE]: Failed to fetch) [^ ]+' | sed 's/.* //')
+                    APT_TIMED_OUT=false
                     if [ $rc -eq 124 ]; then
+                      APT_TIMED_OUT=true
                       echo "apt-get update timed out after ${APT_CMD_TIMEOUT}s (attempt $i/$tries)" >> "$log"
                     elif [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
                       set -e; return 0
@@ -1271,9 +1281,11 @@ available_node_types:
                 # refresh; if it reached any source, install the missing
                 # required packages, then each optional one best-effort. Move
                 # on while a required package is missing, or while an optional
-                # one is after a refresh that partly failed (it may sit behind
-                # the failing source). After a clean refresh, a missing
-                # optional package is taken as absent from this distro.
+                # one is after the Ubuntu archive partly failed to refresh (it
+                # may sit behind the failing entry, which the next mirror
+                # replaces), or the refresh timed out. Otherwise a missing
+                # optional package is taken as absent from this distro, or
+                # behind a source no mirror fixes.
                 run_apt_install_with_fallback() {
                 INSTALL_SUCCESS=false
                 local core_left="$INSTALL_FIRST"
@@ -1334,7 +1346,10 @@ available_node_types:
                   fi
 
                   [ -n "$core_left" ] && continue
-                  [ "$refresh_clean" = "false" ] && [ -n "$optional_left" ] && continue
+                  if [ "$refresh_clean" = "false" ] && [ -n "$optional_left" ] && { [ "$APT_TIMED_OUT" = "true" ] || \
+                    echo "$APT_FAILED_URLS" | grep -qE "^https?://([a-zA-Z0-9.-]+\.ubuntu\.com${candidate:+|$candidate})/ubuntu"; }; then
+                    continue
+                  fi
                   break
                 done
                 restore_source
