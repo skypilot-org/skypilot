@@ -3297,6 +3297,69 @@ def get_config_schema():
         },
     }
 
+    idle_detection_schema = {
+        'type': 'object',
+        'required': ['window', 'source', 'notify'],
+        'additionalProperties': False,
+        'properties': {
+            'window': {
+                'type': 'string',
+                'pattern': constants.TIME_PATTERN_SECONDS,
+            },
+            # Exactly one source decides whether a cluster is idle.
+            'source': {
+                'type': 'object',
+                'additionalProperties': False,
+                'minProperties': 1,
+                'maxProperties': 1,
+                'properties': {
+                    'prometheus': {
+                        'type': 'object',
+                        'required': ['url', 'query', 'threshold'],
+                        'additionalProperties': False,
+                        'properties': {
+                            'url': {
+                                'type': 'string',
+                            },
+                            'headers_file': {
+                                'type': 'string',
+                            },
+                            'query': {
+                                'type': 'string',
+                            },
+                            'threshold': {
+                                'type': 'number',
+                            },
+                        },
+                    },
+                    'http': {
+                        'type': 'object',
+                        'required': ['url'],
+                        'additionalProperties': False,
+                        'properties': {
+                            'url': {
+                                'type': 'string',
+                            },
+                            'headers_file': {
+                                'type': 'string',
+                            },
+                        },
+                    },
+                },
+            },
+            'notify': {
+                'type': 'object',
+                'required': ['webhook'],
+                'additionalProperties': False,
+                'properties': {
+                    'webhook': {
+                        'type': 'string',
+                    },
+                },
+            },
+        },
+    }
+
     dashboard_schema = {
         'type': 'object',
         'required': [],
@@ -3408,6 +3471,7 @@ def get_config_schema():
             'data': data_schema,
             'dashboard': dashboard_schema,
             'metrics': metrics_schema,
+            'idle_detection': idle_detection_schema,
             **cloud_configs,
             # For plugin-specific config.
             'plugins': {
