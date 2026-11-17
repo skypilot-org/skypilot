@@ -1923,6 +1923,25 @@ Verda |community-badge|
 4. Alternatively, you can set the environment variables :code:`VERDA_CLIENT_ID` and :code:`VERDA_CLIENT_SECRET`.
 5. You are all set! Verda Cloud does not require any additional setup or dependencies.
 
+Runcrate |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`Runcrate <https://www.runcrate.ai/?utm_source=skypilot&utm_medium=directory&utm_campaign=gpu_pricing>`__ is a GPU cloud that rents GPU and CPU virtual machines by the hour in many regions. To use Runcrate with SkyPilot:
+
+1. Create an API key on the `API keys <https://www.runcrate.ai/dashboard/api-keys>`__ page of the Runcrate dashboard. A key acts in one environment of your workspace.
+2. Save the key to :code:`~/.runcrate/api_key`:
+
+.. code-block:: shell
+
+  mkdir -p ~/.runcrate
+  echo "<your_api_key_here>" > ~/.runcrate/api_key
+
+3. You are all set! Runcrate does not require any additional dependencies.
+
+.. note::
+
+  Runcrate clusters are single-node, and they can be terminated or auto-terminated (``--down``) but not stopped. Ports requested with ``ports:`` are opened in the environment's firewall, which applies to every instance in that environment.
+
 
 .. _docker-image:
 
