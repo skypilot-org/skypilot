@@ -383,7 +383,7 @@ def test_page_sends_the_headers_extensions_register():
 
 
 def test_default_docs_redirect_to_the_page(client):
-    for path in ('/docs', '/redoc'):
+    for path in ('/docs', '/redoc', '/api-reference'):
         response = client.get(path, follow_redirects=False)
         assert response.status_code == 307
         assert response.headers['location'] == routes.PAGE_PATH

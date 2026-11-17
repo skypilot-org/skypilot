@@ -365,6 +365,10 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'HEAD'
     },
     {
+        'path': '/api-reference',
+        'method': 'GET'
+    },
+    {
         'path': '/api-reference/*',
         'method': 'GET'
     },

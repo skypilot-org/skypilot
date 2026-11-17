@@ -189,9 +189,11 @@ def init_script(request: fastapi.Request) -> fastapi.Response:
 
 
 # FastAPI's own pages load their assets from a CDN, which the server's CSP
-# blocks.
+# blocks. The slashless page path needs a route of its own: RBAC checks the
+# path before FastAPI's trailing-slash redirect.
 @router.get('/docs')
 @router.get('/redoc')
+@router.get(PAGE_PATH.rstrip('/'))
 def default_docs() -> responses.RedirectResponse:
     return responses.RedirectResponse(PAGE_PATH)
 
