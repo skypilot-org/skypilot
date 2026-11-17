@@ -42,7 +42,7 @@ from sky.server.requests.serializers import return_value_serializers
 from sky.skylet import constants as skylet_constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
-from sky.utils import locks
+from sky.utils import leader_election
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
@@ -79,6 +79,8 @@ DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 _REQUESTS_GC_INTERVAL_SECONDS = 3600  # 1 hour
 # Must be the same on every API server that shares the request backend.
 _REQUESTS_GC_LOCK_ID = 'requests_gc'
+# A pass does not renew its leader lease, so the lease must outlast the pass.
+_REQUESTS_GC_LEASE_SECONDS = _REQUESTS_GC_INTERVAL_SECONDS
 # File locks are thread-local: acquire and release on this one thread.
 _requests_gc_lock_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=1, thread_name_prefix='requests-gc-lock')
@@ -1506,6 +1508,12 @@ async def _clean_orphan_request_logs() -> None:
                     f'{removed_bytes} bytes freed')
 
 
+def _try_lead_requests_gc() -> Optional[leader_election.LeaderElector]:
+    elector = leader_election.get_elector(
+        _REQUESTS_GC_LOCK_ID, ttl_seconds=_REQUESTS_GC_LEASE_SECONDS)
+    return elector if elector.try_acquire() else None
+
+
 @contextlib.asynccontextmanager
 async def _requests_gc_role() -> AsyncIterator[bool]:
     """Yield whether this server deletes expired requests in this pass.
@@ -1517,19 +1525,14 @@ async def _requests_gc_role() -> AsyncIterator[bool]:
         yield True
         return
     loop = asyncio.get_running_loop()
-    lock = await loop.run_in_executor(_requests_gc_lock_executor,
-                                      locks.get_lock, _REQUESTS_GC_LOCK_ID)
+    elector = await loop.run_in_executor(_requests_gc_lock_executor,
+                                         _try_lead_requests_gc)
     try:
-        await loop.run_in_executor(
-            _requests_gc_lock_executor,
-            functools.partial(lock.acquire, blocking=False))
-    except locks.LockTimeout:
-        yield False
-        return
-    try:
-        yield True
+        yield elector is not None
     finally:
-        await loop.run_in_executor(_requests_gc_lock_executor, lock.release)
+        if elector is not None:
+            await loop.run_in_executor(_requests_gc_lock_executor,
+                                       elector.release)
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,

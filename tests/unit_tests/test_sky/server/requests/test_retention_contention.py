@@ -9,6 +9,8 @@ import pytest
 import pytest_asyncio
 
 from sky.server.requests import requests
+from sky.utils import leader_election
+from sky.utils import locks
 from sky.utils.db import db_utils
 
 
@@ -176,19 +178,19 @@ async def test_invalid_batch_size(batch_size):
 
 @pytest.fixture(name='gc_lock')
 def gc_lock_fixture(monkeypatch, tmp_path):
-    monkeypatch.setattr(requests.locks, 'SKY_LOCKS_DIR',
-                        str(tmp_path / 'locks'))
+    monkeypatch.delenv(leader_election.ENV_VAR_BACKEND, raising=False)
+    monkeypatch.setattr(locks, 'SKY_LOCKS_DIR', str(tmp_path / 'locks'))
     monkeypatch.setattr(
-        requests.locks,
+        locks,
         '_detect_lock_type',  # pylint: disable=protected-access
         lambda: 'filelock')
-    return requests.locks.get_lock(requests._REQUESTS_GC_LOCK_ID)  # pylint: disable=protected-access
+    return locks.get_lock(requests._REQUESTS_GC_LOCK_ID)  # pylint: disable=protected-access
 
 
 @pytest.fixture(name='shared')
 def shared_backend(retention, monkeypatch):
     db, backend = retention
-    monkeypatch.setattr(type(backend), 'shared_across_servers', True)
+    monkeypatch.setattr(backend, 'shared_across_servers', True)
     return db
 
 

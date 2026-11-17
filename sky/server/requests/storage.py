@@ -18,6 +18,10 @@ if TYPE_CHECKING:
 class RequestBackend(abc.ABC):
     """Abstract interface for request persistence and lifecycle."""
 
+    # Whether several API server instances read and write these rows. If so,
+    # the retention cleanup deletes expired rows from one instance at a time.
+    shared_across_servers: bool = False
+
     @abc.abstractmethod
     def get_request(self,
                     request_id: str,
@@ -194,15 +198,6 @@ class RequestBackend(abc.ABC):
 
     def reset_on_startup(self) -> None:
         """Called on server startup for backend-specific initialization."""
-
-    @property
-    def shared_across_servers(self) -> bool:
-        """Whether several API server instances read and write these rows.
-
-        If so, the retention cleanup deletes expired rows from one instance
-        at a time instead of from each of them.
-        """
-        return False
 
 
 _storage_backend: Optional[RequestBackend] = None
