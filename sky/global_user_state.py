@@ -847,6 +847,28 @@ def add_or_update_user(
             if existing_user is not None:
                 return (False, user) if return_user else False
 
+        # Request authentication calls this for every request, almost always
+        # with values the row already holds. The write below locks the row
+        # until COMMIT even then, so concurrent requests of one user would
+        # queue on it; a plain read takes no lock. Write only a new or
+        # changed user.
+        row = session.execute(
+            sqlalchemy.select(user_table).where(
+                user_table.c.id == user.id)).fetchone()
+        if (row is not None and row.name == user.name and
+            (not user.password or row.password == user.password) and
+            (not user.user_type or row.type == user.user_type)):
+            if return_user:
+                return False, models.User(
+                    id=row.id,
+                    name=row.name,
+                    password=row.password,
+                    created_at=row.created_at,
+                    user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
+                )
+            return False
+
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
             # vs existing
