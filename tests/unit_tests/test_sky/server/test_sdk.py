@@ -249,9 +249,9 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             [mock.call(test_endpoint_2),
              mock.call(test_endpoint_2)])
 
-    # Test with invalid endpoint
+    # Test with an unsupported scheme
     with pytest.raises(click.BadParameter):
-        client_sdk.api_login("invalid_endpoint")
+        client_sdk.api_login('ftp://invalid_endpoint')
 
     # Test with endpoint ending with a slash
     test_endpoint_with_slash = "http://test3.skypilot.co/"
@@ -354,6 +354,41 @@ def _mock_healthy_check():
     """Returns a mock of check_server_healthy that reports a healthy server."""
     mock_check = mock.patch('sky.server.common.check_server_healthy')
     return mock_check
+
+
+@pytest.mark.parametrize(
+    'endpoint,expected',
+    [
+        # No scheme: https:// is added.
+        ('test.skypilot.co/', 'https://test.skypilot.co'),
+        ('test.skypilot.co:8443', 'https://test.skypilot.co:8443'),
+        ('1.2.3.4:30050', 'https://1.2.3.4:30050'),
+        ('[::1]:46580', 'https://[::1]:46580'),
+        ('a.co/?next=http://x', 'https://a.co/?next=http://x'),
+        # An explicit scheme is kept.
+        ('https://1.2.3.4:46580', 'https://1.2.3.4:46580'),
+        ('http://test.skypilot.co/', 'http://test.skypilot.co'),
+    ])
+def test_api_login_endpoint_without_scheme(monkeypatch: pytest.MonkeyPatch,
+                                           tmp_path: Path, endpoint: str,
+                                           expected: str):
+    """An endpoint with no scheme gets https:// added."""
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(endpoint)
+
+    mock_check.assert_called_with(expected)
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['endpoint'] == expected
 
 
 def test_api_login_with_env_endpoint(monkeypatch: pytest.MonkeyPatch,

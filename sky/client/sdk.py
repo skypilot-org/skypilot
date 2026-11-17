@@ -3165,6 +3165,10 @@ def _without_service_account_token() -> Iterator[None]:
         yield
 
 
+# A URL scheme at the start of the endpoint (RFC 3986), e.g. `https://`.
+_URL_SCHEME_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*://')
+
+
 def _validate_endpoint(endpoint: Optional[str]) -> str:
     """Validate and normalize the endpoint URL."""
     if endpoint is None:
@@ -3176,6 +3180,9 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
             ('api_server', 'endpoint'), None)
         endpoint = click.prompt('Enter your SkyPilot API server endpoint',
                                 default=default_endpoint)
+    # Default to https:// when no scheme is given, e.g. a bare hostname.
+    if not _URL_SCHEME_RE.match(endpoint):
+        endpoint = f'https://{endpoint}'
     # Check endpoint is a valid URL
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
