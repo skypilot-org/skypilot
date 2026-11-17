@@ -25,7 +25,6 @@ MAX_IN_ROW_BYTES = 1024 * 1024
 _REFERENCE_KEY = '__skypilot_stored_result__'
 _SUFFIX = '.json.zlib'
 _TMP_SUFFIX = '.tmp'
-# Level 1 compresses encoded results about 10x at several hundred MB/s.
 _COMPRESSION_LEVEL = 1
 
 
