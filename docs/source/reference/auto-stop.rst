@@ -175,6 +175,7 @@ Every 15 minutes the API server sends the query for each ``UP`` cluster. A clust
 SkyPilot does not collect the metrics or know what they mean: the query is yours, and a source that is not PromQL-compatible can be put behind ``source.http``. See :ref:`idle_detection <config-yaml-idle-detection>` for all fields.
 
 - A cluster that cannot be measured (no data, an error from the source) counts as active.
+- The query decides how much data is enough. ``avg_over_time`` averages whatever samples exist; see :ref:`idle_detection <config-yaml-idle-detection>` for requiring data from the start of the window.
 - A cluster is first checked after the API server has seen it ``UP`` for a full ``window``, so nothing is reported for the first ``window`` after turning this on, or after ``sky start``.
 - Running jobs and SSH sessions do not exempt a cluster; only the source decides.
 - Controllers and clusters launched by managed jobs, services or pools are never checked.

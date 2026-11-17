@@ -3707,6 +3707,8 @@ When set, the API server asks the source whether each ``UP`` cluster has been id
     ``query``
         A PromQL expression, sent once per cluster with the placeholders below filled in. The cluster is idle if the result has at least one series and every series is below ``threshold``. An empty result, an error or a timeout counts as active.
 
+        The query defines what idle means, including how much data is enough: ``avg_over_time`` averages whatever samples exist, so an exporter that only started reporting a minute ago can make a busy cluster look idle. To require data from the start of the window, add ``and <metric>{...} offset {window}``, which returns nothing when there was no sample one window ago.
+
         - ``{cluster}``: cluster name.
         - ``{cluster_on_cloud}``: cluster name on the cloud. On Kubernetes, pods are named ``{cluster_on_cloud}-head`` and ``{cluster_on_cloud}-worker<N>``.
         - ``{user}``: name of the user who owns the cluster.

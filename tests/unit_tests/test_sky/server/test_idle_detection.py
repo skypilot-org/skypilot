@@ -97,6 +97,7 @@ class _World:
         self.saves = 0
         self.system_config = {}
         self.source_seconds = 0
+        self.relaunch_during_source_call = None
         self.now = 0
 
         original_get_nested = skypilot_config.get_nested
@@ -117,6 +118,9 @@ class _World:
                             lambda lock_id: self)
         monkeypatch.setattr(requests, 'get', self._get)
         monkeypatch.setattr(requests, 'post', self._post)
+        monkeypatch.setattr(
+            global_user_state, 'get_cluster_launch_time',
+            lambda cluster_name: self.clusters[cluster_name]['launched_at'])
         monkeypatch.setattr(global_user_state, 'get_system_config',
                             self.system_config.get)
         monkeypatch.setattr(global_user_state, 'set_system_config',
@@ -189,6 +193,9 @@ class _World:
         assert timeout
         self.queries.append((url, params, headers))
         self.now += self.source_seconds
+        if self.relaunch_during_source_call is not None:
+            self.clusters[
+                self.relaunch_during_source_call]['launched_at'] = self.now
         if isinstance(self.source_response, Exception):
             raise self.source_response
         return self.source_response
@@ -491,8 +498,59 @@ def test_long_pass_renews_leadership(world):
 
     world.run(_WINDOW)
 
-    assert world.renewals == 1
+    assert world.renewals == 2
     assert len(world.queries) == 2
+
+
+def test_leadership_lost_during_a_source_call_stops_before_acting(world):
+    """The source can take longer to answer than the leader lease lasts."""
+    world.add_cluster()
+    world.run_until(_WINDOW - _INTERVAL)
+    marker = dict(world.system_config)
+    saves = world.saves
+    world.source_seconds = 61
+    world.still_leading = False
+
+    world.run(_WINDOW)
+
+    assert len(world.queries) == 1
+    assert not world.webhooks
+    assert not world.events
+    assert world.saves == saves
+    assert world.system_config == marker
+
+
+def test_cluster_relaunched_during_the_source_call_is_not_reported(world):
+    """The answer describes the cluster before it was relaunched."""
+    world.add_cluster()
+    world.run_until(_WINDOW - _INTERVAL)
+    world.relaunch_during_source_call = 'train'
+
+    world.run(_WINDOW)
+
+    assert len(world.queries) == 1
+    assert not world.webhooks
+    assert not world.events
+
+
+def test_pause_is_handled_again_if_its_reset_could_not_be_saved(
+        world, monkeypatch):
+    """Otherwise the next pass would trust the window from before the pause."""
+    world.add_cluster()
+    world.run_until(_WINDOW - _INTERVAL)
+    set_cluster_info = global_user_state.set_cluster_info
+
+    def fail(cluster_name, metadata):
+        raise ValueError('database is locked')
+
+    monkeypatch.setattr(global_user_state, 'set_cluster_info', fail)
+    world.run(_WINDOW + 5 * _INTERVAL)
+    monkeypatch.setattr(global_user_state, 'set_cluster_info', set_cluster_info)
+
+    world.run(_WINDOW + 6 * _INTERVAL)
+
+    assert not world.queries
+    assert world.state()['up_since'] == _WINDOW + 6 * _INTERVAL
 
 
 def test_pass_ends_when_leadership_is_lost(world):

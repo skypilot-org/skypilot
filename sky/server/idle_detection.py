@@ -29,7 +29,7 @@ OPT_OUT_VALUE = 'skip'
 
 _LOCK_ID = 'idle_detection'
 _STATE_KEY = 'idle_detection'
-_LAST_PASS_KEY = 'idle_detection_last_pass_finished'
+_LAST_PASS_KEY = 'idle_detection_last_pass'
 _SOURCE_TIMEOUT_SECONDS = 30
 _WEBHOOK_TIMEOUT_SECONDS = 10
 
@@ -164,8 +164,9 @@ def _is_exempt(record: Dict[str, Any]) -> bool:
 
 
 def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
-                   headers: Dict[str, str], window: int, watching: bool,
-                   now: int, counts: Dict[str, int]) -> None:
+                   headers: Dict[str, str], window: int, watching_since: int,
+                   now: int, leading: Callable[[], bool],
+                   counts: Dict[str, int]) -> None:
     previous = record['metadata'].get(_STATE_KEY)
     if record['status'] != status_lib.ClusterStatus.UP:
         if previous is not None:
@@ -176,10 +177,15 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
 
     # The daemon judges a cluster only after watching it stay UP for a whole
     # window: the source averages whatever samples exist, so a young cluster
-    # would read idle. Provisioning rewrites launched_at.
-    if (previous is None or not watching or
+    # would read idle. Provisioning rewrites launched_at; watching_since
+    # changes when the daemon resumes after a pause.
+    if (previous is None or previous['watching_since'] != watching_since or
             previous['launched_at'] != record['launched_at']):
-        state = {'launched_at': record['launched_at'], 'up_since': now}
+        state = {
+            'launched_at': record['launched_at'],
+            'watching_since': watching_since,
+            'up_since': now,
+        }
     else:
         state = dict(previous)
 
@@ -195,6 +201,9 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
             logger.warning(
                 f'Could not tell whether cluster {record["name"]!r} is idle; '
                 f'treating it as active: {common_utils.format_exception(e)}')
+        # The source may have taken longer to answer than leadership lasts.
+        if not leading():
+            return
         if reason is None:
             state.pop('idle_since', None)
             state.pop('notified_at', None)
@@ -202,6 +211,11 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
             counts['idle'] += 1
             state.setdefault('idle_since', now)
             if now - state.get('notified_at', now - window) >= window:
+                # The answer describes the cluster as it was when this pass
+                # read it; it may have been relaunched since.
+                if global_user_state.get_cluster_launch_time(
+                        record['name']) != record['launched_at']:
+                    return
                 try:
                     _notify(config, record, reason, state['idle_since'])
                     state['notified_at'] = now
@@ -239,30 +253,46 @@ def run_pass(interval: int) -> None:
         # After a pause in the daemon nobody watched the clusters stay UP, so
         # every observation window starts over. Measured from the end of the
         # last pass: a slow pass is not a pause.
-        last_pass_finished = global_user_state.get_system_config(_LAST_PASS_KEY)
-        watching = (last_pass_finished is not None and
-                    now - int(last_pass_finished) <= 2 * interval)
+        last_pass = json.loads(
+            global_user_state.get_system_config(_LAST_PASS_KEY) or 'null')
+        if (last_pass is not None and
+                now - last_pass['finished'] <= 2 * interval):
+            watching_since = last_pass['watching_since']
+        else:
+            watching_since = now
         renewed_at = time.monotonic()
+
+        def leading() -> bool:
+            nonlocal renewed_at
+            if time.monotonic() - renewed_at >= elector.renew_interval_seconds:
+                if not elector.renew():
+                    return False
+                renewed_at = time.monotonic()
+            return True
+
         counts = {'checked': 0, 'idle': 0, 'notified': 0, 'errors': 0}
         for record in global_user_state.get_clusters(
                 exclude_managed_clusters=True):
-            if (time.monotonic() - renewed_at >=
-                    elector.renew_interval_seconds):
-                if not elector.renew():
-                    logger.warning('Another API server took over idle '
-                                   'detection; ending this pass.')
-                    return
-                renewed_at = time.monotonic()
+            if not leading():
+                break
             try:
-                _check_cluster(record, config, headers, window, watching, now,
-                               counts)
+                _check_cluster(record, config, headers, window, watching_since,
+                               now, leading, counts)
             except Exception as e:  # pylint: disable=broad-except
                 counts['errors'] += 1
                 logger.warning(
                     f'Idle detection failed for cluster {record["name"]!r}: '
                     f'{common_utils.format_exception(e)}')
-        global_user_state.set_system_config(_LAST_PASS_KEY,
-                                            str(int(time.time())))
+        if not leading():
+            logger.warning('Another API server took over idle detection; '
+                           'ending this pass.')
+            return
+        global_user_state.set_system_config(
+            _LAST_PASS_KEY,
+            json.dumps({
+                'finished': int(time.time()),
+                'watching_since': watching_since,
+            }))
         # A source that fails for every cluster makes them all look active,
         # which is indistinguishable from a busy fleet without this line.
         summary = ' '.join(f'{name}={count}' for name, count in counts.items())
