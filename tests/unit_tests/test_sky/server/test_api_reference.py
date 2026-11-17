@@ -436,3 +436,99 @@ def test_reference_of_the_api_server():
         ref for ref in refs
         if ref.split('/')[-1] not in doc['components']['schemas']
     } == set()
+
+
+# Every core operation the reference marks as a background request. The marks
+# are inferred from handler source, so a refactor of how a handler schedules
+# its work can drop one; update this set only for a deliberate change.
+_BACKGROUND_OPERATIONS = {
+    'GET /all_contexts',
+    'GET /enabled_clouds',
+    'GET /enabled_clouds/batch',
+    'GET /recipes',
+    'GET /slurm_node_info',
+    'GET /status_kubernetes',
+    'GET /storage/ls',
+    'GET /volumes',
+    'GET /workspaces',
+    'GET /workspaces/config',
+    'POST /api/cancel',
+    'POST /autostop',
+    'POST /cancel',
+    'POST /check',
+    'POST /cluster_events',
+    'POST /cluster_job_spec',
+    'POST /cost_report',
+    'POST /down',
+    'POST /download_logs',
+    'POST /endpoints',
+    'POST /exec',
+    'POST /job_status',
+    'POST /jobs/cancel',
+    'POST /jobs/download_logs',
+    'POST /jobs/events',
+    'POST /jobs/launch',
+    'POST /jobs/pool_apply',
+    'POST /jobs/pool_down',
+    'POST /jobs/pool_status',
+    'POST /jobs/pool_sync-down-logs',
+    'POST /jobs/queue',
+    'POST /jobs/queue/v2',
+    'POST /jobs/wait',
+    'POST /kubernetes_label_gpus',
+    'POST /kubernetes_node_info',
+    'POST /launch',
+    'POST /list_accelerator_counts',
+    'POST /list_accelerators',
+    'POST /optimize',
+    'POST /queue',
+    'POST /realtime_kubernetes_gpu_availability',
+    'POST /recipes/create',
+    'POST /recipes/delete',
+    'POST /recipes/get',
+    'POST /recipes/list',
+    'POST /recipes/pin',
+    'POST /recipes/update',
+    'POST /serve/down',
+    'POST /serve/status',
+    'POST /serve/sync-down-logs',
+    'POST /serve/terminate-replica',
+    'POST /serve/up',
+    'POST /serve/update',
+    'POST /slurm_cluster_names',
+    'POST /slurm_gpu_availability',
+    'POST /slurm_node_info',
+    'POST /ssh_node_pools/deploy',
+    'POST /ssh_node_pools/down',
+    'POST /ssh_node_pools/{pool_name}/deploy',
+    'POST /ssh_node_pools/{pool_name}/down',
+    'POST /start',
+    'POST /status',
+    'POST /stop',
+    'POST /storage/delete',
+    'POST /volumes/apply',
+    'POST /volumes/delete',
+    'POST /workspaces/batch_add_users',
+    'POST /workspaces/batch_remove_users',
+    'POST /workspaces/config',
+    'POST /workspaces/create',
+    'POST /workspaces/delete',
+    'POST /workspaces/update',
+}
+
+
+def test_background_operations_of_the_api_server():
+    # pylint: disable=import-outside-toplevel
+    from sky.server import server
+
+    doc = testclient.TestClient(server.app).get(routes.OPENAPI_PATH).json()
+    by_operation = schema.routes_by_operation(server.app)
+    marked = {
+        f'{method.upper()} {path}' for path, operations in doc['paths'].items()
+        for method, operation in operations.items()
+        if operation.get('x-skypilot-async') and by_operation[(
+            path, method)].endpoint.__module__.startswith('sky.')
+    }
+    assert marked == _BACKGROUND_OPERATIONS, (
+        f'Newly marked: {sorted(marked - _BACKGROUND_OPERATIONS)}; no longer '
+        f'marked: {sorted(_BACKGROUND_OPERATIONS - marked)}')
