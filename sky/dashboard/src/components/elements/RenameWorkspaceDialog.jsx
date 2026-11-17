@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { PencilIcon } from 'lucide-react';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { getVolumes } from '@/data/connectors/volumes';
 import { updateWorkspace } from '@/data/connectors/workspaces';
 import dashboardCache from '@/lib/cache';
 import {
@@ -85,9 +86,10 @@ export function RenameWorkspaceDialog({
       const renamed = { ...storedConfig, name: newName };
       await updateWorkspace(workspaceId, renamed, storedConfig);
       invalidateWorkspaceCaches();
-      // Cluster and job records carry the workspace name.
+      // Cluster, job and volume records carry the workspace name.
       dashboardCache.invalidateFunction(getClusters);
       dashboardCache.invalidateFunction(getManagedJobs);
+      dashboardCache.invalidateFunction(getVolumes);
       onRenamed(newName, renamed);
     } catch (err) {
       setSaving(false);

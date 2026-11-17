@@ -1063,6 +1063,31 @@ def check_cluster_write_permission(user: models.User,
             f'the workspace of cluster {cluster_name!r}')
 
 
+def check_volume_write_permission(user: models.User, volume_name: str) -> None:
+    """Checks a user may delete or mount an existing volume.
+
+    The volume counterpart of ``check_cluster_write_permission``: gated by the
+    workspace the volume belongs to, not the caller's active workspace. A
+    missing volume is left to the caller's own not-found handling.
+
+    Raises:
+        PermissionDeniedError: If the user cannot write to the volume's
+            workspace.
+    """
+    record = global_user_state.get_volume_by_name(volume_name)
+    if record is None:
+        return
+    # Volumes recorded before workspaces existed belong to the default one.
+    workspace = (record.get('workspace') or
+                 constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have permission to access '
+            f'the workspace of volume {volume_name!r}')
+
+
 def _save_config_and_sync_members(config: Optional[Dict[str, Any]]) -> None:
     """Saves `config`, then syncs every workspace's members with it.
 
@@ -1576,6 +1601,7 @@ def resolve_workspace_for_user(
     requested: Optional[str] = None,
     action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
     requested_ref: Optional[str] = None,
+    pick_for_read: bool = False,
 ) -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
 
@@ -1586,7 +1612,10 @@ def resolve_workspace_for_user(
     affects the fallback: for 'read' (vs the 'write' default), when the user
     has *no* writable workspace at all, read-only workspaces are considered so
     a read-only-only user can still resolve an active workspace instead of
-    hitting NoWorkspaceAccessError.
+    hitting NoWorkspaceAccessError, and several of them resolve to the first by
+    name. With ``pick_for_read``, a read by a user with several writable
+    workspaces also resolves to the first by name instead of raising
+    WorkspaceAmbiguousError.
 
     Precedence (a future admin-assignment tier can splice in between
     `preferred_workspace` and the default-fallback step without changing
@@ -1608,13 +1637,17 @@ def resolve_workspace_for_user(
       5. zero accessible -> one-shot policy re-sync and recompute (heals a
          first-login re-sync that failed transiently); still zero ->
          NoWorkspaceAccessError
-      6. multiple, none chosen, no 'default' access -> WorkspaceAmbiguousError
+      6. multiple, none chosen, no 'default' access -> the first by name for
+         a read with ``pick_for_read`` (or a read-only-only user);
+         WorkspaceAmbiguousError otherwise
 
     Args:
         user: the user the resolution is for.
         requested: workspace explicitly named by the caller, or None.
         requested_ref: what the user typed for `requested`, shown in a
             denial instead of the id.
+        pick_for_read: for a read, pick the first workspace by name instead
+            of raising WorkspaceAmbiguousError.
 
     Returns:
         WorkspaceResolution carrying the workspace name + source + optional
@@ -1625,7 +1658,8 @@ def resolve_workspace_for_user(
             requested workspace not accessible (PermissionDeniedError
             subclass).
         exceptions.WorkspaceAmbiguousError: multiple accessible and none
-            chosen, and the user has no access to 'default'.
+            chosen, the user has no access to 'default', and the request is
+            not a read with ``pick_for_read``.
     """
     if requested is not None:
         try:
@@ -1726,20 +1760,17 @@ def resolve_workspace_for_user(
         raise exceptions.NoWorkspaceAccessError(
             f'User {user.name} ({user.id}) has no accessible workspaces.')
 
-    if read_only_only:
-        # Several read-only-visible workspaces and no writable one. Ambiguity
-        # is a *write* problem — a new resource lands in exactly one workspace
-        # and only the user can say which. A read just needs a config context,
-        # and listings filter by every accessible workspace regardless of the
-        # pick, so any candidate serves. Raising here would leave such a user
-        # unable to read ANYTHING (every request resolves the active workspace
-        # first), and `WorkspaceAmbiguousError`'s recovery hint would be a dead
-        # end for them: it says to set a preferred workspace, but
-        # `set_user_preferred_workspace` requires write access. Pick
-        # deterministically instead.
+    if read_only_only or (pick_for_read and
+                          action == workspace_constants.WORKSPACE_ACTION_READ):
+        # Ambiguity is a *write* problem: only the user can say where a new
+        # resource lands. Listings cover every accessible workspace whatever
+        # the pick, and raising would fail every read (e.g. every dashboard
+        # page). By name, so users can tell which workspace their reads use.
         return WorkspaceResolution(
-            workspace=accessible[0],
-            source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY,
+            workspace=min(accessible, key=skypilot_config.get_workspace_name),
+            source=(workspace_constants.WORKSPACE_SOURCE_READ_ONLY
+                    if read_only_only else
+                    workspace_constants.WORKSPACE_SOURCE_READ_FIRST),
             note=drift_note)
 
     # The user is a member of each, so names are safe to show.

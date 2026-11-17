@@ -527,7 +527,7 @@ class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     `sky workspace use <name>` or `~/.sky/config.yaml`. The `--workspace`
     flag is listed as a footnote because it only exists on the launch
     commands (`sky launch` / `sky jobs launch`); listing it as a main
-    fix would mislead users running `sky status` / `sky queue` / etc.
+    fix would mislead users of the other commands that write.
 
     `note` is an optional drift explanation populated when the user has a
     saved preference that is no longer accessible — so the user understands

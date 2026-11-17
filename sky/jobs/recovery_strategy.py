@@ -55,10 +55,9 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Launch failures that retrying cannot fix: the launch never got as far as
-# asking for resources, and trying again does not change the answer. These fail
-# the job with FAILED_PRECHECKS instead of entering the retry loop, so a job
-# does not sit there re-attempting something only an operator can resolve.
+# Launch failures before the launch asks for resources. These fail the job with
+# FAILED_PRECHECKS when raise_on_failure is True; recovery fails the job only on
+# TERMINAL_PRECHECK_FAILURES and retries the rest.
 PRECHECK_FAILURES = (
     exceptions.InvalidClusterNameError,
     exceptions.NoCloudAccessError,
@@ -66,6 +65,16 @@ PRECHECK_FAILURES = (
     exceptions.StorageSpecError,
     exceptions.StorageError,
     exceptions.VolumeNotReadyError,
+)
+
+# The precheck failures that fail the job even when raise_on_failure is False,
+# as in recovery: the task spec or the user's access is wrong, so no retry
+# will succeed. Recovery keeps retrying the others, which can clear on their
+# own (a failed upload, expired cloud credentials, a volume not ready yet).
+TERMINAL_PRECHECK_FAILURES = (
+    exceptions.InvalidClusterNameError,
+    exceptions.ResourcesMismatchError,
+    exceptions.StorageSpecError,
 )
 
 # Waiting time for job from INIT/PENDING to RUNNING
@@ -1320,6 +1329,8 @@ class StrategyExecutor:
                 cloud user identity, or unsupported feature.
                 3. Every attempt for UNREACHABLE_INFRA_TIMEOUT_SECONDS failed
                 only because the infra could not be reached.
+                A TERMINAL_PRECHECK_FAILURES error raises it regardless of
+                raise_on_failure.
             exceptions.ManagedJobReachedMaxRetriesError: This will be raised
                 when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -1762,7 +1773,8 @@ class StrategyExecutor:
                     except PRECHECK_FAILURES as e:
                         logger.error('Failure happened before provisioning. '
                                      f'{common_utils.format_exception(e)}')
-                        if raise_on_failure:
+                        if raise_on_failure or isinstance(
+                                e, TERMINAL_PRECHECK_FAILURES):
                             raise exceptions.ProvisionPrechecksError(
                                 reasons=[e])
                         return None
