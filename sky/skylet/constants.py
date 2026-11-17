@@ -865,6 +865,12 @@ ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
 ENV_VAR_SERVER_EXEC_AUTH_CACHE = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}EXEC_AUTH_CACHE')
 
+# Server-side only: `1` stores large request results outside the requests table
+# (sky.server.requests.stored_results). Set it only once every API server
+# process that shares the requests table runs a version that reads them.
+ENV_VAR_SERVER_STORE_LARGE_RESULTS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}STORE_LARGE_RESULTS')
+
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
 # pooler while session-scoped advisory locks keep a direct connection (see

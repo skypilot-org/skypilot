@@ -381,7 +381,8 @@ class Request:
             # isascii() is O(1); only a result with non-ASCII text is encoded.
             self.stored_result_size = (len(serialized) if serialized.isascii()
                                        else len(serialized.encode('utf-8')))
-            if self.stored_result_size <= stored_results.MAX_IN_ROW_BYTES:
+            if (self.stored_result_size <= stored_results.MAX_IN_ROW_BYTES or
+                    not stored_results.store_enabled()):
                 return serialized
             try:
                 self.return_value = stored_results.store(
@@ -1473,14 +1474,14 @@ def _list_stale_log_files(log_dir: pathlib.Path,
 
 
 def _list_stale_files(
-    directory: pathlib.Path, cutoff: float,
+    directory: Optional[pathlib.Path], cutoff: float,
     request_id_of: Callable[[str],
                             Optional[str]]) -> List[Tuple[str, str, int]]:
     """List (request_id, path, size) of files written before cutoff.
 
     ``request_id_of`` maps a file name to its request ID, or None to skip it.
     """
-    if not directory.is_dir():
+    if directory is None or not directory.is_dir():
         return []
     stale = []
     with os.scandir(directory) as entries:

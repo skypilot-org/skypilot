@@ -24,6 +24,7 @@ from sky.server.requests.requests import ScheduleType
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
+from sky.skylet import constants as skylet_constants
 
 
 def dummy():
@@ -2526,7 +2527,8 @@ _LARGE_RESULT = {'jobs': [{'id': i, 'name': f'job-{i}'} for i in range(200)]}
 
 
 @pytest.fixture
-def small_in_row_limit(monkeypatch):
+def store_large_results(monkeypatch):
+    monkeypatch.setenv(skylet_constants.ENV_VAR_SERVER_STORE_LARGE_RESULTS, '1')
     monkeypatch.setattr(requests.stored_results, 'MAX_IN_ROW_BYTES', 1024)
 
 
@@ -2540,7 +2542,7 @@ def _recorded_return_value(request_id: str):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('test_async', [True, False])
 async def test_large_result_is_stored_outside_the_row(isolated_database,
-                                                      small_in_row_limit,
+                                                      store_large_results,
                                                       test_async):
     await requests.create_if_not_exists_async(_running_request('large-req'))
     if test_async:
@@ -2565,7 +2567,7 @@ async def test_large_result_is_stored_outside_the_row(isolated_database,
 
 @pytest.mark.asyncio
 async def test_small_result_stays_in_the_row(isolated_database,
-                                             small_in_row_limit):
+                                             store_large_results):
     await requests.create_if_not_exists_async(_running_request('small-req'))
     requests.set_request_succeeded('small-req', {'ok': True})
 
@@ -2579,7 +2581,7 @@ async def test_small_result_stays_in_the_row(isolated_database,
 
 @pytest.mark.asyncio
 async def test_result_stays_in_the_row_when_storing_fails(
-        isolated_database, small_in_row_limit):
+        isolated_database, store_large_results):
     await requests.create_if_not_exists_async(_running_request('fail-req'))
     with mock.patch.object(requests.stored_results,
                            'store',
@@ -2594,7 +2596,7 @@ async def test_result_stays_in_the_row_when_storing_fails(
 
 @pytest.mark.asyncio
 async def test_updating_a_request_keeps_its_stored_result(
-        isolated_database, small_in_row_limit):
+        isolated_database, store_large_results):
     await requests.create_if_not_exists_async(_running_request('update-req'))
     requests.set_request_succeeded('update-req', _LARGE_RESULT)
     path = requests.stored_results.result_path('update-req')
@@ -2616,7 +2618,7 @@ async def test_updating_a_request_keeps_its_stored_result(
 
 @pytest.mark.asyncio
 async def test_listing_does_not_load_stored_results(isolated_database,
-                                                    small_in_row_limit):
+                                                    store_large_results):
     await requests.create_if_not_exists_async(_running_request('list-req'))
     requests.set_request_succeeded('list-req', _LARGE_RESULT)
 
@@ -2634,7 +2636,7 @@ async def test_listing_does_not_load_stored_results(isolated_database,
 
 @pytest.mark.asyncio
 async def test_gc_deletes_stored_result_with_its_row(isolated_database,
-                                                     small_in_row_limit):
+                                                     store_large_results):
     await requests.create_if_not_exists_async(_running_request('gc-req'))
     requests.set_request_succeeded('gc-req', _LARGE_RESULT)
     with requests.update_request('gc-req') as request:
@@ -2652,7 +2654,7 @@ async def test_gc_deletes_stored_result_with_its_row(isolated_database,
 
 @pytest.mark.asyncio
 async def test_gc_deletes_orphan_stored_results(isolated_database,
-                                                small_in_row_limit):
+                                                store_large_results):
     stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
     await requests.create_if_not_exists_async(_running_request('live-req'))
     requests.set_request_succeeded('live-req', _LARGE_RESULT)
@@ -2680,7 +2682,7 @@ async def test_gc_deletes_orphan_stored_results(isolated_database,
 
 
 def test_stored_result_reference_survives_a_row_round_trip(
-        isolated_database, small_in_row_limit):
+        isolated_database, store_large_results):
     request = _running_request('round-trip-req')
     request.set_return_value(_LARGE_RESULT)
     row = request.to_row()
@@ -2692,7 +2694,7 @@ def test_stored_result_reference_survives_a_row_round_trip(
 
 
 def test_missing_stored_result_raises_a_clear_error(isolated_database,
-                                                    small_in_row_limit):
+                                                    store_large_results):
     request = _running_request('missing-req')
     request.set_return_value(_LARGE_RESULT)
     request.to_row()
@@ -2703,7 +2705,7 @@ def test_missing_stored_result_raises_a_clear_error(isolated_database,
 
 
 def test_stored_result_goes_through_a_version_aware_serializer(
-        isolated_database, small_in_row_limit, monkeypatch):
+        isolated_database, store_large_results, monkeypatch):
     old_client = []
 
     def serializer(value):
@@ -2724,3 +2726,14 @@ def test_stored_result_goes_through_a_version_aware_serializer(
             'id': i
         } for i in range(200)]
     }).decode('utf-8')
+
+
+@pytest.mark.asyncio
+async def test_large_result_stays_in_the_row_until_storing_is_enabled(
+        isolated_database, store_large_results, monkeypatch):
+    monkeypatch.delenv(skylet_constants.ENV_VAR_SERVER_STORE_LARGE_RESULTS)
+    await requests.create_if_not_exists_async(_running_request('off-req'))
+    requests.set_request_succeeded('off-req', _LARGE_RESULT)
+
+    assert not requests.stored_results.result_path('off-req').exists()
+    assert _recorded_return_value('off-req') == _LARGE_RESULT

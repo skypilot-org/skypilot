@@ -1,8 +1,9 @@
 """Request results kept outside the requests table.
 
-A result whose encoded form exceeds ``MAX_IN_ROW_BYTES`` is compressed into
-a file under the blob storage's request results directory, and the request
-row keeps a small reference in its ``return_value`` column instead.
+When ``store_enabled()``, a result whose encoded form exceeds
+``MAX_IN_ROW_BYTES`` is compressed into a file under the blob storage's request
+results directory, and the request row keeps a small reference in its
+``return_value`` column instead. Stored results are always read back.
 """
 import dataclasses
 import os
@@ -16,6 +17,7 @@ import orjson
 from sky import sky_logging
 from sky.metrics import utils as metrics_lib
 from sky.server.blob import blob_storage as bs
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
@@ -35,24 +37,33 @@ class StoredResult:
     size: int
 
 
-def results_dir() -> pathlib.Path:
+def results_dir() -> Optional[pathlib.Path]:
     return bs.get_blob_storage().request_results_dir()
 
 
+def store_enabled() -> bool:
+    return (os.environ.get(constants.ENV_VAR_SERVER_STORE_LARGE_RESULTS) == '1'
+            and results_dir() is not None)
+
+
 def result_path(request_id: str) -> pathlib.Path:
-    return results_dir() / f'{request_id}{_SUFFIX}'
+    directory = results_dir()
+    if directory is None:
+        raise RuntimeError('The blob storage keeps no request results.')
+    return directory / f'{request_id}{_SUFFIX}'
 
 
 def store(request_id: str, request_name: str, encoded: str) -> StoredResult:
     """Compress an encoded result into the results directory."""
     data = encoded.encode('utf-8')
     compressed = zlib.compress(data, _COMPRESSION_LEVEL)
-    directory = results_dir()
+    path = result_path(request_id)
+    directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)
     tmp_path = directory / f'{request_id}.{uuid.uuid4().hex}{_TMP_SUFFIX}'
     try:
         tmp_path.write_bytes(compressed)
-        os.replace(tmp_path, result_path(request_id))
+        os.replace(tmp_path, path)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
