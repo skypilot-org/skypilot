@@ -3303,8 +3303,9 @@ async def api_get(request: fastapi.Request,
     # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
     if request_task.should_retry:
         # Interrupted by a server version that recorded no error object —
         # including the very rolling update that ships this code, whose
@@ -3316,11 +3317,12 @@ async def api_get(request: fastapi.Request,
                 f'Request {request_id!r} was interrupted by an API server '
                 'restart and will not be resumed. Please re-submit the '
                 'original request.'))
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
     if request_task.has_stored_result:
-        return await asyncio.to_thread(request_task.encode)
-    return request_task.encode()
+        return await asyncio.to_thread(request_task.encode_for_client)
+    return request_task.encode_for_client()
 
 
 @app.get('/api/stream')
@@ -3577,10 +3579,6 @@ async def api_status(
         None, description='Filter requests by cluster name.'),
 ) -> Union[List[payloads.RequestPayload], fastapi.Response]:
     """Gets the list of requests."""
-    # Scope the request body to the caller: the owner sees it, others get null
-    # (see _request_body_for_display).
-    auth_user = request.state.auth_user
-    caller_user_id = auth_user.id if auth_user is not None else None
     # `fields` is caller-supplied and ends up in the SQL column list. Reject an
     # unknown column here so the client gets a 400 instead of a 500 from the
     # query layer.
@@ -3608,7 +3606,7 @@ async def api_status(
             sort=True,
         )
         content = await asyncio.to_thread(requests_lib.list_requests_json,
-                                          req_filter, caller_user_id)
+                                          req_filter)
         return fastapi.Response(content=content, media_type='application/json')
     else:
         encoded_request_tasks = []
@@ -3622,8 +3620,7 @@ async def api_status(
                 if (scope_user_id is not None and
                         request_task.user_id != scope_user_id):
                     continue
-                encoded_request_tasks.append(
-                    request_task.readable_encode(caller_user_id=caller_user_id))
+                encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 

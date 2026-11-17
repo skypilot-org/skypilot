@@ -134,7 +134,7 @@ def mock_request_obj():
     obj.status = requests_lib.RequestStatus.SUCCEEDED
     obj.should_retry = False
     obj.get_error = lambda: None
-    obj.encode = lambda: mock.MagicMock(model_dump=lambda: {})
+    obj.encode_for_client = lambda: mock.MagicMock(model_dump=lambda: {})
     obj.readable_encode = lambda: {}
     return obj
 
