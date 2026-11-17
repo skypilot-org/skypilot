@@ -2,6 +2,7 @@
 import asyncio
 import atexit
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -1276,8 +1277,25 @@ async def set_request_failed_async(request_id: str, e: BaseException) -> None:
     running, keeps its status.
     """
     set_exception_stacktrace(e)
-    await request_storage.get_request_backend().update_if_status_async(
-        request_id, RequestStatus.active_statuses(), _failed_values(e))
+    await _update_status_if(request_id, RequestStatus.active_statuses(),
+                            _failed_values(e))
+
+
+async def _update_status_if(request_id: str, from_statuses: List[RequestStatus],
+                            values: Dict[str, Any]) -> bool:
+    """Set columns of a request while it is in from_statuses.
+
+    Returns:
+        True if the request was updated; False if it is missing or in another
+        status.
+    """
+    updated = await request_storage.get_request_backend(
+    ).update_if_status_async(request_id, from_statuses, values)
+    if not updated and sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Request {request_id} not set to {values["status"]}: '
+                     'it is missing or not in '
+                     f'{[status.value for status in from_statuses]}.')
+    return updated
 
 
 def _failed_values(e: BaseException) -> Dict[str, Any]:
@@ -1299,11 +1317,10 @@ async def transition_request_status_async(request_id: str,
         True if the request was transitioned; False if it is gone or in
         another status, e.g. already cancelled.
     """
-    return await request_storage.get_request_backend().update_if_status_async(
-        request_id, from_statuses, {
-            'status': status.value,
-            COL_STATUS_MSG: None
-        })
+    return await _update_status_if(request_id, from_statuses, {
+        'status': status.value,
+        COL_STATUS_MSG: None
+    })
 
 
 @metrics_lib.time_me_async
@@ -1321,8 +1338,8 @@ async def set_request_failed_if_pending_async(request_id: str,
         True if the request was transitioned to FAILED.
     """
     set_exception_stacktrace(e)
-    return await request_storage.get_request_backend().update_if_status_async(
-        request_id, [RequestStatus.PENDING], _failed_values(e))
+    return await _update_status_if(request_id, [RequestStatus.PENDING],
+                                   _failed_values(e))
 
 
 def set_request_succeeded(request_id: str,
@@ -1351,7 +1368,8 @@ async def set_request_succeeded_async(request: Request,
     running, keeps its status.
 
     Args:
-        request: The request being run; its return value is set in place.
+        request: The request being run. Its name and request body pick how
+            the result is encoded; the object itself is not modified.
         result: The result to store.
 
     Returns:
@@ -1366,13 +1384,13 @@ async def set_request_succeeded_async(request: Request,
     if result is not None:
         values['return_value'], stored_size = await asyncio.to_thread(
             _serialize_result, request, result)
-    updated = await request_storage.get_request_backend(
-    ).update_if_status_async(request.request_id,
-                             RequestStatus.active_statuses(), values)
+    updated = await _update_status_if(request.request_id,
+                                      RequestStatus.active_statuses(), values)
     return stored_size if updated else None
 
 
 def _serialize_result(request: Request, result: Any) -> Tuple[str, int]:
+    request = copy.copy(request)
     request.set_return_value(result)
     stored = request.serialized_return_value()
     return stored, _stored_size(stored)
@@ -1382,11 +1400,10 @@ def _serialize_result(request: Request, result: Any) -> Tuple[str, int]:
 @asyncio_utils.shield
 async def set_request_cancelled_async(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
-    await request_storage.get_request_backend().update_if_status_async(
-        request_id, RequestStatus.active_statuses(), {
-            'status': RequestStatus.CANCELLED.value,
-            COL_FINISHED_AT: time.time(),
-        })
+    await _update_status_if(request_id, RequestStatus.active_statuses(), {
+        'status': RequestStatus.CANCELLED.value,
+        COL_FINISHED_AT: time.time(),
+    })
 
 
 @metrics_lib.time_me_async

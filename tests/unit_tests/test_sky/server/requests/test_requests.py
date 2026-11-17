@@ -234,6 +234,8 @@ async def test_set_request_succeeded_async_stores_result(conditional_backend):
     stored = await requests.set_request_succeeded_async(created, result)
 
     assert stored == len(orjson.dumps(result))
+    # The caller's request object is left as it was.
+    assert created.return_value is None
     request = await requests.get_request_async('cond-request')
     assert request is not None
     assert request.status == RequestStatus.SUCCEEDED
@@ -303,6 +305,19 @@ async def test_set_request_failed_if_pending_async(conditional_backend, status):
     assert failed == (status == RequestStatus.PENDING)
     expected = RequestStatus.FAILED if failed else status
     assert await _status() == expected
+
+
+@pytest.mark.asyncio
+async def test_noop_update_is_logged(conditional_backend, monkeypatch):
+    monkeypatch.setattr(requests.sky_logging, 'logging_enabled',
+                        lambda *_: True)
+    debug = mock.Mock()
+    monkeypatch.setattr(requests.logger, 'debug', debug)
+
+    await requests.set_request_cancelled_async('missing-request')
+
+    debug.assert_called_once()
+    assert 'missing-request' in debug.call_args.args[0]
 
 
 @pytest.mark.asyncio

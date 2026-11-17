@@ -51,6 +51,12 @@ class RequestBackend(abc.ABC):
                                      values: Dict[str, Any]) -> bool:
         """Atomically set columns of a request while it is in from_statuses.
 
+        Backends are expected to override this with a native conditional
+        write, e.g. ``UPDATE ... WHERE request_id = ? AND status IN (...)``.
+        The default is a compatibility fallback for backends that only
+        implement update_request: it reads, decodes, re-encodes and writes
+        back the whole row for every call.
+
         Args:
             request_id: The request to update.
             from_statuses: The statuses the request must be in to be updated.
