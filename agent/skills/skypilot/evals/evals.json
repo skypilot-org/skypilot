@@ -1,6 +1,6 @@
 {
   "skill_name": "skypilot",
-  "description": "Evaluates the 'Before You Start (Agent Bootstrap)', 'Converting a Slurm Workload' and 'Investigating a Managed Job' section behavior",
+  "description": "Evaluates the 'Before You Start (Agent Bootstrap)', 'Calling the REST API', 'Converting a Slurm Workload' and 'Investigating a Managed Job' section behavior",
   "evals": [
     {
       "id": 1,
@@ -174,6 +174,30 @@
         },
         {
           "text": "Agent uses `--tail` or `--no-follow` when fetching logs rather than streaming the full log",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "rest-api-without-the-client",
+      "prompt": "I'm in a sandbox with only curl, no Python. Our SkyPilot API server is at https://skypilot.example.com and I have a service account token in $SKY_TOKEN. List my clusters.",
+      "expected_output": "Agent does not try to install the sky client. It reads /api-reference/guide.md (or /api-reference/openapi.json) from the server with the bearer token, sends the version headers taken from /api/health, POSTs /status with include_handle false, takes the request ID from the X-Skypilot-Request-ID header, and reads the result from /api/get, parsing return_value as JSON.",
+      "assertions": [
+        {
+          "text": "Agent calls the REST API with `Authorization: Bearer` instead of installing the sky client",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent reads the server's `/api-reference/guide.md` or `/api-reference/openapi.json` before composing calls",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent gets the result through `GET /api/get?request_id=<id>` using the ID from the `X-Skypilot-Request-ID` header",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent sends `X-SkyPilot-API-Version` and `X-SkyPilot-Version`",
           "type": "required_action"
         }
       ]

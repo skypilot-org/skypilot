@@ -1,6 +1,6 @@
 ---
 name: skypilot
-description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, optimizing cost and GPU availability, or migrating an existing Slurm workload (converting sbatch scripts, salloc sessions, job arrays or srun invocations into SkyPilot task YAMLs, and mapping Slurm commands, directives and SLURM_* environment variables to their SkyPilot equivalents)."
+description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, optimizing cost and GPU availability, or migrating an existing Slurm workload (converting sbatch scripts, salloc sessions, job arrays or srun invocations into SkyPilot task YAMLs, and mapping Slurm commands, directives and SLURM_* environment variables to their SkyPilot equivalents), or calling a SkyPilot API server over its REST API when the sky CLI or Python SDK cannot be used."
 ---
 
 # SkyPilot Skill
@@ -65,6 +65,8 @@ pip install "skypilot[aws,gcp,kubernetes]"  # Pick clouds the user needs
 ```
 Ask the user which clouds they need if unclear, then re-run `sky api info`.
 
+If the `sky` client cannot be installed or run here (no Python or pip, a locked-down sandbox, a non-Python caller), skip the bootstrap and call the API server over HTTP instead: see [Calling the REST API](#calling-the-rest-api).
+
 **Start or connect a server** (only if "not running"):
 
 Ask the user:
@@ -80,6 +82,10 @@ After either path, re-run `sky api info` to confirm the server is reachable.
 sky check -o json
 ```
 This shows which clouds are enabled or disabled. If the user's target cloud is not enabled, guide them through credential setup (see [Troubleshooting](references/troubleshooting.md#1-installation-and-credentials)).
+
+## Calling the REST API
+
+When neither the `sky` CLI nor the Python SDK can be used, call the API server's REST API. Get the endpoint (and, on a server with authentication, a service account token) from the user, then read `GET <endpoint>/api-reference/guide.md` from that server before the first call: it lists the headers to send, how background requests return results through `/api/get`, and the retry rules. `/api-reference/openapi.json` has every operation and schema. See [REST API](references/rest-api.md) for the request pattern and pitfalls.
 
 ## Essential Commands
 
@@ -479,6 +485,7 @@ For detailed reference documentation:
 - [CLI Reference](references/cli-reference.md) — All commands and flags
 - [YAML Specification](references/yaml-spec.md) — Complete task YAML schema, file mounts, environment variables
 - [Python SDK](references/python-sdk.md) — Programmatic API and SDK usage
+- [REST API](references/rest-api.md) — Calling the API server over HTTP when the CLI and SDK do not fit: discovery, auth, background requests, pitfalls
 - [Advanced Patterns](references/advanced-patterns.md) — Multi-cloud, distributed training, production patterns
 - [Migrating from Slurm](references/migrating-from-slurm.md) — Converting `sbatch` scripts to task YAMLs, Slurm command/env-var mapping, Slurm-specific constraints
 - [Job Investigation](references/job-investigation.md) — Which command answers "what is my job doing and why"; reading `details`, events, Slurm pending reasons
