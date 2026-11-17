@@ -1161,6 +1161,47 @@ def test_api_get_interrupted_request_without_error_synthesizes_error(
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
 
 
+@pytest.mark.parametrize('outcome', ['success', 'error', 'should_retry'])
+def test_api_get_never_returns_request_body(monkeypatch, outcome):
+    """A body built on the server holds the server's env; /api/get must not
+    return it in any branch, and the client must still decode the reply."""
+    from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    request = _make_interrupted_request(with_error=outcome == 'error')
+    request.request_body = payloads.RequestBody()
+    assert 'server-canary' in request.request_body.model_dump_json()
+    if outcome == 'success':
+        request.status = requests_lib.RequestStatus.SUCCEEDED
+        request.should_retry = False
+        request.set_return_value('result')
+    _mount_api_get_request(monkeypatch, request)
+
+    response = TestClient(server.app).get(
+        '/api/get', params={'request_id': 'interrupted-req'})
+
+    if outcome == 'success':
+        assert response.status_code == 200
+        payload = payloads.RequestPayload(**response.json())
+    else:
+        assert response.status_code == 500
+        payload = payloads.RequestPayload(**response.json()['detail'])
+    assert payload.request_body == server_constants.EMPTY_PICKLED_VALUE
+    decoded = requests_lib.Request.decode(payload)
+    assert decoded.request_body is None
+    if outcome == 'success':
+        assert decoded.get_return_value() == 'result'
+    else:
+        assert isinstance(decoded.get_error()['object'],
+                          exceptions.RequestInterruptedError)
+    # Response only: the stored request keeps its body.
+    assert 'server-canary' in request.request_body.model_dump_json()
+
+
 def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
     """/dashboard_config returns JSON-serialized dashboard settings.
 
@@ -1806,6 +1847,27 @@ def test_api_status_listing_matches_model_encoding(_request_authz_env,
         assert listed.headers['content-type'] == 'application/json'
         assert fetched, params
         assert listed.json() == reference_client.get('/list').json(), params
+
+
+@pytest.mark.parametrize('scope', ['carol', None])
+def test_api_status_never_returns_request_body(_request_authz_env, monkeypatch,
+                                               scope):
+    """Not even to the owner: a body built on the server holds its env."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    row = _seed_request('carol-req-1', 'carol')
+    assert 'server-canary' in row.request_body.model_dump_json()
+    asyncio.new_event_loop().run_until_complete(
+        server.requests_lib.create_if_not_exists_async(row))
+    _scope_as(monkeypatch, scope)
+
+    client = testclient.TestClient(server.app)
+    for params in ({'all_status': True}, {'request_ids': ['carol-req-1']}):
+        listed = client.get('/api/status', params=params)
+        assert listed.status_code == 200, params
+        assert 'server-canary' not in listed.text, params
+        carol = [r for r in listed.json() if r['request_id'] == 'carol-req-1']
+        assert len(carol) == 1, params
+        assert carol[0]['request_body'] == 'null', params
 
 
 def test_api_status_lists_off_event_loop(_request_authz_env, monkeypatch):

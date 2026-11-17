@@ -2405,38 +2405,42 @@ def test_encode_owner_path_keeps_real_values():
     }
 
 
+def test_encode_for_client_drops_body(monkeypatch):
+    """/api/get never returns the body, which may hold the server's env."""
+    request = _make_request('display-client-1', _launch_body_with_secrets())
+    pickled = []
+    pickle_and_encode = encoders.pickle_and_encode
+    monkeypatch.setattr(
+        encoders, 'pickle_and_encode',
+        lambda obj: pickled.append(obj) or pickle_and_encode(obj))
+    payload = request.encode_for_client()
+    # The body is skipped, not pickled and then thrown away.
+    assert request.request_body not in pickled
+    assert payload.request_body == server_constants.EMPTY_PICKLED_VALUE
+    assert decoders.decode_and_unpickle(payload.request_body) is None
+    for marker in ('env-marker-secret', 'secret-marker-value', 'CONFIG-MARKER',
+                   'env-var-marker'):
+        assert marker not in payload.model_dump_json()
+    # Wire-only: the stored row still holds the whole body.
+    assert request.encode().request_body != payload.request_body
+    _assert_full(request.request_body.model_dump_json())
+
+
 @pytest.mark.asyncio
-async def test_readable_encode_scopes_to_caller(isolated_database):
+async def test_readable_encode_drops_body(isolated_database):
     request = _make_request('display-readable-1', _launch_body_with_secrets())
     await requests.create_if_not_exists_async(request)
     row = requests.get_request('display-readable-1')
-    # Owner (caller == owner) and no-auth (caller None) get the full body.
-    _assert_full(row.readable_encode(caller_user_id='alice').request_body)
-    _assert_full(row.readable_encode(caller_user_id=None).request_body)
-    # Any other caller (e.g. an admin listing everyone) gets no body at all.
-    other = row.readable_encode(caller_user_id='some-admin')
-    assert other.request_body == json.dumps(None)
+    assert row.readable_encode().request_body == json.dumps(None)
 
 
-def test_encode_requests_scopes_to_caller():
+def test_encode_requests_drops_body():
     """The other listing serializer (GET /api/status without request_ids)."""
     request = _make_request('display-listing-1', _launch_body_with_secrets())
     with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
-        _assert_full(
-            requests.encode_requests([request],
-                                     caller_user_id='alice')[0].request_body)
-        other = requests.encode_requests([request],
-                                         caller_user_id='some-admin')[0]
-        assert other.request_body == json.dumps(None)
-
-
-def test_encode_requests_omits_body_when_owner_unknown():
-    """Fail-safe: an unknown (blanked) owner is not the caller, so no body."""
-    request = _make_request('display-listing-2', _launch_body_with_secrets())
-    request.user_id = ''  # user_id excluded from the fetched fields
-    with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
-        payload = requests.encode_requests([request], caller_user_id='bob')[0]
+        payload = requests.encode_requests([request])[0]
     assert payload.request_body == json.dumps(None)
+    assert payload.request_id == 'display-listing-1'
 
 
 @pytest.mark.asyncio
