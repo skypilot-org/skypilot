@@ -23,6 +23,7 @@ from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.server.requests.serializers import return_value_serializers
 
 
 def dummy():
@@ -204,9 +205,9 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Verify old running request was NOT deleted
     assert requests.get_request('old-running-1') is not None
 
-    # Verify unlink was called for the current, legacy, and debug log paths
-    # and the stored result (4 calls per deleted request)
-    assert mock_unlink.call_count == 4
+    # Verify log file unlink was called for current, legacy, and debug paths
+    # (3 calls per deleted request: current path + legacy path + debug log)
+    assert mock_unlink.call_count == 3
 
     # Verify logging
     mock_logger.info.assert_called_once()
@@ -297,9 +298,9 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
     assert call_counts[1] == 10  # Second batch
     assert call_counts[2] == 5  # Third batch (remaining)
 
-    # Verify unlink was called for each deleted request (4 calls per request:
-    # current, legacy, and debug log paths and the stored result)
-    assert mock_unlink.call_count == 100
+    # Verify log file unlink was called for each deleted request
+    # (3 calls per request: current path + legacy path + debug log)
+    assert mock_unlink.call_count == 75
 
     # Verify logging shows correct total
     mock_logger.info.assert_called_once()
@@ -686,15 +687,12 @@ async def test_clean_finished_requests_cleans_both_paths(
                     retention_seconds)
 
     # Verify that unlink was called for current, legacy, and debug log paths
-    # and the stored result
-    assert len(unlinked_paths) == 4
+    assert len(unlinked_paths) == 3
 
     # All paths should contain the request ID
-    log_path_count = sum(
+    current_path_count = sum(
         1 for p in unlinked_paths if 'legacy-test-req-1.log' in p)
-    assert log_path_count == 3
-    assert any(
-        p.endswith('legacy-test-req-1.json.zlib') for p in unlinked_paths)
+    assert current_path_count == 3  # All paths should have the request ID
 
     # Verify the request was deleted
     assert requests.get_request('legacy-test-req-1') is None
@@ -2531,8 +2529,7 @@ def small_in_row_limit(monkeypatch):
 def _raw_return_value_column(request_id: str) -> str:
     request = requests.get_request(request_id)
     assert request is not None
-    # pylint: disable=protected-access
-    return request._encode(resolve_stored_result=False).return_value
+    return request.to_row()[requests.REQUEST_COLUMNS.index('return_value')]
 
 
 @pytest.mark.asyncio
@@ -2621,7 +2618,10 @@ async def test_listing_does_not_load_stored_results(isolated_database,
 
     with mock.patch.object(requests.stored_results,
                            'load',
-                           side_effect=AssertionError('loaded')):
+                           side_effect=AssertionError('loaded')), \
+            mock.patch.object(requests.stored_results,
+                              'load_text',
+                              side_effect=AssertionError('loaded')):
         listing = orjson.loads(
             requests.list_requests_json(
                 requests.RequestTaskFilter(fields=requests.DISPLAY_COLUMNS)))
@@ -2637,7 +2637,8 @@ async def test_gc_deletes_stored_result_with_its_row(isolated_database,
         assert request is not None
         request.finished_at = time.time() - 3600
     path = requests.stored_results.result_path('gc-req')
-    assert path.exists()
+    stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
+    os.utime(path, (stale_mtime, stale_mtime))
 
     await requests.clean_finished_requests_with_retention(60)
 
@@ -2678,9 +2679,10 @@ def test_stored_result_reference_survives_a_row_round_trip(
         isolated_database, small_in_row_limit):
     request = _running_request('round-trip-req')
     request.set_return_value(_LARGE_RESULT)
+    row = request.to_row()
     assert request.has_stored_result
 
-    decoded = requests.Request.from_row(request.to_row())
+    decoded = requests.Request.from_row(row)
     assert decoded.return_value == request.return_value
     assert decoded.get_return_value() == _LARGE_RESULT
 
@@ -2689,7 +2691,32 @@ def test_missing_stored_result_raises_a_clear_error(isolated_database,
                                                     small_in_row_limit):
     request = _running_request('missing-req')
     request.set_return_value(_LARGE_RESULT)
+    request.to_row()
     requests.stored_results.result_path('missing-req').unlink()
 
     with pytest.raises(RuntimeError, match='no longer available'):
         request.get_return_value()
+
+
+def test_stored_result_goes_through_a_version_aware_serializer(
+        isolated_database, small_in_row_limit, monkeypatch):
+    old_client = []
+
+    def serializer(value):
+        if old_client:
+            value = {'jobs': [{'id': job['id']} for job in value['jobs']]}
+        return orjson.dumps(value).decode('utf-8')
+
+    monkeypatch.setitem(return_value_serializers.handlers, 'test-request',
+                        serializer)
+    request = _running_request('serializer-req')
+    request.set_return_value(_LARGE_RESULT)
+    request.to_row()
+    assert request.has_stored_result
+
+    old_client.append(True)
+    assert request.encode().return_value == orjson.dumps({
+        'jobs': [{
+            'id': i
+        } for i in range(200)]
+    }).decode('utf-8')

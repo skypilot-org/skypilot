@@ -7,8 +7,7 @@ row keeps a small reference in its ``return_value`` column instead.
 import dataclasses
 import os
 import pathlib
-import stat
-from typing import Any, List, Tuple
+from typing import Any, Optional
 import uuid
 import zlib
 
@@ -68,15 +67,24 @@ def store(request_id: str, request_name: str, encoded: str) -> StoredResult:
     return StoredResult(size=len(data))
 
 
-def load(request_id: str) -> Any:
-    """Load a stored result as the decoded JSON value of the encoded result."""
+def _load_encoded(request_id: str) -> bytes:
     try:
         compressed = result_path(request_id).read_bytes()
     except FileNotFoundError as e:
         raise RuntimeError(
             f'The result of request {request_id} is no longer available.'
         ) from e
-    return orjson.loads(zlib.decompress(compressed))
+    return zlib.decompress(compressed)
+
+
+def load(request_id: str) -> Any:
+    """Load a stored result as the decoded JSON value of the encoded result."""
+    return orjson.loads(_load_encoded(request_id))
+
+
+def load_text(request_id: str) -> str:
+    """Load a stored result as the encoded text it was stored from."""
+    return _load_encoded(request_id).decode('utf-8')
 
 
 def to_column(reference: StoredResult) -> str:
@@ -94,24 +102,7 @@ def from_column(value: Any) -> Any:
     return value
 
 
-def list_stale_files(cutoff: float) -> List[Tuple[str, str, int]]:
-    """List (request_id, path, size) of files written before cutoff."""
-    directory = results_dir()
-    if not directory.is_dir():
-        return []
-    stale = []
-    with os.scandir(directory) as entries:
-        for entry in entries:
-            # Both stored results and interrupted writes are named
-            # '<request_id>.<...>'.
-            request_id = entry.name.split('.', 1)[0]
-            if not request_id:
-                continue
-            try:
-                st = os.stat(entry.path, follow_symlinks=False)
-            except OSError:
-                continue
-            if not stat.S_ISREG(st.st_mode) or st.st_mtime >= cutoff:
-                continue
-            stale.append((request_id, entry.path, st.st_size))
-    return stale
+def request_id_of(file_name: str) -> Optional[str]:
+    """The request a file in the results directory belongs to."""
+    # Both stored results and interrupted writes are named '<request_id>.<...>'.
+    return file_name.split('.', 1)[0] or None
