@@ -714,8 +714,8 @@ class CriticalityTierPolicy(sky.AdminPolicy):
       when they recover from a preemption.
 
     Tasks without the label and CPU-only resources are left unchanged. Labels
-    are matched case-insensitively. An unknown tier, or different tiers on
-    the resources of one task, rejects the request.
+    are matched case-insensitively. The policy rejects a request whose label
+    names an unknown tier or whose resources carry different tiers.
 
     Admins can change the mapping through the class attributes. A label is
     looked up in ON_DEMAND_TIERS, then SPOT_ONLY_TIERS, then SPOT_FIRST_TIERS,
@@ -724,8 +724,8 @@ class CriticalityTierPolicy(sky.AdminPolicy):
     ``UseSpotForGpuPolicy``. Set WIDEN_PINNED_ZONE to let critical tasks
     fail over to other zones of their region when a zone is pinned.
 
-    With no task labelled ``critical``, labelling every task ``standard``
-    gives spot with on-demand fallback everywhere.
+    Labelling every task ``standard`` gives spot with on-demand fallback
+    everywhere.
     """
 
     LABEL_KEY = 'criticality'
