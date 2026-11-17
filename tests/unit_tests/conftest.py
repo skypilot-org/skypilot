@@ -25,13 +25,23 @@ def _isolate_context():
     to order the suite, so the failures move between files and between runs.
     Resetting here removes the coupling instead of chasing it one victim at
     a time.
+
+    With the ContextVar unset, ``context.set_context_var()`` writes to the
+    process-global fallback instead, so that is restored too. Otherwise a
+    test that runs a request for real (e.g. through
+    ``executor.override_request_env_and_config``) leaves its user and request
+    id behind, and every later test on the worker looks like it runs inside
+    that request.
     """
     # pylint: disable=protected-access
     token = context._CONTEXT.set(None)
+    process_vars = dict(context._PROCESS_GLOBAL_VARS)
     try:
         yield
     finally:
         context._CONTEXT.reset(token)
+        context._PROCESS_GLOBAL_VARS.clear()
+        context._PROCESS_GLOBAL_VARS.update(process_vars)
 
 
 @pytest.fixture(autouse=True)
