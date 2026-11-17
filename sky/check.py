@@ -987,8 +987,10 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     else:
         cloud_type = cloud
     if isinstance(cloud_type, sky_clouds.SSH):
-        # Get the cluster names by reading from the node pools file
-        contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+        # Pools set up or not, but only those this workspace allows, as for
+        # Kubernetes contexts: others may belong to workspaces the caller
+        # cannot see.
+        contexts = sky_clouds.SSH.allowed_node_pool_contexts()
     elif isinstance(cloud_type, sky_clouds.Slurm):
         # Get the cluster names from SLURM config
         contexts = sky_clouds.Slurm.existing_allowed_clusters()
@@ -1021,18 +1023,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                 f'{str_to_format}'
                 f'{colorama.Style.RESET_ALL}')
 
-    # For SSH, determine which contexts are disabled due to allowed_node_pools
-    disabled_due_to_allowed_node_pools = set()
-    if isinstance(cloud_type, sky_clouds.SSH):
-        # Get all node pool contexts from file
-        all_node_pool_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
-        # Get allowed contexts (after filtering)
-        allowed_contexts = sky_clouds.SSH.existing_allowed_contexts()
-        # Contexts that exist in file but not in allowed list are disabled
-        # due to allowed_node_pools configuration
-        disabled_due_to_allowed_node_pools = (set(all_node_pool_contexts) -
-                                              set(allowed_contexts))
-
     # Format the context info with consistent styling
     contexts_formatted = []
     for i, context in enumerate(filtered_contexts):
@@ -1050,13 +1040,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             if ctx2text is not None:
                 if context in ctx2text:
                     text_suffix = f': {ctx2text[context]}'
-                elif (isinstance(cloud_type, sky_clouds.SSH) and
-                      context in disabled_due_to_allowed_node_pools):
-                    # Context is disabled due to allowed_node_pools config
-                    text_suffix = (': ' + _red_color('disabled. ') +
-                                   _dim_color('Reason: Not included in '
-                                              'allowed_node_pools '
-                                              'configuration.'))
                 else:
                     # Default case - not set up
                     text_suffix = (': ' + _red_color('disabled. ') + _dim_color(

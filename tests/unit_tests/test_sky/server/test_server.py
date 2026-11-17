@@ -18,6 +18,7 @@ import prometheus_client as prom
 import pytest
 import uvicorn
 
+from sky import core
 from sky import models
 from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
@@ -329,6 +330,23 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
             "is available")
     else:
         pytest.skip("uvloop not available, skipping uvloop policy check")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('auth_user,func', [
+    (models.User(id='alice-id', name='alice'), core.get_workspace_contexts),
+    (None, core.get_all_contexts),
+])
+async def test_all_contexts_scopes_authenticated_users(auth_user, func):
+    # get_all_contexts lists every SSH node pool, allowed or not.
+    request = mock.MagicMock()
+    request.state.auth_user = auth_user
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.all_contexts(request)
+
+    _, kwargs = mock_schedule.call_args
+    assert kwargs['func'] is func
 
 
 @pytest.mark.asyncio
