@@ -420,6 +420,8 @@ Or, use the ``SKYPILOT_SERVICE_ACCOUNT_TOKEN`` environment variable:
     $ export SKYPILOT_SERVICE_ACCOUNT_TOKEN=<SERVICE_ACCOUNT_TOKEN>
     $ sky api info
 
+To call the API server over HTTP without the CLI or the SDK, send the token as a bearer token; see :ref:`rest-api`.
+
 Example: GitHub actions (CI/CD)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
