@@ -339,6 +339,36 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
+def _is_glob_pattern(name: str) -> bool:
+    return any(c in name for c in '*?[')
+
+
+def _drop_unwritable_volumes(listed: List[responses.VolumeRecord],
+                             names: List[str]) -> List[str]:
+    """Drops the volumes in workspaces the user cannot modify.
+
+    The listing also shows read-only workspaces' volumes, and the server
+    refuses a delete request naming any of them as a whole.
+    """
+    if not names:
+        return names
+    workspaces = sdk.get(sdk.workspaces())
+    # A server too old to report `writable` cannot be filtered against.
+    unwritable = {
+        ws for ws, ws_config in workspaces.items()
+        if ws_config.get('writable') is False
+    }
+    skipped = sorted(
+        volume['name']
+        for volume in listed
+        if volume['name'] in names and (volume.get(
+            'workspace') or constants.SKYPILOT_DEFAULT_WORKSPACE) in unwritable)
+    if skipped:
+        click.echo(f'Skipping {len(skipped)} volume(s) in workspaces you '
+                   f'cannot modify: {", ".join(skipped)}')
+    return [name for name in names if name not in skipped]
+
+
 def _async_call_or_wait(request_id: server_common.RequestId[T],
                         async_call: bool, request_name: str) -> Any:
     short_request_id = request_id[:8]
@@ -5830,12 +5860,23 @@ def volumes_delete(
         if not all_volumes:
             click.echo('No volumes to delete.')
             return
-        names = [volume['name'] for volume in all_volumes]
+        names = _drop_unwritable_volumes(
+            all_volumes, [volume['name'] for volume in all_volumes])
     else:
         existing_volume_names = [volume['name'] for volume in all_volumes]
-        names = _get_glob_matches(existing_volume_names,
-                                  names,
-                                  resource_type='Volume')
+        # A name given exactly is left to the server, which says why it
+        # cannot be deleted; only pattern matches are narrowed.
+        exact_names = [n for n in names if not _is_glob_pattern(n)]
+        patterns = [n for n in names if _is_glob_pattern(n)]
+        names = list(
+            set(
+                _get_glob_matches(
+                    existing_volume_names, exact_names, resource_type='Volume')
+                + _drop_unwritable_volumes(
+                    all_volumes,
+                    _get_glob_matches(existing_volume_names,
+                                      patterns,
+                                      resource_type='Volume'))))
     if names:
         if not yes:
             volume_names = ', '.join(names)

@@ -52,6 +52,17 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Storage created before storage belonged to workspaces was placed in the
+# default workspace with no creator, so its owner may now be refused.
+_PREDATES_WORKSPACES_HINT = (
+    'It was created before storage belonged to workspaces; if it belongs to '
+    'your workspace, ask an admin to move it there.')
+
+
+def _predates_workspaces(record: Dict[str, Any]) -> bool:
+    return (record['user_hash'] is None and
+            record['workspace'] == constants.SKYPILOT_DEFAULT_WORKSPACE)
+
 
 def _get_accessible_handle(
         storage_name: Optional[str],
@@ -80,13 +91,15 @@ def _get_accessible_handle(
         return None
     workspace = record['workspace']
     active = skypilot_config.get_active_workspace()
+    hint = (f' {_PREDATES_WORKSPACES_HINT}'
+            if _predates_workspaces(record) else '')
     if not common_utils.is_in_request_context():
         if workspace == active:
             return record['handle']
         with ux_utils.print_exception_no_traceback():
             raise exceptions.StorageWorkspaceError(
                 f'Storage {storage_name!r} not found in workspace '
-                f'{skypilot_config.get_workspace_name(active)!r}.')
+                f'{skypilot_config.get_workspace_name(active)!r}.{hint}')
     # Imported here because of a circular import: sky.server.common imports
     # sky.data (this module), and sky.workspaces.core reaches back to
     # sky.server.common through sky.backends.backend_utils -> sky.jobs ->
@@ -104,14 +117,14 @@ def _get_accessible_handle(
                     f'{skypilot_config.get_workspace_name(active)!r}. A job '
                     'or service tears its storage down from the workspace '
                     'it is launched in, so launch it in workspace '
-                    f'{workspace_name!r} to use this storage.')
+                    f'{workspace_name!r} to use this storage.{hint}')
         return record['handle']
     if workspace in readable:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.StorageReadOnlyError(
                 f'Storage {storage_name!r} is in workspace '
                 f'{skypilot_config.get_workspace_name(workspace)!r}, which '
-                'is read-only for you.')
+                f'is read-only for you.{hint}')
     if (not for_controller and
             workspaces_core.get_readable_workspace_names() is None):
         # An admin, and the workspace was removed from the config: the
@@ -120,7 +133,9 @@ def _get_accessible_handle(
     with ux_utils.print_exception_no_traceback():
         raise exceptions.StorageWorkspaceError(
             f'Storage name {storage_name!r} is taken by a storage in a '
-            'workspace you cannot access. Choose another name.')
+            'workspace you cannot access.' +
+            (f'{hint} Otherwise, choose another name.'
+             if hint else ' Choose another name.'))
 
 
 StorageHandle = Any

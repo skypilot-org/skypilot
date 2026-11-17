@@ -65,6 +65,7 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
@@ -780,6 +781,7 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
                     f'{user.name!r} ({user.id}): {request.method} '
                     f'{request.url.path} (request ID: {request_id})')
         request.state.impersonator = caller
+        caller_usage.set_impersonator(caller)
         request.state.auth_user = models.User(id=user.id, name=user.name)
         return None
 
@@ -3301,8 +3303,9 @@ async def api_get(request: fastapi.Request,
     # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
     if request_task.should_retry:
         # Interrupted by a server version that recorded no error object —
         # including the very rolling update that ships this code, whose
@@ -3314,9 +3317,12 @@ async def api_get(request: fastapi.Request,
                 f'Request {request_id!r} was interrupted by an API server '
                 'restart and will not be resumed. Please re-submit the '
                 'original request.'))
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
-    return request_task.encode()
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
+    if request_task.has_stored_result:
+        return await asyncio.to_thread(request_task.encode_for_client)
+    return request_task.encode_for_client()
 
 
 @app.get('/api/stream')
@@ -3573,10 +3579,6 @@ async def api_status(
         None, description='Filter requests by cluster name.'),
 ) -> Union[List[payloads.RequestPayload], fastapi.Response]:
     """Gets the list of requests."""
-    # Scope the request body to the caller: the owner sees it, others get null
-    # (see _request_body_for_display).
-    auth_user = request.state.auth_user
-    caller_user_id = auth_user.id if auth_user is not None else None
     # `fields` is caller-supplied and ends up in the SQL column list. Reject an
     # unknown column here so the client gets a 400 instead of a 500 from the
     # query layer.
@@ -3604,7 +3606,7 @@ async def api_status(
             sort=True,
         )
         content = await asyncio.to_thread(requests_lib.list_requests_json,
-                                          req_filter, caller_user_id)
+                                          req_filter)
         return fastapi.Response(content=content, media_type='application/json')
     else:
         encoded_request_tasks = []
@@ -3618,8 +3620,7 @@ async def api_status(
                 if (scope_user_id is not None and
                         request_task.user_id != scope_user_id):
                     continue
-                encoded_request_tasks.append(
-                    request_task.readable_encode(caller_user_id=caller_user_id))
+                encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 
@@ -4468,10 +4469,38 @@ async def download_debug_dump(
 
 
 # === Internal APIs ===
+def _completion_workspaces_filter(
+        auth_user: Optional[models.User]) -> Optional[Set[str]]:
+    """Workspaces whose names `sky status` / `sky volumes ls` would show.
+
+    None (no authenticated user) means every workspace.
+    """
+    if auth_user is None:
+        return None
+    # Read-only visibility comes from the workspace config, which this
+    # process does not reload per request.
+    common.refresh_workspace_state_for_sync_handler()
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}))
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return permission.permission_service.get_accessible_workspace_names(
+        auth_user.id,
+        workspaces,
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def _readable_cluster_names_start_with(auth_user: Optional[models.User],
+                                       incomplete: str) -> List[str]:
+    """Cluster names to complete: only those `sky status -u` would show."""
+    return global_user_state.get_cluster_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
+
+
 @app.get('/api/completion/cluster_name')
-async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_cluster_names_start_with, incomplete)
+async def complete_cluster_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_cluster_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/storage_name')
@@ -4497,10 +4526,18 @@ async def complete_storage_name(request: fastapi.Request,
     return await asyncio.to_thread(_complete)
 
 
+def _readable_volume_names_start_with(auth_user: Optional[models.User],
+                                      incomplete: str) -> List[str]:
+    """Volume names to complete: only those `sky volumes ls` would show."""
+    return global_user_state.get_volume_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
+
+
 @app.get('/api/completion/volume_name')
-async def complete_volume_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_volume_names_start_with, incomplete)
+async def complete_volume_name(request: fastapi.Request,
+                               incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_volume_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/api_request')

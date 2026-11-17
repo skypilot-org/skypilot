@@ -7,7 +7,7 @@ import { getUserLink, isServiceAccount } from '@/utils/userUtils';
  * ServiceAccountBadge component - A reusable badge for service accounts
  */
 const ServiceAccountBadge = () => (
-  <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium ml-1">
+  <span className="px-2 py-0.5 text-xs bg-blue-tint-strong text-blue-fg-strong rounded font-medium ml-1">
     SA
   </span>
 );
@@ -29,7 +29,7 @@ export const UserDisplay = ({
   username,
   userHash,
   className = 'flex items-center gap-1',
-  linkClassName = 'text-gray-700 hover:text-blue-600 hover:underline',
+  linkClassName = 'text-content hover:text-blue-fg hover:underline',
   showBadge = true,
   onUserClick = null,
 }) => {
