@@ -206,7 +206,12 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
             return
         if reason is None:
             state.pop('idle_since', None)
-            state.pop('notified_at', None)
+            if state.pop('notified_at', None) is not None:
+                # Without this the idle event stays the cluster's last event.
+                global_user_state.add_cluster_event(
+                    record['name'], status_lib.ClusterStatus.UP,
+                    'No longer reported idle.',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
         else:
             counts['idle'] += 1
             state.setdefault('idle_since', now)
@@ -245,21 +250,25 @@ def run_pass(interval: int) -> None:
     config = skypilot_config.get_nested(('idle_detection',), None)
     if config is None:
         return
-    # One API server acts per pass: the per-cluster state is read, changed and
-    # written back as a whole.
+    # Never two API servers at once: the per-cluster state is read, changed
+    # and written back as a whole.
     elector = leader_election.get_elector(_LOCK_ID)
     if not elector.try_acquire():
         return
     try:
+        now = int(time.time())
+        last_pass = json.loads(
+            global_user_state.get_system_config(_LAST_PASS_KEY) or 'null')
+        # Every API server runs this daemon; the source is asked once per
+        # interval, not once per server.
+        if last_pass is not None and now - last_pass['finished'] < interval:
+            return
         window = resources_utils.parse_time_seconds(config['window'])
         (source_config,) = config['source'].values()
         headers = _read_headers(source_config)
-        now = int(time.time())
         # After a pause in the daemon nobody watched the clusters stay UP, so
         # every observation window starts over. Measured from the end of the
         # last pass: a slow pass is not a pause.
-        last_pass = json.loads(
-            global_user_state.get_system_config(_LAST_PASS_KEY) or 'null')
         if (last_pass is not None and
                 now - last_pass['finished'] <= 2 * interval):
             watching_since = last_pass['watching_since']

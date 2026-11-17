@@ -439,6 +439,33 @@ def test_activity_ends_the_idle_period(world):
     assert world.webhooks[1]['idle_since'] == _WINDOW + 2 * _INTERVAL
 
 
+def test_end_of_an_idle_period_is_recorded(world):
+    """Otherwise the idle event stays the cluster's last event for good."""
+    world.add_cluster()
+    world.run_until(_WINDOW)
+    world.source_response = _vector(90)
+
+    world.run(_WINDOW + _INTERVAL)
+    world.run(_WINDOW + 2 * _INTERVAL)
+
+    assert [event[2] for event in world.events[1:]
+           ] == ['No longer reported idle.']
+    assert world.events[1][1] == status_lib.ClusterStatus.UP
+    assert world.events[1][3] == (
+        global_user_state.ClusterEventType.STATUS_CHANGE)
+
+
+def test_end_of_an_idle_period_nobody_was_told_about_is_not_recorded(world):
+    world.add_cluster()
+    world.webhook_response = _response({}, status_code=503)
+    world.run_until(_WINDOW)
+    world.source_response = _vector(90)
+
+    world.run(_WINDOW + _INTERVAL)
+
+    assert not world.events
+
+
 def test_relaunch_restarts_the_observation_window(world):
     """`sky start` and `sky launch -c` rewrite launched_at."""
     cluster = world.add_cluster()
@@ -469,6 +496,31 @@ def test_one_missed_pass_keeps_the_observation_window(world):
     world.run(_WINDOW + _INTERVAL)
 
     assert world.queries
+
+
+def test_pass_is_skipped_right_after_another_servers_pass(world):
+    """Every API server runs the daemon; the source is asked once per interval."""
+    world.add_cluster()
+    world.run_until(_WINDOW)
+    assert len(world.queries) == 1
+    saves = world.saves
+
+    world.run(_WINDOW + _INTERVAL // 2)
+
+    assert len(world.queries) == 1
+    assert world.saves == saves
+
+
+def test_pass_runs_one_interval_after_the_last(world):
+    """The daemon's own next pass comes exactly one sleep later."""
+    world.run(0)
+
+    world.run(_INTERVAL)
+
+    assert json.loads(world.system_config['idle_detection_last_pass']) == {
+        'finished': _INTERVAL,
+        'watching_since': 0,
+    }
 
 
 def test_slow_pass_is_not_an_outage(world):
