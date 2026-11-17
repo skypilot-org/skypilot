@@ -72,7 +72,7 @@ class SkyServeLoadBalancer:
             load_balancer_port: The port where the load balancer listens to.
             load_balancing_policy_name: The name of the load balancing policy
                 to use. Defaults to None.
-            tls_credentials: The TLS credentials for HTTPS endpoint. Defaults
+            tls_credential: The TLS credentials for HTTPS endpoint. Defaults
                 to None.
             target_qps_per_replica: Target QPS per replica for instance-aware
                 load balancing. Can be a float or dict mapping GPU types to QPS.
@@ -348,8 +348,8 @@ def run_load_balancer(
     Args:
         controller_addr: The address of the controller.
         load_balancer_port: The port where the load balancer listens to.
-        policy_name: The name of the load balancing policy to use.
-        Defaults to None.
+        load_balancing_policy_name: The name of the load balancing policy
+            to use. Defaults to None.
         tls_credential:
             The TLS credentials for HTTPS endpoint. Defaults to None.
         target_qps_per_replica: Target QPS per replica for instance-aware
