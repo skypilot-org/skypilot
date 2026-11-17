@@ -1268,7 +1268,8 @@ Current limitations:
 - ``disk_size`` is not applied: Modal sets the container's disk.
 - Modal bills CPU per physical core, which SkyPilot counts as 2 vCPUs. A
   ``4CPU--16GB`` instance is 2 Modal cores, so the processes on it (and Ray)
-  see 2 CPUs, not 4. A task that asks for more CPUs than that still runs.
+  see 2 CPUs, not 4. A task that asks for more CPUs than that still runs. A
+  request for less than one core (``--cpus`` below 2) is rounded up to one core.
 - ``sky stop`` / ``sky start`` and stop/resume semantics are not supported; use
   ``sky down``.
 - Managed jobs can run on Modal clusters, but the jobs and SkyServe

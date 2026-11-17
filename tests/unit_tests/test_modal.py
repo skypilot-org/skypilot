@@ -224,8 +224,14 @@ def test_modal_dynamic_instance_types_and_prices():
     assert modal_catalog.get_default_instance_type() == '4CPU--16GB'
     assert modal_catalog.get_default_instance_type(
         cpus='16+', memory='64+') == '16CPU--64GB'
+    # Less than one Modal core (2 vCPUs) is rounded up: Ray would get no CPU,
+    # and SkyPilot's jobs would never start.
     assert modal_catalog.get_default_instance_type(
-        cpus='0.25', memory='0.125') == '0.25CPU--0.125GB'
+        cpus='0.25', memory='0.125') == '2CPU--0.125GB'
+    assert modal_catalog.get_default_instance_type(cpus='1') == '2CPU--4GB'
+    assert modal_catalog.get_default_instance_type(cpus='1+',
+                                                   memory='1') == '2CPU--1GB'
+    assert modal_catalog.get_default_instance_type(cpus='2') == '2CPU--8GB'
     assert modal_catalog.get_modal_args_from_instance_type(
         '0.25CPU--0.125GB') == (None, 0.125, 128)
     assert modal_catalog.get_default_instance_type(
@@ -3037,7 +3043,8 @@ def test_modal_catalog_unknown_region():
         ('8', '2x', '8CPU--16GB'),
         ('8', '0.5x', '8CPU--4GB'),
         ('100', None, '100CPU--336GB'),  # default memory capped at the max
-        ('0.1', None, None),
+        ('0.1', '1', '2CPU--1GB'),  # below one Modal core: rounded up
+        ('1', None, '2CPU--4GB'),
         ('8', '0.01', None),
     ])
 def test_modal_cpu_and_memory_requests(cpus, memory, expected):

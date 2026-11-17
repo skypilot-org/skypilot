@@ -54,6 +54,10 @@ _df = common.read_catalog('modal/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _DEFAULT_SKY_VCPUS = 4.0
+# Ray gets whole Modal cores, so a container with less than one core (2 vCPUs)
+# has no CPU for SkyPilot's jobs and they never start. Smaller requests are
+# rounded up to one core.
+_MIN_SKY_VCPUS = 2.0
 _DEFAULT_MEMORY_GIB = 16
 _DEFAULT_MEMORY_CPU_RATIO = _DEFAULT_MEMORY_GIB / _DEFAULT_SKY_VCPUS
 # Without a CPU request, GPU containers get 4 vCPUs per GPU, as on Kubernetes
@@ -329,7 +333,7 @@ def _resources_from_requests(cpus: Optional[str],
         memory_gib = float(memory[:-1]) * vcpus
     else:
         memory_gib = float(memory)
-    return ModalInstanceType(vcpus, memory_gib)
+    return ModalInstanceType(max(vcpus, _MIN_SKY_VCPUS), memory_gib)
 
 
 def _gpu_instance(accelerator: str, count: int, cpus: Optional[str],
