@@ -2,6 +2,7 @@
 import asyncio
 import atexit
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -218,6 +219,27 @@ class ScheduleType(enum.Enum):
     SHORT = 'short'
 
 
+def _encode_error(error: BaseException) -> Dict[str, Any]:
+    # TODO(zhwu): pickle.dump does not work well with custom exceptions if
+    # it has more than 1 arguments.
+    serialized = exceptions.serialize_exception(error)
+    return {
+        'object': encoders.pickle_and_encode(serialized),
+        'type': type(error).__name__,
+        'message': str(error),
+    }
+
+
+def _serialize_error(error: Optional[Dict[str, Any]]) -> str:
+    return orjson.dumps(error).decode('utf-8')
+
+
+def _stored_size(stored: str) -> int:
+    """UTF-8 size of a stored text column."""
+    # isascii() is O(1); only text with non-ASCII characters is encoded.
+    return len(stored) if stored.isascii() else len(stored.encode('utf-8'))
+
+
 @dataclasses.dataclass
 class Request:
     """A SkyPilot API request."""
@@ -259,14 +281,7 @@ class Request:
 
     def set_error(self, error: BaseException) -> None:
         """Set the error."""
-        # TODO(zhwu): pickle.dump does not work well with custom exceptions if
-        # it has more than 1 arguments.
-        serialized = exceptions.serialize_exception(error)
-        self.error = {
-            'object': encoders.pickle_and_encode(serialized),
-            'type': type(error).__name__,
-            'message': str(error),
-        }
+        self.error = _encode_error(error)
 
     def get_error(self) -> Optional[Dict[str, Any]]:
         """Get the error."""
@@ -317,6 +332,14 @@ class Request:
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
         return cls.decode(payloads.RequestPayload(**content))
+
+    def apply_stored_values(self, values: Dict[str, Any]) -> None:
+        """Set fields from column values in the form to_row() writes them."""
+        row = dict(zip(REQUEST_COLUMNS, self.to_row()))
+        row.update(values)
+        updated = Request.from_row(tuple(row[c] for c in REQUEST_COLUMNS))
+        for column in values:
+            setattr(self, column, getattr(updated, column))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self._encode(self._return_value_column(), include_body=True)
@@ -378,9 +401,7 @@ class Request:
         if not self.has_stored_result:
             serialized = return_value_serializers.get_serializer(self.name)(
                 self.return_value)
-            # isascii() is O(1); only a result with non-ASCII text is encoded.
-            self.stored_result_size = (len(serialized) if serialized.isascii()
-                                       else len(serialized.encode('utf-8')))
+            self.stored_result_size = _stored_size(serialized)
             if (self.stored_result_size <= stored_results.MAX_IN_ROW_BYTES or
                     not stored_results.store_enabled()):
                 return serialized
@@ -428,7 +449,7 @@ class Request:
                               server_constants.EMPTY_PICKLED_VALUE),
                 status=_status_value_for_client(self.status.value),
                 return_value=return_value,
-                error=orjson.dumps(self.error).decode('utf-8'),
+                error=_serialize_error(self.error),
                 pid=self.pid,
                 created_at=self.created_at,
                 schedule_type=self.schedule_type.value,
@@ -1302,14 +1323,33 @@ async def set_request_failed_async(request_id: str, e: BaseException) -> None:
     running, keeps its status.
     """
     set_exception_stacktrace(e)
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        assert request_task is not None, request_id
-        if request_task.status in RequestStatus.finished_status():
-            return
-        request_task.status = RequestStatus.FAILED
-        request_task.finished_at = time.time()
-        request_task.set_error(e)
+    await _update_status_if(request_id, RequestStatus.active_statuses(),
+                            _failed_values(e))
+
+
+async def _update_status_if(request_id: str, from_statuses: List[RequestStatus],
+                            values: Dict[str, Any]) -> bool:
+    """Set columns of a request while it is in from_statuses.
+
+    Returns:
+        True if the request was updated; False if it is missing or in another
+        status.
+    """
+    updated = await request_storage.get_request_backend(
+    ).update_if_status_async(request_id, from_statuses, values)
+    if not updated and sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Request {request_id} not set to {values["status"]}: '
+                     'it is missing or not in '
+                     f'{[status.value for status in from_statuses]}.')
+    return updated
+
+
+def _failed_values(e: BaseException) -> Dict[str, Any]:
+    return {
+        'status': RequestStatus.FAILED.value,
+        COL_FINISHED_AT: time.time(),
+        'error': _serialize_error(_encode_error(e)),
+    }
 
 
 @metrics_lib.time_me_async
@@ -1323,13 +1363,10 @@ async def transition_request_status_async(request_id: str,
         True if the request was transitioned; False if it is gone or in
         another status, e.g. already cancelled.
     """
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        if request_task is None or request_task.status not in from_statuses:
-            return False
-        request_task.status = status
-        request_task.status_msg = None
-        return True
+    return await _update_status_if(request_id, from_statuses, {
+        'status': status.value,
+        COL_STATUS_MSG: None
+    })
 
 
 @metrics_lib.time_me_async
@@ -1347,15 +1384,8 @@ async def set_request_failed_if_pending_async(request_id: str,
         True if the request was transitioned to FAILED.
     """
     set_exception_stacktrace(e)
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        assert request_task is not None, request_id
-        if request_task.status != RequestStatus.PENDING:
-            return False
-        request_task.status = RequestStatus.FAILED
-        request_task.finished_at = time.time()
-        request_task.set_error(e)
-        return True
+    return await _update_status_if(request_id, [RequestStatus.PENDING],
+                                   _failed_values(e))
 
 
 def set_request_succeeded(request_id: str,
@@ -1376,41 +1406,52 @@ def set_request_succeeded(request_id: str,
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
-async def set_request_succeeded_async(request_id: str,
+async def set_request_succeeded_async(request: Request,
                                       result: Optional[Any]) -> Optional[int]:
     """Set a request to succeeded and populate the result.
 
     A request that already finished, e.g. cancelled while its thread was still
     running, keeps its status.
 
+    Args:
+        request: The request being run. Its name and request body pick how
+            the result is encoded; the object itself is not modified.
+        result: The result to store.
+
     Returns:
         The length of the stored serialized result, None if nothing was
         stored.
     """
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        assert request_task is not None, request_id
-        if request_task.status in RequestStatus.finished_status():
-            return None
-        request_task.status = RequestStatus.SUCCEEDED
-        request_task.finished_at = time.time()
-        if result is not None:
-            request_task.set_return_value(result)
-    return request_task.stored_result_size
+    values: Dict[str, Any] = {
+        'status': RequestStatus.SUCCEEDED.value,
+        COL_FINISHED_AT: time.time(),
+    }
+    stored_size = None
+    if result is not None:
+        values['return_value'], stored_size = await asyncio.to_thread(
+            _serialize_result, request, result)
+    updated = await _update_status_if(request.request_id,
+                                      RequestStatus.active_statuses(), values)
+    return stored_size if updated else None
+
+
+def _serialize_result(request: Request, result: Any) -> Tuple[str, int]:
+    """The return value column for result, and the size of the result."""
+    request = copy.copy(request)
+    request.set_return_value(result)
+    column = request._return_value_column()  # pylint: disable=protected-access
+    assert request.stored_result_size is not None
+    return column, request.stored_result_size
 
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_cancelled_async(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        assert request_task is not None, request_id
-        # Already finished or cancelled.
-        if request_task.status > RequestStatus.RUNNING:
-            return
-        request_task.finished_at = time.time()
-        request_task.status = RequestStatus.CANCELLED
+    await _update_status_if(request_id, RequestStatus.active_statuses(), {
+        'status': RequestStatus.CANCELLED.value,
+        COL_FINISHED_AT: time.time(),
+    })
 
 
 @metrics_lib.time_me_async
@@ -1708,14 +1749,24 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             if request is not None:
                 _add_or_update_request_no_lock(request)
 
-    @contextlib.asynccontextmanager
-    async def update_request_async(self, request_id: str):
-        _ensure_db_initialized()
+    @init_db_async
+    @asyncio_utils.shield
+    async def update_if_status_async(self, request_id: str,
+                                     from_statuses: List[RequestStatus],
+                                     values: Dict[str, Any]) -> bool:
+        assert _DB is not None
+        assert set(values) <= set(REQUEST_COLUMNS), values
+        set_clause = ', '.join(f'{column}=?' for column in values)
+        status_placeholders = ', '.join('?' * len(from_statuses))
+        sql = (f'UPDATE {REQUEST_TABLE} SET {set_clause} '
+               f'WHERE request_id=? AND status IN ({status_placeholders}) '
+               'RETURNING request_id')
+        params = (*values.values(), request_id,
+                  *(status.value for status in from_statuses))
+        # update_request() reads and writes back the whole row under this lock.
         async with filelock.AsyncFileLock(request_lock_path(request_id)):
-            request = await _get_request_no_lock_async(request_id)
-            yield request
-            if request is not None:
-                await _add_or_update_request_no_lock_async(request)
+            row = await _DB.execute_get_returning_value_async(sql, params)
+        return row is not None
 
     @init_db_async
     @asyncio_utils.shield

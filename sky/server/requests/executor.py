@@ -1568,7 +1568,7 @@ async def _execute_request_coroutine(
         try:
             result = await fut
             stored = await api_requests.set_request_succeeded_async(
-                request_id, None if ignore_return_value else result)
+                request, None if ignore_return_value else result)
             caller_usage.record_stored_bytes(caller, request.name, stored)
         except asyncio.CancelledError:
             # The task is cancelled by ctx.cancel(), where the status
