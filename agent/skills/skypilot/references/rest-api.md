@@ -29,7 +29,7 @@ On a server with authentication, send a service account token: `Authorization: B
 
 ## The request pattern
 
-1. Send `X-SkyPilot-API-Version` and `X-SkyPilot-Version` on every request. Take the values from the `api_version` and `version` fields of `GET /api/health`. Without them the server treats you as a very old client.
+1. Send `X-SkyPilot-API-Version` and `X-SkyPilot-Version` on every request. Take the values from the `api_version` and `version` fields of `GET /api/health`, called with the bearer token: without a token it returns only `status`. Without these headers the server treats you as a very old client.
 2. Operations marked `x-skypilot-async: true` in the OpenAPI document run in the background. They answer `200` with the request ID in the `X-Skypilot-Request-ID` response header.
 3. `GET /api/get?request_id=<id>` waits for the request to finish and returns its payload. `return_value` is a JSON-encoded string: parse it a second time. A failure answers `500` with the payload under `detail`.
 4. For long operations such as `POST /launch`, follow the log with `GET /api/stream?request_id=<id>&format=plain` instead of waiting silently.
@@ -53,5 +53,6 @@ curl -s "$ENDPOINT/api/get?request_id=$REQUEST_ID" \
 
 - Some response fields (cluster handles, resources) are base64-encoded Python pickles. You cannot read them without the Python client; set `"include_handle": false` on `POST /status` and ignore such fields elsewhere.
 - The server cannot read files on the caller's machine. A task whose `workdir` or `file_mounts` point to local paths fails over plain HTTP; point them at a git repository or cloud storage instead.
+- Always pass `request_ids` to `POST /api/cancel`. Without it the server cancels every request the caller can see: all of the user's own, or every request on the server for an admin token or a server without authentication.
 - Do not poll full lists in a tight loop. Filter (`cluster_names`, job filters), and wait on a specific request with `/api/get` or `/api/stream`.
 - Follow the guide's retry rules: retry `503` with backoff, resubmit on `RequestInterruptedError`, do not retry `401`, `403` or other `4xx` responses unchanged.

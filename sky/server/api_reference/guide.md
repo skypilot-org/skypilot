@@ -31,7 +31,9 @@ X-SkyPilot-Version: <the "version" field of GET /api/health>
   treated as coming from a very old client: the server skips version checks,
   turns off behavior that newer clients opt into, and may drop newer fields from
   responses. `{{api_version}}` is this server's current API version; it is also
-  the `api_version` field of `GET /api/health`.
+  the `api_version` field of `GET /api/health`. Send your token on that call
+  too: without one, `/api/health` returns only `status`, not the `version` and
+  `api_version` fields.
 {{slot:request_header_notes}}
 
 To act in a workspace other than your default one, add
@@ -73,7 +75,10 @@ Other request operations:
 
 - `GET /api/stream?request_id=<id>&format=plain` streams the request's log as
   plain text until it finishes. Use it for long operations such as `/launch`.
-- `POST /api/cancel` with `{"request_ids": ["<id>"]}` cancels requests.
+- `POST /api/cancel` with `{"request_ids": ["<id>"]}` cancels requests. Always
+  pass `request_ids`: without it, the server cancels every request you can see,
+  which for an admin token or a server without authentication is every request
+  on the server.
 - `GET /api/status?request_ids=<id>` returns a request's status without waiting.
 
 {{slot:inline_reads}}
