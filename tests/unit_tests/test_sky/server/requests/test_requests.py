@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pathlib
+import threading
 import time
 from typing import List, Optional
 import unittest.mock as mock
@@ -116,7 +117,7 @@ async def test_set_request_succeeded(isolated_database, test_async):
     result = {'key': 'value', 'number': 42}
     if test_async:
         stored = await requests.set_request_succeeded_async(
-            'test-request-1', result)
+            'test-request-1', 'test-request', result)
     else:
         stored = requests.set_request_succeeded('test-request-1', result)
     assert stored == len(orjson.dumps(result))
@@ -141,6 +142,191 @@ def test_set_request_succeeded_nonexistent_request(isolated_database):
     # Try to set a non-existent request as succeeded
     with pytest.raises(AssertionError):
         requests.set_request_succeeded('nonexistent-request', {'result': 'ok'})
+
+
+class _DefaultUpdateBackend(requests.SqliteRequestBackend):
+    """SQLite backend that uses the RequestBackend default conditional
+    update."""
+    update_if_status_async = (
+        requests.request_storage.RequestBackend.update_if_status_async)
+
+
+@pytest.fixture(params=['sqlite', 'default'])
+def conditional_backend(request, isolated_database):
+    backend = (requests.SqliteRequestBackend()
+               if request.param == 'sqlite' else _DefaultUpdateBackend())
+    with mock.patch.object(requests.request_storage, '_storage_backend',
+                           backend):
+        yield backend
+
+
+async def _create_request(status: RequestStatus,
+                          request_id: str = 'cond-request') -> None:
+    await requests.create_if_not_exists_async(
+        requests.Request(request_id=request_id,
+                         name='test-request',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=status,
+                         created_at=0.0,
+                         status_msg='queued',
+                         user_id='test-user'))
+
+
+async def _status(request_id: str = 'cond-request') -> RequestStatus:
+    request = await requests.get_request_async(request_id)
+    assert request is not None
+    return request.status
+
+
+@pytest.mark.asyncio
+async def test_update_if_status_async(conditional_backend):
+    await _create_request(RequestStatus.RUNNING)
+    values = {'status': RequestStatus.SUCCEEDED.value, 'finished_at': 1.0}
+
+    assert not await conditional_backend.update_if_status_async(
+        'cond-request', [RequestStatus.PENDING], values)
+    assert await _status() == RequestStatus.RUNNING
+
+    assert await conditional_backend.update_if_status_async(
+        'cond-request', [RequestStatus.PENDING, RequestStatus.RUNNING], values)
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.SUCCEEDED
+    assert request.finished_at == 1.0
+    assert request.status_msg == 'queued'
+
+    assert not await conditional_backend.update_if_status_async(
+        'missing-request', [RequestStatus.RUNNING], values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'status',
+    [RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED])
+async def test_finished_request_keeps_its_outcome(conditional_backend, status):
+    await _create_request(status)
+
+    assert await requests.set_request_succeeded_async(
+        'cond-request', 'test-request', {'key': 'value'}) is None
+    await requests.set_request_failed_async('cond-request', ValueError('Boom'))
+    await requests.set_request_cancelled_async('cond-request')
+    assert not await requests.transition_request_status_async(
+        'cond-request', RequestStatus.executable_statuses(),
+        RequestStatus.RUNNING)
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == status
+    assert request.return_value is None
+    assert request.error is None
+
+
+@pytest.mark.asyncio
+async def test_set_request_succeeded_async_stores_result(conditional_backend):
+    await _create_request(RequestStatus.RUNNING)
+    result = {'key': 'välue'}
+
+    stored = await requests.set_request_succeeded_async('cond-request',
+                                                        'test-request', result)
+
+    assert stored == len(orjson.dumps(result))
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.SUCCEEDED
+    assert request.finished_at is not None
+    assert request.get_return_value() == result
+
+
+@pytest.mark.asyncio
+async def test_set_request_failed_async_stores_error(conditional_backend):
+    await _create_request(RequestStatus.RUNNING)
+
+    await requests.set_request_failed_async('cond-request', ValueError('Boom'))
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.FAILED
+    assert request.finished_at is not None
+    error = request.get_error()
+    assert error is not None
+    assert error['type'] == 'ValueError'
+    assert error['message'] == 'Boom'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status',
+                         [RequestStatus.PENDING, RequestStatus.WAITING])
+async def test_transition_request_status_async_claims(conditional_backend,
+                                                      status):
+    await _create_request(status)
+
+    assert await requests.transition_request_status_async(
+        'cond-request', RequestStatus.executable_statuses(),
+        RequestStatus.RUNNING)
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.RUNNING
+    assert request.status_msg is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [
+    RequestStatus.PENDING, RequestStatus.WAITING, RequestStatus.RUNNING,
+    RequestStatus.SUCCEEDED
+])
+async def test_set_request_failed_if_pending_async(conditional_backend, status):
+    await _create_request(status)
+
+    failed = await requests.set_request_failed_if_pending_async(
+        'cond-request', ValueError('Boom'))
+
+    assert failed == (status == RequestStatus.PENDING)
+    expected = RequestStatus.FAILED if failed else status
+    assert await _status() == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', RequestStatus.active_statuses())
+async def test_set_request_cancelled_async(conditional_backend, status):
+    await _create_request(status)
+
+    await requests.set_request_cancelled_async('cond-request')
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.CANCELLED
+    assert request.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_conditional_update_waits_for_update_request(conditional_backend):
+    """A cancellation written under update_request() is not overwritten."""
+    await _create_request(RequestStatus.RUNNING)
+    locked = threading.Event()
+    release = threading.Event()
+
+    def _cancel_under_lock():
+        with requests.update_request('cond-request') as request:
+            assert request is not None
+            request.status = RequestStatus.CANCELLED
+            locked.set()
+            release.wait(timeout=10)
+
+    canceller = threading.Thread(target=_cancel_under_lock)
+    canceller.start()
+    assert await asyncio.to_thread(locked.wait, 10)
+    succeed = asyncio.create_task(
+        requests.set_request_succeeded_async('cond-request', 'test-request',
+                                             {'key': 'value'}))
+    await asyncio.sleep(0.2)
+    assert not succeed.done()
+    release.set()
+    await asyncio.to_thread(canceller.join, 10)
+
+    assert await succeed is None
+    assert await _status() == RequestStatus.CANCELLED
 
 
 @pytest.mark.asyncio
