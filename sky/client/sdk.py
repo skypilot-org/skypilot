@@ -3165,10 +3165,6 @@ def _without_service_account_token() -> Iterator[None]:
         yield
 
 
-# A URL scheme at the start of the endpoint (RFC 3986), e.g. `https://`.
-_URL_SCHEME_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*://')
-
-
 def _validate_endpoint(endpoint: Optional[str]) -> str:
     """Validate and normalize the endpoint URL."""
     if endpoint is None:
@@ -3181,8 +3177,7 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
         endpoint = click.prompt('Enter your SkyPilot API server endpoint',
                                 default=default_endpoint)
     # Default to https:// when no scheme is given, e.g. a bare hostname.
-    if not _URL_SCHEME_RE.match(endpoint):
-        endpoint = f'https://{endpoint}'
+    endpoint = server_common.add_default_scheme(endpoint)
     # Check endpoint is a valid URL
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
@@ -3219,7 +3214,12 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
                 'value, which makes every command resolve to an empty server '
                 'URL. Set it to an endpoint, or run unset '
                 f'{constants.SKY_API_SERVER_URL_ENV_VAR}.')
-    if endpoint is not None and endpoint.rstrip('/') != env_endpoint:
+    # Compare with the default scheme added, so that `api.example.com` and
+    # `https://api.example.com` count as the same endpoint.
+    env_endpoint = server_common.add_default_scheme(env_endpoint)
+    if (endpoint is not None and
+            server_common.add_default_scheme(endpoint).rstrip('/') !=
+            env_endpoint):
         # Two different explicit endpoints; we cannot tell which one the user
         # meant, and logging into one of them would leave the other in effect.
         with ux_utils.print_exception_no_traceback():

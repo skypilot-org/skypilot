@@ -463,6 +463,38 @@ def test_api_login_env_endpoint_with_conflicting_flag(
         client_sdk.api_login("http://other.skypilot.co")
 
 
+@pytest.mark.parametrize(
+    'env_value,flag',
+    [
+        # Scheme-less env var: login and later commands both use https://.
+        ('api.example.com', None),
+        # Same server with and without the scheme is not a conflict.
+        ('https://api.example.com', 'api.example.com'),
+        ('api.example.com', 'https://api.example.com'),
+    ])
+def test_api_login_env_endpoint_without_scheme(monkeypatch: pytest.MonkeyPatch,
+                                               tmp_path: Path, env_value: str,
+                                               flag):
+    """Login and later commands resolve a scheme-less env var the same way."""
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_value)
+    monkeypatch.delenv(constants.OVERRIDE_CONSOLIDATION_MODE, raising=False)
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(flag)
+
+    mock_check.assert_called_with('https://api.example.com')
+    server_common.get_server_url.cache_clear()
+    assert server_common.get_server_url() == 'https://api.example.com'
+
+
 def test_api_login_env_endpoint_with_matching_flag(
         monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """`-e` matching the env var is not ambiguous, so login proceeds.
