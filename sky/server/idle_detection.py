@@ -204,6 +204,15 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
         # The source may have taken longer to answer than leadership lasts.
         if not leading():
             return
+        # The answer describes the cluster as it was when this pass read it;
+        # it may have been stopped, torn down or relaunched since, and events
+        # and state are stored by cluster name.
+        current = global_user_state.get_cluster_from_name(
+            record['name'], include_user_info=False, summary_response=True)
+        if (current is None or
+                current['status'] != status_lib.ClusterStatus.UP or
+                current['launched_at'] != record['launched_at']):
+            return
         if reason is None:
             state.pop('idle_since', None)
             if state.pop('notified_at', None) is not None:
@@ -216,16 +225,6 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
             counts['idle'] += 1
             state.setdefault('idle_since', now)
             if now - state.get('notified_at', now - window) >= window:
-                # The answer describes the cluster as it was when this pass
-                # read it; it may have been stopped or relaunched since.
-                current = global_user_state.get_cluster_from_name(
-                    record['name'],
-                    include_user_info=False,
-                    summary_response=True)
-                if (current is None or
-                        current['status'] != status_lib.ClusterStatus.UP or
-                        current['launched_at'] != record['launched_at']):
-                    return
                 try:
                     _notify(config, record, reason, state['idle_since'])
                     state['notified_at'] = now

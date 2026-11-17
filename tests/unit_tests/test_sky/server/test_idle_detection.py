@@ -605,8 +605,24 @@ def test_cluster_that_changed_during_the_source_call_is_not_reported(
     assert [webhook['cluster'] for webhook in world.webhooks] == ['eval']
     assert len(world.events) == 1
     info.assert_called_once_with(
-        'Idle detection pass: checked=2 idle=2 notified=1 errors=0')
+        'Idle detection pass: checked=2 idle=1 notified=1 errors=0')
     warning.assert_not_called()
+
+
+@pytest.mark.parametrize('change', [_relaunch, _stop, _down])
+def test_end_of_idle_is_not_recorded_for_a_cluster_that_changed(world, change):
+    """Events are stored by name, so it would land on the new cluster."""
+    world.add_cluster()
+    world.run_until(_WINDOW)
+    assert len(world.events) == 1
+    saves = world.saves
+    world.source_response = _vector(90)
+    world.during_source_call = lambda: change(world)
+
+    world.run(_WINDOW + _INTERVAL)
+
+    assert len(world.events) == 1
+    assert world.saves == saves
 
 
 def test_pause_is_handled_again_if_its_reset_could_not_be_saved(
