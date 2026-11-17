@@ -141,6 +141,19 @@ class TestWorkspaceRemoteIdentitySchema:
         }
         jsonschema.validate(config, schema)
 
+    def test_gcp_custom_service_account_in_workspace(self):
+        schema = self._get_schema()
+        config = {
+            'workspaces': {
+                'team-a': {
+                    'gcp': {
+                        'remote_identity': 'team-a-sa@my-project.iam.gserviceaccount.com',
+                    }
+                }
+            }
+        }
+        jsonschema.validate(config, schema)
+
     def test_k8s_remote_identity_string_in_workspace(self):
         schema = self._get_schema()
         config = {

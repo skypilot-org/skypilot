@@ -236,6 +236,68 @@ def _make_provision_config(provider_config):
     )
 
 
+def test_gcp_configure_iam_role_uses_custom_service_account():
+    provision_config = _make_provision_config({
+        'project_id': 'test-project',
+        'remote_identity': 'custom-sa@test-project.iam.gserviceaccount.com',
+    })
+    provision_config.node_config['machineType'] = 'n2-standard-8'
+
+    with patch.object(gcp_config, '_get_service_account') as get_sa, \
+         patch.object(gcp_config, '_create_service_account') as create_sa, \
+         patch.object(gcp_config, '_add_iam_policy_binding') as add_binding:
+        iam_role = gcp_config._configure_iam_role(provision_config, MagicMock(),
+                                                  MagicMock())
+
+    assert iam_role == {
+        'serviceAccounts': [{
+            'email': 'custom-sa@test-project.iam.gserviceaccount.com',
+            'scopes': ['https://www.googleapis.com/auth/cloud-platform'],
+        }]
+    }
+    get_sa.assert_not_called()
+    create_sa.assert_not_called()
+    add_binding.assert_not_called()
+
+
+def test_gcp_configure_iam_role_uses_custom_service_account_for_tpu():
+    provision_config = _make_provision_config({
+        'project_id': 'test-project',
+        'remote_identity': 'custom-sa@test-project.iam.gserviceaccount.com',
+    })
+    provision_config.node_config['acceleratorType'] = 'v4-8'
+
+    with patch.object(gcp_config, '_get_service_account') as get_sa:
+        iam_role = gcp_config._configure_iam_role(provision_config, MagicMock(),
+                                                  MagicMock())
+
+    assert iam_role == {
+        'serviceAccount': {
+            'email': 'custom-sa@test-project.iam.gserviceaccount.com',
+            'scope': ['https://www.googleapis.com/auth/cloud-platform'],
+        }
+    }
+    get_sa.assert_not_called()
+
+
+def test_gcp_configure_iam_role_treats_mode_as_default_service_account():
+    provision_config = _make_provision_config({
+        'project_id': 'test-project',
+        'remote_identity': 'service_account',
+    })
+    provision_config.node_config['machineType'] = 'n2-standard-8'
+    skypilot_sa = {'email': 'skypilot-v1@test-project.iam.gserviceaccount.com'}
+
+    with patch.object(gcp_config, '_get_service_account',
+                      return_value=skypilot_sa), \
+         patch.object(gcp_config, '_is_permission_satisfied',
+                      return_value=(True, None)):
+        iam_role = gcp_config._configure_iam_role(provision_config, MagicMock(),
+                                                  MagicMock())
+
+    assert iam_role['serviceAccounts'][0]['email'] == skypilot_sa['email']
+
+
 def test_gcp_get_usable_vpc_and_subnet_uses_specified_subnet(monkeypatch):
     provider_config = {
         'project_id': 'test-project',

@@ -14,6 +14,7 @@ from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import resources_utils
+from sky.utils import schemas
 
 logger = logging.getLogger(__name__)
 
@@ -331,8 +332,21 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     an IAM role that allows it to create further gce instances and store items
     in google cloud storage.
 
-    TODO: Allow the name/id of the service account to be configured
+    If remote_identity is a custom service account, it is used as-is, without
+    creating it or granting it roles.
     """
+    remote_identity = config.provider_config.get('remote_identity')
+    # NONE is Kubernetes-only; on GCP it stays a service account name.
+    enum_values = {
+        opt.value
+        for opt in schemas.RemoteIdentityOptions
+        if opt is not schemas.RemoteIdentityOptions.NONE
+    }
+    if remote_identity and remote_identity.upper() not in enum_values:
+        logger.info('_configure_iam_role: using service account '
+                    f'{remote_identity} from remote_identity')
+        return _make_iam_role(remote_identity, config.node_config)
+
     project_id = config.provider_config['project_id']
     email = constants.SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
         account_id=constants.SKYPILOT_SERVICE_ACCOUNT_ID,
@@ -395,8 +409,12 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
                     f'Adding roles to service account {email}...')
         _add_iam_policy_binding(service_account, policy, crm, iam)
 
+    return _make_iam_role(service_account['email'], config.node_config)
+
+
+def _make_iam_role(email: str, node_config: Dict[str, Any]) -> Dict[str, Any]:
     account_dict = {
-        'email': service_account['email'],
+        'email': email,
         # NOTE: The amount of access is determined by the scope + IAM
         # role of the service account. Even if the cloud-platform scope
         # gives (scope) access to the whole cloud-platform, the service
@@ -404,8 +422,8 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
         'scopes': ['https://www.googleapis.com/auth/cloud-platform'],
     }
     iam_role: Dict[str, Any]
-    if (instance_utils.get_node_type(
-            config.node_config) == instance_utils.GCPNodeType.TPU):
+    if (instance_utils.get_node_type(node_config) ==
+            instance_utils.GCPNodeType.TPU):
         # SKY: The API for TPU VM is slightly different from normal compute
         # instances.
         # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node # pylint: disable=line-too-long
