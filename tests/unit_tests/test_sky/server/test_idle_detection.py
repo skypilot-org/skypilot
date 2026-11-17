@@ -91,7 +91,12 @@ class _World:
         self.source_response = _vector(0)
         self.webhook_response = _response({})
         self.leader = True
+        self.still_leading = True
+        self.renewals = 0
         self.released = 0
+        self.saves = 0
+        self.system_config = {}
+        self.source_seconds = 0
         self.now = 0
 
         original_get_nested = skypilot_config.get_nested
@@ -112,10 +117,21 @@ class _World:
                             lambda lock_id: self)
         monkeypatch.setattr(requests, 'get', self._get)
         monkeypatch.setattr(requests, 'post', self._post)
+        monkeypatch.setattr(global_user_state, 'get_system_config',
+                            self.system_config.get)
+        monkeypatch.setattr(global_user_state, 'set_system_config',
+                            self.system_config.__setitem__)
         monkeypatch.setattr(idle_detection.time, 'time', lambda: self.now)
+        monkeypatch.setattr(idle_detection.time, 'monotonic', lambda: self.now)
 
     def try_acquire(self):
         return self.leader
+
+    renew_interval_seconds = 10
+
+    def renew(self):
+        self.renewals += 1
+        return self.still_leading
 
     def release(self):
         self.released += 1
@@ -165,12 +181,14 @@ class _World:
         return [dict(record) for record in self.clusters.values()]
 
     def _set_cluster_info(self, cluster_name, metadata):
+        self.saves += 1
         self.clusters[cluster_name]['metadata'] = json.loads(
             json.dumps(metadata))
 
     def _get(self, url, params=None, headers=None, timeout=None):
         assert timeout
         self.queries.append((url, params, headers))
+        self.now += self.source_seconds
         if isinstance(self.source_response, Exception):
             raise self.source_response
         return self.source_response
@@ -440,6 +458,55 @@ def test_one_missed_pass_keeps_the_observation_window(world):
     world.run(_WINDOW + _INTERVAL)
 
     assert world.queries
+
+
+def test_slow_pass_is_not_an_outage(world):
+    """The daemon sleeps after a pass, so a slow one delays the next."""
+    world.add_cluster()
+    world.run_until(_WINDOW - _INTERVAL)
+    world.source_response = _vector(90)
+    world.source_seconds = 3 * _INTERVAL
+
+    world.run(_WINDOW)
+    world.run(world.now + _INTERVAL)
+
+    assert len(world.queries) == 2
+    assert world.state()['up_since'] == 0
+
+
+def test_state_is_written_only_when_it_changes(world):
+    world.add_cluster()
+
+    world.run_until(_WINDOW - _INTERVAL)
+
+    assert world.saves == 1
+
+
+def test_long_pass_renews_leadership(world):
+    world.add_cluster('train')
+    world.add_cluster('eval')
+    world.run_until(_WINDOW - _INTERVAL)
+    assert world.renewals == 0
+    world.source_seconds = 15
+
+    world.run(_WINDOW)
+
+    assert world.renewals == 1
+    assert len(world.queries) == 2
+
+
+def test_pass_ends_when_leadership_is_lost(world):
+    """Another API server may already be running its own pass."""
+    world.add_cluster('train')
+    world.add_cluster('eval')
+    world.run_until(_WINDOW - _INTERVAL)
+    world.source_seconds = 15
+    world.still_leading = False
+
+    world.run(_WINDOW)
+
+    assert len(world.queries) == 1
+    assert world.released == _WINDOW // _INTERVAL + 1
 
 
 def test_state_is_cleared_when_the_cluster_is_not_up(world):

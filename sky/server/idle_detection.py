@@ -29,6 +29,7 @@ OPT_OUT_VALUE = 'skip'
 
 _LOCK_ID = 'idle_detection'
 _STATE_KEY = 'idle_detection'
+_LAST_PASS_KEY = 'idle_detection_last_pass_finished'
 _SOURCE_TIMEOUT_SECONDS = 30
 _WEBHOOK_TIMEOUT_SECONDS = 10
 
@@ -163,11 +164,11 @@ def _is_exempt(record: Dict[str, Any]) -> bool:
 
 
 def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
-                   headers: Dict[str, str], window: int, interval: int,
+                   headers: Dict[str, str], window: int, watching: bool,
                    now: int, counts: Dict[str, int]) -> None:
-    state = record['metadata'].get(_STATE_KEY)
+    previous = record['metadata'].get(_STATE_KEY)
     if record['status'] != status_lib.ClusterStatus.UP:
-        if state is not None:
+        if previous is not None:
             _save_state(record, None)
         return
     if _is_exempt(record):
@@ -175,12 +176,12 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
 
     # The daemon judges a cluster only after watching it stay UP for a whole
     # window: the source averages whatever samples exist, so a young cluster
-    # would read idle. Provisioning rewrites launched_at, and a gap in
-    # last_seen means the cluster was down or this daemon was.
-    if (state is None or state['launched_at'] != record['launched_at'] or
-            now - state['last_seen'] > 2 * interval):
+    # would read idle. Provisioning rewrites launched_at.
+    if (previous is None or not watching or
+            previous['launched_at'] != record['launched_at']):
         state = {'launched_at': record['launched_at'], 'up_since': now}
-    state['last_seen'] = now
+    else:
+        state = dict(previous)
 
     if now - state['up_since'] >= window:
         counts['checked'] += 1
@@ -211,14 +212,16 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
                         f'Could not notify the owner of idle cluster '
                         f'{record["name"]!r}; will retry on the next pass: '
                         f'{common_utils.format_exception(e)}')
-    _save_state(record, state)
+    if state != previous:
+        _save_state(record, state)
 
 
 def run_pass(interval: int) -> None:
     """Checks every UP cluster once.
 
     Args:
-        interval: Seconds between passes, to recognize a missed pass.
+        interval: Seconds the daemon sleeps between passes, to tell a pause
+            in the daemon from its normal rhythm.
     """
     config = skypilot_config.get_nested(('idle_detection',), None)
     if config is None:
@@ -233,17 +236,33 @@ def run_pass(interval: int) -> None:
         (source_config,) = config['source'].values()
         headers = _read_headers(source_config)
         now = int(time.time())
+        # After a pause in the daemon nobody watched the clusters stay UP, so
+        # every observation window starts over. Measured from the end of the
+        # last pass: a slow pass is not a pause.
+        last_pass_finished = global_user_state.get_system_config(_LAST_PASS_KEY)
+        watching = (last_pass_finished is not None and
+                    now - int(last_pass_finished) <= 2 * interval)
+        renewed_at = time.monotonic()
         counts = {'checked': 0, 'idle': 0, 'notified': 0, 'errors': 0}
         for record in global_user_state.get_clusters(
                 exclude_managed_clusters=True):
+            if (time.monotonic() - renewed_at >=
+                    elector.renew_interval_seconds):
+                if not elector.renew():
+                    logger.warning('Another API server took over idle '
+                                   'detection; ending this pass.')
+                    return
+                renewed_at = time.monotonic()
             try:
-                _check_cluster(record, config, headers, window, interval, now,
+                _check_cluster(record, config, headers, window, watching, now,
                                counts)
             except Exception as e:  # pylint: disable=broad-except
                 counts['errors'] += 1
                 logger.warning(
                     f'Idle detection failed for cluster {record["name"]!r}: '
                     f'{common_utils.format_exception(e)}')
+        global_user_state.set_system_config(_LAST_PASS_KEY,
+                                            str(int(time.time())))
         # A source that fails for every cluster makes them all look active,
         # which is indistinguishable from a busy fleet without this line.
         summary = ' '.join(f'{name}={count}' for name, count in counts.items())
