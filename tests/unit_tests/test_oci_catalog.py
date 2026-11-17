@@ -106,6 +106,39 @@ def test_filtered_view_follows_catalog_refresh(isolated_catalog):
         assert subscribed.call_count == 2
 
 
+def test_refresh_by_another_worker_is_picked_up(isolated_catalog):
+    """A refresh done by another server worker must reach this one too.
+
+    The API server runs several worker processes. Only one of them
+    downloads the new catalog; the others see a fresh file on disk and
+    must still re-read it instead of serving the copy they loaded before.
+    """
+    catalog_path = isolated_catalog
+    with mock.patch.object(oci_catalog, '_fetch_subscribed_regions',
+                           return_value=['us-ashburn-1']), \
+         mock.patch.object(catalog_common.requests, 'get',
+                           return_value=_Response(CATALOG_V1)) as get:
+        assert sorted(
+            oci_catalog._get_df()['InstanceType']) == ['BM.GPU.H100.8']
+
+        # Another worker, with its own lazy frame for the same file, finds
+        # the catalog stale and downloads the new one.
+        get.return_value = _Response(CATALOG_V2)
+        _make_stale(catalog_path)
+        other_worker = catalog_common.read_catalog(
+            oci_catalog._VMS_FILE, pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+        assert 'BM.GPU.B200.8' in set(other_worker['InstanceType'])
+        assert get.call_count == 2
+
+        # This worker's next request sees the new rows without downloading.
+        annotations.clear_request_level_cache()
+        assert sorted(oci_catalog._get_df()['InstanceType']) == [
+            'BM.GPU.B200.8', 'BM.GPU.H100.8'
+        ]
+        assert oci_catalog.instance_type_exists('BM.GPU.B200.8')
+        assert get.call_count == 2
+
+
 def test_unfiltered_view_is_the_lazy_frame(isolated_catalog):
     """Without subscription info the self-refreshing frame is served as is."""
     del isolated_catalog
