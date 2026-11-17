@@ -74,11 +74,8 @@ def _workspace_targets(workspace: str, cloud: str) -> Set[str]:
         return set()
 
 
-def visible_for_workspaces(workspaces: Iterable[str], cloud: str) -> Set[str]:
-    """The union of ``cloud``'s allowed targets over ``workspaces``.
-
-    Pure: no auth and no config refresh, so the executor can use it too.
-    """
+def _representatives(workspaces: Iterable[str], cloud: str) -> List[str]:
+    """One workspace per distinct ``cloud`` setting among ``workspaces``."""
     key = _ALLOWED_KEYS[cloud]
     configs = skypilot_config.get_nested(('workspaces',), default_value={})
     # The result depends only on a workspace's own value and `disabled`, so
@@ -94,10 +91,27 @@ def visible_for_workspaces(workspaces: Iterable[str], cloud: str) -> Set[str]:
                            sort_keys=True,
                            default=str)
         representatives.setdefault(group, workspace)
+    return list(representatives.values())
+
+
+def visible_for_workspaces(workspaces: Iterable[str], cloud: str) -> Set[str]:
+    """The union of ``cloud``'s allowed targets over ``workspaces``.
+
+    Pure: no auth and no config refresh, so the executor can use it too.
+    """
     targets: Set[str] = set()
-    for workspace in representatives.values():
+    for workspace in _representatives(workspaces, cloud):
         targets |= _workspace_targets(workspace, cloud)
     return targets
+
+
+def workspace_allowing(workspaces: Iterable[str], cloud: str,
+                       target: str) -> Optional[str]:
+    """A workspace among ``workspaces`` that allows ``target``, or None."""
+    for workspace in _representatives(workspaces, cloud):
+        if target in _workspace_targets(workspace, cloud):
+            return workspace
+    return None
 
 
 def _is_admin(user_id: str) -> bool:

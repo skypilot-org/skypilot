@@ -28,7 +28,9 @@ from sky.clouds import cloud as sky_cloud
 from sky.server import constants as server_constants
 from sky.server import server
 from sky.server import versions
+from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.users import permission
@@ -43,6 +45,7 @@ _TASK = 'run: echo hi\n'
 _INSTANCE_TYPE_TASK = 'resources:\n  instance_type: m5.2xlarge\nrun: echo hi\n'
 _NEW_CLIENT = server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION
 _OLD_CLIENT = _NEW_CLIENT - 1
+_PREFIX = server_constants.REQUEST_NAME_PREFIX
 
 
 class _Env:
@@ -383,6 +386,43 @@ class TestResolutionErrors:
         assert error.accessible == ['ws-a', 'ws-b']
         assert 'You belong to multiple workspaces: ws-a, ws-b.' in str(error)
         assert 'sky workspace use <name>' in str(error)
+
+    @pytest.mark.parametrize('request_name,access,picked', [
+        (_PREFIX + request_names.RequestName.CLUSTER_STATUS.value, 'read',
+         'ws-b'),
+        (_PREFIX + request_names.RequestName.ENABLED_CLOUDS.value, 'read',
+         'ws-b'),
+        (request_names.AdminPolicyRequestName.VALIDATE.value, 'read', None),
+        (_PREFIX + request_names.RequestName.OPTIMIZE.value, 'read', None),
+        (_PREFIX + request_names.RequestName.CLUSTER_LAUNCH.value, 'write',
+         None),
+    ])
+    def test_reads_use_the_first_workspace_by_name(self, env, request_name,
+                                                   access, picked):
+        """A read by alice, who chose neither of her workspaces, runs in the
+        first one by name, unless it prepares a write. A write never picks."""
+        # The names sort the other way round from the ids.
+        env.configure({
+            'default': _private(),
+            'ws-a': _private('alice', name='zeta'),
+            'ws-b': _private('alice', name='alpha'),
+        })
+        env.add_user('alice', ['ws-a', 'ws-b'])
+        body = payloads.RequestBody(env_vars={
+            constants.USER_ID_ENV_VAR: 'alice',
+            constants.USER_ENV_VAR: 'alice',
+        })
+        body.client_api_version = _NEW_CLIENT
+        body.workspace_access = access
+        context_manager = executor.override_request_env_and_config(
+            body, 'request-id', request_name)
+        if picked is None:
+            with pytest.raises(exceptions.WorkspaceAmbiguousError):
+                with context_manager:
+                    pass
+            return
+        with context_manager:
+            assert skypilot_config.get_active_workspace() == picked
 
     def test_no_access_reaches_the_client(self, env):
         env.configure({'default': _private(), 'ws-a': _private('alice')})

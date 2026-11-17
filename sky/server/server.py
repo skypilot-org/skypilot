@@ -3320,6 +3320,8 @@ async def api_get(request: fastapi.Request,
         raise fastapi.HTTPException(
             status_code=500,
             detail=request_task.encode_for_client().model_dump())
+    if request_task.has_stored_result:
+        return await asyncio.to_thread(request_task.encode_for_client)
     return request_task.encode_for_client()
 
 
@@ -4406,13 +4408,15 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
 
 @app.get('/all_contexts')
 async def all_contexts(request: fastapi.Request) -> None:
-    """Gets all Kubernetes and SSH node pool contexts."""
+    """Gets the Kubernetes and SSH node pool contexts the caller can read."""
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
         request_body=payloads.RequestBody(),
-        func=core.get_all_contexts,
+        # Without an authenticated user nothing is scoped.
+        func=(core.get_all_contexts if request.state.auth_user is None else
+              core.get_workspace_contexts),
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )

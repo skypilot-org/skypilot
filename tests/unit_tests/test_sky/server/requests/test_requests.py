@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pathlib
+import threading
 import time
 from typing import List, Optional
 import unittest.mock as mock
@@ -23,6 +24,8 @@ from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.server.requests.serializers import return_value_serializers
+from sky.skylet import constants as skylet_constants
 
 
 def dummy():
@@ -45,7 +48,10 @@ def isolated_database(tmp_path):
         with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
                         str(temp_log_path)):
             with mock.patch('sky.sky_logging.DEBUG_LOG_DIR',
-                            str(temp_debug_log_path)):
+                            str(temp_debug_log_path)), mock.patch(
+                                'sky.server.requests.stored_results.'
+                                'results_dir',
+                                return_value=tmp_path / 'results'):
                 # Reset the global database variable to force
                 # re-initialization
                 requests._DB = None
@@ -115,8 +121,7 @@ async def test_set_request_succeeded(isolated_database, test_async):
     await requests.create_if_not_exists_async(request)
     result = {'key': 'value', 'number': 42}
     if test_async:
-        stored = await requests.set_request_succeeded_async(
-            'test-request-1', result)
+        stored = await requests.set_request_succeeded_async(request, result)
     else:
         stored = requests.set_request_succeeded('test-request-1', result)
     assert stored == len(orjson.dumps(result))
@@ -141,6 +146,224 @@ def test_set_request_succeeded_nonexistent_request(isolated_database):
     # Try to set a non-existent request as succeeded
     with pytest.raises(AssertionError):
         requests.set_request_succeeded('nonexistent-request', {'result': 'ok'})
+
+
+class _DefaultUpdateBackend(requests.SqliteRequestBackend):
+    """SQLite backend that uses the RequestBackend default conditional
+    update."""
+    update_if_status_async = (
+        requests.request_storage.RequestBackend.update_if_status_async)
+
+
+@pytest.fixture(params=['sqlite', 'default'])
+def conditional_backend(request, isolated_database):
+    backend = (requests.SqliteRequestBackend()
+               if request.param == 'sqlite' else _DefaultUpdateBackend())
+    with mock.patch.object(requests.request_storage, '_storage_backend',
+                           backend):
+        yield backend
+
+
+def _new_request(request_id: str, status: RequestStatus,
+                 **kwargs) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='test-request',
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=status,
+                            created_at=time.time(),
+                            user_id='user-1',
+                            **kwargs)
+
+
+async def _create_request(status: RequestStatus) -> requests.Request:
+    request = _new_request('cond-request', status, status_msg='queued')
+    await requests.create_if_not_exists_async(request)
+    return request
+
+
+async def _status(request_id: str = 'cond-request') -> RequestStatus:
+    request = await requests.get_request_async(request_id)
+    assert request is not None
+    return request.status
+
+
+@pytest.mark.asyncio
+async def test_update_if_status_async(conditional_backend):
+    await _create_request(RequestStatus.RUNNING)
+    values = {'status': RequestStatus.SUCCEEDED.value, 'finished_at': 1.0}
+
+    assert not await conditional_backend.update_if_status_async(
+        'cond-request', [RequestStatus.PENDING], values)
+    assert await _status() == RequestStatus.RUNNING
+
+    assert await conditional_backend.update_if_status_async(
+        'cond-request', [RequestStatus.PENDING, RequestStatus.RUNNING], values)
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.SUCCEEDED
+    assert request.finished_at == 1.0
+    assert request.status_msg == 'queued'
+
+    assert not await conditional_backend.update_if_status_async(
+        'missing-request', [RequestStatus.RUNNING], values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'status',
+    [RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED])
+async def test_finished_request_keeps_its_outcome(conditional_backend, status):
+    created = await _create_request(status)
+
+    assert await requests.set_request_succeeded_async(created,
+                                                      {'key': 'value'}) is None
+    await requests.set_request_failed_async('cond-request', ValueError('Boom'))
+    await requests.set_request_cancelled_async('cond-request')
+    assert not await requests.transition_request_status_async(
+        'cond-request', RequestStatus.executable_statuses(),
+        RequestStatus.RUNNING)
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == status
+    assert request.return_value is None
+    assert request.error is None
+
+
+@pytest.mark.asyncio
+async def test_set_request_succeeded_async_stores_result(conditional_backend):
+    created = await _create_request(RequestStatus.RUNNING)
+    result = {'key': 'välue'}
+
+    stored = await requests.set_request_succeeded_async(created, result)
+
+    assert stored == len(orjson.dumps(result))
+    # The caller's request object is left as it was.
+    assert created.return_value is None
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.SUCCEEDED
+    assert request.finished_at is not None
+    assert request.get_return_value() == result
+
+
+@pytest.mark.asyncio
+async def test_set_request_succeeded_async_encodes_through_set_return_value(
+        conditional_backend, monkeypatch):
+    created = await _create_request(RequestStatus.RUNNING)
+    original = requests.Request.set_return_value
+
+    def _set_return_value(self, return_value):
+        original(self, {'wrapped': return_value})
+
+    monkeypatch.setattr(requests.Request, 'set_return_value', _set_return_value)
+
+    await requests.set_request_succeeded_async(created, 'value')
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.get_return_value() == {'wrapped': 'value'}
+
+
+@pytest.mark.asyncio
+async def test_set_request_failed_async_stores_error(conditional_backend):
+    await _create_request(RequestStatus.RUNNING)
+
+    await requests.set_request_failed_async('cond-request', ValueError('Boom'))
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.FAILED
+    assert request.finished_at is not None
+    error = request.get_error()
+    assert error is not None
+    assert error['type'] == 'ValueError'
+    assert error['message'] == 'Boom'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status',
+                         [RequestStatus.PENDING, RequestStatus.WAITING])
+async def test_transition_request_status_async_claims(conditional_backend,
+                                                      status):
+    await _create_request(status)
+
+    assert await requests.transition_request_status_async(
+        'cond-request', RequestStatus.executable_statuses(),
+        RequestStatus.RUNNING)
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.RUNNING
+    assert request.status_msg is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', RequestStatus.active_statuses())
+async def test_set_request_failed_if_pending_async(conditional_backend, status):
+    await _create_request(status)
+
+    failed = await requests.set_request_failed_if_pending_async(
+        'cond-request', ValueError('Boom'))
+
+    assert failed == (status == RequestStatus.PENDING)
+    expected = RequestStatus.FAILED if failed else status
+    assert await _status() == expected
+
+
+@pytest.mark.asyncio
+async def test_noop_update_is_logged(conditional_backend, monkeypatch):
+    monkeypatch.setattr(requests.sky_logging, 'logging_enabled',
+                        lambda *_: True)
+    debug = mock.Mock()
+    monkeypatch.setattr(requests.logger, 'debug', debug)
+
+    await requests.set_request_cancelled_async('missing-request')
+
+    debug.assert_called_once()
+    assert 'missing-request' in debug.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', RequestStatus.active_statuses())
+async def test_set_request_cancelled_async(conditional_backend, status):
+    await _create_request(status)
+
+    await requests.set_request_cancelled_async('cond-request')
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.CANCELLED
+    assert request.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_conditional_update_waits_for_update_request(conditional_backend):
+    """A cancellation written under update_request() is not overwritten."""
+    created = await _create_request(RequestStatus.RUNNING)
+    locked = threading.Event()
+    release = threading.Event()
+
+    def _cancel_under_lock():
+        with requests.update_request('cond-request') as request:
+            assert request is not None
+            request.status = RequestStatus.CANCELLED
+            locked.set()
+            release.wait(timeout=10)
+
+    canceller = threading.Thread(target=_cancel_under_lock)
+    canceller.start()
+    assert await asyncio.to_thread(locked.wait, 10)
+    succeed = asyncio.create_task(
+        requests.set_request_succeeded_async(created, {'key': 'value'}))
+    await asyncio.sleep(0.2)
+    assert not succeed.done()
+    release.set()
+    await asyncio.to_thread(canceller.join, 10)
+
+    assert await succeed is None
+    assert await _status() == RequestStatus.CANCELLED
 
 
 @pytest.mark.asyncio
@@ -695,7 +918,7 @@ async def test_clean_finished_requests_cleans_both_paths(
 
 
 @pytest.mark.asyncio
-async def test_clean_orphan_request_logs(isolated_database):
+async def test_clean_orphan_request_files(isolated_database):
     """Test that log files whose request row is gone are reclaimed."""
     current_time = time.time()
     # Older than the grace period the sweep applies to the age cutoff.
@@ -749,12 +972,12 @@ async def test_clean_orphan_request_logs(isolated_database):
         assert path.exists(), f'{path} should have been kept'
 
     messages = [call[0][0] for call in mock_logger.info.call_args_list]
-    assert any('Cleaned up 2 orphan request log file(s)' in message
+    assert any('Cleaned up 2 orphan request file(s)' in message
                for message in messages), messages
 
 
 @pytest.mark.asyncio
-async def test_clean_orphan_request_logs_many_files(isolated_database):
+async def test_clean_orphan_request_files_many_files(isolated_database):
     """Test reclaiming more orphans than fit in one existence query."""
     stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
     count = 2 * requests._ORPHAN_LOG_QUERY_CHUNK_SIZE + 1
@@ -2066,13 +2289,7 @@ def test_active_statuses_includes_waiting():
 
 
 def _waiting_request():
-    return requests.Request(request_id='waiting-req',
-                            name='test-request',
-                            entrypoint=dummy,
-                            request_body=payloads.RequestBody(),
-                            status=RequestStatus.WAITING,
-                            created_at=time.time(),
-                            user_id='user-1')
+    return _new_request('waiting-req', RequestStatus.WAITING)
 
 
 @pytest.fixture()
@@ -2506,3 +2723,230 @@ def test_stored_result_size_counts_utf8_bytes():
     request.set_return_value(result)
     request.to_row()
     assert request.stored_result_size == len(orjson.dumps(result))
+
+
+def _running_request(request_id: str) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='test-request',
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=RequestStatus.RUNNING,
+                            created_at=time.time(),
+                            user_id='test-user')
+
+
+_LARGE_RESULT = {'jobs': [{'id': i, 'name': f'job-{i}'} for i in range(200)]}
+
+
+@pytest.fixture
+def store_large_results(monkeypatch):
+    monkeypatch.setenv(skylet_constants.ENV_VAR_SERVER_STORE_LARGE_RESULTS, '1')
+    monkeypatch.setattr(requests.stored_results, 'MAX_IN_ROW_BYTES', 1024)
+
+
+def _recorded_return_value(request_id: str):
+    """The return value as recorded in the row, without loading a stored one."""
+    request = requests.get_request(request_id, fields=['return_value'])
+    assert request is not None
+    return request.return_value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_large_result_is_stored_outside_the_row(isolated_database,
+                                                      store_large_results,
+                                                      test_async):
+    request = _running_request('large-req')
+    await requests.create_if_not_exists_async(request)
+    if test_async:
+        size = await requests.set_request_succeeded_async(
+            request, _LARGE_RESULT)
+    else:
+        size = requests.set_request_succeeded('large-req', _LARGE_RESULT)
+
+    encoded = orjson.dumps(_LARGE_RESULT)
+    # The usage metrics still see the size of the result itself.
+    assert size == len(encoded)
+    assert requests.stored_results.result_path('large-req').exists()
+    assert _recorded_return_value('large-req') == (
+        requests.stored_results.StoredResult(size=len(encoded)))
+
+    request = requests.get_request('large-req')
+    assert request is not None
+    assert request.has_stored_result
+    assert request.get_return_value() == _LARGE_RESULT
+    assert request.encode().return_value == encoded.decode('utf-8')
+
+
+@pytest.mark.asyncio
+async def test_small_result_stays_in_the_row(isolated_database,
+                                             store_large_results):
+    await requests.create_if_not_exists_async(_running_request('small-req'))
+    requests.set_request_succeeded('small-req', {'ok': True})
+
+    assert not requests.stored_results.result_path('small-req').exists()
+    assert _recorded_return_value('small-req') == {'ok': True}
+    request = requests.get_request('small-req')
+    assert request is not None
+    assert not request.has_stored_result
+    assert request.get_return_value() == {'ok': True}
+
+
+@pytest.mark.asyncio
+async def test_result_stays_in_the_row_when_storing_fails(
+        isolated_database, store_large_results):
+    await requests.create_if_not_exists_async(_running_request('fail-req'))
+    with mock.patch.object(requests.stored_results,
+                           'store',
+                           side_effect=OSError('disk full')):
+        requests.set_request_succeeded('fail-req', _LARGE_RESULT)
+
+    assert _recorded_return_value('fail-req') == _LARGE_RESULT
+    request = requests.get_request('fail-req')
+    assert request is not None
+    assert request.get_return_value() == _LARGE_RESULT
+
+
+@pytest.mark.asyncio
+async def test_updating_a_request_keeps_its_stored_result(
+        isolated_database, store_large_results):
+    await requests.create_if_not_exists_async(_running_request('update-req'))
+    requests.set_request_succeeded('update-req', _LARGE_RESULT)
+    path = requests.stored_results.result_path('update-req')
+    mtime = path.stat().st_mtime_ns
+
+    with mock.patch.object(requests.stored_results,
+                           'load',
+                           side_effect=AssertionError('loaded')):
+        with requests.update_request('update-req') as request:
+            assert request is not None
+            request.status_msg = 'updated'
+
+    assert path.stat().st_mtime_ns == mtime
+    request = requests.get_request('update-req')
+    assert request is not None
+    assert request.status_msg == 'updated'
+    assert request.get_return_value() == _LARGE_RESULT
+
+
+@pytest.mark.asyncio
+async def test_listing_does_not_load_stored_results(isolated_database,
+                                                    store_large_results):
+    await requests.create_if_not_exists_async(_running_request('list-req'))
+    requests.set_request_succeeded('list-req', _LARGE_RESULT)
+
+    with mock.patch.object(requests.stored_results,
+                           'load',
+                           side_effect=AssertionError('loaded')), \
+            mock.patch.object(requests.stored_results,
+                              'load_text',
+                              side_effect=AssertionError('loaded')):
+        listing = orjson.loads(
+            requests.list_requests_json(
+                requests.RequestTaskFilter(fields=requests.DISPLAY_COLUMNS)))
+    assert [item['request_id'] for item in listing] == ['list-req']
+
+
+@pytest.mark.asyncio
+async def test_gc_deletes_stored_result_with_its_row(isolated_database,
+                                                     store_large_results):
+    await requests.create_if_not_exists_async(_running_request('gc-req'))
+    requests.set_request_succeeded('gc-req', _LARGE_RESULT)
+    with requests.update_request('gc-req') as request:
+        assert request is not None
+        request.finished_at = time.time() - 3600
+    path = requests.stored_results.result_path('gc-req')
+    stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
+    os.utime(path, (stale_mtime, stale_mtime))
+
+    await requests.clean_finished_requests_with_retention(60)
+
+    assert requests.get_request('gc-req') is None
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_gc_deletes_orphan_stored_results(isolated_database,
+                                                store_large_results):
+    stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
+    await requests.create_if_not_exists_async(_running_request('live-req'))
+    requests.set_request_succeeded('live-req', _LARGE_RESULT)
+    results_dir = requests.stored_results.results_dir()
+    live = requests.stored_results.result_path('live-req')
+    os.utime(live, (stale_mtime, stale_mtime))
+    orphans = [
+        requests.stored_results.result_path('orphan-req'),
+        # A write interrupted before it was renamed into place.
+        results_dir / 'orphan-tmp-req.0123abcd.tmp',
+    ]
+    for orphan in orphans:
+        orphan.write_bytes(b'x')
+        os.utime(orphan, (stale_mtime, stale_mtime))
+    # No row, but written within the grace period.
+    fresh = requests.stored_results.result_path('fresh-req')
+    fresh.write_bytes(b'x')
+
+    await requests.clean_finished_requests_with_retention(60)
+
+    for orphan in orphans:
+        assert not orphan.exists(), orphan
+    assert live.exists()
+    assert fresh.exists()
+
+
+def test_stored_result_reference_survives_a_row_round_trip(
+        isolated_database, store_large_results):
+    request = _running_request('round-trip-req')
+    request.set_return_value(_LARGE_RESULT)
+    row = request.to_row()
+    assert request.has_stored_result
+
+    decoded = requests.Request.from_row(row)
+    assert decoded.return_value == request.return_value
+    assert decoded.get_return_value() == _LARGE_RESULT
+
+
+def test_missing_stored_result_raises_a_clear_error(isolated_database,
+                                                    store_large_results):
+    request = _running_request('missing-req')
+    request.set_return_value(_LARGE_RESULT)
+    request.to_row()
+    requests.stored_results.result_path('missing-req').unlink()
+
+    with pytest.raises(RuntimeError, match='no longer available'):
+        request.get_return_value()
+
+
+def test_stored_result_goes_through_a_version_aware_serializer(
+        isolated_database, store_large_results, monkeypatch):
+    old_client = []
+
+    def serializer(value):
+        if old_client:
+            value = {'jobs': [{'id': job['id']} for job in value['jobs']]}
+        return orjson.dumps(value).decode('utf-8')
+
+    monkeypatch.setitem(return_value_serializers.handlers, 'test-request',
+                        serializer)
+    request = _running_request('serializer-req')
+    request.set_return_value(_LARGE_RESULT)
+    request.to_row()
+    assert request.has_stored_result
+
+    old_client.append(True)
+    assert request.encode().return_value == orjson.dumps({
+        'jobs': [{
+            'id': i
+        } for i in range(200)]
+    }).decode('utf-8')
+
+
+@pytest.mark.asyncio
+async def test_large_result_stays_in_the_row_until_storing_is_enabled(
+        isolated_database, store_large_results, monkeypatch):
+    monkeypatch.delenv(skylet_constants.ENV_VAR_SERVER_STORE_LARGE_RESULTS)
+    await requests.create_if_not_exists_async(_running_request('off-req'))
+    requests.set_request_succeeded('off-req', _LARGE_RESULT)
+
+    assert not requests.stored_results.result_path('off-req').exists()
+    assert _recorded_return_value('off-req') == _LARGE_RESULT

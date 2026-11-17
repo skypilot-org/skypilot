@@ -4,40 +4,30 @@ from typing import Any, Dict, List
 
 import fastapi
 
+from sky import skypilot_config
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.ssh_node_pools import core
-from sky.users import permission
-from sky.users import rbac
 from sky.utils import common_utils
+from sky.workspaces import visibility
 
 router = fastapi.APIRouter()
 
 
-def _caller_is_admin(request: fastapi.Request) -> bool:
-    """Whether the caller holds the admin role.
-
-    With no authenticated user there is no role to distinguish: the server is
-    either a single-user loopback server or sits behind the operator's own
-    proxy, and the RBAC middleware passes such requests too, so they are
-    treated as admin here as well.
-    """
-    auth_user = request.state.auth_user
-    if auth_user is None:
-        return True
-    roles = permission.permission_service.get_user_roles(auth_user.id)
-    return rbac.RoleName.ADMIN.value in roles
+def _scope(request: fastapi.Request) -> visibility.InfraScope:
+    # Unscoped for admins and for requests with no authenticated user.
+    return visibility.scope_for(request.state.auth_user, need_slurm=False)
 
 
 @router.get('')
 def get_ssh_node_pools(request: fastapi.Request) -> Dict[str, Any]:
-    """Get all SSH Node Pool configurations.
+    """Get the SSH Node Pool configurations the caller may see.
 
-    The stored config carries each host's sudo password and SSH key path.
-    Only admins, the one role allowed to change the pools, receive them; any
-    other caller gets the config with credential fields removed.
+    Admins get every pool as stored, including each host's sudo password and
+    SSH key path. Any other caller gets only the pools their workspaces allow,
+    with credential fields removed.
     """
     try:
         pools = core.get_all_pools()
@@ -46,9 +36,15 @@ def get_ssh_node_pools(request: fastapi.Request) -> Dict[str, Any]:
             status_code=500,
             detail=
             f'Failed to get SSH Node Pools: {common_utils.format_exception(e)}')
-    if _caller_is_admin(request):
+    scope = _scope(request)
+    if scope.unscoped:
         return pools
-    return core.redact_pool_secrets(pools)
+    assert scope.kubernetes is not None
+    return core.redact_pool_secrets({
+        name: config
+        for name, config in pools.items()
+        if f'ssh-{name}' in scope.kubernetes
+    })
 
 
 @router.post('')
@@ -228,12 +224,24 @@ async def down_ssh_node_pool_general(
 
 
 @router.get('/{pool_name}/status')
-def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
+def get_ssh_node_pool_status(request: fastapi.Request,
+                             pool_name: str) -> Dict[str, str]:
     """Get the status of a specific SSH Node Pool."""
+    context_name = f'ssh-{pool_name}'
+    scope = _scope(request)
+    if scope.kubernetes is not None and context_name not in scope.kubernetes:
+        raise visibility.not_found('SSH Node Pool')
+    # The check honors the active workspace's allowed_node_pools, so run it
+    # under a workspace that allows the pool, not the server's default.
+    workspace = visibility.workspace_allowing(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {},
+        'ssh', context_name)
     try:
-        # Call ssh_status to check the context
-        context_name = f'ssh-{pool_name}'
-        is_ready, reason = core.ssh_status(context_name)
+        if workspace is None:
+            is_ready, reason = core.ssh_status(context_name)
+        else:
+            with skypilot_config.local_active_workspace_ctx(workspace):
+                is_ready, reason = core.ssh_status(context_name)
 
         # Strip ANSI escape codes from the reason text
         def strip_ansi_codes(text):

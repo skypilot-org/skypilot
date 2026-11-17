@@ -3312,8 +3312,8 @@ def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
                         lambda *args: True)
     resolved_for = []
 
-    def fake_resolve(user, action):
-        del action
+    def fake_resolve(user, action, pick_for_read):
+        del action, pick_for_read
         resolved_for.append(user.preferred_workspace)
         return mock.Mock(workspace=constants.SKYPILOT_DEFAULT_WORKSPACE,
                          source='explicit')
