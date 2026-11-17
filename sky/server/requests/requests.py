@@ -35,6 +35,7 @@ from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
+from sky.server.requests import stored_results
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
@@ -302,6 +303,10 @@ class Request:
         SIGTERM-to-idle-worker pool break. All return-value serializers
         already guard `if return_value is not None`, so None persists as JSON
         `null`.
+
+        A result larger than ``stored_results.MAX_IN_ROW_BYTES`` once
+        serialized is stored outside the requests table, and the request keeps
+        a ``stored_results.StoredResult`` reference to it.
         """
         encoder = encoders.get_encoder(self.name)
         try:
@@ -311,10 +316,32 @@ class Request:
                 f'Encoder for request {self.request_id} ({self.name}) '
                 f'failed; storing None: {common_utils.format_exception(e)}')
             self.return_value = None
+            return
+        try:
+            serialized = return_value_serializers.get_serializer(self.name)(
+                self.return_value)
+            if len(serialized) > stored_results.MAX_IN_ROW_BYTES:
+                self.return_value = stored_results.store(
+                    self.request_id, self.name, serialized)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to store the result of request {self.request_id} '
+                f'({self.name}) outside the requests table; keeping it in '
+                f'the row: {common_utils.format_exception(e)}')
+
+    def _resolved_return_value(self) -> Any:
+        if isinstance(self.return_value, stored_results.StoredResult):
+            return stored_results.load(self.request_id)
+        return self.return_value
+
+    @property
+    def has_stored_result(self) -> bool:
+        """Whether the result is stored outside the requests table."""
+        return isinstance(self.return_value, stored_results.StoredResult)
 
     def get_return_value(self) -> Any:
         """Get the return value."""
-        return decoders.get_decoder(self.name)(self.return_value)
+        return decoders.get_decoder(self.name)(self._resolved_return_value())
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
@@ -322,15 +349,18 @@ class Request:
         return cls.decode(payloads.RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
-        payload = self.encode()
+        payload = self._encode(resolve_stored_result=False)
         # encode() may downgrade WAITING -> RUNNING for clients on an older API
         # version; that is a wire-only concern. to_row() feeds the database, so
         # always persist the true status regardless of the request context.
         payload.status = self.status.value
-        stored = payload.return_value or ''
-        # isascii() is O(1); only a result with non-ASCII text is encoded.
-        self.stored_result_size = (len(stored) if stored.isascii() else len(
-            stored.encode('utf-8')))
+        if isinstance(self.return_value, stored_results.StoredResult):
+            self.stored_result_size = self.return_value.size
+        else:
+            stored = payload.return_value or ''
+            # isascii() is O(1); only a result with non-ASCII text is encoded.
+            self.stored_result_size = (len(stored) if stored.isascii() else len(
+                stored.encode('utf-8')))
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -383,19 +413,28 @@ class Request:
 
     def encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request."""
+        return self._encode(resolve_stored_result=True)
+
+    def _encode(self, resolve_stored_result: bool) -> payloads.RequestPayload:
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
-            # Use version-aware serializer to handle backward compatibility
-            # for old clients that don't recognize new fields.
-            serializer = return_value_serializers.get_serializer(self.name)
+            if (not resolve_stored_result and
+                    isinstance(self.return_value, stored_results.StoredResult)):
+                return_value = stored_results.to_column(self.return_value)
+            else:
+                # Use version-aware serializer to handle backward
+                # compatibility for old clients that don't recognize new
+                # fields.
+                serializer = return_value_serializers.get_serializer(self.name)
+                return_value = serializer(self._resolved_return_value())
             return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
                 status=_status_value_for_client(self.status.value),
-                return_value=serializer(self.return_value),
+                return_value=return_value,
                 error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
                 created_at=self.created_at,
@@ -450,7 +489,8 @@ class Request:
                 entrypoint=cls._decode_entrypoint(payload.entrypoint),
                 request_body=decoders.decode_and_unpickle(payload.request_body),
                 status=RequestStatus(payload.status),
-                return_value=orjson.loads(payload.return_value),
+                return_value=stored_results.from_column(
+                    orjson.loads(payload.return_value)),
                 error=orjson.loads(payload.error),
                 pid=payload.pid,
                 created_at=payload.created_at,
@@ -1465,24 +1505,26 @@ def _unlink_log_files(files: List[Tuple[str, int]]) -> Tuple[int, int]:
     return removed_files, removed_bytes
 
 
-async def _clean_orphan_request_logs() -> None:
-    """Delete request log files whose request row is already gone.
+async def _clean_orphan_request_files() -> None:
+    """Delete request log files and stored results whose row is already gone.
 
     When several API server instances share one database, each writes its
     request logs to local disk, so the row-driven cleanup above only reaches
     the files that sit on the instance running it. A file left behind on
     another instance outlives the row that names it, after which nothing on
-    the database side can enumerate it.
+    the database side can enumerate it. A stored result is also left behind
+    when its writer dies between storing it and recording it in the row.
 
     A file with no row is already garbage — it cannot be read back through
     the API — so the age cutoff is a grace period against reading a
     directory while a request is being recorded, not a retention period.
     """
     cutoff = time.time() - bs.GC_GRACE_SECONDS
-    listings = await asyncio.gather(*[
-        asyncio.to_thread(_list_stale_log_files, log_dir, cutoff)
-        for log_dir in request_log_dirs()
-    ])
+    listings = await asyncio.gather(
+        *[
+            asyncio.to_thread(_list_stale_log_files, log_dir, cutoff)
+            for log_dir in request_log_dirs()
+        ], asyncio.to_thread(stored_results.list_stale_files, cutoff))
     # A request writes one file per log directory, so group by request ID to
     # ask the database about each one once.
     stale: Dict[str, List[Tuple[str, int]]] = {}
@@ -1511,7 +1553,7 @@ async def _clean_orphan_request_logs() -> None:
         removed_files += batch_files
         removed_bytes += batch_bytes
     if removed_files:
-        logger.info(f'Cleaned up {removed_files} orphan request log file(s), '
+        logger.info(f'Cleaned up {removed_files} orphan request file(s), '
                     f'{removed_bytes} bytes freed')
 
 
@@ -1571,6 +1613,10 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             futs.append(
                 asyncio.create_task(
                     anyio.Path(debug_log_path).unlink(missing_ok=True)))
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(stored_results.result_path(
+                        req.request_id)).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
         await _delete_requests([req.request_id for req in reqs])
@@ -1588,7 +1634,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
                 f'older than {retention_seconds} seconds '
                 f'in {time.monotonic() - started:.3f}s')
 
-    await _clean_orphan_request_logs()
+    await _clean_orphan_request_files()
 
 
 async def requests_gc_daemon():

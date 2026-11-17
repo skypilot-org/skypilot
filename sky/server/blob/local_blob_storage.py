@@ -33,11 +33,12 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
         return None
 
     def local_disk_roots(self) -> Dict[str, str]:
-        # Everything this backend writes lives under the clients dir:
-        # extracted file-mount blobs plus per-user download staging.
+        # Extracted file-mount blobs and per-user download staging live under
+        # the clients dir.
         return {
             'api_server_clients': str(
-                server_common.API_SERVER_CLIENT_DIR.expanduser())
+                server_common.API_SERVER_CLIENT_DIR.expanduser()),
+            'request_results': str(self.request_results_dir()),
         }
 
     def blobs_dir(self, user_id: str) -> pathlib.Path:

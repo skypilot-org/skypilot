@@ -10,6 +10,7 @@ from typing import Dict, Generator, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -133,6 +134,17 @@ class BlobStorage(abc.ABC):
     def download_tmp_dir(self, user_hash: str) -> str:
         """Return a staging directory for log downloads for a user."""
         raise NotImplementedError
+
+    def request_results_dir(self) -> pathlib.Path:
+        """Return the directory for request results kept outside the
+        requests table.
+
+        Every API server instance that shares the requests table must resolve
+        this to the same directory.
+        """
+        return pathlib.Path(
+            runtime_utils.runtime_tilde_path(
+                '~/.sky/api_server/request_results')).expanduser()
 
     def local_disk_roots(self) -> Dict[str, str]:
         """Returns {name: path} for directories this backend writes locally.
