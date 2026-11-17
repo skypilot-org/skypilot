@@ -173,20 +173,6 @@ DISPLAY_COLUMNS = [
 ]
 
 
-def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
-                              caller_user_id: Optional[str]) -> str:
-    """Serialize a request body for a listing, scoped to the caller.
-
-    Returns the full body to the owner (and when ``caller_user_id`` is
-    ``None``); any other caller gets no body (``null``), so one user's body is
-    never exposed to another. The owner can still fetch the full body via
-    ``/api/get`` (``Request.encode()``).
-    """
-    if caller_user_id is None or owner_user_id == caller_user_id:
-        return body.model_dump_json()
-    return orjson.dumps(None).decode('utf-8')
-
-
 def _entrypoint_name(entrypoint: Callable[..., Any]) -> str:
     # An execution policy may record a wrapper, e.g. a functools.partial,
     # that has no __name__.
@@ -336,9 +322,7 @@ class Request:
             row.append(getattr(payload, k))
         return tuple(row)
 
-    def readable_encode(
-            self,
-            caller_user_id: Optional[str] = None) -> payloads.RequestPayload:
+    def readable_encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -351,9 +335,6 @@ class Request:
         We do not use `encode` for display to avoid a large amount of data being
         sent to the client side, especially for the request table could include
         all the requests.
-
-        ``caller_user_id`` scopes the request body; see
-        ``_request_body_for_display``.
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
@@ -363,9 +344,8 @@ class Request:
             request_id=self.request_id,
             name=self.name,
             entrypoint=_entrypoint_name(self.entrypoint),
-            request_body=_request_body_for_display(self.request_body,
-                                                   self.user_id,
-                                                   caller_user_id),
+            # No client reads the body, and it may hold the server's env.
+            request_body=orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
@@ -381,8 +361,11 @@ class Request:
             file_mounts_blob_id=self.file_mounts_blob_id,
         )
 
-    def encode(self) -> payloads.RequestPayload:
-        """Serialize the SkyPilot API request."""
+    def encode(self, include_body: bool = True) -> payloads.RequestPayload:
+        """Serialize the SkyPilot API request for the DB (to_row).
+
+        HTTP responses must use encode_for_client() instead.
+        """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
@@ -393,7 +376,9 @@ class Request:
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
-                request_body=encoders.pickle_and_encode(self.request_body),
+                request_body=(encoders.pickle_and_encode(self.request_body)
+                              if include_body else
+                              server_constants.EMPTY_PICKLED_VALUE),
                 status=_status_value_for_client(self.status.value),
                 return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
@@ -418,6 +403,11 @@ class Request:
                 f'  {self.created_at}\n',
                 exc_info=e)
             raise
+
+    def encode_for_client(self) -> payloads.RequestPayload:
+        """encode() for an HTTP response: without the request body."""
+        # The body may hold the server's own env vars, and no client reads it.
+        return self.encode(include_body=False)
 
     @staticmethod
     def _decode_entrypoint(encoded_entrypoint: str) -> Callable:
@@ -480,9 +470,7 @@ def get_new_request_id() -> str:
     return str(uuid.uuid4())
 
 
-def encode_requests(
-        requests: List[Request],
-        caller_user_id: Optional[str] = None) -> List[payloads.RequestPayload]:
+def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
     """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -510,10 +498,8 @@ def encode_requests(
             name=request.name,
             entrypoint=_entrypoint_name(request.entrypoint)
             if request.entrypoint is not None else '',
-            request_body=_request_body_for_display(
-                request.request_body, request.user_id, caller_user_id)
-            if request.request_body is not None else
-            orjson.dumps(None).decode('utf-8'),
+            # No client reads the body, and it may hold the server's env.
+            request_body=orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(request.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
@@ -531,14 +517,12 @@ def encode_requests(
     return encoded_requests
 
 
-def list_requests_json(req_filter: 'RequestTaskFilter',
-                       caller_user_id: Optional[str] = None) -> bytes:
+def list_requests_json(req_filter: 'RequestTaskFilter') -> bytes:
     """Query requests and render ``encode_requests`` as a JSON array.
 
     Blocking; listings can run to many MB, so call it off the event loop.
     """
-    encoded = encode_requests(get_request_tasks(req_filter),
-                              caller_user_id=caller_user_id)
+    encoded = encode_requests(get_request_tasks(req_filter))
     # Per row: one dump of the whole list holds the GIL, and so blocks the
     # event loop, for tens of milliseconds.
     return b''.join([
