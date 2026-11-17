@@ -116,8 +116,7 @@ async def test_set_request_succeeded(isolated_database, test_async):
     await requests.create_if_not_exists_async(request)
     result = {'key': 'value', 'number': 42}
     if test_async:
-        stored = await requests.set_request_succeeded_async(
-            'test-request-1', 'test-request', result)
+        stored = await requests.set_request_succeeded_async(request, result)
     else:
         stored = requests.set_request_succeeded('test-request-1', result)
     assert stored == len(orjson.dumps(result))
@@ -160,17 +159,22 @@ def conditional_backend(request, isolated_database):
         yield backend
 
 
-async def _create_request(status: RequestStatus,
-                          request_id: str = 'cond-request') -> None:
-    await requests.create_if_not_exists_async(
-        requests.Request(request_id=request_id,
-                         name='test-request',
-                         entrypoint=dummy,
-                         request_body=payloads.RequestBody(),
-                         status=status,
-                         created_at=0.0,
-                         status_msg='queued',
-                         user_id='test-user'))
+def _new_request(request_id: str, status: RequestStatus,
+                 **kwargs) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='test-request',
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=status,
+                            created_at=time.time(),
+                            user_id='user-1',
+                            **kwargs)
+
+
+async def _create_request(status: RequestStatus) -> requests.Request:
+    request = _new_request('cond-request', status, status_msg='queued')
+    await requests.create_if_not_exists_async(request)
+    return request
 
 
 async def _status(request_id: str = 'cond-request') -> RequestStatus:
@@ -205,10 +209,10 @@ async def test_update_if_status_async(conditional_backend):
     'status',
     [RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED])
 async def test_finished_request_keeps_its_outcome(conditional_backend, status):
-    await _create_request(status)
+    created = await _create_request(status)
 
-    assert await requests.set_request_succeeded_async(
-        'cond-request', 'test-request', {'key': 'value'}) is None
+    assert await requests.set_request_succeeded_async(created,
+                                                      {'key': 'value'}) is None
     await requests.set_request_failed_async('cond-request', ValueError('Boom'))
     await requests.set_request_cancelled_async('cond-request')
     assert not await requests.transition_request_status_async(
@@ -224,11 +228,10 @@ async def test_finished_request_keeps_its_outcome(conditional_backend, status):
 
 @pytest.mark.asyncio
 async def test_set_request_succeeded_async_stores_result(conditional_backend):
-    await _create_request(RequestStatus.RUNNING)
+    created = await _create_request(RequestStatus.RUNNING)
     result = {'key': 'välue'}
 
-    stored = await requests.set_request_succeeded_async('cond-request',
-                                                        'test-request', result)
+    stored = await requests.set_request_succeeded_async(created, result)
 
     assert stored == len(orjson.dumps(result))
     request = await requests.get_request_async('cond-request')
@@ -236,6 +239,24 @@ async def test_set_request_succeeded_async_stores_result(conditional_backend):
     assert request.status == RequestStatus.SUCCEEDED
     assert request.finished_at is not None
     assert request.get_return_value() == result
+
+
+@pytest.mark.asyncio
+async def test_set_request_succeeded_async_encodes_through_set_return_value(
+        conditional_backend, monkeypatch):
+    created = await _create_request(RequestStatus.RUNNING)
+    original = requests.Request.set_return_value
+
+    def _set_return_value(self, return_value):
+        original(self, {'wrapped': return_value})
+
+    monkeypatch.setattr(requests.Request, 'set_return_value', _set_return_value)
+
+    await requests.set_request_succeeded_async(created, 'value')
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.get_return_value() == {'wrapped': 'value'}
 
 
 @pytest.mark.asyncio
@@ -272,10 +293,7 @@ async def test_transition_request_status_async_claims(conditional_backend,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('status', [
-    RequestStatus.PENDING, RequestStatus.WAITING, RequestStatus.RUNNING,
-    RequestStatus.SUCCEEDED
-])
+@pytest.mark.parametrize('status', RequestStatus.active_statuses())
 async def test_set_request_failed_if_pending_async(conditional_backend, status):
     await _create_request(status)
 
@@ -303,7 +321,7 @@ async def test_set_request_cancelled_async(conditional_backend, status):
 @pytest.mark.asyncio
 async def test_conditional_update_waits_for_update_request(conditional_backend):
     """A cancellation written under update_request() is not overwritten."""
-    await _create_request(RequestStatus.RUNNING)
+    created = await _create_request(RequestStatus.RUNNING)
     locked = threading.Event()
     release = threading.Event()
 
@@ -318,8 +336,7 @@ async def test_conditional_update_waits_for_update_request(conditional_backend):
     canceller.start()
     assert await asyncio.to_thread(locked.wait, 10)
     succeed = asyncio.create_task(
-        requests.set_request_succeeded_async('cond-request', 'test-request',
-                                             {'key': 'value'}))
+        requests.set_request_succeeded_async(created, {'key': 'value'}))
     await asyncio.sleep(0.2)
     assert not succeed.done()
     release.set()
@@ -2252,13 +2269,7 @@ def test_active_statuses_includes_waiting():
 
 
 def _waiting_request():
-    return requests.Request(request_id='waiting-req',
-                            name='test-request',
-                            entrypoint=dummy,
-                            request_body=payloads.RequestBody(),
-                            status=RequestStatus.WAITING,
-                            created_at=time.time(),
-                            user_id='user-1')
+    return _new_request('waiting-req', RequestStatus.WAITING)
 
 
 @pytest.fixture()

@@ -242,16 +242,8 @@ def _encode_error(error: BaseException) -> Dict[str, Any]:
     }
 
 
-def _encode_return_value(request_id: str, request_name: str,
-                         return_value: Any) -> Any:
-    encoder = encoders.get_encoder(request_name)
-    try:
-        return encoder(return_value)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Encoder for request {request_id} ({request_name}) '
-                       f'failed; storing None: '
-                       f'{common_utils.format_exception(e)}')
-        return None
+def _serialize_error(error: Optional[Dict[str, Any]]) -> str:
+    return orjson.dumps(error).decode('utf-8')
 
 
 def _stored_size(stored: str) -> int:
@@ -325,8 +317,20 @@ class Request:
         already guard `if return_value is not None`, so None persists as JSON
         `null`.
         """
-        self.return_value = _encode_return_value(self.request_id, self.name,
-                                                 return_value)
+        encoder = encoders.get_encoder(self.name)
+        try:
+            self.return_value = encoder(return_value)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Encoder for request {self.request_id} ({self.name}) '
+                f'failed; storing None: {common_utils.format_exception(e)}')
+            self.return_value = None
+
+    def serialized_return_value(self) -> str:
+        """The return value in the form it is stored and sent."""
+        # Version-aware, for old clients that do not recognize new fields.
+        return return_value_serializers.get_serializer(self.name)(
+            self.return_value)
 
     def get_return_value(self) -> Any:
         """Get the return value."""
@@ -407,17 +411,14 @@ class Request:
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
-            # Use version-aware serializer to handle backward compatibility
-            # for old clients that don't recognize new fields.
-            serializer = return_value_serializers.get_serializer(self.name)
             return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
                 status=_status_value_for_client(self.status.value),
-                return_value=serializer(self.return_value),
-                error=orjson.dumps(self.error).decode('utf-8'),
+                return_value=self.serialized_return_value(),
+                error=_serialize_error(self.error),
                 pid=self.pid,
                 created_at=self.created_at,
                 schedule_type=self.schedule_type.value,
@@ -1299,7 +1300,7 @@ def _failed_values(e: BaseException) -> Dict[str, Any]:
     return {
         'status': RequestStatus.FAILED.value,
         COL_FINISHED_AT: time.time(),
-        'error': orjson.dumps(_encode_error(e)).decode('utf-8'),
+        'error': _serialize_error(_encode_error(e)),
     }
 
 
@@ -1358,12 +1359,16 @@ def set_request_succeeded(request_id: str,
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
-async def set_request_succeeded_async(request_id: str, request_name: str,
+async def set_request_succeeded_async(request: Request,
                                       result: Optional[Any]) -> Optional[int]:
     """Set a request to succeeded and populate the result.
 
     A request that already finished, e.g. cancelled while its thread was still
     running, keeps its status.
+
+    Args:
+        request: The request being run; its return value is set in place.
+        result: The result to store.
 
     Returns:
         The length of the stored serialized result, None if nothing was
@@ -1373,21 +1378,20 @@ async def set_request_succeeded_async(request_id: str, request_name: str,
         'status': RequestStatus.SUCCEEDED.value,
         COL_FINISHED_AT: time.time(),
     }
+    stored_size = None
     if result is not None:
-        values['return_value'] = await asyncio.to_thread(
-            _stored_return_value, request_id, request_name, result)
+        values['return_value'], stored_size = await asyncio.to_thread(
+            _serialize_result, request, result)
     updated = await request_storage.get_request_backend(
-    ).update_if_status_async(request_id, RequestStatus.active_statuses(),
-                             values)
-    if not updated or result is None:
-        return None
-    return _stored_size(values['return_value'])
+    ).update_if_status_async(request.request_id,
+                             RequestStatus.active_statuses(), values)
+    return stored_size if updated else None
 
 
-def _stored_return_value(request_id: str, request_name: str,
-                         result: Any) -> str:
-    encoded = _encode_return_value(request_id, request_name, result)
-    return return_value_serializers.get_serializer(request_name)(encoded)
+def _serialize_result(request: Request, result: Any) -> Tuple[str, int]:
+    request.set_return_value(result)
+    stored = request.serialized_return_value()
+    return stored, _stored_size(stored)
 
 
 @metrics_lib.time_me_async
