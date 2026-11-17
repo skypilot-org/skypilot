@@ -183,7 +183,11 @@ class LazyDataFrame:
         mtime = self._file_mtime()
         if updated or self._df is None or mtime != self._df_mtime:
             try:
-                self._df = pd.read_csv(self._filename)
+                # A catalog whose rows all lack a GPU has an empty
+                # AcceleratorName column, which pandas reads as float. The
+                # .str filters on that column then raise AttributeError.
+                self._df = pd.read_csv(self._filename,
+                                       dtype={'AcceleratorName': str})
                 self._df_mtime = mtime
             except Exception as e:  # pylint: disable=broad-except
                 # As users can manually modify the catalog, read_csv can fail.

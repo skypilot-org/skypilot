@@ -1,0 +1,118 @@
+# Held-out pilot eval of the base model and RL checkpoints, on the same
+# real-time benchmark as the API models (tools/pilot_bench.py).
+#
+# vLLM serves each checkpoint on one H100 (by default with the LoRA merged into
+# the base weights), and the benchmark flies against it through the
+# OpenAI-compatible API, so the decision latency is what a deployed 1-GPU pilot
+# would see (network hop excluded).
+#
+#   sky jobs launch eval.yaml --env OUTPUT_BUCKET=... --env RUN=pilot-run1 \
+#     --env MODEL=/outputs/pilot-run1/sft_model --env STEPS="30"
+name: roadster-pilot-eval
+resources:
+  accelerators: H100:1
+  ordered:                # your Kubernetes cluster first; AWS spot H100s when it is full
+    - infra: k8s
+    - {infra: aws, use_spot: true}
+  cpus: 16+
+  memory: 64+
+  image_id: docker:nvidia/cuda:13.0.2-devel-ubuntu22.04
+workdir: .
+file_mounts:
+  /outputs:
+    name: ${OUTPUT_BUCKET}
+    store: s3
+    mode: MOUNT_CACHED
+envs:
+  OUTPUT_BUCKET: my-roadster-bucket   # S3 bucket for checkpoints + eval results
+  MODEL: Qwen/Qwen3-4B-Instruct-2507  # the base the LoRA trained on: /outputs/<RUN>/sft_model after a warm start
+  RUN: pilot-run1
+  STEPS: "30"         # checkpoints to evaluate (export/global_step_<N>/policy); "" = base model only
+  PER_KIND: 96
+  WEATHERS: "normal gale storm"
+  MODES: "turn realtime"
+  TEMPS: "0.0"        # sampling temperatures to fly at; runs other than 1.0 get a _t<temp> suffix
+  EVAL_SEEDS: ""      # "" = held-out seeds; e.g. "2001,2002,2003" = validation split for picking checkpoints
+  MERGE: 1            # merge each LoRA checkpoint into the base weights before serving (faster
+                      # decisions); 0 = serve the base with vLLM's LoRA adapters
+  QUANT: ""           # e.g. fp8: vLLM weight quantization when serving
+  QUANTS: ""          # with MERGE=1: several precisions in one job, e.g. "none fp8"
+  # Flights flown in parallel against the one server. 1 = one car per GPU, which
+  # the reported real-time numbers use; 8 is faster for sim-waits-only runs
+  # (MODES=turn), where latency doesn't affect the result.
+  CONCURRENCY: 1
+  SKIP_BASE: 0        # 1 = only evaluate the checkpoints in STEPS
+  TAG: ""             # suffix for the output dir, to keep variants apart
+  SKYRL_COMMIT: c2a5ce0d68e3c21ce4aa4b098174f88a55e5a638
+  HF_HUB_ENABLE_HF_TRANSFER: "1"
+  WANDB_PROJECT: flying-roadster-rl
+secrets:
+  WANDB_API_KEY: ""     # optional: also upload results + clips as a W&B artifact
+setup: |
+  bash ~/sky_workdir/skyrl_roadster/prep_image.sh
+  bash ~/sky_workdir/skyrl_roadster/install_skyrl.sh   # vLLM build that matches training
+  python3 -m pip install -q requests wandb
+run: |
+  set -ex
+  # The vLLM server runs detached; left running it keeps the job (and its GPU) alive after the eval is done.
+  trap 'pkill -f "vllm serve" || true' EXIT
+  OUT=/outputs/$RUN/pilot_eval${TAG:+_$TAG}
+  mkdir -p $OUT
+  # Copy weights off the S3 mount first: vLLM reading a full model through the
+  # mount took 7.5 min.
+  BASE=$MODEL
+  if [ -d "$MODEL" ]; then BASE=$HOME/models/$(basename $MODEL); mkdir -p $BASE; cp -r $MODEL/. $BASE/; fi
+  for s in $STEPS; do
+    mkdir -p $HOME/loras/step$s && cp -r /outputs/$RUN/export/global_step_$s/policy/. $HOME/loras/step$s/
+  done
+  serve() {  # serve one model (path, served name, extra vllm args) and wait until ready
+    pkill -f "vllm serve" || true; sleep 5
+    (cd ~/SkyRL && uv run --isolated --extra fsdp -- vllm serve "$1" --served-model-name "$2" --port 8001 \
+      --max-model-len 10240 --enable-prefix-caching --gpu-memory-utilization 0.85 ${QUANT:+--quantization $QUANT} \
+      $3 > ~/vllm_${2//\//_}.log 2>&1 &)
+    for i in $(seq 1 360); do curl -sf localhost:8001/v1/models >/dev/null && return 0; sleep 5; done
+    tail -50 ~/vllm_${2//\//_}.log; return 1
+  }
+  bench() {  # bench <served name>
+    for t in $TEMPS; do
+      sfx=""; if [ "$t" != 1.0 ]; then sfx=_t$t; fi
+      for w in $WEATHERS; do
+        for mode in $MODES; do
+          flag=""; if [ "$mode" = realtime ]; then flag=--realtime; fi
+          python3 ~/sky_workdir/tools/pilot_bench.py --base-url http://localhost:8001/v1 --model $1 $flag \
+            --weather $w --per-kind $PER_KIND --max-tokens 128 --concurrency $CONCURRENCY ${EVAL_SEEDS:+--seeds $EVAL_SEEDS} \
+            --temperature $t --out $OUT/$(basename $1)_${w}_${mode}${sfx}
+        done
+      done
+    done
+    # One flight at a time: decision latency without batching from other flights.
+    python3 ~/sky_workdir/tools/pilot_bench.py --base-url http://localhost:8001/v1 --model $1 --realtime \
+      --per-kind 4 --max-tokens 128 --concurrency 1 --out $OUT/$(basename $1)_latency_c1
+  }
+  if [ "$SKIP_BASE" != 1 ]; then serve $BASE $MODEL && bench $MODEL; fi
+  for s in $STEPS; do
+    if [ "$MERGE" = 1 ]; then
+      # LoRA merged into the base weights: no per-token adapter overhead when serving.
+      (cd ~/SkyRL && uv run --isolated --extra fsdp python ~/sky_workdir/tools/merge_lora.py \
+        --base $BASE --lora $HOME/loras/step$s --out $HOME/models/step$s)
+      for q in ${QUANTS:-${QUANT:-none}}; do  # e.g. QUANTS="none fp8": the same weights at two precisions
+        if [ "$q" = none ]; then QUANT= serve $HOME/models/step$s step$s-bf16 && bench step$s-bf16
+        else QUANT=$q serve $HOME/models/step$s step$s-$q && bench step$s-$q; fi
+      done
+    else
+      serve $BASE $MODEL "--enable-lora --max-lora-rank 64 --lora-modules step$s=$HOME/loras/step$s" && bench step$s
+    fi
+  done
+  pkill -f "vllm serve" || true   # free the GPU before the upload
+  grep -h . $OUT/*/summary.json | head -c 20000
+  if [ -n "$WANDB_API_KEY" ]; then
+    python3 - <<'PY'
+  import os, wandb
+  tag = f"_{os.environ['TAG']}" if os.environ.get('TAG') else ''
+  run = wandb.init(project=os.environ['WANDB_PROJECT'],
+                   name=f"pilot-eval-{os.environ['RUN']}{tag}", job_type='pilot-eval')
+  art = wandb.Artifact(f"pilot-eval-{os.environ['RUN']}{tag}", type='pilot-eval')
+  art.add_dir(f"/outputs/{os.environ['RUN']}/pilot_eval{tag}")
+  run.log_artifact(art); run.finish()
+  PY
+  fi

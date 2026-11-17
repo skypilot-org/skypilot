@@ -3,7 +3,11 @@ import datetime
 from typing import Optional
 from unittest import mock
 
+import pytest
+
+from sky.adaptors import kubernetes
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import utils as k8s_utils
 from sky.provision.kubernetes.instance import _check_nodes_health
 from sky.provision.kubernetes.instance import _get_pod_health_issues
 
@@ -218,9 +222,119 @@ def _make_k8s_node(name: str, ready: bool):
     return node
 
 
+def _forbidden_api(*args, **kwargs):  # pylint: disable=unused-argument
+    """A core API whose node reads are denied (no RBAC on nodes)."""
+    api = mock.MagicMock()
+    api.read_node.side_effect = kubernetes.api_exception()(status=403)
+    return api
+
+
 class TestCheckNodesHealth:
     """Tests for _check_nodes_health."""
 
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_a_node_cache_does_not_hide_what_the_api_says(
+            self, mock_nis_get, mock_core_api):
+        """With the plugin's node cache registered, the result is the same as
+        without it: the cache has no evicting taints and no deleted nodes."""
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (False, False),
+            'node-2': (True, False),
+        })
+        not_ready = _make_k8s_node('node-1', ready=False)
+        taint = mock.MagicMock(key='node.kubernetes.io/unreachable',
+                               value=None,
+                               effect='NoExecute',
+                               time_added=None)
+        not_ready.spec.taints = [taint]
+        nodes = {'node-1': not_ready}
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name in nodes:
+                return nodes[name]
+            raise kubernetes.api_exception()(status=404)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
+        assert _check_nodes_health('ctx', {'node-1', 'node-2'}) == {
+            'node-1': 'NotReady (NoExecute taint '
+                      'node.kubernetes.io/unreachable)',
+            'node-2': 'deleted',
+        }
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_the_cache_fills_in_only_nodes_the_api_could_not_read(
+            self, mock_nis_get, mock_core_api):
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (False, False),
+            'node-2': (False, False),
+        })
+        readable = _make_k8s_node('node-2', ready=False)
+        readable.spec.taints = [
+            mock.MagicMock(key='node.kubernetes.io/unreachable',
+                           value=None,
+                           effect='NoExecute',
+                           time_added=None)
+        ]
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name == 'node-2':
+                return readable
+            raise kubernetes.api_exception()(status=403)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
+        assert _check_nodes_health('ctx', {'node-1', 'node-2'}) == {
+            'node-1': 'NotReady',
+            'node-2': 'NotReady (NoExecute taint '
+                      'node.kubernetes.io/unreachable)',
+        }
+
+    @pytest.mark.parametrize('cached', [True, False])
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_a_large_cluster_reads_a_bounded_number_of_nodes(
+            self, mock_nis_get, mock_core_api, cached):
+        """A cluster stuck INIT reads its nodes on every refresh: the API
+        reads stay bounded, and past them only the node cache answers, as it
+        does for a node within them the API could not read."""
+        names = [f'node-{i:03d}' for i in range(128)]
+        mock_nis_get.return_value = (_make_nodes_info(
+            {n: (False, False) for n in names}) if cached else None)
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name == 'node-000':
+                raise kubernetes.api_exception()(status=403)
+            return _make_k8s_node(name, ready=False)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
+
+        result = _check_nodes_health('ctx', set(names))
+
+        read = sorted(
+            c.args[0]
+            for c in mock_core_api.return_value.read_node.call_args_list)
+        assert read == names[:10]
+        assert len(result) == (128 if cached else 9)
+        assert ('node-000' in result) == cached
+        assert all(result[n] == 'NotReady' for n in result)
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
+                return_value=None)
+    def test_a_node_that_fails_to_parse_does_not_lose_the_others(
+            self, mock_nis_get, mock_core_api):  # pylint: disable=unused-argument
+        nodes = {
+            'node-1': object(),  # no spec / status
+            'node-2': _make_k8s_node('node-2', ready=False),
+        }
+        mock_core_api.return_value.read_node.side_effect = (
+            lambda name, **kw: nodes[name])
+        assert _check_nodes_health('ctx', {'node-1', 'node-2'}) == {
+            'node-2': 'NotReady'
+        }
+
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_node_info_source_detects_not_ready(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({
@@ -232,6 +346,7 @@ class TestCheckNodesHealth:
         assert 'NotReady' in result['node-2']
         assert 'node-1' not in result
 
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_node_info_source_detects_cordoned(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({
@@ -241,6 +356,7 @@ class TestCheckNodesHealth:
         assert 'node-1' in result
         assert 'cordoned' in result['node-1']
 
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_all_healthy_returns_empty(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({
@@ -299,6 +415,7 @@ class TestCheckNodesHealth:
         assert 'node-1' in result
         assert 'cordoned' in result['node-1']
 
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_filters_to_requested_nodes(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({
@@ -432,11 +549,22 @@ class TestGetPodTerminationReason:
         assert 'Terminated unexpectedly' in result
 
 
-def _make_event(reason, message):
-    """Create a mock kubelet pod event."""
+def _make_event(reason, message, at=None):
+    """Create a mock kubelet pod event.
+
+    *at* is when the event was observed; leaving it out makes an undated
+    event, which is what a MagicMock with no timestamps reads as.
+    """
     e = mock.MagicMock()
     e.reason = reason
     e.message = message
+    if at is not None:
+        # The reader prefers these over the creation timestamp; leaving them
+        # as auto-created MagicMocks would make the event read as undated.
+        e.series = None
+        e.last_timestamp = None
+        e.event_time = None
+        e.metadata.creation_timestamp = at
     return e
 
 
@@ -523,6 +651,12 @@ class TestQueryInstancesEventEnrichment:
         mock_events.assert_not_called()
 
 
+_CLUSTER_LAUNCHED_AT = datetime.datetime(2025,
+                                         1,
+                                         1,
+                                         tzinfo=datetime.timezone.utc)
+
+
 class TestGetClusterFailureReasonFromEvents:
     """Tests for get_cluster_failure_reason_from_events."""
 
@@ -531,6 +665,11 @@ class TestGetClusterFailureReasonFromEvents:
     def test_returns_first_evicted(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
         mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
         mock_events.return_value = [
             _make_event(
                 'Evicted', 'Pod ephemeral local storage usage '
@@ -547,9 +686,74 @@ class TestGetClusterFailureReasonFromEvents:
     def test_none_when_no_failure_event(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
         mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
         mock_events.return_value = [_make_event('Scheduled', 'assigned')]
         assert k8s_instance.get_cluster_failure_reason_from_events(
             {}, ['pod-0', 'pod-1']) is None
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_events_from_before_the_cluster_are_ignored(self, mock_events,
+                                                        mock_kutils):
+        """Pod names are a function of the cluster name and Kubernetes keeps
+        events for an hour, so what deleted the pods of the cluster that held
+        this name before is still on file. It says nothing about this one."""
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=_CLUSTER_LAUNCHED_AT -
+                        datetime.timedelta(minutes=30)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'], since=_CLUSTER_LAUNCHED_AT) is None
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_events_from_after_the_launch_still_count(self, mock_events,
+                                                      mock_kutils):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/wl',
+                        at=_CLUSTER_LAUNCHED_AT +
+                        datetime.timedelta(minutes=5)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'],
+            since=_CLUSTER_LAUNCHED_AT) == ('Stopped by Kueue: Exceeded the '
+                                            'PodsReady timeout default/wl')
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_without_a_bound_an_older_event_still_counts(
+            self, mock_events, mock_kutils):
+        """Callers that cannot work out when the cluster was launched get the
+        unbounded lookup they had before."""
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=_CLUSTER_LAUNCHED_AT -
+                        datetime.timedelta(minutes=30)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'],
+            since=None) == ('Stopped by Kueue: Exceeded the PodsReady '
+                            'timeout default/old')
 
 
 class TestGetClusterFailureReasonFromPods:

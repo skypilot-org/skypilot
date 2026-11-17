@@ -133,8 +133,14 @@ def get_user_type(user: models.User) -> str:
 # TODO(aylei): make these async once we have the global_user_state async
 # support.
 @router.get('')
-def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
+def users(request: fastapi.Request) -> List[Dict[str, Any]]:
+    """Gets all users for admins, and for everyone else the members of the
+    workspaces they can read, plus themselves.
+
+    The readable workspaces are the ones that decide which clusters and jobs
+    the caller sees. A public one makes every user visible. No authenticated
+    user is treated as admin, as in `GET /users/role`.
+    """
     all_users = []
     user_list = global_user_state.get_all_users()
 
@@ -143,6 +149,18 @@ def users() -> List[Dict[str, Any]]:
         user_ids = permission.permission_service.get_users_for_role(role)
         for user_id in user_ids:
             users_to_role[user_id] = role
+
+    auth_user = request.state.auth_user
+    # The loop above has just reloaded the policy.
+    if auth_user is not None and not _is_admin(
+            permission.permission_service.roles_in_memory(auth_user.id)):
+        # The read_access settings that decide the readable workspaces may
+        # have changed on another process.
+        server_common.refresh_workspace_state_for_sync_handler()
+        visible = workspaces_core.readable_workspace_members_in_memory(
+            auth_user.id)
+        if visible is not None:
+            user_list = [user for user in user_list if user.id in visible]
 
     for user in user_list:
         # Filter out service accounts - they have IDs starting with "sa-"
@@ -176,6 +194,15 @@ def get_current_user_role(request: fastapi.Request):
     }
 
 
+@router.get('/default-role')
+def get_default_user_role() -> Dict[str, str]:
+    """Get the role new users and service accounts get by default."""
+    # Main-process handler: refresh config so a runtime `rbac.default_role`
+    # change is honored without a server restart.
+    skypilot_config.safe_reload_config()
+    return {'role': rbac.get_default_role()}
+
+
 @router.post('/me/workspace')
 def set_user_preferred_workspace(
     request: fastapi.Request,
@@ -193,8 +220,18 @@ def set_user_preferred_workspace(
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Not authenticated.')
+    preferred = body.preferred
+    if preferred is not None:
+        # Typed by the user (`sky workspace use NAME`); the users table stores
+        # the id. Resolve against the latest config, not this process's copy.
+        server_common.refresh_workspace_state_for_sync_handler()
+        try:
+            preferred = skypilot_config.resolve_workspace_ref(preferred)
+        except ValueError as e:
+            raise fastapi.HTTPException(status_code=409, detail=str(e)) from e
     try:
-        workspaces_core.set_user_preferred_workspace(auth_user, body.preferred)
+        workspaces_core.set_user_preferred_workspace(
+            auth_user, preferred, workspace_ref=body.preferred)
     except exceptions.PermissionDeniedError as e:
         raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
@@ -280,8 +317,16 @@ def get_user_workspace(
     # no request body, so the SDK stamps `?requested=` explicitly. We
     # still check the server-side config as a fallback so an admin who
     # set `active_workspace` globally gets honored.
-    if requested is None and skypilot_config.is_active_workspace_set():
-        requested = skypilot_config.get_active_workspace()
+    requested_ref = requested
+    if requested is not None:
+        # The client's `active_workspace` is what a person typed.
+        try:
+            requested = skypilot_config.resolve_workspace_ref(requested)
+        except ValueError as e:
+            raise fastapi.HTTPException(status_code=409, detail=str(e)) from e
+    elif skypilot_config.is_active_workspace_set():
+        # Already an id: the server's own value is resolved when it is read.
+        requested = requested_ref = skypilot_config.get_active_workspace()
     response: Dict[str, Any] = {
         'workspace': None,
         'source': None,
@@ -293,7 +338,7 @@ def get_user_workspace(
     }
     try:
         resolution = workspaces_core.resolve_workspace_for_user(
-            user_for_resolve, requested=requested)
+            user_for_resolve, requested=requested, requested_ref=requested_ref)
     except exceptions.WorkspaceAmbiguousError as e:
         # Per-user state, not a server fault — return 200 with a state-
         # coded `source` and a SHORT `note`. The CLI / dashboard show
@@ -317,7 +362,8 @@ def get_user_workspace(
             resolution = workspaces_core.resolve_workspace_for_user(
                 user_for_resolve,
                 requested=requested,
-                action=workspace_constants.WORKSPACE_ACTION_READ)
+                action=workspace_constants.WORKSPACE_ACTION_READ,
+                requested_ref=requested_ref)
         except (exceptions.NoWorkspaceAccessError,
                 exceptions.PermissionDeniedError):
             # No read access either, so the original message is the truth.
@@ -353,6 +399,15 @@ def get_user_workspace(
     # Workspaces the user can only view (read-only visibility for non-members):
     # visible but not writable. Lets the CLI/dashboard list them separately.
     response['read_only'] = sorted(readable - writable)
+    # Everything above is an id. Names only for workspaces the user can see,
+    # so a preferred one they lost access to doesn't reveal its new name.
+    named = set(readable)
+    if response['workspace'] is not None:
+        named.add(response['workspace'])
+    response['names'] = {
+        workspace_id: skypilot_config.get_workspace_name(workspace_id)
+        for workspace_id in sorted(named)
+    }
     return response
 
 
@@ -466,15 +521,21 @@ def user_update(request: fastapi.Request,
             raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_info.id):
+        # A user deleted since the check above gets no password and no role:
+        # both writes only update an existing user.
         if password:
             password_hash = server_common.crypt_ctx.hash(password)
-            global_user_state.add_or_update_user(
-                models.User(id=user_info.id,
-                            name=user_info.name,
-                            password=password_hash))
+            if not global_user_state.set_user_password(user_info.id,
+                                                       password_hash):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
         if role and need_update_role:
-            # Update user role in casbin policy
-            permission.permission_service.update_role(user_info.id, role)
+            if not permission.permission_service.update_role(
+                    user_info.id, role, existing_user_only=True):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
 
 
 @router.post('/batch_update')
@@ -537,7 +598,8 @@ def user_batch_update(request: fastapi.Request,
         resolver = user_resolver.UserResolver()
         all_users_map = resolver.id_to_user
         batch_workspaces = resource_checker.load_fresh_workspaces()
-        batch_resources = resource_checker.ResourceSnapshot.fetch_all()
+        batch_resources = resource_checker.ResourceSnapshot.fetch_for_users(
+            list(user_ids))
         # Pre-resolve each private workspace's allowed_users -> user_id
         # set ONCE for the batch. Without this, check_user_role_demotion
         # iterates private workspaces and calls get_workspace_users for
@@ -546,8 +608,10 @@ def user_batch_update(request: fastapi.Request,
         batch_workspaces_allowed_users = (
             resolver.resolve_workspaces_allowed_users(batch_workspaces))
 
-    succeeded: List[str] = []
+    done: Set[str] = set()
     failed: List[Dict[str, str]] = []
+    # Users whose role changes, written together after the checks below.
+    to_update: List[str] = []
 
     for user_id in user_ids:
         try:
@@ -571,7 +635,7 @@ def user_batch_update(request: fastapi.Request,
                                 role != target_user_roles[0])
             if not need_update_role:
                 # Already in the desired role; record as success no-op.
-                succeeded.append(user_id)
+                done.add(user_id)
                 continue
             # When demoting from admin to a non-admin role (user / viewer),
             # ensure the user has no active resources in private workspaces
@@ -586,15 +650,36 @@ def user_batch_update(request: fastapi.Request,
                     workspaces=batch_workspaces,
                     resources=batch_resources,
                     workspaces_allowed_users=batch_workspaces_allowed_users)
-            with _user_lock(user_info.id):
-                permission.permission_service.update_role(user_info.id, role)
-            succeeded.append(user_id)
+            to_update.append(user_info.id)
         except ValueError as e:
             failed.append({'user_id': user_id, 'error': str(e)})
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(f'Failed to update role for user {user_id}')
             failed.append({'user_id': user_id, 'error': str(e)})
 
+    # No per-user locks: the checks above ran without them, and update_roles
+    # writes every role in one transaction under the policy lock, which
+    # serialises with other writers across processes and replicas.
+    targets = sorted(set(to_update))
+    if targets:
+        try:
+            # A user deleted since the checks above gets no role.
+            missing = permission.permission_service.update_roles(
+                {user_id: role for user_id in targets},
+                existing_users_only=True)
+            done.update(set(targets) - set(missing))
+            failed.extend({
+                'user_id': user_id,
+                'error': f'User {user_id} does not exist'
+            } for user_id in missing)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(f'Failed to update roles for users {targets}')
+            failed.extend({
+                'user_id': user_id,
+                'error': str(e)
+            } for user_id in targets)
+
+    succeeded = [user_id for user_id in user_ids if user_id in done]
     return {'succeeded': succeeded, 'failed': failed}
 
 
@@ -618,8 +703,7 @@ def _delete_user(user_id: str) -> None:
         raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_id):
-        global_user_state.delete_user(user_id)
-        permission.permission_service.delete_user(user_id)
+        permission.permission_service.delete_user_and_record(user_id)
 
 
 @router.post('/delete')
@@ -832,14 +916,22 @@ def _user_lock(user_id: str) -> Generator[None, None, None]:
 @router.get('/service-account-tokens')
 def get_service_account_tokens(
         request: fastapi.Request) -> List[Dict[str, Any]]:
-    """Get service account tokens. All users can see all tokens."""
+    """Get service account tokens.
+
+    Admins see all tokens and other users the tokens they created, the same
+    rule as the single-token endpoints.
+    """
     auth_user = request.state.auth_user
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Authentication required')
 
-    # All authenticated users can see all tokens
     tokens = global_user_state.get_all_service_account_tokens()
+    if not _caller_is_admin(auth_user.id):
+        tokens = [
+            token for token in tokens
+            if token['creator_user_hash'] == auth_user.id
+        ]
 
     result = []
     for token in tokens:

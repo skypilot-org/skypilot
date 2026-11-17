@@ -1,7 +1,10 @@
 """Workspace management core."""
 
+import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+import functools
+import secrets
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from sky import check as sky_check
 from sky import exceptions
@@ -27,6 +30,13 @@ logger = sky_logging.init_logger(__name__)
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
+
+# Fields whose change touches no infra, so it is allowed while the workspace
+# has active resources. `name` is the user-facing label; the key is the id.
+_ACCESS_AND_NAME_FIELDS = ('private', 'allowed_users', 'read_access', 'name')
+
+# Returned by a workspace modifier; writes the access policies after the save.
+_PolicyWriter = Callable[[], None]
 
 
 @dataclass
@@ -125,6 +135,24 @@ def get_accessible_workspace_names(
         action=action)
 
 
+def filter_workspace_ids_by_name(workspace_ids: Iterable[str],
+                                 name_match: str) -> List[str]:
+    """Returns the ids whose user-facing name contains `name_match`.
+
+    For a workspace filter a user typed: stored rows and the jobs controller
+    only know ids, so callers narrow by id set instead of passing the text.
+    An exact id also matches (a legacy id is a renamed workspace's old
+    name).
+    """
+    workspaces = _load_workspaces()
+    match = name_match.lower()
+    return [
+        workspace_id for workspace_id in workspace_ids
+        if workspace_id == name_match or match in
+        skypilot_config.get_workspace_name(workspace_id, workspaces).lower()
+    ]
+
+
 def get_workspace_access_sets() -> Tuple[Set[str], Set[str]]:
     """Returns ``(readable, writable)`` workspace names for the current user.
 
@@ -138,9 +166,50 @@ def get_workspace_access_sets() -> Tuple[Set[str], Set[str]]:
         common_utils.get_current_user().id, set(workspaces.keys()))
 
 
+def get_readable_workspace_names() -> Optional[Set[str]]:
+    """Returns workspace names the current user can read; None means all.
+
+    See `PermissionService.get_readable_workspace_names`.
+    """
+    return readable_workspace_names_for_user(common_utils.get_current_user().id)
+
+
+def readable_workspace_names_for_user(user_id: str) -> Optional[Set[str]]:
+    """`get_readable_workspace_names` for the given user."""
+    return permission.permission_service.get_readable_workspace_names(
+        user_id, set(_load_workspaces().keys()))
+
+
+def workspace_label_for_caller(workspace_id: str) -> str:
+    """The workspace's name if the current user can read it, else its id.
+
+    For errors that mention another workspace: its id says no more than
+    before workspaces had names; its name might.
+    """
+    try:
+        readable = get_readable_workspace_names()
+    except Exception:  # pylint: disable=broad-except
+        # Only builds an error message; must not replace the error itself.
+        return workspace_id
+    if readable is None or workspace_id in readable:
+        return skypilot_config.get_workspace_name(workspace_id)
+    return workspace_id
+
+
+def readable_workspace_members_in_memory(user_id: str) -> Optional[Set[str]]:
+    """Returns the user plus the members of the workspaces they can read.
+
+    None means everyone. See
+    `PermissionService.readable_workspace_members_in_memory`.
+    """
+    workspaces = _load_workspaces()
+    return permission.permission_service.readable_workspace_members_in_memory(
+        user_id, set(workspaces.keys()))
+
+
 def _update_workspaces_config(
-        workspace_modifier_fn: Callable[[Dict[str, Any]],
-                                        None]) -> Dict[str, Any]:
+    workspace_modifier_fn: Callable[[Dict[str, Any]], Optional[_PolicyWriter]]
+) -> Dict[str, Any]:
     """Update the workspaces configuration in the config file.
 
     This function uses file locking to prevent race conditions when multiple
@@ -149,7 +218,9 @@ def _update_workspaces_config(
     Args:
         workspace_modifier_fn: A function that takes the current workspaces
             dict and modifies it in-place. This ensures all read-modify-write
-            operations happen atomically inside the lock.
+            operations happen atomically inside the lock. It may return a
+            function that writes access policies; it runs after the save,
+            still inside the lock.
 
     Returns:
         The updated workspaces configuration.
@@ -167,15 +238,25 @@ def _update_workspaces_config(
             # Read the current (freshly reloaded) config inside the lock.
             current_config = skypilot_config.to_dict()
             current_workspaces = current_config.get('workspaces', {}).copy()
+            old_workspaces = copy.deepcopy(current_workspaces)
 
             # Apply the modification inside the lock
-            workspace_modifier_fn(current_workspaces)
+            write_policies = workspace_modifier_fn(current_workspaces)
+            _check_workspace_names_unique(old_workspaces, current_workspaces)
 
             # Update the config with the modified workspaces
             current_config['workspaces'] = current_workspaces
 
             # Write the configuration back to the file
             skypilot_config.update_api_server_config_no_lock(current_config)
+            # Policies commit at once, so write them only once the save (and
+            # its validators) went through.
+            if write_policies is not None:
+                write_policies()
+            # This request may have read the workspaces before the write (e.g.
+            # a permission check); the create-time `sky check` must see them.
+            _load_workspaces.cache_clear()
+            workspaces_for_user.cache_clear()
 
             return current_workspaces
     except locks.LockTimeout as e:
@@ -186,21 +267,94 @@ def _update_workspaces_config(
             'configuration. Please try again.') from e
 
 
-def _validate_workspace_config(workspace_name: str,
-                               workspace_config: Dict[str, Any]) -> None:
+def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
+    # Plugin-registered access-only properties are as safe to change as
+    # `allowed_users`: they add or remove no infra.
+    access_fields = set(_ACCESS_AND_NAME_FIELDS)
+    access_fields |= schemas.access_only_workspace_properties()
+    return {k: v for k, v in config.items() if k not in access_fields}
+
+
+def _check_workspace_names_unique(old_workspaces: Dict[str, Any],
+                                  new_workspaces: Dict[str, Any]) -> None:
+    """Raises if this write lets one string name two workspaces.
+
+    A name may not equal another workspace's name or id, and a new id may not
+    equal another workspace's name, so a typed reference always resolves to
+    one workspace. Only workspaces whose name or id appeared or changed in
+    this write are checked, so a clash left by a hand-edited config never
+    blocks unrelated writes (e.g. membership sync).
+    """
+    default_id = constants.SKYPILOT_DEFAULT_WORKSPACE
+    names = {
+        workspace_id:
+        skypilot_config.get_workspace_name(workspace_id, new_workspaces)
+        for workspace_id in set(new_workspaces) | {default_id}
+    }
+    old_ids = set(old_workspaces) | {default_id}
+    for workspace_id, name in names.items():
+        if workspace_id not in old_ids:
+            for other_id, other_name in names.items():
+                if other_id != workspace_id and other_name == workspace_id:
+                    raise ValueError(
+                        f'Workspace id {workspace_id!r} is already the name '
+                        f'of workspace {other_id!r}.')
+        elif skypilot_config.get_workspace_name(workspace_id,
+                                                old_workspaces) == name:
+            continue
+        for other_id, other_name in names.items():
+            if other_id == workspace_id:
+                continue
+            if other_name == name:
+                raise ValueError(f'Workspace {name!r} already exists.')
+            if other_id == name:
+                # A legacy workspace's id is its original name: it stays
+                # taken (and keeps resolving to that workspace) after a rename.
+                raise ValueError(
+                    f'Workspace name {name!r} is the id of workspace '
+                    f'{other_name!r}; choose another name.')
+
+
+def _validate_workspace_config(
+        workspace_name: str,
+        workspace_config: Dict[str, Any],
+        current_config: Optional[Dict[str, Any]] = None) -> None:
     """Validate the workspace configuration.
+
+    `current_config` is the stored config this one replaces, if any.
     """
     workspace_schema = schemas.get_config_schema(
     )['properties']['workspaces']['additionalProperties']
+    display_name = workspace_config.get('name') if isinstance(
+        workspace_config.get('name'),
+        str) else skypilot_config.get_workspace_name(workspace_name)
     try:
         common_utils.validate_schema(
             workspace_config, workspace_schema,
-            f'Invalid configuration for workspace {workspace_name!r}: ')
+            f'Invalid configuration for workspace {display_name!r}: ')
     except exceptions.InvalidSkyPilotConfigError as e:
         # We need to replace this exception with a ValueError because: a) it is
         # more user-friendly and b) it will not be caught by the try-except by
         # the caller the may cause confusion.
         raise ValueError(str(e)) from e
+    # Only a changed name is checked, so a hand-edited stored name does not
+    # block membership writes to that workspace.
+    if (current_config is None or
+            current_config.get('name') != workspace_config.get('name')):
+        _validate_workspace_name_field(workspace_name, workspace_config)
+
+
+def _validate_workspace_name_field(workspace_id: str,
+                                   workspace_config: Dict[str, Any]) -> None:
+    name = workspace_config.get('name')
+    if name is None:
+        return
+    # 'default' is also a literal fallback and a hard-coded id in callers, so
+    # it keeps its name.
+    if (workspace_id == constants.SKYPILOT_DEFAULT_WORKSPACE and
+            name != workspace_id):
+        raise ValueError(f'The {workspace_id!r} workspace cannot be renamed.')
+    common_utils.check_workspace_name_is_valid(name)
 
 
 def _extract_k8s_allowed_contexts(
@@ -295,14 +449,10 @@ def _compare_workspace_configs(
     # adds/removes no member and touches no infra, so it must not be treated
     # as an "other" change that requires the workspace to have no active
     # resources. Exclude it here so a read_access-only change is
-    # classified as a (safe) user-access change.
-    access_fields = ['private', 'allowed_users', 'read_access']
-    current_without_access = {
-        k: v for k, v in current_config.items() if k not in access_fields
-    }
-    new_without_access = {
-        k: v for k, v in new_config.items() if k not in access_fields
-    }
+    # classified as a (safe) user-access change. A rename (`name`) is equally
+    # safe.
+    current_without_access = _without_access_and_name(current_config)
+    new_without_access = _without_access_and_name(new_config)
 
     only_user_access_changes = current_without_access == new_without_access
 
@@ -350,10 +500,15 @@ def _validate_workspace_config_changes_with_lock(
                                                resolver=resolver)
     except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to validate workspace {workspace_name!r} due to '
+            f'Failed to validate workspace '
+            f'{skypilot_config.get_workspace_name(workspace_name)!r} due to '
             'a timeout when trying to access database. Please '
             f'try again or manually remove the lock at {lock_id}. '
             f'{common_utils.format_exception(e)}') from None
+
+
+def _quote_users(names: List[str]) -> str:
+    return ', '.join(repr(name) for name in names)
 
 
 def _validate_workspace_config_changes(
@@ -395,6 +550,8 @@ def _validate_workspace_config_changes(
         ValueError: If the configuration change is not allowed due to active
         resources.
     """
+    ws_name = skypilot_config.get_workspace_name(workspace_name)
+    ws_label = skypilot_config.workspace_label(workspace_name)
     config_comparison = _compare_workspace_configs(current_config,
                                                    new_config,
                                                    resolver=resolver)
@@ -406,23 +563,22 @@ def _validate_workspace_config_changes(
         # user-access validation below (a no-op when only contexts changed).
         if config_comparison.additive_allowed_contexts:
             logger.info(
-                f'Workspace {workspace_name!r} only adds Kubernetes '
+                f'Workspace {ws_label} only adds Kubernetes '
                 'allowed_contexts; existing contexts remain allowed. Skipping '
                 'the active-resource check for this change.')
         if config_comparison.private_changed:
             if (config_comparison.private_old and
                     not config_comparison.private_new):
                 # Changed from private to public - always allow
-                logger.info(
-                    f'Workspace {workspace_name!r} changed from private to'
-                    f' public.')
+                logger.info(f'Workspace {ws_label} changed from private to'
+                            f' public.')
                 return
             elif (not config_comparison.private_old and
                   config_comparison.private_new):
                 # Changed from public to private - check that all active
                 # resources belong to the new allowed users
                 logger.info(
-                    f'Workspace {workspace_name!r} changed from public to'
+                    f'Workspace {ws_label} changed from public to'
                     f' private. Checking that all active resources belong'
                     f' to allowed users.')
 
@@ -431,79 +587,99 @@ def _validate_workspace_config_changes(
                         config_comparison.allowed_users_new, [workspace_name],
                         resources=resources))
                 if error_summary:
-                    error_msg=f'Cannot change workspace {workspace_name!r}' \
-                    f' to private '
-                    if missed_users_names:
-                        missed_users_list = ', '.join(missed_users_names)
-                        if len(missed_users_names) == 1:
-                            error_msg += f'because the user ' \
-                            f'{missed_users_list!r} has {error_summary}'
-                        else:
-                            error_msg += f'because the users ' \
-                            f'{missed_users_list!r} have {error_summary}'
-                        error_msg += ' but not in the allowed_users list.' \
-                        ' Please either add the users to allowed_users or' \
-                        ' ask them to terminate their resources.'
-                    raise ValueError(error_msg)
+                    users = _quote_users(missed_users_names)
+                    if len(missed_users_names) == 1:
+                        reason = (f'the user {users} is not in allowed_users '
+                                  'but has')
+                        advice = ('add the user to allowed_users, or '
+                                  'terminate these resources first')
+                    elif missed_users_names:
+                        reason = (f'the users {users} are not in '
+                                  'allowed_users but have')
+                        advice = ('add the users to allowed_users, or '
+                                  'terminate these resources first')
+                    else:
+                        # The owners are gone from the user table, so they
+                        # cannot be added to allowed_users.
+                        reason = 'users not in allowed_users have'
+                        advice = 'terminate these resources first'
+                    raise ValueError(
+                        f'Cannot change workspace {ws_name!r} to private '
+                        f'because {reason} {error_summary}. Please {advice}.')
         else:
             # Private setting didn't change, but allowed_users changed
             if (config_comparison.allowed_users_changed and
                     config_comparison.removed_users):
-                # Check that removed users don't have active resources
-                logger.info(
-                    f'Checking that removed users'
-                    f' {config_comparison.removed_users} do not have'
-                    f' active resources in workspace {workspace_name!r}.')
-                error_summary, missed_users_names, missed_user_dict = (
+                # Check that removed users don't have active resources.
+                # Resources of other non-members do not block the removal.
+                logger.info(f'Checking that removed users'
+                            f' {config_comparison.removed_users} do not have'
+                            f' active resources in workspace {ws_label}.')
+                error_summary, error_user_names, _ = (
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison.allowed_users_new, [workspace_name],
-                        resources=resources))
+                        resources=resources,
+                        owners=config_comparison.removed_users))
                 if error_summary:
-                    error_user_ids = []
-                    for user_id in config_comparison.removed_users:
-                        if user_id in missed_user_dict:
-                            error_user_ids.append(user_id)
-                    error_user_names = []
-                    if error_user_ids:
-                        error_user_names = [
-                            missed_user_dict[user_id]
-                            for user_id in error_user_ids
-                        ]
-
-                    error_msg = 'Cannot '
-                    error_users_list = ', '.join(error_user_names)
                     if len(error_user_names) == 1:
-                        error_msg += f'remove user {error_users_list!r} ' \
-                        f'from workspace {workspace_name!r} because the ' \
-                        f'user has {error_summary}'
+                        target = f'user {_quote_users(error_user_names)}'
+                        who, has = 'the user', 'has'
                     else:
-                        error_msg += f'remove users {error_users_list!r}' \
-                        f' from workspace {workspace_name!r} because the' \
-                        f' users have {error_summary}'
-                    error_msg += ', but not in the allowed_users list.' \
-                    ' Please either add the users to allowed_users or' \
-                    ' ask them to terminate their resources.'
-                    raise ValueError(error_msg)
+                        target = f'users {_quote_users(error_user_names)}'
+                        who, has = 'the users', 'have'
+                    raise ValueError(
+                        f'Cannot remove {target} from workspace {ws_name!r} '
+                        f'because {who} {has} {error_summary}. Please '
+                        f'terminate these resources first, or keep {who} in '
+                        'allowed_users.')
     else:
         # Other configuration changes - check that workspace has no active
         # resources
-        logger.info(
-            f'Non-user-access configuration changes detected for'
-            f' workspace {workspace_name!r}. Checking that workspace has'
-            f' no active resources.')
-        resource_checker.check_no_active_resources_for_workspaces([
-            (workspace_name, 'update')
-        ])
+        logger.info(f'Non-user-access configuration changes detected for'
+                    f' workspace {ws_label}. Checking that workspace has'
+                    f' no active resources.')
+        resource_checker.check_no_active_resources_for_workspaces(
+            [(workspace_name, 'update')], resources=resources)
+
+
+def _check_expected_workspace_config(
+        workspaces: Dict[str, Any], workspace_name: str,
+        expected_config: Optional[Dict[str, Any]]) -> None:
+    """Raises WorkspaceConfigConflictError if the workspace moved on.
+
+    A no-op when ``expected_config`` is None. A workspace that no longer
+    exists is a conflict too, even if the expected config was empty, except
+    the default workspace, which exists implicitly as ``{}`` when it isn't in
+    the stored config (see `_load_workspaces`).
+    """
+    if expected_config is None:
+        return
+    if workspace_name in workspaces:
+        current = workspaces[workspace_name] or {}
+    elif workspace_name == constants.SKYPILOT_DEFAULT_WORKSPACE:
+        current = {}
+    else:
+        current = None
+    if current is None or current != expected_config:
+        raise exceptions.WorkspaceConfigConflictError(
+            f'Workspace {workspace_name!r} was changed since this update '
+            'was prepared. Reload it and apply your changes again.')
 
 
 @usage_lib.entrypoint
-def update_workspace(workspace_name: str, config: Dict[str,
-                                                       Any]) -> Dict[str, Any]:
+def update_workspace(
+        workspace_name: str,
+        config: Dict[str, Any],
+        expected_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Updates a specific workspace configuration.
 
     Args:
         workspace_name: The name of the workspace to update.
         config: The new configuration for the workspace.
+        expected_config: The configuration this update was based on. If set
+            and the workspace no longer holds it when the config lock is
+            taken, nothing is written and WorkspaceConfigConflictError is
+            raised, so a concurrent change is never silently overwritten.
 
     Returns:
         The updated workspaces configuration.
@@ -522,36 +698,67 @@ def update_workspace(workspace_name: str, config: Dict[str,
             - Other changes: Workspace must have no active resources
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
+        WorkspaceConfigConflictError: If ``expected_config`` is set and the
+            workspace was changed since.
     """
-    _validate_workspace_config(workspace_name, config)
-
+    if expected_config is not None:
+        # This process's config may predate a write handled elsewhere (another
+        # worker or server); refresh it so the early conflict check below
+        # doesn't report a conflict against a stale copy.
+        skypilot_config.safe_reload_config()
     # Get the current workspace configuration for comparison
     current_workspaces = skypilot_config.get_nested(('workspaces',),
                                                     default_value={})
     current_config = current_workspaces.get(workspace_name, {})
+    _validate_workspace_config(workspace_name, config, current_config)
 
+    # Before the active-resource validation, so an outdated draft is reported
+    # as a conflict rather than as a validation error about changes it only
+    # appears to make. Checked again under the config lock below.
+    _check_expected_workspace_config(current_workspaces, workspace_name,
+                                     expected_config)
     _validate_workspace_config_changes_with_lock(workspace_name, current_config,
                                                  config)
 
-    def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
+    def update_workspace_fn(workspaces: Dict[str, Any]) -> _PolicyWriter:
         """Function to update workspace inside the lock."""
+        _check_expected_workspace_config(workspaces, workspace_name,
+                                         expected_config)
         workspaces[workspace_name] = config
         users = workspaces_utils.get_workspace_users(config)
-        permission_service = permission.permission_service
-        permission_service.update_workspace_policy(workspace_name, users)
+        return lambda: permission.permission_service.update_workspace_policy(
+            workspace_name, users)
 
     # Use the internal helper function to save
     result = _update_workspaces_config(update_workspace_fn)
+
+    # A rename or access change touches no cloud config, so skip the
+    # (slow) re-check.
+    if (_without_access_and_name(current_config) == _without_access_and_name(
+            config)):
+        return result
 
     # Validate the workspace by running sky check for it
     try:
         sky_check.check(quiet=True, workspace=workspace_name)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Workspace {workspace_name} configuration saved but '
+        label = skypilot_config.workspace_label(workspace_name)
+        logger.warning(f'Workspace {label} configuration saved but '
                        f'validation check failed: {e}')
         # Don't fail the update if the check fails, just warn
 
     return result
+
+
+def _new_workspace_id(workspaces: Dict[str, Any]) -> str:
+    names = {
+        skypilot_config.get_workspace_name(workspace_id, workspaces)
+        for workspace_id in workspaces
+    }
+    while True:
+        workspace_id = f'ws-{secrets.token_hex(6)}'
+        if workspace_id not in workspaces and workspace_id not in names:
+            return workspace_id
 
 
 @usage_lib.entrypoint
@@ -559,12 +766,15 @@ def create_workspace(workspace_name: str, config: Dict[str,
                                                        Any]) -> Dict[str, Any]:
     """Creates a new workspace configuration.
 
+    The workspace gets a generated id (its key in `workspaces:`), and
+    `workspace_name` is stored as its user-facing `name`.
+
     Args:
         workspace_name: The name of the workspace to create.
         config: The configuration for the new workspace.
 
     Returns:
-        The updated workspaces configuration.
+        The updated workspaces configuration, keyed by workspace id.
 
     Raises:
         ValueError: If the workspace already exists or configuration is invalid.
@@ -576,27 +786,29 @@ def create_workspace(workspace_name: str, config: Dict[str,
         raise ValueError('Workspace name must be a non-empty string.')
     common_utils.check_workspace_name_is_valid(workspace_name)
 
+    config = dict(config, name=workspace_name)
     _validate_workspace_config(workspace_name, config)
+    created_ids: List[str] = []
 
-    def create_workspace_fn(workspaces: Dict[str, Any]) -> None:
+    def create_workspace_fn(workspaces: Dict[str, Any]) -> _PolicyWriter:
         """Function to create workspace inside the lock."""
-        if workspace_name in workspaces:
-            raise ValueError(f'Workspace {workspace_name!r} already exists. '
-                             'Use update instead.')
-        workspaces[workspace_name] = config
-        # Add policy for the workspace and allowed users
+        workspace_id = _new_workspace_id(workspaces)
+        workspaces[workspace_id] = config
         users = workspaces_utils.get_workspace_users(config)
-        permission_service = permission.permission_service
-        permission_service.add_workspace_policy(workspace_name, users)
+        created_ids.append(workspace_id)
+        return lambda: permission.permission_service.add_workspace_policy(
+            workspace_id, users)
 
     # Use the internal helper function to save
     result = _update_workspaces_config(create_workspace_fn)
+    workspace_id = created_ids[-1]
 
     # Validate the workspace by running sky check for it
     try:
-        sky_check.check(quiet=True, workspace=workspace_name)
+        sky_check.check(quiet=True, workspace=workspace_id)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Workspace {workspace_name} configuration saved but '
+        label = skypilot_config.workspace_label(workspace_id)
+        logger.warning(f'Workspace {label} configuration saved but '
                        f'validation check failed: {e}')
         # Don't fail the update if the check fails, just warn
 
@@ -633,13 +845,13 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
     resource_checker.check_no_active_resources_for_workspaces([(workspace_name,
                                                                 'delete')])
 
-    def delete_workspace_fn(workspaces: Dict[str, Any]) -> None:
+    def delete_workspace_fn(workspaces: Dict[str, Any]) -> _PolicyWriter:
         """Function to delete workspace inside the lock."""
         if workspace_name not in workspaces:
             raise ValueError(f'Workspace {workspace_name!r} does not exist.')
         del workspaces[workspace_name]
-        permission_service = permission.permission_service
-        permission_service.remove_workspace_policy(workspace_name)
+        return lambda: permission.permission_service.remove_workspace_policy(
+            workspace_name)
 
     # Use the internal helper function to save
     return _update_workspaces_config(delete_workspace_fn)
@@ -664,6 +876,10 @@ def get_config() -> Dict[str, Any]:
 def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """Updates the entire SkyPilot configuration.
 
+    Writes the config and updates workspace permission policies. Does not
+    run `sky check`; `sky.workspaces.server.schedule_update_config`
+    schedules that as a follow-up request.
+
     Args:
         config: The new configuration to save.
 
@@ -685,8 +901,10 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Check for API server changes and validate them
     current_config = skypilot_config.to_dict()
-    # If there is no changes to the config, we can return early
     if current_config == config:
+        # Nothing to save, but the save that stored this config may have
+        # failed its policy write; retrying it must repair that.
+        _save_config_and_sync_members(None)
         return config
 
     current_endpoint = current_config.get('api_server', {}).get('endpoint')
@@ -701,11 +919,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Collect all workspaces that need to be checked for active resources
     workspaces_to_check: List[Tuple[str, str]] = []
-    workspaces_to_check_policy: Dict[str, Dict[str, List[str]]] = {
-        'add': {},
-        'update': {},
-        'delete': {}
-    }
+    # One fetch for every changed or deleted workspace, made only if a check
+    # needs it.
+    resources = resource_checker.ResourceSnapshot.deferred_for_workspaces([
+        name for name in current_workspaces
+        if current_workspaces[name] != new_workspaces.get(name)
+    ])
 
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
@@ -713,19 +932,20 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             # Validate names for newly added workspaces only (not existing
             # ones, for backward compatibility with pre-validation names).
             common_utils.check_workspace_name_is_valid(workspace_name)
-            users = workspaces_utils.get_workspace_users(new_workspace_config)
-            workspaces_to_check_policy['add'][workspace_name] = users
+            _validate_workspace_name_field(workspace_name, new_workspace_config)
             continue
 
         current_workspace_config = current_workspaces.get(workspace_name, {})
 
         # If workspace configuration is changing, validate and mark for checking
         if current_workspace_config != new_workspace_config:
-            _validate_workspace_config(workspace_name, new_workspace_config)
+            _validate_workspace_config(workspace_name, new_workspace_config,
+                                       current_workspace_config)
             _validate_workspace_config_changes_with_lock(
-                workspace_name, current_workspace_config, new_workspace_config)
-            users = workspaces_utils.get_workspace_users(new_workspace_config)
-            workspaces_to_check_policy['update'][workspace_name] = users
+                workspace_name,
+                current_workspace_config,
+                new_workspace_config,
+                resources=resources)
 
     # Check for workspace deletions
     for workspace_name in current_workspaces:
@@ -735,52 +955,29 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 raise ValueError(f'Cannot delete the default workspace '
                                  f'{constants.SKYPILOT_DEFAULT_WORKSPACE!r}.')
             workspaces_to_check.append((workspace_name, 'delete'))
-            workspaces_to_check_policy['delete'][workspace_name] = ['*']
 
-    # Check all workspaces for active resources in one efficient call
+    # Check all workspaces for active resources in one efficient call. It
+    # reuses the snapshot above rather than refetching: racing creates are an
+    # accepted gap here, as on every other path.
     resource_checker.check_no_active_resources_for_workspaces(
-        workspaces_to_check)
+        workspaces_to_check, resources=resources)
 
-    try:
-        with skypilot_config.get_skypilot_config_lock(
-                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
-            # Convert to config_utils.Config and save
-            config_obj = config_utils.Config.from_dict(config)
-            skypilot_config.update_api_server_config_no_lock(config_obj)
-            permission_service = permission.permission_service
-            for operation, workspaces in workspaces_to_check_policy.items():
-                for workspace_name, users in workspaces.items():
-                    if operation == 'add':
-                        permission_service.add_workspace_policy(
-                            workspace_name, users)
-                    elif operation == 'update':
-                        permission_service.update_workspace_policy(
-                            workspace_name, users)
-                    elif operation == 'delete':
-                        permission_service.remove_workspace_policy(
-                            workspace_name)
-    except locks.LockTimeout as e:
-        raise RuntimeError(
-            'Failed to update configuration due to a timeout '
-            'when trying to acquire the config lock. This may '
-            'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again.') from e
+    _save_config_and_sync_members(config)
 
-    # Validate the configuration by running sky check
-    try:
-        sky_check.check(quiet=True)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Configuration saved but '
-                       f'validation check failed: {e}')
-        # Don't fail the update if the check fails, just warn
-
+    # The `sky check` that refreshes the enabled-clouds cache for the new
+    # config is scheduled as a separate request by
+    # sky/workspaces/server.py::schedule_update_config, gated on this
+    # request succeeding, so the save does not wait on probing every cloud.
+    # Callers that schedule this function as a request should go through
+    # that helper to keep the follow-up check.
     return config
 
 
 def check_workspace_permission(
         user: models.User,
         workspace: str,
-        action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> None:
+        action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
+        workspace_ref: Optional[str] = None) -> None:
     """Checks that a user has permission to access the given workspace.
 
     Args:
@@ -788,6 +985,9 @@ def check_workspace_permission(
         workspace: The workspace name to check.
         action: 'write' (default, membership) or 'read' (also satisfied by a
             read-only workspace).
+        workspace_ref: What the user typed for this workspace, shown in the
+            error instead of the id. Never the stored name: the caller may
+            not be allowed to see it.
 
     Raises:
         PermissionDeniedError: If the user does not have permission to access
@@ -797,12 +997,13 @@ def check_workspace_permission(
             user.id, workspace, action=action):
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have '
-            f'permission to access workspace {workspace!r}')
+            f'permission to access workspace {workspace_ref or workspace!r}')
 
 
 def reject_request_for_unauthorized_workspace(
         user: models.User,
-        action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> None:
+        action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
+        workspace_ref: Optional[str] = None) -> None:
     """Rejects a request that has no permission to access active workspace.
 
     Args:
@@ -813,6 +1014,8 @@ def reject_request_for_unauthorized_workspace(
             so a non-member whose active workspace is read-only (e.g. a user
             whose only accessible workspaces are read-only) can still issue
             read requests.
+        workspace_ref: What the user typed for the active workspace, for the
+            error message.
 
     Raises:
         PermissionDeniedError: If the user does not have permission to access
@@ -820,7 +1023,8 @@ def reject_request_for_unauthorized_workspace(
     """
     check_workspace_permission(user,
                                skypilot_config.get_active_workspace(),
-                               action=action)
+                               action=action,
+                               workspace_ref=workspace_ref)
 
 
 def check_cluster_write_permission(user: models.User,
@@ -849,7 +1053,87 @@ def check_cluster_write_permission(user: models.User,
     workspace = global_user_state.get_cluster_workspace(cluster_name)
     if workspace is None:
         return
-    check_workspace_permission(user, workspace)
+    # The user named the cluster, not its workspace, which they may not be
+    # allowed to see.
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have permission to access '
+            f'the workspace of cluster {cluster_name!r}')
+
+
+def check_volume_write_permission(user: models.User, volume_name: str) -> None:
+    """Checks a user may delete or mount an existing volume.
+
+    The volume counterpart of ``check_cluster_write_permission``: gated by the
+    workspace the volume belongs to, not the caller's active workspace. A
+    missing volume is left to the caller's own not-found handling.
+
+    Raises:
+        PermissionDeniedError: If the user cannot write to the volume's
+            workspace.
+    """
+    record = global_user_state.get_volume_by_name(volume_name)
+    if record is None:
+        return
+    # Volumes recorded before workspaces existed belong to the default one.
+    workspace = (record.get('workspace') or
+                 constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have permission to access '
+            f'the workspace of volume {volume_name!r}')
+
+
+def _save_config_and_sync_members(config: Optional[Dict[str, Any]]) -> None:
+    """Saves `config`, then syncs every workspace's members with it.
+
+    With `config` None, syncs with the stored config instead. Members are
+    resolved before anything is saved, so a workspace being changed whose
+    members cannot be resolved fails the save; one left unchanged keeps its
+    current members.
+    """
+    try:
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+            skypilot_config.reload_config()
+            stored = skypilot_config.get_nested(('workspaces',),
+                                                default_value={})
+            workspaces = dict(
+                stored if config is None else config.get('workspaces', {}))
+            if config is not None:
+                # Check names against the store as of now, not the pre-lock
+                # read, so a concurrent create can't slip a duplicate in.
+                _check_workspace_names_unique(stored, workspaces)
+            workspaces.setdefault(constants.SKYPILOT_DEFAULT_WORKSPACE, {})
+            resolver = user_resolver.UserResolver()
+            members: Dict[str, List[str]] = {}
+            for name, workspace_config in workspaces.items():
+                try:
+                    members[name] = workspaces_utils.get_workspace_users(
+                        workspace_config, resolver)
+                except ValueError as e:
+                    if stored.get(name, {}) != workspace_config:
+                        raise
+                    logger.warning(
+                        'Keeping the current members of workspace '
+                        f'{skypilot_config.workspace_label(name)}: {e}')
+            if config is not None:
+                skypilot_config.update_api_server_config_no_lock(
+                    config_utils.Config.from_dict(config))
+            # Every configured workspace, so the members of one this save (or
+            # an earlier, failed one) deleted are removed too.
+            permission.permission_service.sync_workspace_members(
+                members, all_workspaces=workspaces)
+    except locks.LockTimeout as e:
+        raise RuntimeError(
+            'Failed to update configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
+            'indicate another SkyPilot process is currently updating the '
+            'configuration. Please try again.') from e
 
 
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
@@ -862,6 +1146,22 @@ def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
         True if the workspace is private, False if it's public.
     """
     return workspace_config.get('private', False)
+
+
+def _write_workspace_policies(policy_users: Dict[str, List[str]],
+                              succeeded: List[str],
+                              failed: List[Dict[str, Any]]) -> None:
+    """Writes the access policies of saved workspaces, one failure each."""
+    for workspace_name, users in policy_users.items():
+        try:
+            permission.permission_service.update_workspace_policy(
+                workspace_name, users)
+            succeeded.append(workspace_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(
+                'Failed to update the access policy of workspace '
+                f'{skypilot_config.workspace_label(workspace_name)}')
+            failed.append({'workspace_name': workspace_name, 'error': str(e)})
 
 
 @usage_lib.entrypoint
@@ -914,9 +1214,9 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
         return {'succeeded': [], 'failed': failed}
 
     succeeded: List[str] = []
-    permission_service = permission.permission_service
+    policy_users: Dict[str, List[str]] = {}
 
-    def modifier(workspaces: Dict[str, Any]) -> None:
+    def modifier(workspaces: Dict[str, Any]) -> _PolicyWriter:
         for workspace_name in workspace_names:
             try:
                 if workspace_name not in workspaces:
@@ -927,11 +1227,12 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                     continue
                 current_config = workspaces[workspace_name]
                 if not current_config.get('private', False):
+                    name = skypilot_config.get_workspace_name(
+                        workspace_name, workspaces)
                     failed.append({
                         'workspace_name': workspace_name,
-                        'error':
-                            (f'Workspace {workspace_name!r} is not private; '
-                             'allowed_users has no effect.'),
+                        'error': (f'Workspace {name!r} is not private; '
+                                  'allowed_users has no effect.'),
                     })
                     continue
                 current_allowed = list(current_config.get('allowed_users', []))
@@ -957,17 +1258,13 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 # _validate_workspace_config_changes is a no-op for pure
                 # adds (it only fires on removed users / private toggles),
                 # so we skip it here.
-                _validate_workspace_config(workspace_name, new_config)
+                _validate_workspace_config(workspace_name, new_config,
+                                           current_config)
                 workspaces[workspace_name] = new_config
-                # Update casbin policy inside the file lock so the config
-                # file and the policy table can't drift out of sync if the
-                # process crashes between the two updates. update_workspace
-                # follows the same pattern. resolved_current is the post-add
-                # user_id set we just computed, so reuse it instead of
-                # re-resolving (which would hit get_all_users() again).
-                permission_service.update_workspace_policy(
-                    workspace_name, list(resolved_current))
-                succeeded.append(workspace_name)
+                # resolved_current is the post-add user_id set we just
+                # computed, so reuse it instead of re-resolving (which would
+                # hit get_all_users() again).
+                policy_users[workspace_name] = list(resolved_current)
             except ValueError as e:
                 failed.append({
                     'workspace_name': workspace_name,
@@ -975,11 +1272,14 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 })
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
-                    f'Failed to add users to workspace {workspace_name!r}')
+                    f'Failed to add users to workspace '
+                    f'{skypilot_config.workspace_label(workspace_name)}')
                 failed.append({
                     'workspace_name': workspace_name,
                     'error': str(e),
                 })
+        return functools.partial(_write_workspace_policies, policy_users,
+                                 succeeded, failed)
 
     _update_workspaces_config(modifier)
 
@@ -987,8 +1287,11 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
 
 
 @usage_lib.entrypoint
-def batch_remove_users_from_workspaces(workspace_names: List[str],
-                                       user_ids: List[str]) -> Dict[str, Any]:
+def batch_remove_users_from_workspaces(
+        workspace_names: List[str],
+        user_ids: List[str],
+        *,
+        check_resources: bool = True) -> Dict[str, Any]:
     """Removes users from the ``allowed_users`` of multiple private workspaces.
 
     Per-workspace failures are isolated. Removal of a user with active
@@ -999,6 +1302,10 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
         workspace_names: Names of workspaces to update.
         user_ids: User IDs to remove. Both the user_id and the username
             forms are stripped from each workspace's ``allowed_users``.
+        check_resources: If False, a user is removed even while owning
+            active resources in the workspace. Only for in-process callers
+            that revoke access (identity provider sync); not exposed over
+            the API.
 
     Returns:
         ``{'succeeded': [workspace_name, ...], 'failed': [{
@@ -1040,17 +1347,16 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     # Workspaces whose removal passed validation. The actual strip + write is
     # (re)done INSIDE the config lock in the modifier from the fresh config, not
     # from this pre-lock snapshot, so concurrent per-user removals across
-    # workers/replicas can't clobber each other via a stale read-modify-write.
+    # workers/servers can't clobber each other via a stale read-modify-write.
     validated_changes: Set[str] = set()
 
-    # Pre-fetch active resources for the WHOLE batch of workspaces ONCE.
+    # Fetch active resources for the WHOLE batch of workspaces at most ONCE.
     # Otherwise each per-workspace _validate_workspace_config_changes call
-    # would re-query clusters + managed jobs from scratch (the
-    # managed-jobs fetch in particular is a blocking RPC to the
-    # controller), giving O(W * (C+J)) instead of O(C+J). The
-    # snapshot's per-workspace index is built lazily on first
-    # ``for_workspace`` call.
-    resources = resource_checker.ResourceSnapshot.fetch_for_workspaces(
+    # would re-query them from scratch (the managed-jobs fetch in
+    # particular is a blocking RPC to the controller), giving
+    # O(W * (C+J)) instead of O(C+J). Deferred, so a batch that changes
+    # nothing fetches nothing.
+    resources = resource_checker.ResourceSnapshot.deferred_for_workspaces(
         workspace_names)
 
     for workspace_name in workspace_names:
@@ -1063,9 +1369,11 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 continue
             current_ws_config = current_workspaces[workspace_name]
             if not current_ws_config.get('private', False):
+                name = skypilot_config.get_workspace_name(
+                    workspace_name, current_workspaces)
                 failed.append({
                     'workspace_name': workspace_name,
-                    'error': (f'Workspace {workspace_name!r} is not private; '
+                    'error': (f'Workspace {name!r} is not private; '
                               'allowed_users has no effect.'),
                 })
                 continue
@@ -1079,12 +1387,15 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 continue
             new_ws_config = dict(current_ws_config)
             new_ws_config['allowed_users'] = new_allowed
-            _validate_workspace_config(workspace_name, new_ws_config)
-            _validate_workspace_config_changes_with_lock(workspace_name,
-                                                         current_ws_config,
-                                                         new_ws_config,
-                                                         resources=resources,
-                                                         resolver=resolver)
+            _validate_workspace_config(workspace_name, new_ws_config,
+                                       current_ws_config)
+            if check_resources:
+                _validate_workspace_config_changes_with_lock(
+                    workspace_name,
+                    current_ws_config,
+                    new_ws_config,
+                    resources=resources,
+                    resolver=resolver)
             validated_changes.add(workspace_name)
         except ValueError as e:
             failed.append({
@@ -1093,7 +1404,8 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
             })
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(
-                f'Failed to validate removal from workspace {workspace_name!r}')
+                f'Failed to validate removal from workspace '
+                f'{skypilot_config.workspace_label(workspace_name)}')
             failed.append({
                 'workspace_name': workspace_name,
                 'error': str(e),
@@ -1102,9 +1414,9 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     if not validated_changes:
         return {'succeeded': succeeded, 'failed': failed}
 
-    permission_service = permission.permission_service
+    policy_users: Dict[str, List[str]] = {}
 
-    def modifier(workspaces: Dict[str, Any]) -> None:
+    def modifier(workspaces: Dict[str, Any]) -> _PolicyWriter:
         for workspace_name in validated_changes:
             try:
                 # Defensive re-check: the workspace might have been deleted
@@ -1118,7 +1430,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 # Read-modify-write INSIDE the lock from the fresh config, not
                 # from the pre-lock snapshot above. Otherwise concurrent
                 # removals of different users from the same workspace (e.g.
-                # several deprovisions in parallel, across workers/replicas)
+                # several deprovisions in parallel, across workers/servers)
                 # each strip their own user from a stale snapshot and the last
                 # writer's full-replace resurrects the users the others removed.
                 ws_config = workspaces[workspace_name]
@@ -1133,21 +1445,20 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 new_ws_config = dict(ws_config)
                 new_ws_config['allowed_users'] = new_allowed
                 workspaces[workspace_name] = new_ws_config
-                # Update casbin policy inside the file lock so the config file
-                # and the policy table can't drift out of sync. Resolve from the
-                # fresh config; the resolver's user maps are already built so
-                # this doesn't re-hit get_all_users.
-                permission_service.update_workspace_policy(
-                    workspace_name,
+                # Resolve from the fresh config; the resolver's user maps are
+                # already built so this doesn't re-hit get_all_users.
+                policy_users[workspace_name] = (
                     resolver.resolve_workspace_users(new_ws_config))
-                succeeded.append(workspace_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
-                    f'Failed to apply removal for workspace {workspace_name!r}')
+                    f'Failed to apply removal for workspace '
+                    f'{skypilot_config.workspace_label(workspace_name)}')
                 failed.append({
                     'workspace_name': workspace_name,
                     'error': str(e),
                 })
+        return functools.partial(_write_workspace_policies, policy_users,
+                                 succeeded, failed)
 
     _update_workspaces_config(modifier)
 
@@ -1209,6 +1520,8 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
             }
             if workspaces[name].get('private') is not None:
                 ws_config['private'] = workspaces[name]['private']
+            if workspaces[name].get('name') is not None:
+                ws_config['name'] = workspaces[name]['name']
         else:
             # Copy so the request-cached config isn't mutated with computed
             # state.
@@ -1242,7 +1555,8 @@ class WorkspaceResolution:
 
 
 def set_user_preferred_workspace(user: models.User,
-                                 workspace: Optional[str]) -> None:
+                                 workspace: Optional[str],
+                                 workspace_ref: Optional[str] = None) -> None:
     """Sets (or clears with None) the user's preferred workspace.
 
     Validates that the target workspace exists AND that the user has access
@@ -1262,7 +1576,7 @@ def set_user_preferred_workspace(user: models.User,
         raise ValueError(f'Workspace {workspace!r} does not exist.')
     # Reuse the same permission check the launch path uses, so the error
     # message and the policy are consistent.
-    check_workspace_permission(user, workspace)
+    check_workspace_permission(user, workspace, workspace_ref=workspace_ref)
     global_user_state.set_user_preferred_workspace(user.id, workspace)
 
 
@@ -1285,7 +1599,9 @@ def _try_resync_new_user_grants(user: models.User) -> None:
 def resolve_workspace_for_user(
     user: models.User,
     requested: Optional[str] = None,
-    action: str = workspace_constants.WORKSPACE_ACTION_WRITE
+    action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
+    requested_ref: Optional[str] = None,
+    pick_for_read: bool = False,
 ) -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
 
@@ -1296,7 +1612,10 @@ def resolve_workspace_for_user(
     affects the fallback: for 'read' (vs the 'write' default), when the user
     has *no* writable workspace at all, read-only workspaces are considered so
     a read-only-only user can still resolve an active workspace instead of
-    hitting NoWorkspaceAccessError.
+    hitting NoWorkspaceAccessError, and several of them resolve to the first by
+    name. With ``pick_for_read``, a read by a user with several writable
+    workspaces also resolves to the first by name instead of raising
+    WorkspaceAmbiguousError.
 
     Precedence (a future admin-assignment tier can splice in between
     `preferred_workspace` and the default-fallback step without changing
@@ -1318,11 +1637,17 @@ def resolve_workspace_for_user(
       5. zero accessible -> one-shot policy re-sync and recompute (heals a
          first-login re-sync that failed transiently); still zero ->
          NoWorkspaceAccessError
-      6. multiple, none chosen, no 'default' access -> WorkspaceAmbiguousError
+      6. multiple, none chosen, no 'default' access -> the first by name for
+         a read with ``pick_for_read`` (or a read-only-only user);
+         WorkspaceAmbiguousError otherwise
 
     Args:
         user: the user the resolution is for.
         requested: workspace explicitly named by the caller, or None.
+        requested_ref: what the user typed for `requested`, shown in a
+            denial instead of the id.
+        pick_for_read: for a read, pick the first workspace by name instead
+            of raising WorkspaceAmbiguousError.
 
     Returns:
         WorkspaceResolution carrying the workspace name + source + optional
@@ -1333,17 +1658,24 @@ def resolve_workspace_for_user(
             requested workspace not accessible (PermissionDeniedError
             subclass).
         exceptions.WorkspaceAmbiguousError: multiple accessible and none
-            chosen, and the user has no access to 'default'.
+            chosen, the user has no access to 'default', and the request is
+            not a read with ``pick_for_read``.
     """
     if requested is not None:
         try:
-            check_workspace_permission(user, requested, action=action)
+            check_workspace_permission(user,
+                                       requested,
+                                       action=action,
+                                       workspace_ref=requested_ref)
         except exceptions.PermissionDeniedError:
             # The denial can be a first-login grant that was never
             # materialized (see the zero-accessible branch below); re-sync
             # once and re-check before denying for real.
             _try_resync_new_user_grants(user)
-            check_workspace_permission(user, requested, action=action)
+            check_workspace_permission(user,
+                                       requested,
+                                       action=action,
+                                       workspace_ref=requested_ref)
         return WorkspaceResolution(
             workspace=requested,
             source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
@@ -1381,8 +1713,10 @@ def resolve_workspace_for_user(
         _try_resync_new_user_grants(user)
         accessible, read_only_only = _active_candidates()
         if accessible:
+            labels = ', '.join(
+                skypilot_config.workspace_label(w) for w in accessible)
             logger.info(f'Workspace access for user {user.name} ({user.id}) '
-                        f'restored by policy re-sync: {accessible}')
+                        f'restored by policy re-sync: {labels}')
 
     # Read preferred from the User dataclass: it is populated by
     # global_user_state.add_or_update_user(return_user=True), which the
@@ -1399,7 +1733,14 @@ def resolve_workspace_for_user(
         # The preference was set in the past but the user no longer has
         # access (RBAC drift). Surface this in the source note so users
         # understand why their preference wasn't honored.
-        drift_note = f'preferred {preferred!r} not accessible'
+        # Name it only if the user can still read it; otherwise the stored id,
+        # so a workspace the user lost does not reveal its current name.
+        shown = preferred
+        if _accessible_workspace_names_for_user(
+                user.id, {preferred},
+                action=workspace_constants.WORKSPACE_ACTION_READ):
+            shown = skypilot_config.get_workspace_name(preferred)
+        drift_note = f'preferred {shown!r} not accessible'
 
     if constants.SKYPILOT_DEFAULT_WORKSPACE in accessible:
         # Default-fallback: don't break legacy multi-workspace users and
@@ -1419,20 +1760,20 @@ def resolve_workspace_for_user(
         raise exceptions.NoWorkspaceAccessError(
             f'User {user.name} ({user.id}) has no accessible workspaces.')
 
-    if read_only_only:
-        # Several read-only-visible workspaces and no writable one. Ambiguity
-        # is a *write* problem — a new resource lands in exactly one workspace
-        # and only the user can say which. A read just needs a config context,
-        # and listings filter by every accessible workspace regardless of the
-        # pick, so any candidate serves. Raising here would leave such a user
-        # unable to read ANYTHING (every request resolves the active workspace
-        # first), and `WorkspaceAmbiguousError`'s recovery hint would be a dead
-        # end for them: it says to set a preferred workspace, but
-        # `set_user_preferred_workspace` requires write access. Pick
-        # deterministically instead.
+    if read_only_only or (pick_for_read and
+                          action == workspace_constants.WORKSPACE_ACTION_READ):
+        # Ambiguity is a *write* problem: only the user can say where a new
+        # resource lands. Listings cover every accessible workspace whatever
+        # the pick, and raising would fail every read (e.g. every dashboard
+        # page). By name, so users can tell which workspace their reads use.
         return WorkspaceResolution(
-            workspace=accessible[0],
-            source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY,
+            workspace=min(accessible, key=skypilot_config.get_workspace_name),
+            source=(workspace_constants.WORKSPACE_SOURCE_READ_ONLY
+                    if read_only_only else
+                    workspace_constants.WORKSPACE_SOURCE_READ_FIRST),
             note=drift_note)
 
-    raise exceptions.WorkspaceAmbiguousError(accessible, note=drift_note)
+    # The user is a member of each, so names are safe to show.
+    raise exceptions.WorkspaceAmbiguousError(
+        [skypilot_config.get_workspace_name(w) for w in accessible],
+        note=drift_note)

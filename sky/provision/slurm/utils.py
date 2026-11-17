@@ -21,6 +21,7 @@ from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
@@ -29,7 +30,7 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
-_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
+_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.+-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 
@@ -190,7 +191,8 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
             'Cannot derive a valid Unix user from SkyPilot user '
             f'{user_name!r}. Slurm submit users must start with a lowercase '
             'letter or "_" '
-            'and contain only lowercase letters, digits, "_", ".", or "-".')
+            'and contain only lowercase letters, digits, "_", ".", "+", or "-".'
+        )
     return submit_user
 
 
@@ -211,11 +213,16 @@ def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
     return identities_only.lower() == 'yes'
 
 
-@annotations.lru_cache(scope='request')
 def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
+    """Get the nodes visible to the current Slurm user."""
+    return _get_slurm_nodes_info(cluster, get_submit_user(cluster))
+
+
+@annotations.lru_cache(scope='request')
+def _get_slurm_nodes_info(cluster: str,
+                          slurm_user: Optional[str]) -> List[slurm.NodeInfo]:
     ssh_config = get_slurm_ssh_config()
     ssh_config_dict = ssh_config.lookup(cluster)
-    slurm_user = get_submit_user(cluster)
     command_user = slurm_user or ssh_config_dict['user']
     cache_key = f'slurm:nodes_info:{cluster}:{command_user}'
     cached = kv_cache.get_cache_entry(cache_key)
@@ -573,13 +580,20 @@ def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     return partition
 
 
-@annotations.lru_cache(scope='request')
 def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
     """Get the default partition for a Slurm cluster.
 
     Queries the Slurm cluster for the partition marked with an asterisk (*)
-    in sinfo output. If no default partition is marked, returns None.
+    in sinfo output, as visible to the current Slurm user. If no default
+    partition is marked, returns None.
     """
+    return _get_cluster_default_partition(cluster_name,
+                                          get_submit_user(cluster_name))
+
+
+@annotations.lru_cache(scope='request')
+def _get_cluster_default_partition(cluster_name: str,
+                                   slurm_user: Optional[str]) -> Optional[str]:
     try:
         ssh_config = get_slurm_ssh_config()
         ssh_config_dict = ssh_config.lookup(cluster_name)
@@ -596,7 +610,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
-        slurm_user=get_submit_user(cluster_name),
+        slurm_user=slurm_user,
     )
 
     return client.get_default_partition()
@@ -1490,11 +1504,8 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
     return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
 
 
-# Accepted sbatch --time formats:
-#   m, m:s, h:m:s, d-h, d-h:m, d-h:m:s
 # See: https://slurm.schedmd.com/sbatch.html#OPT_time
-_TIME_FORMAT_RE = re.compile(
-    r'\d+|\d+:\d+|\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+')
+_TIME_FORMAT_RE = re.compile(schemas.SLURM_SBATCH_TIME_PATTERN)
 
 
 def validate_sbatch_time(value: str) -> None:
@@ -1513,7 +1524,8 @@ def validate_sbatch_time(value: str) -> None:
     if not _TIME_FORMAT_RE.fullmatch(value):
         raise ValueError(
             f'Invalid slurm.sbatch_options.time {value!r}. '
-            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s.')
+            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s, '
+            'UNLIMITED, INFINITE, -1.')
 
 
 def srun_sshd_command(

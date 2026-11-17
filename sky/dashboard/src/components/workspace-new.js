@@ -5,6 +5,11 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  workspaceNameError,
+  workspaceNameTaken,
+  workspaceNameTakenMessage,
+} from '@/hooks/useWorkspacesConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,15 +44,18 @@ export function NewWorkspace() {
   };
 
   const handleNext = () => {
-    if (workspaceName.trim() && !isWorkspaceNameTaken) {
+    if (isFormValid) {
       setShowEditor(true);
     }
   };
 
-  const isWorkspaceNameTaken =
-    workspaceName.trim() &&
-    existingWorkspaces.hasOwnProperty(workspaceName.trim());
-  const isFormValid = workspaceName.trim() && !isWorkspaceNameTaken;
+  const typedName = workspaceName.trim();
+  const nameError = typedName ? workspaceNameError(typedName) : null;
+  const taken = typedName
+    ? workspaceNameTaken(existingWorkspaces, typedName)
+    : null;
+  const isWorkspaceNameTaken = taken !== null;
+  const isFormValid = typedName && !nameError && !isWorkspaceNameTaken;
 
   if (showEditor) {
     return (
@@ -59,11 +67,11 @@ export function NewWorkspace() {
     <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
-          <Link href="/workspaces" className="text-sky-blue hover:underline">
+          <Link href="/workspaces" className="text-brand hover:underline">
             Workspaces
           </Link>
-          <span className="mx-2 text-gray-500">›</span>
-          <span className="text-sky-blue">New Workspace</span>
+          <span className="mx-2 text-content-tertiary">›</span>
+          <span className="text-brand">New Workspace</span>
         </div>
       </div>
 
@@ -90,18 +98,24 @@ export function NewWorkspace() {
                 }
               }}
             />
-            {isWorkspaceNameTaken ? (
-              <p className="text-sm text-gray-500 mt-1">
-                Workspace &quot;{workspaceName}&quot; already exists.{' '}
+            {nameError ? (
+              <p className="text-sm text-red-fg mt-1">{nameError}</p>
+            ) : isWorkspaceNameTaken ? (
+              <p className="text-sm text-content-tertiary mt-1">
+                {workspaceNameTakenMessage(
+                  existingWorkspaces,
+                  typedName,
+                  taken
+                )}{' '}
                 <Link
-                  href={`/workspaces/${workspaceName}`}
-                  className="text-blue-600 hover:underline"
+                  href={`/workspaces/${taken.id}`}
+                  className="text-blue-fg hover:underline"
                 >
                   View the workspace
                 </Link>
               </p>
             ) : (
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-content-tertiary mt-1">
                 Choose a unique name for your workspace
               </p>
             )}
@@ -109,7 +123,7 @@ export function NewWorkspace() {
           <Button
             onClick={handleNext}
             disabled={!isFormValid || loading}
-            className="w-full bg-sky-600 hover:bg-sky-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
+            className="w-full bg-sky-solid hover:bg-sky-solid-hover text-white disabled:bg-surface-stronger disabled:text-content-tertiary"
           >
             {loading ? 'Loading...' : 'Next: Configure Workspace'}
           </Button>

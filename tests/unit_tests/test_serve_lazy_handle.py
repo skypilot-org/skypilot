@@ -388,10 +388,10 @@ class TestGetServiceStatusPickledParallel:
                 ['svc-a', 'svc-gone', 'svc-b'], pool=False)
         assert len(out) == 2
 
-    def test_first_failure_raises_like_serial(self):
-        """ex.map() yields in input order and re-raises the first
-        exception it encounters. Matches the legacy for-loop contract:
-        any failure surfaces immediately."""
+    def test_a_failure_is_reported_bare_not_raised(self):
+        """A service whose status cannot be built comes back as its bare
+        database record, so one broken service does not hide the others
+        from status, down or the ownership lookups."""
 
         class Boom(Exception):
             pass
@@ -402,10 +402,17 @@ class TestGetServiceStatusPickledParallel:
             return self._fake_status(name)
 
         with mock.patch('sky.serve.serve_utils._get_service_status',
-                        side_effect=side):
-            with pytest.raises(Boom):
-                serve_utils.get_service_status_pickled(
-                    ['svc-a', 'svc-boom', 'svc-b'], pool=False)
+                        side_effect=side), \
+             mock.patch('sky.serve.serve_utils._bare_service_status',
+                        side_effect=lambda name, pool: {
+                            'name': name,
+                            'replica_info': []
+                        }) as bare:
+            out = serve_utils.get_service_status_pickled(
+                ['svc-a', 'svc-boom', 'svc-b'], pool=False)
+        decoded = serve_utils.unpickle_service_status(out)
+        assert [r['name'] for r in decoded] == ['svc-a', 'svc-b', 'svc-boom']
+        bare.assert_called_once_with('svc-boom', False)
 
     def test_empty_input_short_circuits(self):
         """Empty `service_names` must NOT spawn an executor (cheap path

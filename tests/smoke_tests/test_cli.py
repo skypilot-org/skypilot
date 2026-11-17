@@ -88,6 +88,7 @@ def test_endpoint_output_basic_no_pg_conn_closed_errors(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server
+@pytest.mark.no_remote_identity_none  # Asserts the config file path; the flag rewrites it.
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
 

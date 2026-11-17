@@ -6,6 +6,10 @@
 # /api/logs, /api/cancel, etc.
 _block_requests = False
 
+# Set in the API server main process once it decides to shut itself down, so
+# health checks served from that process can report it as not ready.
+_shutting_down = False
+
 
 # TODO(aylei): refactor, state should be a instance property of API server app
 # instead of a global variable.
@@ -18,3 +22,14 @@ def set_block_requests(shutting_down: bool) -> None:
     """Set the API server to block requests except /api operations."""
     global _block_requests
     _block_requests = shutting_down
+
+
+def is_shutting_down() -> bool:
+    """Whether the API server has decided to shut itself down."""
+    return _shutting_down
+
+
+def set_shutting_down() -> None:
+    """Mark the API server as shutting itself down."""
+    global _shutting_down
+    _shutting_down = True

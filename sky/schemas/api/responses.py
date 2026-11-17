@@ -119,6 +119,8 @@ class StatusResponse(ResponseBaseModel):
     user_name: str
     config_hash: Optional[str] = None
     workspace: str
+    # User-facing name of `workspace` (an id); unset from older servers.
+    workspace_name: Optional[str] = None
     last_creation_yaml: Optional[str] = None
     last_creation_command: Optional[str] = None
     is_managed: bool
@@ -188,6 +190,12 @@ class StorageRecord(ResponseBaseModel):
     store: List[data.StoreType]
     last_use: str
     status: status_lib.StorageStatus
+    # Optional so an older server's response still validates; storage that
+    # predates the recording of its creator has no user.
+    user_hash: Optional[str] = None
+    user_name: Optional[str] = None
+    workspace: Optional[str] = None
+    workspace_name: Optional[str] = None
 
 
 # TODO (syang) figure out which fields are always present
@@ -202,6 +210,7 @@ class ManagedJobRecord(ResponseBaseModel):
     task_name: Optional[str] = None
     job_duration: Optional[float] = None
     workspace: Optional[str] = None
+    workspace_name: Optional[str] = None
     status: Optional[job_state.ManagedJobStatus] = None
     schedule_state: Optional[str] = None
     resources: Optional[str] = None
@@ -265,6 +274,8 @@ class ManagedJobRecord(ResponseBaseModel):
     # are 0..n-1, dynamic tasks number on from n in attach order. None for
     # top-level jobs.
     dynamic_task_index: Optional[int] = None
+    # Managed jobs this job waits for. None for a job without dependencies.
+    depends_on: Optional[List[int]] = None
 
     @property
     def group_job_id(self) -> Optional[int]:
@@ -298,6 +309,7 @@ class VolumeRecord(ResponseBaseModel):
     user_hash: str
     user_name: str
     workspace: str
+    workspace_name: Optional[str] = None
     last_attached_at: Optional[int] = None
     last_use: Optional[str] = None
     status: Optional[str] = None

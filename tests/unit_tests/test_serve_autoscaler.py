@@ -5,6 +5,7 @@ from unittest import mock
 from sky.serve import autoscalers
 from sky.serve import replica_managers
 from sky.serve import serve_state
+from sky.serve import service_spec
 
 
 class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
@@ -151,6 +152,46 @@ class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
         # Should select old version replica first despite having more jobs
         self.assertEqual(len(result), 1)
         self.assertEqual(result, [1])
+
+
+def _fixed_spec(num_replicas: int) -> service_spec.SkyServiceSpec:
+    return service_spec.SkyServiceSpec.from_yaml_config({
+        'readiness_probe': '/health',
+        'replica_policy': {
+            'min_replicas': num_replicas,
+            'max_replicas': num_replicas,
+            'target_qps_per_replica': 1,
+        },
+    })
+
+
+def _ready_replica(replica_id: int, version: int) -> mock.Mock:
+    replica = mock.Mock(spec=replica_managers.ReplicaInfo)
+    replica.replica_id = replica_id
+    replica.version = version
+    replica.status = serve_state.ReplicaStatus.READY
+    replica.is_ready = True
+    replica.is_terminal = False
+    return replica
+
+
+class TestAutoscalerOnRecoveredVersion(unittest.TestCase):
+    """A controller recovery run restarts on the service's latest version."""
+
+    def test_from_spec_starts_on_given_version(self):
+        autoscaler = autoscalers.Autoscaler.from_spec('svc',
+                                                      _fixed_spec(2),
+                                                      version=3)
+        self.assertEqual(autoscaler.latest_version, 3)
+
+    def test_recovered_autoscaler_keeps_ready_replicas_of_latest_version(self):
+        autoscaler = autoscalers.Autoscaler.from_spec('svc',
+                                                      _fixed_spec(2),
+                                                      version=3)
+        replicas = [_ready_replica(4, 3), _ready_replica(5, 3)]
+        self.assertEqual(
+            autoscaler.generate_scaling_decisions(replicas,
+                                                  active_versions=[3]), [])
 
 
 if __name__ == '__main__':

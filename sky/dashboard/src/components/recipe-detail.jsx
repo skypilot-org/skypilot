@@ -15,6 +15,7 @@ import {
   EditIcon,
   ShareIcon,
   CheckIcon,
+  GitCommitHorizontalIcon,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -54,6 +55,15 @@ import {
 import { usePluginRecipeTypes } from '@/plugins/PluginProvider';
 import { TimestampWithTooltip } from '@/components/utils';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import {
+  GitAuthor,
+  GitBadge,
+  getSourceCommitUrl,
+  getSourceFileUrl,
+  getSourceRepoName,
+  isGitSourced,
+  shortSha,
+} from '@/components/elements/RecipeSource';
 
 // Parse recipe name from URL slug
 // Names are the unique identifiers for recipes (no UUID parsing needed)
@@ -112,7 +122,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto px-8">
         <DialogHeader>
-          <DialogTitle className="text-xl text-gray-900">
+          <DialogTitle className="text-xl text-content-strong">
             Edit Recipe: {template.name}
           </DialogTitle>
           <DialogDescription>
@@ -128,7 +138,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional description..."
-              className="placeholder:text-gray-500"
+              className="placeholder:text-content-tertiary"
             />
           </div>
 
@@ -145,9 +155,9 @@ function EditModal({ isOpen, onClose, template, onSave }) {
           </div>
 
           {formError && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 flex items-start gap-2">
-              <AlertTriangleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-800">{formError}</p>
+            <div className="rounded-md border border-red-line bg-red-tint p-3 flex items-start gap-2">
+              <AlertTriangleIcon className="w-4 h-4 text-red-fg mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-red-fg-stronger">{formError}</p>
             </div>
           )}
 
@@ -163,7 +173,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="bg-sky-600 hover:bg-sky-700 text-white"
+              className="bg-sky-solid hover:bg-sky-solid-hover text-white"
             >
               {isSubmitting ? (
                 <>
@@ -203,7 +213,7 @@ function DeleteModal({ isOpen, onClose, template, onDelete }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-xl text-red-600">
+          <DialogTitle className="text-xl text-red-fg">
             Delete Recipe
           </DialogTitle>
           <DialogDescription>
@@ -219,7 +229,7 @@ function DeleteModal({ isOpen, onClose, template, onDelete }) {
           <Button
             onClick={handleDelete}
             disabled={isDeleting}
-            className="bg-red-600 hover:bg-red-700 text-white"
+            className="bg-red-solid hover:bg-red-solid-hover text-white"
           >
             {isDeleting ? (
               <>
@@ -390,7 +400,7 @@ export function RecipeDetail() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress size={20} className="mr-2" />
-        <span className="text-gray-500">Loading...</span>
+        <span className="text-content-tertiary">Loading...</span>
       </div>
     );
   }
@@ -398,7 +408,7 @@ export function RecipeDetail() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <div className="text-red-500 mb-4">{error}</div>
+        <div className="text-red-fg-soft mb-4">{error}</div>
         <Link href="/recipes">
           <Button variant="outline">
             <ArrowLeftIcon className="w-4 h-4 mr-2" />
@@ -423,7 +433,7 @@ export function RecipeDetail() {
         <div className="flex items-center gap-4">
           <Link
             href="/recipes"
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-brand hover:text-brand-bright flex items-center"
           >
             <ArrowLeftIcon className="h-4 w-4 mr-1.5" />
             <span>Back</span>
@@ -432,26 +442,34 @@ export function RecipeDetail() {
             <TypeIcon
               className={`w-5 h-5 ${
                 typeInfo.color === 'sky'
-                  ? 'text-sky-600'
+                  ? 'text-sky-fg'
                   : typeInfo.color === 'purple'
-                    ? 'text-purple-600'
+                    ? 'text-purple-fg'
                     : typeInfo.color === 'green'
-                      ? 'text-green-600'
+                      ? 'text-green-fg'
                       : typeInfo.color === 'orange'
-                        ? 'text-orange-600'
-                        : 'text-gray-600'
+                        ? 'text-orange-fg'
+                        : 'text-content-secondary'
               }`}
             />
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base text-sky-blue leading-none">
+                <h1 className="text-base text-content leading-none">
                   {template.name}
                 </h1>
                 {template.pinned && (
-                  <PinIcon className="w-4 h-4 text-amber-500" />
+                  <PinIcon className="w-4 h-4 text-amber-fg-soft" />
+                )}
+                {isGitSourced(template) && (
+                  <GitBadge
+                    href={getSourceFileUrl(
+                      template.source,
+                      template.source.sha || template.source.ref
+                    )}
+                  />
                 )}
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
+              <div className="flex items-center gap-2 text-sm text-content-tertiary">
                 <span>{typeInfo.fullLabel}</span>
               </div>
             </div>
@@ -466,10 +484,10 @@ export function RecipeDetail() {
           />
           <button
             onClick={handleShare}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-brand hover:text-brand-bright flex items-center"
           >
             {copied ? (
-              <CheckIcon className="h-4 w-4 mr-1.5 text-green-600" />
+              <CheckIcon className="h-4 w-4 mr-1.5 text-green-fg" />
             ) : (
               <ShareIcon className="h-4 w-4 mr-1.5" />
             )}
@@ -481,8 +499,8 @@ export function RecipeDetail() {
             }
             className={`flex items-center ${
               template.is_pinnable === false
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-sky-blue hover:text-sky-blue-bright'
+                ? 'text-content-faint cursor-not-allowed'
+                : 'text-brand hover:text-brand-bright'
             }`}
             title={
               template.is_pinnable === false
@@ -505,32 +523,44 @@ export function RecipeDetail() {
           </button>
           <button
             onClick={handleCopyToNew}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-brand hover:text-brand-bright flex items-center"
           >
             <CopyIcon className="h-4 w-4 mr-1.5" />
             <span>Copy to New</span>
           </button>
-          <button
-            onClick={
-              template.is_editable !== false
-                ? () => setIsEditModalOpen(true)
-                : undefined
-            }
-            className={`flex items-center ${
-              template.is_editable === false
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-sky-blue hover:text-sky-blue-bright'
-            }`}
-            title={
-              template.is_editable === false
-                ? 'Default recipes cannot be edited'
-                : ''
-            }
-            disabled={template.is_editable === false}
-          >
-            <EditIcon className="h-4 w-4 mr-1.5" />
-            <span>Edit</span>
-          </button>
+          {isGitSourced(template) ? (
+            <a
+              href={getSourceFileUrl(template.source, template.source.ref)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand hover:text-brand-bright flex items-center"
+            >
+              <EditIcon className="h-4 w-4 mr-1.5" />
+              <span>Edit</span>
+            </a>
+          ) : (
+            <button
+              onClick={
+                template.is_editable !== false
+                  ? () => setIsEditModalOpen(true)
+                  : undefined
+              }
+              className={`flex items-center ${
+                template.is_editable === false
+                  ? 'text-content-faint cursor-not-allowed'
+                  : 'text-brand hover:text-brand-bright'
+              }`}
+              title={
+                template.is_editable === false
+                  ? 'Default recipes cannot be edited'
+                  : ''
+              }
+              disabled={template.is_editable === false}
+            >
+              <EditIcon className="h-4 w-4 mr-1.5" />
+              <span>Edit</span>
+            </button>
+          )}
           <button
             onClick={
               template.is_editable !== false
@@ -539,11 +569,11 @@ export function RecipeDetail() {
             }
             className={`flex items-center ${
               template.is_editable === false
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-red-600 hover:text-red-700'
+                ? 'text-content-faint cursor-not-allowed'
+                : 'text-red-fg hover:text-red-fg-strong'
             }`}
             title={
-              template.is_editable === false
+              template.is_editable === false && !isGitSourced(template)
                 ? 'Default recipes cannot be deleted'
                 : ''
             }
@@ -555,6 +585,30 @@ export function RecipeDetail() {
         </div>
       </div>
 
+      {isGitSourced(template) && template.source.error && (
+        <div className="flex items-start gap-2 mb-4 rounded-lg border border-amber-line bg-amber-tint px-4 py-3 text-sm text-amber-fg-stronger">
+          <AlertTriangleIcon className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          <div>
+            <div className="font-medium">
+              The latest change in git is invalid, so this recipe still uses the
+              last valid version
+            </div>
+            <div className="mt-1">
+              {template.source.error_sha && (
+                <>
+                  Commit{' '}
+                  <span className="font-mono">
+                    {shortSha(template.source.error_sha)}
+                  </span>
+                  :{' '}
+                </>
+              )}
+              {template.source.error}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Template Details Card */}
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
         <div className="flex items-center justify-between px-4 pt-4">
@@ -564,23 +618,33 @@ export function RecipeDetail() {
           {/* Metadata Grid */}
           <div className="grid grid-cols-2 gap-6 mb-6">
             <div>
-              <div className="text-gray-600 font-medium text-base">Name</div>
+              <div className="text-content-secondary font-medium text-base">
+                Name
+              </div>
               <div className="text-base mt-1">{template.name}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-base">Type</div>
+              <div className="text-content-secondary font-medium text-base">
+                Type
+              </div>
               <div className="text-base mt-1">{typeInfo.fullLabel}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-base">
+              <div className="text-content-secondary font-medium text-base">
                 Authored by
               </div>
               <div className="text-base mt-1">
-                {template.user_name || template.user_id || 'Unknown'}
+                {isGitSourced(template) ? (
+                  <GitAuthor />
+                ) : (
+                  template.user_name || template.user_id || 'Unknown'
+                )}
               </div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-base">Updated</div>
+              <div className="text-content-secondary font-medium text-base">
+                Updated
+              </div>
               <div className="text-base mt-1">
                 <TimestampWithTooltip
                   date={
@@ -592,15 +656,80 @@ export function RecipeDetail() {
                 by {template.updated_by_name || template.user_name || 'Unknown'}
               </div>
             </div>
+            {isGitSourced(template) && (
+              <>
+                <div>
+                  <div className="text-content-secondary font-medium text-base">
+                    Source
+                  </div>
+                  <div className="text-base mt-1 break-all">
+                    <a
+                      href={template.source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand hover:text-brand-bright"
+                    >
+                      {getSourceRepoName(template.source)}
+                    </a>
+                    {template.source.path && (
+                      <>
+                        {' › '}
+                        <span className="font-mono text-sm">
+                          {template.source.path}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-content-secondary font-medium text-base">
+                    Commit
+                  </div>
+                  <div className="text-base mt-1">
+                    {template.source.sha ? (
+                      <a
+                        href={getSourceCommitUrl(template.source)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 align-middle font-mono text-sm text-brand hover:text-brand-bright"
+                      >
+                        <GitCommitHorizontalIcon className="w-4 h-4" />
+                        {shortSha(template.source.sha)}
+                      </a>
+                    ) : (
+                      '-'
+                    )}{' '}
+                    on{' '}
+                    <span className="font-mono text-sm">
+                      {template.source.ref}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-content-secondary font-medium text-base">
+                    Last synced
+                  </div>
+                  <div className="text-base mt-1">
+                    <TimestampWithTooltip
+                      date={
+                        template.source.synced_at
+                          ? new Date(template.source.synced_at * 1000)
+                          : null
+                      }
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Description */}
           {template.description && (
             <div className="mb-6">
-              <div className="text-gray-600 font-medium text-base mb-1">
+              <div className="text-content-secondary font-medium text-base mb-1">
                 Description
               </div>
-              <p className="text-base text-gray-700">{template.description}</p>
+              <p className="text-base text-content">{template.description}</p>
             </div>
           )}
 
@@ -614,7 +743,7 @@ export function RecipeDetail() {
                   recipeName: template.name,
                 }}
                 fallback={
-                  <div className="text-sm text-gray-500 italic">
+                  <div className="text-sm text-content-tertiary italic">
                     A plugin is required to launch this recipe type.
                   </div>
                 }
@@ -623,23 +752,23 @@ export function RecipeDetail() {
           ) : (
             <div className="mb-6">
               <div className="flex items-center">
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Launch Command
                 </div>
                 <button
                   onClick={copyCommandToClipboard}
-                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                  className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
                   title={commandCopied ? 'Copied!' : 'Copy command'}
                 >
                   {commandCopied ? (
-                    <CheckIcon className="w-4 h-4 text-green-600" />
+                    <CheckIcon className="w-4 h-4 text-green-fg" />
                   ) : (
                     <CopyIcon className="w-4 h-4" />
                   )}
                 </button>
               </div>
-              <div className="bg-gray-50 border border-gray-200 rounded-md p-3 mt-2">
-                <code className="text-sm text-gray-800 font-mono break-all">
+              <div className="bg-surface-subtle border border-line rounded-md p-3 mt-2">
+                <code className="text-sm text-content-heavy font-mono break-all">
                   {getLaunchCommand(template.recipe_type, template.name)}
                 </code>
               </div>
@@ -649,16 +778,16 @@ export function RecipeDetail() {
           {/* YAML Content */}
           <div>
             <div className="flex items-center">
-              <div className="text-gray-600 font-medium text-base">
+              <div className="text-content-secondary font-medium text-base">
                 YAML Content
               </div>
               <button
                 onClick={copyYamlToClipboard}
-                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
                 title={yamlCopied ? 'Copied!' : 'Copy YAML'}
               >
                 {yamlCopied ? (
-                  <CheckIcon className="w-4 h-4 text-green-600" />
+                  <CheckIcon className="w-4 h-4 text-green-fg" />
                 ) : (
                   <CopyIcon className="w-4 h-4" />
                 )}

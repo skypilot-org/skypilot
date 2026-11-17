@@ -18,6 +18,9 @@ WORKSPACE_SOURCE_PREFERRED = 'preferred'
 # after upgrade.
 WORKSPACE_SOURCE_DEFAULT_FALLBACK = 'default-fallback'
 WORKSPACE_SOURCE_SINGLE_MEMBERSHIP = 'single-membership'
+# A read by a user with several writable workspaces and none chosen: the first
+# by name. Writes raise WorkspaceAmbiguousError instead.
+WORKSPACE_SOURCE_READ_FIRST = 'read-first'
 
 # Resolver-error states surfaced through `GET /users/me/workspace`. Not
 # returned by `resolve_workspace_for_user()` itself (that path raises) —
@@ -48,3 +51,8 @@ READ_ACCESS_ALL = 'all'
 # Write implies read.
 WORKSPACE_ACTION_READ = 'read'
 WORKSPACE_ACTION_WRITE = 'write'
+
+# The `error` a 404 carries when it hides an infra target (a Kubernetes context
+# or a Slurm cluster) outside the caller's workspaces. The client keys on it to
+# tell this 404 from FastAPI's own for a route an old server lacks.
+INFRA_TARGET_NOT_FOUND = 'infra_target_not_found'

@@ -14,8 +14,10 @@ authenticated endpoint fails for the duration of the DB incident.
 pooler (no server connection is assigned yet) or waiting for a pool
 checkout. On timeout the request fails fast with a 503 the client retries
 with backoff; note the executor thread itself keeps running until the DB
-layer releases it, so the auth executor still acts as a saturation
-buffer — requests beyond it fail fast with the worker-exhausted 503.
+layer releases it. Lookups beyond the auth executor's threads wait in its
+bounded queue, within the same deadline, and are skipped if their caller
+timed out; once the queue is full too, requests fail fast with the
+worker-exhausted 503.
 
 Both timeout and executor exhaustion must be converted to responses
 *inside* the middleware: app-level exception handlers wrap the router
@@ -31,6 +33,7 @@ the helpers with no arguments, keep getting the same 503; they only lose the
 per-reason attribution until they pass the request too.
 """
 import asyncio
+import sqlite3
 from typing import Any, Callable, Optional
 
 import fastapi
@@ -99,6 +102,19 @@ def _server_timeout_pgcode(exc: BaseException) -> Optional[str]:
     return None
 
 
+def _is_sqlite_lock_timeout(exc: BaseException) -> bool:
+    """Whether ``exc`` is SQLite giving up on a lock at its busy timeout.
+
+    That is SQLite's form of lock_timeout: on SQLite the users upsert bounds
+    its busy timeout with the same value (see
+    `global_user_state._user_upsert_session`). SQLite reports it with this
+    message and no SQLSTATE.
+    """
+    orig = getattr(exc, 'orig', exc)
+    return (isinstance(orig, sqlite3.OperationalError) and
+            str(orig) == 'database is locked')
+
+
 # `cause` of a timeout the client-side deadline produced, as opposed to one
 # the database itself ended (those are named by their Postgres setting, see
 # `_SERVER_TIMEOUT_PGCODES`).
@@ -144,7 +160,13 @@ async def _run_with_deadline(pool: Any, pool_name: str,
                                       timeout=AUTH_DB_TIMEOUT_SECONDS)
     except Exception as e:  # pylint: disable=broad-except
         pgcode = _server_timeout_pgcode(e)
-        if pgcode is None:
+        if pgcode is not None:
+            reason = _SERVER_TIMEOUT_PGCODES[pgcode]
+            detail = f'pgcode {pgcode}'
+        elif _is_sqlite_lock_timeout(e):
+            reason = 'lock_timeout'
+            detail = 'SQLite busy timeout'
+        else:
             if isinstance(e, asyncio.TimeoutError):
                 # The deadline elapsed. Counted here, at the one choke point
                 # every auth-path call goes through, rather than at the call
@@ -154,11 +176,10 @@ async def _run_with_deadline(pool: Any, pool_name: str,
                 # symptom -- which are the early ones.
                 _count_timeout(func, TIMEOUT_CAUSE_DEADLINE, pool_name)
             raise
-        reason = _SERVER_TIMEOUT_PGCODES[pgcode]
         _count_timeout(func, reason, pool_name)
         logger.warning(f'Auth DB call {getattr(func, "__name__", func)} was '
                        f'cut off by the database\'s {reason} '
-                       f'(pgcode {pgcode}): '
+                       f'({detail}): '
                        f'{common_utils.format_exception(e)}')
         raise AuthDBTimeoutError(reason) from e
 
@@ -166,10 +187,11 @@ async def _run_with_deadline(pool: Any, pool_name: str,
 async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     """Run a sync auth DB lookup on the auth executor with a total deadline.
 
-    Raises ``asyncio.TimeoutError`` when the deadline elapses (or when the
-    database cut the call off at its own, aligned timeout -- see
-    `_SERVER_TIMEOUT_PGCODES`) and ``ConcurrentWorkerExhaustedError`` when
-    the executor is saturated.
+    Raises ``asyncio.TimeoutError`` when the deadline elapses, including
+    time spent waiting for a free thread (or when the database cut the call
+    off at its own, aligned timeout -- see `_SERVER_TIMEOUT_PGCODES`), and
+    ``ConcurrentWorkerExhaustedError`` when the executor and its queue are
+    full.
     """
     return await _run_with_deadline(executor.get_auth_thread_executor(),
                                     POOL_AUTH, func, *args)

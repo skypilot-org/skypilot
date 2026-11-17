@@ -257,6 +257,15 @@ class ManagedJobStatusError(Exception):
     pass
 
 
+class ManagedJobRecordMissingError(Exception):
+    """Raised when a managed job's database record no longer exists.
+
+    A job-state read or write found no row for the job, so callers should
+    stop retrying bookkeeping that can never be recorded.
+    """
+    pass
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
     pass
@@ -389,6 +398,12 @@ class StorageSpecError(ValueError):
     pass
 
 
+class StorageWorkspaceError(StorageSpecError):
+    """The storage named exists, but not in a workspace the caller can read,
+    or the controller runs for, or the active one when that is required."""
+    pass
+
+
 class StorageInitError(StorageError):
     # Error raised when Initialization fails - either due to permissions,
     # unavailable name, or other reasons.
@@ -489,6 +504,21 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
+class InvalidUserIdError(Exception):
+    """Raised when a user id does not have the expected form."""
+    pass
+
+
+class WorkspaceConfigConflictError(Exception):
+    """Raised when a workspace update was based on an outdated config.
+
+    The caller sent the config it started from (``expected_config``) and the
+    workspace no longer holds it, i.e. someone else changed the workspace in
+    the meantime.
+    """
+    pass
+
+
 class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     """Raised when a user belongs to multiple workspaces and none is chosen.
 
@@ -497,7 +527,7 @@ class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     `sky workspace use <name>` or `~/.sky/config.yaml`. The `--workspace`
     flag is listed as a footnote because it only exists on the launch
     commands (`sky launch` / `sky jobs launch`); listing it as a main
-    fix would mislead users running `sky status` / `sky queue` / etc.
+    fix would mislead users of the other commands that write.
 
     `note` is an optional drift explanation populated when the user has a
     saved preference that is no longer accessible — so the user understands
@@ -756,8 +786,9 @@ class ExecutionPausedError(ExecutionRetryableError):
     """Pause execution mid-attempt while keeping provisioned resources.
 
     Raised from inside an in-progress attempt waiting on an external condition
-    (e.g. admission or quota). The partially provisioned resources are kept so
-    the request can resume, so teardown layers must not clean up the resources.
+    (e.g. a cluster lock held by another operation). Any partially provisioned
+    resources are kept so the request can resume, so teardown layers must not
+    clean up the resources.
 
     ``continue_condition`` optionally says how to wait for the resume signal
     (see ``continue_condition.py``); it must be picklable, as the error crosses
@@ -790,6 +821,24 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class StorageReadOnlyError(StorageSpecError, PermissionDeniedError):
+    """The storage named is in a workspace the caller can only read.
+
+    A ``StorageSpecError`` so a managed job naming it fails its prechecks,
+    and a ``PermissionDeniedError`` so callers that handle denials still
+    catch it."""
+    pass
+
+
+class InfraTargetNotFoundError(ValueError):
+    """Raised when a named Kubernetes context or Slurm cluster is not found.
+
+    Also what a caller gets for a target outside their workspaces, so a hidden
+    target reads the same as a missing one.
+    """
     pass
 
 

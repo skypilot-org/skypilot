@@ -597,6 +597,22 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     # So we don't need to wait here.
 
 
+def _vm_user_assigned_identity(vm) -> Optional[str]:
+    """The VM's user-assigned managed identity resource ID, if unambiguous.
+
+    Returns None when the VM has no user-assigned identity or more than
+    one: callers cannot know which of several identities carries the
+    intended permissions, so disambiguation is left to the user.
+    """
+    identity = getattr(vm, 'identity', None)
+    if identity is None or not identity.user_assigned_identities:
+        return None
+    identity_ids = list(identity.user_assigned_identities.keys())
+    if len(identity_ids) != 1:
+        return None
+    return identity_ids[0]
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -617,6 +633,19 @@ def get_cluster_info(
         filters,
         status_filters=[AzureInstanceStatus.RUNNING])
     head_instance_id = _get_head_instance_id(running_instances)
+
+    # Surface the cluster's user-assigned managed identity so
+    # post-provision steps can authenticate as that exact identity (e.g.
+    # the ACR docker login in DockerInitializer). The 'msi' key is only
+    # present in the in-memory bootstrap config during creation, so on
+    # restarts it must be re-derived from the live VM.
+    if 'msi' not in provider_config:
+        for inst in running_instances:
+            if inst.name == head_instance_id:
+                msi = _vm_user_assigned_identity(inst)
+                if msi is not None:
+                    provider_config = dict(provider_config, msi=msi)
+                break
 
     instances = {}
     use_internal_ips = provider_config.get('use_internal_ips', False)

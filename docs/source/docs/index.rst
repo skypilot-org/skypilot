@@ -8,11 +8,13 @@ SkyPilot: Manage all your AI compute
   :align: center
   :alt: SkyPilot
   :class: no-scaled-link, only-dark, hero-logo
+  :target: https://skypilot.ai/
 .. image:: /_static/SkyPilot_wide_light.svg
   :width: 38%
   :align: center
   :alt: SkyPilot
   :class: no-scaled-link, only-light, hero-logo
+  :target: https://skypilot.ai/
 
 .. raw:: html
 
@@ -268,7 +270,7 @@ Follow updates:
    Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
-   SkyPilot Platform <../skypilot-platform>
+   SkyPilot Platform <https://skypilot.ai/platform?utm_source=oss_docs&utm_medium=sidebar&utm_campaign=try_platform>
 
 .. toctree::
    :hidden:
@@ -293,6 +295,7 @@ Follow updates:
    Using a Pool of Workers <../examples/pools>
    Batch Inference <../examples/batch/index>
    Job Groups for RL <../examples/job-groups>
+   Sandboxes <../sandboxes>
 
 .. toctree::
    :hidden:

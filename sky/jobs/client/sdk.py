@@ -155,6 +155,13 @@ def _resolve_job_group(
     raise ValueError(f'Unsupported job_group value: {requested_job_group!r}')
 
 
+def _uses_wait_for_scheduling_timeout(dag: 'sky.Dag') -> bool:
+    """Whether any task of the DAG sets job.wait_for_scheduling_timeout."""
+    return any(
+        task_.job.get('wait_for_scheduling_timeout') is not None
+        for task_ in dag.tasks)
+
+
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
@@ -164,6 +171,7 @@ def launch(
     pool: Optional[str] = None,
     num_jobs: Optional[int] = None,
     job_group: Union[int, str, None, _AutoJobGroup] = AUTO_JOB_GROUP,
+    depends_on: Optional[List[int]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -183,6 +191,11 @@ def launch(
             attachment otherwise). Pass ``None`` to launch a top-level job
             even from inside a job group, or a job id / unique running job
             name to attach explicitly.
+        depends_on: Managed job IDs this job waits for. It starts once all of
+            them succeed, and is cancelled if any of them ends otherwise. The
+            launch fails if one of them has already ended without succeeding.
+            Requires an API server that runs managed jobs in consolidation
+            mode.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -205,7 +218,20 @@ def launch(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
+    if depends_on and (remote_api_version is None or remote_api_version <
+                       server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'depends_on is not supported by your API server. Please '
+                'upgrade the API server.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    if (_uses_wait_for_scheduling_timeout(dag) and
+        (remote_api_version is None or remote_api_version <
+         server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'job.wait_for_scheduling_timeout is not supported by your API '
+                'server. Please upgrade the API server.')
 
     if name is not None:
         dag.name = name
@@ -300,6 +326,7 @@ def launch(
             parent_job_id=attachment.parent_job_id,
             parent_task_id=attachment.parent_task_id,
             job_group_explicit=attachment.attaches and not attachment.auto,
+            depends_on=depends_on or None,
         )
         response = server_common.make_authenticated_request(
             'POST',
@@ -406,6 +433,7 @@ def queue_v2(
         server_constants.MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION: {
             'dynamic_task_index'
         },
+        server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION: {'depends_on'},
     }
     if fields is not None:
         remote_api_version = versions.get_remote_api_version()

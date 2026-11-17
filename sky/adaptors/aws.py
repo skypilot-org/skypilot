@@ -29,6 +29,7 @@ This is informed by the following boto3 docs:
 # pylint: disable=import-outside-toplevel
 
 import logging
+import os
 import threading
 import time
 import typing
@@ -59,6 +60,14 @@ T = TypeVar('T')
 
 logger = logging.getLogger(__name__)
 _session_creation_lock = threading.RLock()
+
+# botocore caches parsed service models (about 25 MiB for EC2) per loader, and
+# each new session gets its own loader. Sessions are rebuilt per request and per
+# thread, so all sessions share one loader per AWS_DATA_PATH value.
+# Only the loader is shared. Sessions are not thread-safe and stay thread-local
+# (see session()); the loader only reads and caches model files.
+# Guarded by _session_creation_lock.
+_loaders: Dict[Optional[str], Any] = {}
 
 version = 1
 
@@ -107,6 +116,41 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], T],
                         f'{common_utils.format_exception(e)}.')
 
 
+class _UniqueList(list):
+    """A list whose append() skips items it already contains."""
+
+    def append(self, item):
+        if item not in self:
+            super().append(item)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def _new_session(profile: Optional[str]) -> 'boto3.session.Session':
+    """Create a boto3 session that uses the shared botocore loader.
+
+    The returned session must not be shared across threads; session() caches
+    it per thread.
+    """
+    from botocore import loaders
+    from botocore import session as botocore_session
+
+    bs = botocore_session.Session(profile=profile)
+    data_path = bs.get_config_variable('data_path')
+    loader = _loaders.get(data_path)
+    if loader is None:
+        # Same search paths as botocore.loaders.create_loader(). boto3 appends
+        # its own data path on every new session.
+        paths = _UniqueList()
+        if data_path is not None:
+            paths.extend(
+                os.path.expanduser(os.path.expandvars(p))
+                for p in data_path.split(os.pathsep))
+        loader = loaders.Loader(extra_search_paths=paths)
+        _loaders[data_path] = loader
+    bs.register_component('data_loader', loader)
+    return boto3.session.Session(botocore_session=bs)
+
+
 def get_workspace_profile() -> Optional[str]:
     """Get AWS profile name from workspace config."""
     return skypilot_config.get_workspace_cloud('aws').get('profile', None)
@@ -124,10 +168,7 @@ def session(check_credentials: bool = True, profile: Optional[str] = None):
     """
     if profile is not None:
         logger.debug(f'Using AWS profile \'{profile}\'.')
-        s = _create_aws_object(
-            lambda: boto3.session.Session(profile_name=profile), 'session')
-    else:
-        s = _create_aws_object(boto3.session.Session, 'session')
+    s = _create_aws_object(lambda: _new_session(profile), 'session')
     if check_credentials and s.get_credentials() is None:
         # s.get_credentials() can be None if there are actually no credentials,
         # or if we fail to get credentials from IMDS (e.g. due to throttling).

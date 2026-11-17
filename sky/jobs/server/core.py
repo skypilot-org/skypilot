@@ -1,5 +1,6 @@
 """SDK functions for managed jobs."""
 import contextlib
+import copy
 import datetime
 import inspect
 import ipaddress
@@ -10,7 +11,7 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
@@ -18,6 +19,7 @@ import colorama
 from pydantic import SecretStr as _SecretStr
 
 from sky import backends
+from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import execution
@@ -44,12 +46,14 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server import plugin_hooks
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import infra_utils
@@ -102,6 +106,14 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
     'metadata',
     'user_name',
     'user_hash',
+]
+
+_MANAGED_JOB_FIELDS_FOR_WAIT = [
+    'job_id',
+    'job_name',
+    'task_id',
+    'task_name',
+    'status',
 ]
 
 
@@ -444,14 +456,91 @@ def _consolidated_launch(
         os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs'))
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
-    log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    # Name the log by the id span, not the full list: concurrent batch
+    # launches interleave ids, and the list can pass the 255-byte limit.
+    # No two requests share an id, so the span's first id keeps it unique.
+    first_id, last_id = min(job_ids), max(job_ids)
+    log_name = (str(first_id)
+                if first_id == last_id else f'{first_id}-{last_id}')
+    log_path = os.path.join(log_dir, f'submit-job-{log_name}.log')
+    # The span may cover other requests' ids; record this request's own.
+    # The runner appends to the log.
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(f'Job IDs: {job_ids_str}\n')
     # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
     # a clean server env on the subprocess by default to keep per-request
     # env pollution from leaking into the long-lived controller process
     # tree. See LocalProcessCommandRunner.run for details.
-    backend.run_on_head(local_handle, run_script, log_path=log_path)
+    #
+    # Surface the script's exit code so that a failure here marks the
+    # `jobs.launch` request as FAILED. Without this, a non-zero exit from the
+    # scheduler script (e.g. unreachable controller DB, interpreter mismatch,
+    # OOM mid-`scheduler_set_waiting`) is silently dropped — leaving a
+    # PENDING+INACTIVE job row while the user is told the launch succeeded.
+    returncode = backend.run_on_head(local_handle,
+                                     run_script,
+                                     log_path=log_path)
+    if returncode != 0:
+        _cancel_failed_submission(job_ids, returncode, log_path)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
+
+
+def _cancel_failed_submission(job_ids: List[int], returncode: int,
+                              log_path: str) -> None:
+    """Cancels the jobs whose submission script failed, then raises.
+
+    The request is about to fail, so none of its jobs may run. A job whose
+    script failed before scheduler_set_waiting committed stays
+    PENDING+INACTIVE, which nothing ever picks up; after the commit, a
+    controller may claim the job at any moment. Cancel them the way `sky jobs
+    cancel` does: an unclaimed job is cancelled in the database, and the
+    controller of a claimed one is signalled to cancel it and tear down
+    anything it launched.
+
+    Raises:
+        exceptions.CommandError: always.
+    """
+    job_ids_str = _job_ids_to_str(job_ids)
+    request_id = (common_utils.get_current_request_id()
+                  if common_utils.is_in_request_context() else None)
+    cancel_request_info = managed_job_utils.CancelRequestInfo(
+        request_id=request_id,
+        note=(f'because the job submission failed (exit code {returncode}). '
+              f'Submission log: {log_path}'))
+    try:
+        # cancel_jobs_by_id skips jobs outside the workspace it is given, and
+        # launch runs this under the default workspace, so pass each job's
+        # own.
+        job_ids_by_workspace: Dict[str, List[int]] = {}
+        for job_id in job_ids:
+            workspace = managed_job_state.get_workspace(job_id)
+            job_ids_by_workspace.setdefault(workspace, []).append(job_id)
+        for workspace, workspace_job_ids in job_ids_by_workspace.items():
+            result = managed_job_utils.cancel_jobs_by_id(
+                workspace_job_ids,
+                current_workspace=workspace,
+                cancel_request_info=cancel_request_info)
+            logger.debug(
+                f'Cancelling the jobs of a failed submission: {result}')
+        error_msg = (f'Managed job submission failed; cancelled job(s) '
+                     f'{job_ids_str}, so it is safe to retry.')
+    except Exception as e:  # pylint: disable=broad-except
+        # The DB may be the reason the script failed in the first place.
+        logger.warning(f'Failed to cancel job(s) {job_ids_str} after their '
+                       f'submission failed: '
+                       f'{common_utils.format_exception(e)}')
+        cancel_ids = ' '.join(str(job_id) for job_id in job_ids)
+        error_msg = (f'Managed job submission failed, and cancelling job(s) '
+                     f'{job_ids_str} failed too, so they may still run. Check '
+                     '`sky jobs queue` before retrying, and cancel them with '
+                     f'`sky jobs cancel {cancel_ids}` if needed.')
+    error_msg += f' Submission log: {log_path}'
+    raise exceptions.CommandError(
+        returncode=returncode,
+        command=f'sky.jobs.scheduler[job_ids={job_ids_str}]',
+        error_msg=error_msg,
+        detailed_reason='')
 
 
 def _maybe_submit_job_locally(
@@ -461,7 +550,8 @@ def _maybe_submit_job_locally(
         file_mounts_blob_id: Optional[str] = None,
         parent_job_id: Optional[int] = None,
         parent_task_id: Optional[int] = None,
-        root_job_id: Optional[int] = None) -> Optional[List[int]]:
+        root_job_id: Optional[int] = None,
+        depends_on: Optional[List[int]] = None) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -521,6 +611,9 @@ def _maybe_submit_job_locally(
                 parent_task_id=parent_task_id,
                 root_job_id=root_job_id,
                 dynamic_task_index=dynamic_task_index))
+        if depends_on:
+            managed_job_state.set_job_dependencies(consolidation_mode_job_id,
+                                                   depends_on)
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -534,9 +627,12 @@ def _maybe_submit_job_locally(
             assert task.name is not None, 'task must have a name'
             # A job group's tasks all start waiting now; so does task 0 of
             # anything. A pipeline's later tasks are waiting on the task before
-            # them, not on us, so their origin is written at the handoff.
-            eligible_at = (time.time()
-                           if task_id == 0 or dag.is_job_group() else None)
+            # them, not on us, so their origin is written at the handoff. A job
+            # with dependencies waits on them; the controller writes its origin
+            # once they have succeeded.
+            eligible_at = (time.time() if
+                           (task_id == 0 or dag.is_job_group()) and
+                           not depends_on else None)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
@@ -785,11 +881,14 @@ def _check_job_group_attachment(
     active_workspace = skypilot_config.get_active_workspace()
     if parent.workspace != active_workspace:
         if _client_set_workspace():
+            parent_label = workspaces_core.workspace_label_for_caller(
+                parent.workspace)
+            active_name = skypilot_config.get_workspace_name(active_workspace)
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cannot attach to job {parent_job_id}: it is in '
-                    f'workspace {parent.workspace!r}, not the requested '
-                    f'workspace {active_workspace!r}.')
+                    f'workspace {parent_label!r}, not the requested '
+                    f'workspace {active_name!r}.')
         # The executor authorized the caller for the workspace the request
         # resolved to, not for this one. Switching workspaces is a launch
         # there, so it needs the same write access a `--workspace` launch
@@ -800,6 +899,50 @@ def _check_job_group_attachment(
             action=workspace_constants.WORKSPACE_ACTION_WRITE)
         workspace = parent.workspace
     return parent_job_id, parent_task_id, parent.tree_root_job_id, workspace
+
+
+def _check_job_dependencies(depends_on: Optional[List[int]]) -> List[int]:
+    """Validate the jobs a launch depends on; returns them deduplicated.
+
+    Raises:
+        exceptions.NotSupportedError: dependencies with a separate jobs
+            controller (non-consolidation mode).
+        ValueError: a dependency does not exist, is in another workspace than
+            the launch, or has already ended without succeeding.
+    """
+    if not depends_on:
+        return []
+    if not managed_job_utils.is_consolidation_mode():
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Job dependencies require the API server to run managed jobs '
+                'in consolidation mode (a remote API server). This server '
+                'uses a separate jobs controller.')
+    dependencies = sorted(set(depends_on))
+    active_workspace = skypilot_config.get_active_workspace()
+    for dependency in dependencies:
+        row = managed_job_state.get_job_info_row(dependency)
+        status = managed_job_state.get_status(dependency)
+        if row is None or status is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Cannot depend on job {dependency}: no such '
+                                 'managed job.')
+        if row.workspace != active_workspace:
+            row_label = workspaces_core.workspace_label_for_caller(
+                row.workspace)
+            active_name = skypilot_config.get_workspace_name(active_workspace)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot depend on job {dependency}: it is in workspace '
+                    f'{row_label!r}, not {active_name!r}.')
+        if status.is_terminal():
+            succeeded, outcome = managed_job_state.get_job_outcome(dependency)
+            if not succeeded:
+                outcome_str = outcome.value if outcome is not None else None
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Cannot depend on job {dependency}: it '
+                                     f'ended as {outcome_str}.')
+    return dependencies
 
 
 def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
@@ -848,6 +991,7 @@ def launch(
     parent_job_id: Optional[int] = None,
     parent_task_id: Optional[int] = None,
     job_group_explicit: bool = False,
+    depends_on: Optional[List[int]] = None,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -867,10 +1011,13 @@ def launch(
           opposed to the in-job-group default). Only matters where
           attachments are unsupported (non-consolidation mode): explicit
           errors, automatic launches top-level.
+        depends_on: Managed jobs this job waits for. It starts once all of
+          them succeed, and is cancelled if any of them ends otherwise. The
+          launch fails if one of them has already ended without succeeding.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
-            chain dag.
+            chain dag. Or, a job in depends_on cannot be depended on.
         sky.exceptions.NotSupportedError: the feature is not supported.
         sky.exceptions.CachedClusterUnavailable: cached jobs controller cluster
             is unavailable
@@ -891,6 +1038,7 @@ def launch(
     workspace_ctx = (skypilot_config.local_active_workspace_ctx(workspace)
                      if workspace is not None else contextlib.nullcontext())
     with workspace_ctx:
+        dependencies = _check_job_dependencies(depends_on)
         return _launch(task,
                        name=name,
                        pool=pool,
@@ -899,7 +1047,8 @@ def launch(
                        file_mounts_blob_id=file_mounts_blob_id,
                        parent_job_id=parent_job_id,
                        parent_task_id=parent_task_id,
-                       root_job_id=root_job_id)
+                       root_job_id=root_job_id,
+                       depends_on=dependencies)
 
 
 def _launch(
@@ -912,8 +1061,10 @@ def _launch(
     parent_job_id: Optional[int],
     parent_task_id: Optional[int],
     root_job_id: Optional[int],
+    depends_on: List[int],
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
-    """``launch`` after the attachment is resolved; ids are recorded as-is."""
+    """``launch`` after the attachment and dependencies are resolved; ids are
+    recorded as-is."""
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -935,6 +1086,7 @@ def _launch(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
+    managed_job_utils.check_event_callbacks_allowed(dag)
     dag.resolve_and_validate_volumes()
     if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
@@ -945,6 +1097,17 @@ def _launch(
             raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
     dag.validate()
+    # Every storage the tasks name is checked here, whichever branch of
+    # _upload_files_to_controller runs: without a jobs bucket the tasks go
+    # to the controller as they are, and the controller constructs their
+    # storage outside any request, where there is no caller to check.
+    for task_ in dag.tasks:
+        for storage in (task_.storage_mounts or {}).values():
+            storage.check_accessible()
+    if pool is None:  # A pool job launches no cluster of its own.
+        clouds.Kubernetes.check_request_keeps_server_none()
+        for task_ in dag.tasks:
+            clouds.Kubernetes.check_task_keeps_server_none(task_)
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
@@ -1112,6 +1275,11 @@ def _launch(
     # Warn if file mounts may be lost during rolling update
     _warn_file_mounts_rolling_update(dag)
 
+    # Hooks receive the submitted paths before controller staging rewrites them.
+    submitted_dag = None
+    if plugin_hooks.has_managed_job_submitted_hooks():
+        submitted_dag = copy.deepcopy(dag)
+        submitted_dag.pool = pool
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     controller_name = controller.value.cluster_name
@@ -1131,11 +1299,16 @@ def _launch(
                                         file_mounts_blob_id=file_mounts_blob_id,
                                         parent_job_id=parent_job_id,
                                         parent_task_id=parent_task_id,
-                                        root_job_id=root_job_id)
+                                        root_job_id=root_job_id,
+                                        depends_on=depends_on)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)
     assert job_ids is not None, 'job_ids is not set'
+    if submitted_dag is not None:
+        plugin_hooks.fire_managed_job_submitted(job_ids, submitted_dag,
+                                                file_mounts_blob_id,
+                                                common_utils.get_user_hash())
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
@@ -1545,6 +1718,11 @@ def queue_v2_api(
         # and clients key records on them.
         keep = set(fields) | {'job_id', 'task_id', 'status'}
         jobs = [{k: v for k, v in job.items() if k in keep} for job in jobs]
+    workspaces = skypilot_config.get_nested(('workspaces',), {})
+    for job in jobs:
+        if job.get('workspace') is not None:
+            job['workspace_name'] = skypilot_config.get_workspace_name(
+                job['workspace'], workspaces)
     return ([responses.ManagedJobRecord(**job) for job in jobs], total,
             status_counts, total_no_filter, infra_options)
 
@@ -1627,7 +1805,7 @@ def queue_v2(
     if include_tree:
         # The tree lookup takes job ids and nothing else. Whether a filter
         # should test the named jobs, their roots, or every row of the tree
-        # is undecided (SKY-7163), so the combination is refused rather than
+        # is undecided, so the combination is refused rather than
         # answered one way. Visibility (workspace access, all_users) still
         # applies; it is not a filter the caller chose.
         if job_ids is None:
@@ -1677,6 +1855,16 @@ def queue_v2(
     accessible_workspaces = list(
         workspaces_core.get_accessible_workspace_names(
             action=workspace_constants.WORKSPACE_ACTION_READ))
+    if workspace_match is not None:
+        # The filter is typed against workspace names, while the controller
+        # stores ids.
+        accessible_workspaces = workspaces_core.filter_workspace_ids_by_name(
+            accessible_workspaces, workspace_match)
+        workspace_match = None
+        # Controllers older than MANAGED_JOBS_VERSION 12 read an empty list as
+        # no workspace filter at all.
+        if not accessible_workspaces:
+            return [], 0, {}, 0, []
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -1750,6 +1938,11 @@ def queue_v2(
     # ones asking for a tree. Pass the keyword only to a runner that takes it.
     # If the runner does not take it and a tree was asked for, refuse the
     # request the way an old controller does.
+    # Only consolidation mode records dependencies, and a separate jobs
+    # controller may be too old to know the field.
+    if (fields is not None and 'depends_on' in fields and
+            not managed_job_utils.is_consolidation_mode()):
+        fields = [field for field in fields if field != 'depends_on']
     tree_kwargs: Dict[str, Any] = {}
     if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
         tree_kwargs['include_tree'] = include_tree
@@ -1952,6 +2145,11 @@ def cancel(name: Optional[str] = None,
                 graceful_timeout=graceful_timeout,
             )
 
+        # The controller has no workspace names; show the name here.
+        workspace = skypilot_config.get_active_workspace()
+        workspace_name = skypilot_config.get_workspace_name(workspace)
+        stdout = stdout.replace(f'active workspace {workspace!r}',
+                                f'active workspace {workspace_name!r}')
         logger.info(stdout)
         if 'Multiple jobs found with name' in stdout:
             with ux_utils.print_exception_no_traceback():
@@ -1995,6 +2193,7 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+    requested_job_id = job_id
     # `sky jobs logs 39 2`: task 2 may be a dynamic task (a job launched
     # from inside job 39, numbered on from its declared tasks); then it is that
     # job's log. Declared tasks resolve as before. Dynamic tasks exist in
@@ -2022,6 +2221,27 @@ def tail_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
+    # Dedicated controllers are not checked: their job state is on the
+    # controller, so a check would cost a queue round-trip per request.
+    readable = (workspaces_core.get_readable_workspace_names()
+                if managed_job_utils.is_consolidation_mode() else None)
+    if readable is not None:
+        if (requested_job_id is not None and requested_job_id != job_id and
+                managed_job_state.get_workspace(requested_job_id)
+                not in readable):
+            # A dynamic task shares its parent's workspace; answering about
+            # the parent id keeps the parent -> task job id mapping hidden.
+            job_id = requested_job_id
+        job_id, message, exit_code = _resolve_readable_tail_job_id(
+            readable, job_id, name, controller)
+        if job_id is None:
+            ctx = context_lib.get()
+            print(message,
+                  file=ctx.output_stream(sys.stdout) if ctx else sys.stdout,
+                  flush=True)
+            return exit_code
+        name = None
+
     return managed_job_runner.current().tail_managed_job_logs(
         handle=handle,
         backend=backend,
@@ -2033,6 +2253,79 @@ def tail_logs(name: Optional[str],
         tail_offset=tail_offset,
         task=task,
     )
+
+
+def _resolve_readable_tail_job_id(
+        readable: Set[str], job_id: Optional[int], name: Optional[str],
+        controller: bool) -> Tuple[Optional[int], str, int]:
+    """The job `stream_logs` would pick, among jobs in `readable` workspaces.
+
+    Returns (job_id, '', 0), or (None, message, exit code) for the answer
+    `stream_logs` gives when nothing (or more than one job) matches. Reads
+    the local jobs DB only: a queue call here is a subprocess per log request
+    under consolidation.
+    """
+    not_found = exceptions.JobExitCode.NOT_FOUND
+    if job_id is not None:
+        if managed_job_state.get_workspace(job_id) in readable:
+            return job_id, '', 0
+        return None, f'Job {job_id} not found.', not_found
+    if name is None:
+        job_id = managed_job_state.get_latest_job_id(workspaces=readable)
+        if job_id is None:
+            return None, 'No managed job found.', not_found
+        return job_id, '', 0
+    # An ambiguous name raises inside `stream_logs`, which the default runner
+    # runs as `python -c`: the message lands in the stream and the code is 1.
+    if controller:
+        job_ids = managed_job_state.get_all_job_ids_by_name(name,
+                                                            workspaces=readable)
+        if not job_ids:
+            return None, f'No managed job found with name {name!r}.', not_found
+        if len(job_ids) > 1:
+            job_ids_str = ', '.join(str(i) for i in job_ids)
+            return None, (f'Multiple managed jobs found with name {name!r} '
+                          f'(Job IDs: {job_ids_str}). Please specify the '
+                          'job_id instead.'), 1
+    else:
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
+            name, workspaces=readable)
+        if not job_ids:
+            return None, (f'No running managed job found with name '
+                          f'{name!r}.'), not_found
+        if len(job_ids) > 1:
+            return None, f'Multiple running jobs found with name {name!r}.', 1
+    return job_ids[0], '', 0
+
+
+def _resolve_readable_sync_down_job_id(readable: Set[str],
+                                       job_id: Optional[int],
+                                       name: Optional[str],
+                                       controller: bool) -> Optional[int]:
+    """The job `sync_down_managed_job_logs` would pick, among `readable`.
+
+    None when nothing matches, after logging what that function logs then.
+    """
+    if job_id is not None:
+        if managed_job_state.get_workspace(job_id) in readable:
+            return job_id
+        job_ids = []
+    else:
+        job_ids = managed_job_state.get_all_job_ids_by_name(name,
+                                                            workspaces=readable)
+    if not job_ids:
+        logger.info(f'{colorama.Fore.YELLOW}No matching job found'
+                    f'{colorama.Style.RESET_ALL}')
+        return None
+    if len(job_ids) > 1:
+        name_str = ''
+        if name is not None:
+            name_str = f'Multiple jobs IDs found under the name {name}. '
+        controller_str = ' (controller)' if controller else ''
+        logger.info(f'{colorama.Fore.YELLOW}{name_str}'
+                    f'Downloading the latest job logs{controller_str}.'
+                    f'{colorama.Style.RESET_ALL}')
+    return job_ids[0]
 
 
 def wait(name: Optional[str],
@@ -2081,7 +2374,9 @@ def wait(name: Optional[str],
 
     # Resolve name to job_id on the first call.
     if name is not None:
-        records, _, _, _, _ = queue_v2_api(refresh=False, name_match=name)
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           name_match=name,
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         matching = [r for r in records if r.job_name == name]
         if not matching:
             with ux_utils.print_exception_no_traceback():
@@ -2094,7 +2389,9 @@ def wait(name: Optional[str],
     start_time = time.time()
 
     while True:
-        records, _, _, _, _ = queue_v2_api(refresh=False, job_ids=[job_id])
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           job_ids=[job_id],
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         if not records:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Managed job {job_id} not found.')
@@ -2180,6 +2477,15 @@ def download_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
+    readable = (workspaces_core.get_readable_workspace_names()
+                if managed_job_utils.is_consolidation_mode() else None)
+    if readable is not None:
+        job_id = _resolve_readable_sync_down_job_id(readable, job_id, name,
+                                                    controller)
+        if job_id is None:
+            return {}
+        name = None
+
     return backend.sync_down_managed_job_logs(handle,
                                               job_id=job_id,
                                               job_name=name,
@@ -2193,9 +2499,15 @@ def pool_apply(
     pool_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     workers: Optional[int] = None,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> None:
     """Apply a config to a pool."""
-    return impl.apply(task, workers, pool_name, mode, pool=True)
+    return impl.apply(task,
+                      workers,
+                      pool_name,
+                      mode,
+                      pool=True,
+                      file_mounts_blob_id=file_mounts_blob_id)
 
 
 @usage_lib.entrypoint
@@ -2393,12 +2705,17 @@ def get_job_events(
 ) -> List[Dict[str, Any]]:
     """Get task events for a managed job.
 
-    Routed through the registered ``ManagedJobRunner`` so a runner can add
-    what the infrastructure knows about the same job -- on Slurm, what the
-    allocation waited on and for how long. The default implementation
-    answers from the jobs database and the cluster's own events; see
-    ``_job_events`` for the arguments and the row shape.
+    Routed through the registered ``ManagedJobRunner``. The default
+    implementation answers from the jobs database and the cluster's own
+    events; see ``_job_events`` for the arguments and the row shape.
     """
+    readable = workspaces_core.get_readable_workspace_names()
+    if (readable is not None and
+            managed_job_state.get_workspace(job_id) not in readable):
+        # Answer as for a job that does not exist.
+        if task is not None:
+            raise ValueError(f'Managed job {job_id} not found.')
+        return []
     runner = managed_job_runner.current()
     # A runner that predates this method: the plugins that register one are
     # distributed separately from the server, so an older one can be
@@ -2466,9 +2783,7 @@ def _job_events(
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
         # Boundaries that have been passed, with how long the phase they close
-        # took. Today that is the end of an admission wait, which is the one
-        # moment of a gated launch the rest of this list never marks -- and
-        # routinely most of the job's start-up.
+        # took.
         global_user_state.ClusterEventType.LAUNCH_MILESTONE,
     ]
     # (event, task_id) so each merged row keeps the task it belongs to.

@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 35  # remove ephemeral_storage; use disk_size for k8s.
+    _VERSION = 36  # add _kubernetes_identity, _remote_identity_none.
 
     def __init__(
         self,
@@ -465,6 +465,12 @@ class Resources:
         self._requires_fuse = _requires_fuse
 
         self._cluster_config_overrides = _cluster_config_overrides
+        # Not a constructor argument and never in YAML, so a requester cannot
+        # set it: only a cluster SkyPilot launches in-process for itself does.
+        self._kubernetes_identity: Optional[str] = None
+        # Recorded from the rendered cluster config when a Kubernetes cluster
+        # is launched; None until then (and for clusters from older versions).
+        self._remote_identity_none: Optional[bool] = None
         self._cached_repr: Optional[str] = None
         self._no_missing_accel_warnings = _no_missing_accel_warnings
 
@@ -497,6 +503,7 @@ class Resources:
         self._try_validate_labels()
         self._try_validate_local_disk()
         self._try_validate_max_hourly_cost()
+        self._try_validate_tpu_multi_host()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -827,6 +834,24 @@ class Resources:
         self._requires_fuse = value
 
     @property
+    def kubernetes_identity(self) -> Optional[str]:
+        """A fixed Kubernetes service account, exempt from remote_identity."""
+        return self._kubernetes_identity
+
+    def set_kubernetes_identity(self, service_account: Optional[str]) -> None:
+        # Mutates in place like set_requires_fuse: the task's resources are
+        # shared with the dag the launch already holds.
+        self._kubernetes_identity = service_account
+
+    @property
+    def remote_identity_none_at_launch(self) -> Optional[bool]:
+        """Whether its launched pods got no Kubernetes token, if known."""
+        return self._remote_identity_none
+
+    def set_remote_identity_none_at_launch(self, value: Optional[bool]) -> None:
+        self._remote_identity_none = value
+
+    @property
     def cluster_config_overrides(self) -> Dict[str, Any]:
         if self._cluster_config_overrides is None:
             return {}
@@ -961,7 +986,12 @@ class Resources:
                 # Fix the logic such that GCP TPU names can failover between
                 # GCP and kubernetes.
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
+                    # accelerator_args.multi_host only exists on Kubernetes,
+                    # so it also resolves a GCP TPU name (tpu-v6e-8) to
+                    # Kubernetes (and never gets a GCP runtime_version).
+                    if (kubernetes_utils.is_tpu_on_gke(acc, normalize=False) or
+                            kubernetes_utils.multi_host_requested(
+                                accelerator_args)):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -1816,6 +1846,41 @@ class Resources:
                         f'Specified instance type {self._instance_type} does '
                         f'not have specified local disk {self._local_disk}.')
 
+    def _try_validate_tpu_multi_host(self) -> None:
+        """``accelerator_args.multi_host`` is only accepted as True, for an
+        8-chip TPU v6e slice on Kubernetes (the one size that exists both as
+        one VM and as a multi-host slice)."""
+        if (self._accelerator_args is None or
+                'multi_host' not in self._accelerator_args):
+            return
+        multi_host = self._accelerator_args['multi_host']
+        usage = ('`accelerator_args.multi_host` is only supported as `true` '
+                 'with `accelerators: tpu-v6e-8` (or `tpu-v6e-slice:8`) on '
+                 'Kubernetes.')
+        with ux_utils.print_exception_no_traceback():
+            if multi_host is not True:
+                raise ValueError(
+                    f'{usage} Got multi_host={multi_host!r}; remove the field '
+                    'instead of setting it to false.')
+            accelerators = self._accelerators or {}
+            shape = None
+            if len(accelerators) == 1:
+                acc, count = next(iter(accelerators.items()))
+                if kubernetes_utils.is_tpu_on_gke(acc):
+                    acc_type, chips = (
+                        kubernetes_utils.normalize_tpu_accelerator(acc, count))
+                    # A GCP name carries its count in the name, so an extra
+                    # count (tpu-v6e-8:2) is ambiguous here.
+                    if (acc_type, chips) in (
+                            kubernetes_utils.OPT_IN_MULTI_HOST_SHAPES) and (
+                                acc == acc_type or count in (None, 1)):
+                        shape = (acc_type, chips)
+            if shape is None:
+                raise ValueError(f'{usage} Got accelerators={accelerators!r}.')
+            if self._cloud is not None and not isinstance(
+                    self._cloud, clouds.Kubernetes):
+                raise ValueError(f'{usage} Got cloud {self._cloud}.')
+
     def _try_validate_max_hourly_cost(self):
         if self._max_hourly_cost is not None:
             if not isinstance(self._max_hourly_cost, (int, float)):
@@ -2057,6 +2122,9 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
+        # This also tells a multi-host TPU slice (accelerator_args.multi_host)
+        # from a single VM of the same chip count. A CPU-only request has no
+        # accelerator_args, so it fits either cluster.
         if (self.accelerator_args is not None and
                 self.accelerator_args != other.accelerator_args):
             return False
@@ -2345,6 +2413,8 @@ class Resources:
             _no_missing_accel_warnings=override.pop(
                 'no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
+        resources.set_kubernetes_identity(self._kubernetes_identity)
+        resources.set_remote_identity_none_at_launch(self._remote_identity_none)
         assert not override
         return resources
 
@@ -3006,6 +3076,10 @@ class Resources:
 
         if version < 34:
             self._docker_image = None
+
+        if version < 36:
+            self._kubernetes_identity = None
+            self._remote_identity_none = None
 
         if version < 35:
             state.pop('_ephemeral_storage', None)

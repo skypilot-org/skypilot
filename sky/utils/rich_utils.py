@@ -157,7 +157,7 @@ class _NoOpConsoleStatus:
         pass
 
 
-# TODO(SKY-1216): we need a wrapper for the rich.progress in our code as well.
+# TODO: we need a wrapper for the rich.progress in our code as well.
 class _RevertibleStatus:
     """A wrapper for status that can revert to previous message after exit."""
 

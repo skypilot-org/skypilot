@@ -1,7 +1,7 @@
 .. _api-server-auth:
 
-Authentication and RBAC
-=========================
+Authentication (SSO) and RBAC
+=============================
 
 SkyPilot API server supports two authentication methods:
 
@@ -504,16 +504,16 @@ Step 1: Create policies
   * **Policy 1: allow-<yourorg>**
 
     * **Action**: ``Allow``
-    * **Include**: 
-       
+    * **Include**:
+
       * **Selector**: ``Emails ending in``
       * **Value**: ``@<yourorg>.com``
 
   * **Policy 2: bypass-warp**
 
     * **Action**: ``Bypass``
-    * **Include**: 
-       
+    * **Include**:
+
       * **Selector**: ``Warp``
       * **Value**: ``Warp``
 
@@ -533,7 +533,7 @@ Step 2: Configure your SSO provider as an identity provider
    * **Redirect URIs**: ``https://<your-team-name>.cloudflareaccess.com/cdn-cgi/access/callback``
 
 .. note::
-    
+
     You can find your team name under **Zero Trust → Settings → Custom Pages → Team Domain**.
     It will be listed as ``<your-team-name>.cloudflareaccess.com``.
 
@@ -548,7 +548,7 @@ Step 3: Create a Cloudflare access application
    * **Application name**: ``SkyPilot API``
    * **Session duration**: ``24 hours``
    * **Public hostname**:
-   
+
      * **Subdomain**: ``DNS_RECORD_NAME`` (e.g. ``zerotrust``)
      * **Domain**: ``DNS_RECORD_DOMAIN`` (e.g. ``skypilot.org``)
    * **Access policies → Select existing policies**:

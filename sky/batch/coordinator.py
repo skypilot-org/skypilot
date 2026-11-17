@@ -857,8 +857,8 @@ class BatchCoordinator:
             '\n')
         for fmt in output_formats:
             fmt_name = type(fmt).__name__
-            fields = ', '.join(f'{k}={v!r}' for k, v in fmt.to_dict().items()
-                               if k not in ('format', '_class_source'))
+            fields = ', '.join(
+                f'{k}={v!r}' for k, v in fmt.to_dict().items() if k != 'format')
             logger.info(f'    writer = sky.batch.{fmt_name}({fields})\n'
                         f'    writer.reduce_results({job_id!r})\n'
                         f'    writer.cleanup({job_id!r})\n')

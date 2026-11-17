@@ -13,7 +13,6 @@ from sky.client.cli import command
 from sky.clouds import cloud as sky_cloud
 from sky.clouds.cloud import CloudCapability
 from sky.utils import config_utils
-from sky.workspaces import constants as workspace_constants
 
 
 def strip_ansi(s: str) -> str:
@@ -272,14 +271,11 @@ def _mock_k8s_env(monkeypatch,
         'ws1': {}
     })
 
-    # check writes each visited workspace's cached rows, so it must ask for the
-    # writable set; assert that rather than swallowing the argument.
-    def _accessible_workspace_names(action):
-        assert action == workspace_constants.WORKSPACE_ACTION_WRITE, action
-        return {'default', 'ws1'}
-
-    monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
-                        _accessible_workspace_names)
+    # check writes each visited workspace's cached rows, so it must visit the
+    # writable set only; 'ws-ro' is readable but not writable.
+    monkeypatch.setattr(
+        'sky.workspaces.core.get_workspace_access_sets', lambda:
+        ({'default', 'ws1', 'ws-ro'}, {'default', 'ws1'}))
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
@@ -364,6 +360,9 @@ def test_check_capabilities_k8s_workspace_override(monkeypatch, capsys):
     assert 'ctx-c' in ws1_section
     assert 'ctx-a' not in ws1_section
     assert 'ctx-b' not in ws1_section
+
+    # Readable but not writable, so its cached rows are not rewritten.
+    assert 'workspace: \'ws-ro\'' not in out
 
 
 def test_workspace_cloud_capabilities():
@@ -612,10 +611,30 @@ class TestCheckWorkspacePermission:
             with pytest.raises(exceptions.PermissionDeniedError,
                                match='no access'):
                 sky_check.check(workspace='restricted')
-        mock_check.assert_called_once_with(mock_user, 'restricted')
+        mock_check.assert_called_once_with(mock_user,
+                                           'restricted',
+                                           workspace_ref=None)
 
     @mock.patch('sky.check.check_capabilities', return_value={})
     @mock.patch('sky.workspaces.core.check_workspace_permission')
     def test_skips_check_when_workspace_is_none(self, mock_check, _):
         sky_check.check(workspace=None)
         mock_check.assert_not_called()
+
+
+def test_ssh_details_list_only_allowed_pools():
+    # A pool this workspace does not allow may belong to a workspace the
+    # caller cannot see, so it is not listed at all.
+    with mock.patch.object(sky_clouds.SSH,
+                           'get_ssh_node_pool_contexts',
+                           return_value=['ssh-a', 'ssh-b', 'ssh-c']), \
+         mock.patch('sky.skypilot_config.get_workspace_cloud',
+                    return_value={'allowed_node_pools': ['a', 'c']}):
+        out = strip_ansi(
+            sky_check._format_context_details(  # pylint: disable=protected-access
+                sky_clouds.SSH(),
+                show_details=True,
+                ctx2text={'ssh-a': 'enabled'}))
+    assert re.findall(r'[├└]── (\w+):', out) == ['a', 'c']
+    assert 'a: enabled' in out
+    assert 'c: disabled. Reason: Not set up.' in out

@@ -4,3 +4,9 @@ CVE-2025-47907
 # Go stdlib CVE in kubectl/gcloud-crc32c/nebius binaries - requires Go 1.24.13+
 # which is not yet available in any released kubectl or gcloud SDK version
 CVE-2025-68121
+
+# kin-openapi fail-open auth in ValidationHandler (server-side request
+# validation), bundled in the Nebius CLI binary. The CLI does not serve HTTP,
+# and the latest stable Nebius CLI (0.12.306) still ships kin-openapi v0.133.0
+# (fixed in 0.144.0). Remove once Nebius ships a CLI with the fix.
+GHSA-r277-6w6q-xmqw

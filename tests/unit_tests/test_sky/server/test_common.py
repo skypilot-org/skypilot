@@ -14,10 +14,12 @@ import requests
 import sky
 from sky import exceptions
 from sky import skypilot_config
+from sky.client import sdk
 from sky.server import common
 from sky.server import constants as server_constants
 from sky.server.common import ApiServerInfo
 from sky.server.common import ApiServerStatus
+from sky.skylet import constants
 
 
 def _create_test_cookie(name: str = 'test-cookie', value: str = 'test-value'):
@@ -109,6 +111,10 @@ def test_check_server_healthy_or_start_rechecks_status(
     mock_check_compat.return_value = mock.Mock(error=None)
     mock_filelock.return_value.__enter__.return_value = None
     mock_filelock.return_value.__exit__.return_value = None
+    # The status response cache is process-wide (5s TTL), so an earlier test
+    # in the same worker can leave a cached entry for this endpoint; that
+    # would let the first health check skip `make_authenticated_request`.
+    common.get_api_server_status_response.cache_clear()
 
     try:
         with mock.patch.object(common.get_api_server_status_response,
@@ -172,6 +178,178 @@ def test_start_api_server_disabled_by_env_var():
         with pytest.raises(RuntimeError) as exc_info:
             common._start_api_server()
     assert 'SKYPILOT_DISABLE_LOCAL_API_SERVER' in str(exc_info.value)
+
+
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_in_server_never_starts(
+        unused_url, unused_local, mock_make_request, mock_filelock,
+        mock_start_server):
+    """Inside the API server, a healthz failure never starts a new local
+    server.
+
+    A consolidation-mode controller runs as a child of the API server and
+    inherits IS_SKYPILOT_SERVER. When its localhost /api/health probe fails,
+    the old code routed into _start_api_server, which ran a second server's
+    startup against the live server's state (removing the jobs consolidation
+    signal file, resetting the local request database, wiping the prometheus
+    multiproc dir). Now the in-server branch surfaces an
+    ApiServerConnectionError, as for a remote endpoint; _start_api_server and
+    the creation lock are never reached (the lock is only for coordinating a
+    real start).
+    """
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+    common.get_api_server_status_response.cache_clear()
+
+    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}):
+        with pytest.raises(exceptions.ApiServerConnectionError):
+            common.check_server_healthy_or_start_fn()
+
+    mock_start_server.assert_not_called()
+    # The creation lock is only needed to start a server.
+    mock_filelock.assert_not_called()
+
+
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.check_server_healthy')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+def test_check_server_healthy_or_start_in_server_raises_without_retry(
+        unused_local, mock_check, mock_filelock, mock_start_server):
+    """Inside the API server, one failed probe raises at once, as for a remote
+    endpoint.
+
+    There is no in-place retry and no second probe under the creation lock:
+    the caller (e.g. the jobs controller) handles the connection error through
+    its own retry path.
+    """
+    healthy = (ApiServerStatus.HEALTHY, mock.Mock())
+    mock_check.side_effect = [
+        exceptions.ApiServerConnectionError('http://127.0.0.1:1111'), healthy
+    ]
+
+    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}):
+        with pytest.raises(exceptions.ApiServerConnectionError):
+            common.check_server_healthy_or_start_fn()
+
+    assert mock_check.call_count == 1
+    mock_start_server.assert_not_called()
+    mock_filelock.assert_not_called()
+
+
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_non_server_still_auto_starts(
+        unused_url, unused_local, mock_make_request, mock_filelock,
+        mock_start_server):
+    """A standalone controller (IS_SKYPILOT_SERVER unset) still auto-starts a
+    local server -- the fix must not break non-consolidation mode.
+    """
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+
+    env = {k: v for k, v in os.environ.items() if k != 'IS_SKYPILOT_SERVER'}
+    with mock.patch.dict(os.environ, env, clear=True):
+        common.check_server_healthy_or_start_fn()
+
+    mock_start_server.assert_called_once()
+    # The normal auto-start path still coordinates via the creation lock.
+    mock_filelock.assert_called_once()
+
+
+def test_check_server_healthy_or_start_in_server_preserves_metrics_dir(
+        monkeypatch, tmp_path):
+    """Regression: _set_metrics_env_var must not rmtree the prometheus
+    multiproc dir when an in-server process hits a transient healthz failure.
+
+    Exercises the REAL _start_api_server / _set_metrics_env_var (only the
+    trigger and external side effects are mocked) against a populated metrics
+    dir. With the fix, _start_api_server is never reached, so the markers
+    survive. If the in-server gate is removed, _start_api_server runs, the real
+    _set_metrics_env_var rmtree's the dir, and the markers vanish -- failing
+    this test -- which is exactly the production bug.
+    """
+    metrics_root = tmp_path / 'metrics_root'
+    metrics_dir = metrics_root / 'metrics'
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / 'gauge_liveall.db').write_text('multiproc-gauge')
+    (metrics_dir / 'histogram_liveall.db').write_text('multiproc-histogram')
+
+    monkeypatch.setattr(common.tempfile, 'gettempdir',
+                        lambda: str(metrics_root))
+    monkeypatch.setattr(
+        common, 'check_server_healthy',
+        mock.Mock(side_effect=exceptions.ApiServerConnectionError(
+            'http://127.0.0.1:46580')))
+    monkeypatch.setattr(common, 'is_api_server_local', lambda *a, **k: True)
+    monkeypatch.setattr(common, 'get_server_url',
+                        lambda *a, **k: 'http://127.0.0.1:46580')
+    monkeypatch.setattr(common.filelock, 'FileLock', mock.MagicMock())
+    # External side effects of a *real* _start_api_server, in case the gate is
+    # ever removed: keep them inert so the rmtree (the thing under test) is the
+    # only real side effect that could fire.
+    monkeypatch.setattr(common.common_utils, 'get_mem_size_gb', lambda: 16.0)
+    monkeypatch.setattr(common.os, 'makedirs', lambda *a, **k: None)
+    monkeypatch.setattr(
+        common.subprocess, 'Popen',
+        mock.Mock(return_value=mock.Mock(poll=mock.Mock(return_value=1))))
+    monkeypatch.setattr('builtins.open', mock.mock_open())
+
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+    monkeypatch.setenv('SKY_API_SERVER_METRICS_ENABLED', 'true')
+
+    with pytest.raises(exceptions.ApiServerConnectionError):
+        common.check_server_healthy_or_start_fn()
+
+    assert (metrics_dir / 'gauge_liveall.db').exists()
+    assert (metrics_dir / 'histogram_liveall.db').exists()
+
+
+@mock.patch('sky.server.common.subprocess.Popen')
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_sdk_api_start_in_server_never_starts(unused_url, unused_local,
+                                              mock_make_request, mock_filelock,
+                                              mock_start_server, mock_popen,
+                                              monkeypatch):
+    """sdk.api_start() from inside the API server never starts a new server.
+
+    recovery_strategy._launch called sdk.api_start() before launching a
+    cluster, after clearing env vars that include
+    SKYPILOT_DISABLE_LOCAL_API_SERVER. That call is now skipped inside the API
+    server, but any in-server caller can still reach api_start, so the guard
+    in check_server_healthy_or_start_fn must hold on this path too.
+
+    While the server's HTTP workers are not listening yet (for example, while
+    they are still binding during startup), the health probe fails. A second,
+    non-deploy server started at that point runs its startup against the live
+    server's state directory before it fails to bind: it removes the jobs
+    consolidation signal file and resets the local request database. The call
+    must surface the connection error instead.
+    """
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+    monkeypatch.delenv('SKYPILOT_DISABLE_LOCAL_API_SERVER', raising=False)
+    common.get_api_server_status_response.cache_clear()
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+
+    with pytest.raises(exceptions.ApiServerConnectionError):
+        sdk.api_start()
+
+    mock_start_server.assert_not_called()
+    mock_popen.assert_not_called()
+    # The creation lock is only needed to start a server.
+    mock_filelock.assert_not_called()
 
 
 def test_local_api_server_not_disabled_by_default():
@@ -728,6 +906,68 @@ run: echo "hello world"
     assert not list(api_server_dir.rglob('*.yaml'))
 
 
+_BLOB_ID = 'a' * 64
+
+
+def test_cloud_urls_skip_blob_resolve(tmp_path, monkeypatch):
+    """A task whose mounts are already cloud URLs must not touch the blob."""
+    from sky.skylet import constants as skylet_constants
+
+    monkeypatch.setattr(common, 'API_SERVER_CLIENT_DIR', tmp_path)
+    monkeypatch.setattr(
+        common, 'resolve_blob_dir',
+        mock.Mock(side_effect=AssertionError('blob was resolved')))
+    task_yaml = '''
+name: test-task
+file_mounts:
+  /remote/data: gs://bucket/data
+  /remote/code:
+    source: s3://bucket/code
+  /remote/azure: https://account.blob.core.windows.net/container/obj
+run: echo hi
+'''
+    dag = common.process_mounts_in_task_on_api_server(
+        task=task_yaml,
+        env_vars={skylet_constants.USER_ID_ENV_VAR: 'test-user'},
+        workdir_only=False,
+        file_mounts_blob_id=_BLOB_ID)
+    assert dag.tasks[0].file_mounts['/remote/data'] == 'gs://bucket/data'
+    assert not common.dag_requires_local_file_mounts(dag)
+
+
+def test_local_path_still_resolves_blob(tmp_path, monkeypatch):
+    """A task that still names a local path resolves the blob."""
+    from sky.skylet import constants as skylet_constants
+
+    clients = tmp_path / 'clients'
+    blob_dir = clients / 'test-user' / 'file_mounts' / 'blobs' / _BLOB_ID
+    blob_dir.mkdir(parents=True)
+    resolve = mock.Mock(return_value=str(blob_dir))
+    monkeypatch.setattr(common, 'API_SERVER_CLIENT_DIR', clients)
+    monkeypatch.setattr(common, 'resolve_blob_dir', resolve)
+    task_yaml = '''
+name: test-task
+workdir: /local/workdir
+file_mounts_mapping:
+  /local/workdir: workdir
+run: echo hi
+'''
+    common.process_mounts_in_task_on_api_server(
+        task=task_yaml,
+        env_vars={skylet_constants.USER_ID_ENV_VAR: 'test-user'},
+        workdir_only=False,
+        file_mounts_blob_id=_BLOB_ID)
+    resolve.assert_called_once_with(_BLOB_ID, 'test-user')
+
+
+def test_dag_requires_local_file_mounts_for_local_workdir(tmp_path):
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    dag = sky.Dag()
+    dag.add(sky.Task(workdir=str(workdir)))
+    assert common.dag_requires_local_file_mounts(dag)
+
+
 def _fake_response(status_code, json_body=None, json_raises=False):
     """Build a fake requests.Response for handle_request_error tests."""
     resp = mock.Mock(spec=requests.Response)
@@ -763,6 +1003,31 @@ def test_handle_request_error_403_detail_clean_message():
 def test_handle_request_error_403_no_detail_falls_through():
     """A 403 without a usable `detail` keeps the original HTTPError."""
     resp = _fake_response(403, {})
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)
+
+
+def test_handle_request_error_404_hidden_infra_target():
+    """The server's 404 for a context or cluster outside the caller's
+    workspaces reads as a clean not-found error."""
+    resp = _fake_response(
+        404, {
+            'detail': {
+                'error': 'infra_target_not_found',
+                'message': 'Kubernetes context not found.'
+            }
+        })
+    with pytest.raises(exceptions.InfraTargetNotFoundError) as exc_info:
+        common.handle_request_error(resp)
+    assert str(exc_info.value) == 'Kubernetes context not found.'
+    # The CLI's show-gpus path catches ValueError.
+    assert isinstance(exc_info.value, ValueError)
+
+
+@pytest.mark.parametrize('body', [{'detail': 'Not Found'}, {}, None])
+def test_handle_request_error_other_404_keeps_http_error(body):
+    """FastAPI's own 404 (e.g. a route an old server lacks) is unchanged."""
+    resp = _fake_response(404, body, json_raises=body is None)
     with pytest.raises(requests.exceptions.HTTPError):
         common.handle_request_error(resp)
 
@@ -822,3 +1087,62 @@ def test_redact_url_password_bad_port_is_returned_unchanged():
     """
     for url in ('http://user:pw@host:notaport', 'http://user:pw@host:99999'):
         assert common.redact_url_password(url) == url
+
+
+def test_controller_always_uses_local_server(monkeypatch):
+    """A controller calls its own server over loopback even when an endpoint
+    is configured, so its requests keep loopback treatment."""
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       'http://remote.example.com:8080')
+    common.get_server_url.cache_clear()
+    try:
+        assert common.get_server_url() == 'http://remote.example.com:8080'
+        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        common.get_server_url.cache_clear()
+        assert common.get_server_url() == common.get_default_server_url()
+    finally:
+        common.get_server_url.cache_clear()
+
+
+def test_controller_ignores_config_api_server_endpoint(monkeypatch):
+    """The controller loopback pin must also beat a server-side
+    api_server.endpoint in the config, not only the URL env var: get_server_url
+    falls back to that config key (common.py), and a non-loopback endpoint
+    there would otherwise stamp the controller's own requests as remote."""
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+    real_get_nested = skypilot_config.get_nested
+
+    def fake_get_nested(keys, default_value=None, *args, **kwargs):
+        if tuple(keys) == ('api_server', 'endpoint'):
+            return 'http://remote.example.com:8080'
+        return real_get_nested(keys, default_value, *args, **kwargs)
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', fake_get_nested)
+    common.get_server_url.cache_clear()
+    try:
+        # Without the controller marker, the config endpoint is honored.
+        assert common.get_server_url() == 'http://remote.example.com:8080'
+        # With it, the controller pins to its own loopback server.
+        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        common.get_server_url.cache_clear()
+        assert common.get_server_url() == common.get_default_server_url()
+    finally:
+        common.get_server_url.cache_clear()
+
+
+@pytest.mark.parametrize('sync_refresh', [False, True])
+def test_reload_for_new_request_passes_sync_refresh(mock_all_dependencies,
+                                                    sync_refresh):
+    """sync_refresh keeps keep_if caches and the shared log handler."""
+    with mock.patch(
+            'sky.utils.annotations.clear_request_level_cache') as mock_clear:
+        common.reload_for_new_request(
+            client_entrypoint='test_entry',
+            client_command='test_cmd',
+            using_remote_api_server=False,
+            user=mock.Mock(id='test_user'),
+            request_id='dummy-request-id',
+            sync_refresh=sync_refresh,
+        )
+    mock_clear.assert_called_once_with(sync_refresh=sync_refresh)
+    assert mock_all_dependencies['reload_logger'].called is not sync_refresh

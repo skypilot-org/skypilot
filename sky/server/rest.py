@@ -85,8 +85,8 @@ _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = (
     versions.get_local_readable_version())
 
-# Allow the client type to be set via environment variable.
-# Used by enterprise CLI distributions to identify themselves.
+# Allow the client type to be set via environment variable, so that a
+# client distribution can identify itself.
 _client_type = os.environ.get('SKYPILOT_CLIENT_TYPE')
 if _client_type:
     _session.headers['X-SkyPilot-Client-Type'] = _client_type
@@ -175,7 +175,7 @@ def retry_transient_errors(max_retries: int = 3,
                         return func(*args, **kwargs)
                     # Occurs when the server proactively interrupts the request
                     # during rolling update, we can retry immediately on the
-                    # new replica.
+                    # new server.
                     except exceptions.RequestInterruptedError:
                         _handle_exception()
                         if consecutive_failed_count >= max_retries:

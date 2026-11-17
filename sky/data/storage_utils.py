@@ -1,4 +1,6 @@
 """Utility functions for the storage module."""
+import fnmatch
+import functools
 import glob
 import os
 import pathlib
@@ -22,6 +24,31 @@ _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
 
 
+def _match_skyignore_path(path: str, pattern: str) -> bool:
+    """Match glob path components without treating hidden names specially."""
+    path_parts = path.replace(os.sep, '/').split('/')
+    pattern_parts = pattern.split('/')
+    if pattern.startswith('/'):
+        pattern_parts = pattern_parts[1:]
+    else:
+        pattern_parts.insert(0, '**')
+
+    @functools.lru_cache(maxsize=None)
+    def match(path_index: int, pattern_index: int) -> bool:
+        if pattern_index == len(pattern_parts):
+            return path_index == len(path_parts)
+        component = pattern_parts[pattern_index]
+        if component == '**':
+            return (match(path_index, pattern_index + 1) or
+                    (path_index < len(path_parts) and
+                     match(path_index + 1, pattern_index)))
+        return (path_index < len(path_parts) and
+                fnmatch.fnmatchcase(path_parts[path_index], component) and
+                match(path_index + 1, pattern_index + 1))
+
+    return match(0, 0)
+
+
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
     """List files and patterns ignored by the .skyignore file
     in the given source directory.
@@ -36,6 +63,29 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#'):
+                    is_negation = line.startswith('!')
+                    if is_negation:
+                        line = line[1:]
+                        if not line:
+                            continue
+                    # A trailing '/**' matches directory contents, not the
+                    # directory itself. Glob's bare '**' also returns its
+                    # parent, which would prevent ZIP traversal on reinclusion.
+                    if line.endswith('/**'):
+                        line += '/*'
+                    if is_negation:
+                        # Re-include only previously excluded paths. Re-globbing
+                        # would miss hidden paths, even if an explicit pattern
+                        # already added them to the exclusion set.
+                        directory_only = line.endswith('/')
+                        matching_paths = {
+                            path for path in excluded_list
+                            if (not directory_only or os.path.isdir(
+                                os.path.join(expand_src_dir_path, path))) and
+                            _match_skyignore_path(path, line.rstrip('/'))
+                        }
+                        excluded_list.difference_update(matching_paths)
+                        continue
                     # Make parsing consistent with rsync.
                     # Rsync uses '/' as current directory.
                     if line.startswith('/'):
