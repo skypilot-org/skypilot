@@ -152,13 +152,18 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 Install SkyPilot skill
 ----------------------
 
-Install the `SkyPilot skill <https://docs.skypilot.ai/en/latest/getting-started/skill.html>`__ so your AI agent knows how to launch clusters, run jobs, and serve models with SkyPilot. Tell your agent:
+The `SkyPilot skill <https://docs.skypilot.ai/en/latest/getting-started/skill.html>`__ teaches your AI agent (Claude Code, Codex, etc.) how to launch clusters, run jobs, and serve models with SkyPilot. An AI agent that is installing SkyPilot should install the skill too, as part of the same setup.
 
-.. code-block:: text
+For Claude Code, run:
 
-   Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the SkyPilot skill
+.. code-block:: shell
 
-You may need to restart the agent afterwards so it picks up the skill.
+   claude plugin marketplace add skypilot-org/skypilot
+   claude plugin install skypilot@skypilot
+
+For other agents, follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md.
+
+Restart the agent afterwards so it loads the skill.
 
 Run locally or connect to a remote API server
 ---------------------------------------------
@@ -228,10 +233,17 @@ There is no need to install any dependencies locally.
 
   .. code-block:: shell
 
+    # AI agents: run this in the background, then show the printed URL to the
+    # user right away. It blocks until they click Authorize (up to 5 minutes).
     sky api login -e <API_SERVER_ENDPOINT> --no-browser
 
   SkyPilot prints a URL. Open it in a browser on any device and click **Authorize**; the command finishes once you do.
-  It waits up to 5 minutes, so an AI agent should run it in the background, show the URL to the user, and wait for it to exit.
+
+  If it times out, run it again. If it instead prints a ``/token`` URL and asks you to paste a token (older API servers), open that URL, copy the token, and pass it on stdin:
+
+  .. code-block:: shell
+
+    echo <TOKEN> | sky api login -e <API_SERVER_ENDPOINT> --no-browser
 
 See :ref:`sky-api-server-connect` for more details.
 

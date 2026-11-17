@@ -70,7 +70,7 @@ Ask the user which clouds they need if unclear, then re-run `sky api info`.
 Ask the user:
 > Do you have an existing SkyPilot API server to connect to, or should I start one locally?
 
-- **Connect to existing server:** `sky api login -e <API_SERVER_URL> --no-browser` — get the URL from the user. Always pass `-e` (without it the command waits for interactive input) and `--no-browser` (the user may be on another device). If the server needs SSO login, the command prints an authorize URL and waits up to 5 minutes for the user to open it and click **Authorize**: run it in the background, show the URL to the user right away, then wait for the command to exit.
+- **Connect to existing server:** `sky api login -e <API_SERVER_URL> --no-browser` — get the URL from the user. Always pass `-e` (without it the command waits for interactive input) and `--no-browser` (the user may be on another device). If the server needs SSO login, the command prints an authorize URL and waits up to 5 minutes for the user to open it and click **Authorize**: run it in the background, show the URL to the user right away, then wait for the command to exit. If it times out, run it again. If it instead prints a `/token` URL and asks to paste a token (older servers), ask the user to open that URL and send you the token, then run `echo <TOKEN> | sky api login -e <API_SERVER_URL> --no-browser`.
 - **Start locally:** `sky api start`
 
 After either path, re-run `sky api info` to confirm the server is reachable.
