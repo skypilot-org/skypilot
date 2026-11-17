@@ -23,7 +23,6 @@ from sky.skylet import constants
 from sky.users import permission
 from sky.utils import locks
 from sky.utils.db import db_utils
-from sky.utils.db import kv_cache
 
 
 class _Handle:
@@ -65,9 +64,6 @@ def clusters(tmp_path, monkeypatch):
     skypilot_config.reload_config()
     state_db = db_utils.DatabaseManager('state', global_user_state.create_table)
     monkeypatch.setattr(global_user_state, '_db_manager', state_db)
-    monkeypatch.setattr(
-        kv_cache, '_db_manager',
-        db_utils.DatabaseManager('kv_cache', kv_cache.create_table))
     service = permission.PermissionService()
     service.enforcer = casbin.SyncedEnforcer(
         os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
@@ -226,3 +222,33 @@ class TestClusterReadPermission:
         monkeypatch.setattr(skypilot_config, 'safe_reload_config', reload)
         _status(endpoint, user_id, cluster)
         assert reload.call_count == reloads
+
+
+def _completed(user_id):
+    request = _request('x')
+    request.state.auth_user = (None if user_id is None else models.User(
+        id=user_id, name=user_id))
+    return sorted(asyncio.run(server.complete_cluster_name(request, '')))
+
+
+@pytest.mark.usefixtures('clusters')
+class TestClusterNameCompletion:
+    """Completion shows only the clusters `sky status -u` would."""
+
+    def test_non_member_gets_only_readable_workspaces(self):
+        assert _completed('bob') == ['ro-1']
+
+    @pytest.mark.parametrize('user_id', ['alice', 'admin'])
+    def test_member_and_admin_get_all(self, user_id):
+        assert _completed(user_id) == ['a-1', 'ro-1']
+
+    def test_without_an_authenticated_user_nothing_is_scoped(self):
+        assert _completed(None) == ['a-1', 'ro-1']
+
+    def test_read_access_change_applies_without_restart(self, tmp_path):
+        config = tmp_path / 'config.yaml'
+        workspaces = json.loads(config.read_text())['workspaces']
+        workspaces['ws-a']['read_access'] = 'all'
+        workspaces['ws-ro']['read_access'] = 'allowed_users'
+        config.write_text(json.dumps({'workspaces': workspaces}))
+        assert _completed('bob') == ['a-1']

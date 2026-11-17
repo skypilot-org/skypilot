@@ -40,7 +40,7 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/clusters',
         'title': 'Clusters | SkyPilot Dashboard',
         'aria': """
-- link "Sky Clusters"
+- text: /Sky Clusters/
 - textbox "Filter clusters"
 - tablist "Filter clusters by owner":
   - tab "My Clusters"
@@ -56,7 +56,7 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/jobs',
         'title': 'Managed Jobs | SkyPilot Dashboard',
         'aria': """
-- link "Managed Jobs"
+- text: /Managed Jobs/
 - textbox "Filter jobs"
 - tablist "Filter jobs by owner":
   - tab "My Jobs"
@@ -72,12 +72,12 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/volumes',
         'title': 'Volumes | SkyPilot Dashboard',
         'aria': """
-- link "Volumes"
+- text: /Volumes/
 - button "Refresh"
 - textbox "Filter volumes"
 - table:
   - rowgroup:
-    - row /Name Infra Status Size User/
+    - row /Name Workspace Infra Status Size User/
 """,
     },
     {
@@ -100,7 +100,7 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/infra',
         'title': 'Infra | SkyPilot Dashboard',
         'aria': """
-- link "Infrastructure"
+- text: /Infrastructure/
 - combobox
 - button "Refresh"
 """,
@@ -175,7 +175,7 @@ TOP_LINKS = [
 
 ACTIVE_LINKS_JS = """
   () => [...document.querySelectorAll('a.border-b-2')]
-    .filter(a => a.classList.contains('text-blue-600'))
+    .filter(a => a.classList.contains('text-blue-fg'))
     .map(a => a.getAttribute('href'))
 """
 
@@ -371,8 +371,8 @@ def test_every_top_level_page_renders(make_user, open_as, twist):
           expect=r'the top bar must highlight only',
           apply=run_script("""
             new MutationObserver(() => document
-              .querySelectorAll('a.border-b-2.text-blue-600')
-              .forEach(a => a.classList.remove('text-blue-600')))
+              .querySelectorAll('a.border-b-2.text-blue-fg')
+              .forEach(a => a.classList.remove('text-blue-fg')))
               .observe(document, {subtree: true, childList: true,
                                   attributes: true,
                                   attributeFilter: ['class']});
@@ -419,7 +419,7 @@ def test_top_bar_links_route_and_highlight(make_user, open_as, twist):
     expect(
         config,
         'the Configuration link must be highlighted on Settings').to_have_class(
-            re.compile(r'(^|\s)text-blue-600(\s|$)'))
+            re.compile(r'(^|\s)text-blue-fg(\s|$)'))
     assert page.evaluate(ACTIVE_LINKS_JS) == [], (
         'the top bar must highlight only Configuration on Settings, got '
         f'{page.evaluate(ACTIVE_LINKS_JS)}')
@@ -454,7 +454,7 @@ def test_tour_runs_once_then_stays_away(make_user, open_as, twist):
     # A returning visitor: the suite's browser has seen the tour already.
     page = open_as(user, '/dashboard/clusters')
     tour = page.locator('.shepherd-element')
-    expect(page.get_by_role('link', name='Sky Clusters'),
+    expect(page.get_by_text('Sky Clusters', exact=True),
            'the clusters page must load').to_be_visible()
     # Absence check: the tour starts on mount and the welcome prompt after
     # 2 s, so give both that long to (wrongly) appear.
@@ -477,7 +477,7 @@ def test_tour_runs_once_then_stays_away(make_user, open_as, twist):
     expect(tour, 'Skip Tour must close the tour').to_have_count(0)
 
     page.reload()
-    expect(page.get_by_role('link', name='Sky Clusters'),
+    expect(page.get_by_text('Sky Clusters', exact=True),
            'the clusters page must load again').to_be_visible()
     page.wait_for_timeout(3000)
     expect(tour,

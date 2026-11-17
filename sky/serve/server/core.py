@@ -121,6 +121,9 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     )
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    # Terminating a replica changes the service, so the same rule as `down`
+    # and `update` applies: its creator or an admin.
+    impl.check_service_owned_by_caller(service_name, pool=False, handle=handle)
     use_legacy = not handle.is_grpc_enabled_with_flag
 
     if not use_legacy:

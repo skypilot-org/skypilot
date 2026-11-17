@@ -60,6 +60,10 @@ import {
   filterData,
 } from '@/components/shared/FilterSystem';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
@@ -78,6 +82,7 @@ const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 // on each volume.
 const VOLUME_FILTER_SCHEMA = [
   { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'status', label: 'Status', kind: 'enum', multi: true },
   { key: 'infra', label: 'Infra', kind: 'text' },
   { key: 'type', label: 'Type', kind: 'enum', multi: true },
@@ -260,8 +265,8 @@ export function Volumes() {
               <button
                 className={`leading-none mr-6 pb-2 px-1 border-b-2 ${
                   activeTab === 'volumes'
-                    ? 'text-sky-blue border-sky-500'
-                    : 'text-gray-500 hover:text-gray-700 border-transparent'
+                    ? 'text-brand border-sky-solid-soft'
+                    : 'text-content-tertiary hover:text-content border-transparent'
                 }`}
                 onClick={() => handleTabChange('volumes')}
               >
@@ -274,12 +279,7 @@ export function Volumes() {
               />
             </>
           ) : (
-            <Link
-              href="/volumes"
-              className="text-sky-blue hover:underline leading-none"
-            >
-              Volumes
-            </Link>
+            <span className="text-content leading-none">Volumes</span>
           )}
         </div>
         {activeTab === 'volumes' && (
@@ -287,7 +287,9 @@ export function Volumes() {
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+                <span className="ml-2 text-content-tertiary text-sm">
+                  Loading...
+                </span>
               </div>
             )}
             {!loading && lastFetchedTime && (
@@ -298,7 +300,7 @@ export function Volumes() {
             <button
               onClick={handleRefresh}
               disabled={loading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              className="text-brand hover:text-brand-bright flex items-center"
             >
               <RotateCwIcon className="h-4 w-4 mr-1.5" />
               {!isMobile && <span>Refresh</span>}
@@ -356,9 +358,9 @@ export function Volumes() {
               </DialogHeader>
 
               {!showPurgeUI && volumeToDelete?.config?.use_existing && (
-                <div className="bg-sky-50 border border-sky-200 rounded-md p-3 my-3 flex items-start gap-2">
-                  <AlertTriangleIcon className="w-4 h-4 text-sky-600 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-sky-900">
+                <div className="bg-sky-tint border border-sky-line rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-sky-fg mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-sky-fg-strongest">
                     This volume was imported from an existing{' '}
                     {volumeToDelete?.type === 'k8s-pvc' ? 'PVC' : 'resource'}.
                     Deleting it only removes it from SkyPilot
@@ -366,7 +368,7 @@ export function Volumes() {
                     volumeToDelete?.name_on_cloud ? (
                       <>
                         ; the underlying PVC{' '}
-                        <code className="bg-sky-100 px-1 rounded">
+                        <code className="bg-sky-tint-strong px-1 rounded">
                           {volumeToDelete.name_on_cloud}
                         </code>
                         {volumeToDelete.namespace &&
@@ -374,7 +376,7 @@ export function Volumes() {
                             <>
                               {' '}
                               in namespace{' '}
-                              <code className="bg-sky-100 px-1 rounded">
+                              <code className="bg-sky-tint-strong px-1 rounded">
                                 {volumeToDelete.namespace}
                               </code>
                             </>
@@ -397,9 +399,9 @@ export function Volumes() {
               )}
 
               {showPurgeUI && (
-                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 my-3 flex items-start gap-2">
-                  <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-amber-800 space-y-2">
+                <div className="bg-amber-tint border border-amber-line rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-fg mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-fg-stronger space-y-2">
                     <p className="m-0">
                       Removing the SkyPilot entry means this volume will no
                       longer appear here, but{' '}
@@ -407,7 +409,7 @@ export function Volumes() {
                       volumeToDelete?.name_on_cloud ? (
                         <>
                           the Kubernetes PVC{' '}
-                          <code className="bg-amber-100 px-1 rounded">
+                          <code className="bg-amber-tint-strong px-1 rounded">
                             {volumeToDelete.name_on_cloud}
                           </code>
                           {volumeToDelete.namespace &&
@@ -415,14 +417,14 @@ export function Volumes() {
                               <>
                                 {' '}
                                 in namespace{' '}
-                                <code className="bg-amber-100 px-1 rounded">
+                                <code className="bg-amber-tint-strong px-1 rounded">
                                   {volumeToDelete.namespace}
                                 </code>
                               </>
                             )}{' '}
                           may still exist and continue consuming resources.
                           Delete it manually with{' '}
-                          <code className="bg-amber-100 px-1 rounded">
+                          <code className="bg-amber-tint-strong px-1 rounded">
                             kubectl delete pvc
                             {volumeToDelete.namespace &&
                             volumeToDelete.namespace !== '-'
@@ -483,7 +485,7 @@ export function Volumes() {
                         variant="outline"
                         onClick={() => setShowPurgeUI(true)}
                         disabled={deleteLoading}
-                        className="border-amber-600 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                        className="border-amber-solid text-amber-fg-strong hover:bg-amber-tint hover:text-amber-fg-stronger"
                       >
                         Force remove
                       </Button>
@@ -502,7 +504,7 @@ export function Volumes() {
                     <Button
                       onClick={handlePurgeVolumeConfirm}
                       disabled={!purgeConfirmed || purgeLoading}
-                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                      className="bg-amber-solid hover:bg-amber-solid-hover text-white"
                     >
                       {purgeLoading ? 'Removing...' : 'Force Remove'}
                     </Button>
@@ -531,6 +533,22 @@ export function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
+  // Names for the Workspace column, and which workspaces the user may delete
+  // volumes from.
+  const { isWorkspaceWritable, workspacesConfig, loaded } =
+    useWorkspacesConfig();
+  // Rows carry the workspace name, which filters and sorting go by; older
+  // servers send only the id.
+  const rows = useMemo(
+    () =>
+      data.map((volume) => ({
+        ...volume,
+        workspace_name:
+          volume.workspace_name ||
+          getWorkspaceName(workspacesConfig, volume.workspace),
+      })),
+    [data, workspacesConfig]
+  );
   // Filters live in the URL, keyed by name, so a filtered view is shareable.
   const { filters, setFilters } = useUrlFilterState(VOLUME_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
@@ -595,29 +613,30 @@ export function VolumesTable({
   // Suggestions shown in the filter dropdown, keyed by PROPERTY_OPTIONS value.
   const valueList = useMemo(() => {
     const uniq = (getValue) => [
-      ...new Set(data.map(getValue).filter((value) => value && value !== '-')),
+      ...new Set(rows.map(getValue).filter((value) => value && value !== '-')),
     ];
     return {
       name: uniq((volume) => volume.name),
+      workspace: uniq((volume) => volume.workspace_name),
       status: uniq((volume) => volume.status),
       infra: uniq((volume) => volume.infra),
       type: uniq((volume) => volume.type),
       user: uniq((volume) => volume.user_name),
     };
-  }, [data]);
+  }, [rows]);
 
   const filteredData = useMemo(() => {
     if (filters.length === 0) {
-      return data;
+      return rows;
     }
     // `User` filters against `user_name`; alias it so the shared filter can
     // resolve the property name to a field.
     return filterData(
-      data.map((volume) => ({ ...volume, user: volume.user_name })),
+      rows.map((volume) => ({ ...volume, user: volume.user_name })),
       filters,
       { orProperties: OR_PROPERTIES }
     );
-  }, [data, filters]);
+  }, [rows, filters]);
 
   const pluginColumns = useTableColumns('volumes');
 
@@ -749,7 +768,7 @@ export function VolumesTable({
             reads worse than a wider column. */}
         <span className="whitespace-nowrap">
           {size}
-          <span className="text-gray-500"> &rarr; {target}</span>
+          <span className="text-content-tertiary"> &rarr; {target}</span>
         </span>
       </Tooltip>
     );
@@ -782,7 +801,7 @@ export function VolumesTable({
 
   const sortableHeader = (label, sortKey) => (
     <TableHead
-      className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
       onClick={() => requestSort(sortKey)}
     >
       {label}
@@ -799,9 +818,24 @@ export function VolumesTable({
         <TableCell>
           <Link
             href={`/volumes/${encodeURIComponent(volume.name)}`}
-            className="text-blue-600"
+            className="text-blue-fg"
           >
             {volume.name}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'workspace',
+      order: 5,
+      renderHeader: () => sortableHeader('Workspace', 'workspace_name'),
+      renderCell: (volume) => (
+        <TableCell>
+          <Link
+            href="/workspaces"
+            className="text-content hover:text-blue-fg hover:underline"
+          >
+            {volume.workspace_name}
           </Link>
         </TableCell>
       ),
@@ -897,19 +931,37 @@ export function VolumesTable({
       id: 'actions',
       order: 1000,
       renderHeader: () => <TableHead>Actions</TableHead>,
-      renderCell: (volume) => (
-        <TableCell>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDeleteVolume(volume)}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-            title="Delete volume"
-          >
-            <Trash2Icon className="w-4 h-4" />
-          </Button>
-        </TableCell>
-      ),
+      renderCell: (volume) => {
+        // The server refuses to delete a volume in a workspace the user can
+        // only read.
+        const writable = isWorkspaceWritable(volume.workspace);
+        // Until the workspaces load, delete is disabled without a reason.
+        const readOnly = loaded && !writable;
+        return (
+          <TableCell>
+            {/* Also on a wrapper: a disabled button shows no tooltip. */}
+            <span
+              title={
+                readOnly
+                  ? 'Read-only: you are not a member of this volume’s workspace'
+                  : undefined
+              }
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDeleteVolume(volume)}
+                disabled={!writable}
+                className="text-red-fg hover:text-red-fg-strong hover:bg-red-tint"
+                title="Delete volume"
+                aria-label="Delete volume"
+              >
+                <Trash2Icon className="w-4 h-4" />
+              </Button>
+            </span>
+          </TableCell>
+        );
+      },
     },
   ];
 
@@ -919,7 +971,7 @@ export function VolumesTable({
     isPlugin: true,
     renderHeader: () => {
       const baseClasses = col.header.sortKey
-        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-gray-50'
+        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover'
         : 'whitespace-nowrap';
       const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
       return (
@@ -1008,7 +1060,7 @@ export function VolumesTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-content-tertiary"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -1060,7 +1112,7 @@ export function VolumesTable({
 
       {/* Pagination controls */}
       {sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex justify-end items-center py-2 px-4 text-sm text-content">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
@@ -1079,7 +1131,7 @@ export function VolumesTable({
                 </select>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                  className="h-4 w-4 text-content-tertiary absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -1103,7 +1155,7 @@ export function VolumesTable({
                 size="icon"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-content-tertiary h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1125,7 +1177,7 @@ export function VolumesTable({
                 size="icon"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-content-tertiary h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1182,7 +1234,7 @@ function UsedByCell({ clusters, pods }) {
           {isCluster ? (
             <Link
               href={`/clusters/${encodeURIComponent(item)}`}
-              className="text-sky-blue hover:underline"
+              className="text-brand hover:underline"
             >
               {item}
             </Link>
@@ -1196,7 +1248,7 @@ function UsedByCell({ clusters, pods }) {
         <>
           ,{' '}
           <span
-            className="text-sky-blue cursor-pointer underline"
+            className="text-brand cursor-pointer underline"
             onClick={handleClick}
             style={{ userSelect: 'none' }}
           >
@@ -1215,7 +1267,7 @@ function UsedByCell({ clusters, pods }) {
                   {isCluster ? (
                     <Link
                       href={`/clusters/${encodeURIComponent(item)}`}
-                      className="text-sky-blue hover:underline"
+                      className="text-brand hover:underline"
                     >
                       {item}
                     </Link>

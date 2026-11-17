@@ -173,18 +173,10 @@ DISPLAY_COLUMNS = [
 ]
 
 
-def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
-                              caller_user_id: Optional[str]) -> str:
-    """Serialize a request body for a listing, scoped to the caller.
-
-    Returns the full body to the owner (and when ``caller_user_id`` is
-    ``None``); any other caller gets no body (``null``), so one user's body is
-    never exposed to another. The owner can still fetch the full body via
-    ``/api/get`` (``Request.encode()``).
-    """
-    if caller_user_id is None or owner_user_id == caller_user_id:
-        return body.model_dump_json()
-    return orjson.dumps(None).decode('utf-8')
+def _entrypoint_name(entrypoint: Callable[..., Any]) -> str:
+    # An execution policy may record a wrapper, e.g. a functools.partial,
+    # that has no __name__.
+    return getattr(entrypoint, '__name__', type(entrypoint).__name__)
 
 
 def validate_fields(fields: Optional[List[str]]) -> None:
@@ -251,6 +243,10 @@ class Request:
     finished_at: Optional[float] = None
     # Blob ID of uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
+    # UTF-8 size of the serialized return value as last written by to_row().
+    stored_result_size: Optional[int] = dataclasses.field(default=None,
+                                                          compare=False,
+                                                          repr=False)
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -317,14 +313,16 @@ class Request:
         # version; that is a wire-only concern. to_row() feeds the database, so
         # always persist the true status regardless of the request context.
         payload.status = self.status.value
+        stored = payload.return_value or ''
+        # isascii() is O(1); only a result with non-ASCII text is encoded.
+        self.stored_result_size = (len(stored) if stored.isascii() else len(
+            stored.encode('utf-8')))
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
         return tuple(row)
 
-    def readable_encode(
-            self,
-            caller_user_id: Optional[str] = None) -> payloads.RequestPayload:
+    def readable_encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -337,9 +335,6 @@ class Request:
         We do not use `encode` for display to avoid a large amount of data being
         sent to the client side, especially for the request table could include
         all the requests.
-
-        ``caller_user_id`` scopes the request body; see
-        ``_request_body_for_display``.
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
@@ -348,10 +343,9 @@ class Request:
         return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
-            entrypoint=self.entrypoint.__name__,
-            request_body=_request_body_for_display(self.request_body,
-                                                   self.user_id,
-                                                   caller_user_id),
+            entrypoint=_entrypoint_name(self.entrypoint),
+            # No client reads the body, and it may hold the server's env.
+            request_body=orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
@@ -367,8 +361,11 @@ class Request:
             file_mounts_blob_id=self.file_mounts_blob_id,
         )
 
-    def encode(self) -> payloads.RequestPayload:
-        """Serialize the SkyPilot API request."""
+    def encode(self, include_body: bool = True) -> payloads.RequestPayload:
+        """Serialize the SkyPilot API request for the DB (to_row).
+
+        HTTP responses must use encode_for_client() instead.
+        """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
@@ -379,7 +376,9 @@ class Request:
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
-                request_body=encoders.pickle_and_encode(self.request_body),
+                request_body=(encoders.pickle_and_encode(self.request_body)
+                              if include_body else
+                              server_constants.EMPTY_PICKLED_VALUE),
                 status=_status_value_for_client(self.status.value),
                 return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
@@ -404,6 +403,11 @@ class Request:
                 f'  {self.created_at}\n',
                 exc_info=e)
             raise
+
+    def encode_for_client(self) -> payloads.RequestPayload:
+        """encode() for an HTTP response: without the request body."""
+        # The body may hold the server's own env vars, and no client reads it.
+        return self.encode(include_body=False)
 
     @staticmethod
     def _decode_entrypoint(encoded_entrypoint: str) -> Callable:
@@ -466,9 +470,7 @@ def get_new_request_id() -> str:
     return str(uuid.uuid4())
 
 
-def encode_requests(
-        requests: List[Request],
-        caller_user_id: Optional[str] = None) -> List[payloads.RequestPayload]:
+def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
     """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -494,12 +496,10 @@ def encode_requests(
         payload = payloads.RequestPayload(
             request_id=request.request_id,
             name=request.name,
-            entrypoint=request.entrypoint.__name__
+            entrypoint=_entrypoint_name(request.entrypoint)
             if request.entrypoint is not None else '',
-            request_body=_request_body_for_display(
-                request.request_body, request.user_id, caller_user_id)
-            if request.request_body is not None else
-            orjson.dumps(None).decode('utf-8'),
+            # No client reads the body, and it may hold the server's env.
+            request_body=orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(request.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
@@ -515,6 +515,21 @@ def encode_requests(
         )
         encoded_requests.append(payload)
     return encoded_requests
+
+
+def list_requests_json(req_filter: 'RequestTaskFilter') -> bytes:
+    """Query requests and render ``encode_requests`` as a JSON array.
+
+    Blocking; listings can run to many MB, so call it off the event loop.
+    """
+    encoded = encode_requests(get_request_tasks(req_filter))
+    # Per row: one dump of the whole list holds the GIL, and so blocks the
+    # event loop, for tens of milliseconds.
+    return b''.join([
+        b'[', b','.join(
+            payload.model_dump_json().encode('utf-8') for payload in encoded),
+        b']'
+    ])
 
 
 def _update_request_row_fields(
@@ -1295,34 +1310,45 @@ async def set_request_failed_if_pending_async(request_id: str,
         return True
 
 
-def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
+def set_request_succeeded(request_id: str,
+                          result: Optional[Any]) -> Optional[int]:
+    """Set a request to succeeded and populate the result.
+
+    Returns:
+        The length of the stored serialized result.
+    """
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+    return request_task.stored_result_size
 
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_succeeded_async(request_id: str,
-                                      result: Optional[Any]) -> None:
+                                      result: Optional[Any]) -> Optional[int]:
     """Set a request to succeeded and populate the result.
 
     A request that already finished, e.g. cancelled while its thread was still
     running, keeps its status.
+
+    Returns:
+        The length of the stored serialized result, None if nothing was
+        stored.
     """
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
         if request_task.status in RequestStatus.finished_status():
-            return
+            return None
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+    return request_task.stored_result_size
 
 
 @metrics_lib.time_me_async

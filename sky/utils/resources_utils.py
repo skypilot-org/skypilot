@@ -9,6 +9,7 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
@@ -17,6 +18,11 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import resources as resources_lib
+    from sky.provision.kubernetes import utils as kubernetes_utils
+else:
+    # Lazy: the Kubernetes utils import sky.clouds, which imports this module.
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 _PORT_RANGE_HINT_MSG = ('Invalid port range {}. Please use the format '
                         '"from-to", in which from <= to. e.g. "1-3".')
@@ -454,9 +460,12 @@ def get_readable_resources_repr(
         assert resource_str_full is not None
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        return (f'{handle.launched_nodes}x{resource_str_simple}',
-                None if simplified_only else
-                f'{handle.launched_nodes}x{resource_str_full}')
+        # launched_resources describes one task node; a multi-host TPU slice
+        # on Kubernetes has several cluster nodes (pods) per task node.
+        num_nodes = kubernetes_utils.num_task_nodes(handle.launched_nodes,
+                                                    handle.launched_resources)
+        return (f'{num_nodes}x{resource_str_simple}',
+                None if simplified_only else f'{num_nodes}x{resource_str_full}')
     return (_DEFAULT_MESSAGE_HANDLE_INITIALIZING,
             _DEFAULT_MESSAGE_HANDLE_INITIALIZING)
 

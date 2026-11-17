@@ -96,6 +96,9 @@ else:
     time = adaptors_common.LazyImport('time')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
+    # only used in the --resize confirmation prompt
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -486,6 +489,28 @@ def _check_task_namespace_api_version(dag: 'sky.Dag') -> None:
                 '). Please upgrade the API server.')
 
 
+def _check_tpu_multi_host_api_version(dag: 'sky.Dag') -> None:
+    """Raises if a task asks for accelerator_args.multi_host and the API
+    server is too old to know it.
+
+    The field cannot be dropped silently: without it the server would pick
+    different hardware.
+    """
+    if not any('multi_host' in (resources.accelerator_args or {})
+               for task in dag.tasks
+               for resources in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_TPU_MULTI_HOST_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'The API server does not support '
+                '`accelerator_args.multi_host`; upgrade it to a version that '
+                'supports API_VERSION >= '
+                f'{server_constants.MIN_TPU_MULTI_HOST_API_VERSION}.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -517,6 +542,7 @@ def optimize(
     _check_slurm_host_path_volume_api_version(dag)
     _check_task_namespace_api_version(dag)
     versions.check_modal_deadline_api(dag, versions.get_remote_api_version())
+    _check_tpu_multi_host_api_version(dag)
     _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -660,6 +686,7 @@ def validate(
     _check_slurm_host_path_volume_api_version(dag)
     _check_task_namespace_api_version(dag)
     versions.check_modal_deadline_api(dag, versions.get_remote_api_version())
+    _check_tpu_multi_host_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
@@ -1043,6 +1070,14 @@ def _launch(
             # the generic "Restarting the stopped cluster" message.
             current_nodes = cluster_record.get('nodes')
             target_nodes = dag.tasks[0].num_nodes
+            # The record counts cluster nodes. On a multi-host TPU slice one
+            # task node (one slice) is one cluster node per VM of the slice,
+            # so convert to task nodes, the unit of num_nodes.
+            vms_per_slice = max(
+                kubernetes_utils.tpu_vms_per_slice(r)
+                for r in dag.tasks[0].resources)
+            if current_nodes is not None and vms_per_slice > 1:
+                current_nodes //= vms_per_slice
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
                 user_name_str = (f' (created by another user '
