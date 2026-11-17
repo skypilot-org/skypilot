@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 class RequestBackend(abc.ABC):
     """Abstract interface for request persistence and lifecycle."""
 
+    # Whether several API server instances read and write these rows. If so,
+    # the retention cleanup deletes expired rows from one instance at a time.
+    shared_across_servers: bool = False
+
     @abc.abstractmethod
     def get_request(self,
                     request_id: str,
