@@ -713,9 +713,16 @@ class CriticalityTierPolicy(sky.AdminPolicy):
       available (an ordered list of resources). Managed jobs keep this order
       when they recover from a preemption.
 
-    Tasks without the label and CPU-only resources are left unchanged. Labels
-    are matched case-insensitively. The policy rejects a request whose label
-    names an unknown tier or whose resources carry different tiers.
+    Tasks without the label and CPU-only resources are left unchanged. If the
+    task lists its resources in order of preference, the policy keeps that
+    order, and in the ``standard`` tier each GPU choice is tried on spot and
+    then on-demand. Labels are matched case-insensitively. The policy rejects
+    a request whose label names an unknown tier or whose resources carry
+    different tiers.
+
+    Services and pools are left unchanged. SkyServe needs all resources of a
+    service to use the same capacity, and it has its own on-demand fallback
+    (``dynamic_ondemand_fallback`` and ``base_ondemand_fallback_replicas``).
 
     Admins can change the mapping through the class attributes. A label is
     looked up in ON_DEMAND_TIERS, then SPOT_ONLY_TIERS, then SPOT_FIRST_TIERS,
@@ -739,39 +746,48 @@ class CriticalityTierPolicy(sky.AdminPolicy):
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         """Sets spot or on-demand capacity from the task's tier label."""
         task = user_request.task
+        # A service or pool must use one capacity for all its resources, which
+        # the standard tier's spot and on-demand list would break.
+        if task.service is not None:
+            return sky.MutatedUserRequest(task, user_request.skypilot_config)
         tier = cls._get_tier(task)
         if tier is None:
             return sky.MutatedUserRequest(task, user_request.skypilot_config)
         mode = cls._capacity(tier)
 
-        spot, on_demand, unchanged = [], [], []
-        for r in task.resources:
-            if not r.accelerators:
-                unchanged.append(r)
-            elif mode == 'on_demand':
-                zone = None if cls.WIDEN_PINNED_ZONE else r.zone
-                on_demand.append(r.copy(use_spot=False, zone=zone))
-            elif mode == 'spot_only':
-                spot.append(r.copy(use_spot=True))
-            else:
-                spot.append(r.copy(use_spot=True))
-                on_demand.append(r.copy(use_spot=False))
+        choices = [c for r in task.resources for c in cls._choices(r, mode)]
+        if not isinstance(task.resources, list):
+            # The user gave no order, so every spot choice comes before every
+            # on-demand one, and resources without GPUs come last.
+            choices.sort(key=lambda r: (not r.accelerators, not r.use_spot))
 
-        # Spot candidates come before on-demand ones. Resources have no value
-        # equality, so drop duplicates by their YAML config.
+        # Resources have no value equality, so drop duplicates by their YAML
+        # config.
         new_resources: List[sky.Resources] = []
         seen: List[Dict] = []
-        for r in spot + on_demand + unchanged:
+        for r in choices:
             config = r.to_yaml_config()
             if config not in seen:
                 seen.append(config)
                 new_resources.append(r)
-        if mode == 'spot_first' and spot:
+        if mode == 'spot_first' and any(r.accelerators for r in new_resources):
             task.set_resources(new_resources)
         else:
             task.set_resources(type(task.resources)(new_resources))
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
+
+    @classmethod
+    def _choices(cls, r: sky.Resources, mode: str) -> List[sky.Resources]:
+        """Returns the capacity choices for one resource, in order."""
+        if not r.accelerators:
+            return [r]
+        if mode == 'on_demand':
+            zone = None if cls.WIDEN_PINNED_ZONE else r.zone
+            return [r.copy(use_spot=False, zone=zone)]
+        if mode == 'spot_only':
+            return [r.copy(use_spot=True)]
+        return [r.copy(use_spot=True), r.copy(use_spot=False)]
 
     @classmethod
     def _capacity(cls, tier: str) -> str:

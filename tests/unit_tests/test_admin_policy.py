@@ -1055,6 +1055,65 @@ def test_criticality_tier_policy(add_example_policy_paths, task):
         _load_task_and_apply_policy(task, config_path)
 
 
+def test_criticality_tier_policy_keeps_user_order(add_example_policy_paths,
+                                                  task):
+    from example_policy.skypilot_policy import CriticalityTierPolicy
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+
+    def apply(tier):
+        task.set_resources([
+            sky.Resources(cpus='8+', labels={'criticality': tier}),
+            sky.Resources(accelerators={'A100': 1},
+                          labels={'criticality': tier}),
+            sky.Resources(accelerators={'H100': 1},
+                          labels={'criticality': tier}),
+        ])
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+        resources = dag.tasks[0].resources
+        assert isinstance(resources, list)
+        return [(list(r.accelerators)[0] if r.accelerators else 'cpu',
+                 r.use_spot) for r in resources]
+
+    # The user prefers CPU, then A100, then H100. Every tier keeps that order.
+    assert apply('critical') == [('cpu', False), ('A100', False),
+                                 ('H100', False)]
+    assert apply('standard') == [('cpu', False), ('A100', True),
+                                 ('A100', False), ('H100', True),
+                                 ('H100', False)]
+    with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                           ('preemptible',)):
+        assert apply('preemptible') == [('cpu', False), ('A100', True),
+                                        ('H100', True)]
+
+
+@pytest.mark.parametrize('pool', [False, True])
+def test_criticality_tier_policy_leaves_services_unchanged(
+        add_example_policy_paths, pool):
+    from sky.serve import serve_utils
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+    resources = {
+        'accelerators': 'A100:1',
+        'labels': {
+            'criticality': 'standard'
+        },
+    }
+    if pool:
+        config = {'pool': {'workers': 1}}
+    else:
+        config = {'service': {'readiness_probe': '/', 'replicas': 1}}
+        resources['ports'] = 8080
+    task = sky.Task.from_yaml_config({
+        **config,
+        'resources': resources,
+        'run': 'python serve.py',
+    })
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    # SkyServe needs one capacity for all resources and no ordered list for
+    # pools, so the mutated task must still pass its validation.
+    serve_utils.validate_service_task(dag.tasks[0], pool=pool)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [False]
+
+
 def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
                                                        task):
     """Test consistency between server-side and client-side execution.
