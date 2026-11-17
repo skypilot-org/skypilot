@@ -455,6 +455,45 @@ def test_end_of_an_idle_period_is_recorded(world):
         global_user_state.ClusterEventType.STATUS_CHANGE)
 
 
+def test_end_of_an_idle_period_is_recorded_after_a_pause(world):
+    """A pause restarts the window but the warning is still on the cluster."""
+    world.add_cluster()
+    world.run_until(_WINDOW)
+    assert len(world.events) == 1
+    world.source_response = _vector(90)
+    resumed = _WINDOW + 5 * _INTERVAL
+
+    for at in range(resumed, resumed + _WINDOW + 1, _INTERVAL):
+        world.run(at)
+
+    assert [event[2] for event in world.events[1:]
+           ] == ['No longer reported idle.']
+
+
+def test_idle_cluster_is_notified_again_after_a_pause(world):
+    world.add_cluster()
+    world.run_until(_WINDOW)
+    resumed = _WINDOW + 5 * _INTERVAL
+
+    for at in range(resumed, resumed + _WINDOW + 1, _INTERVAL):
+        world.run(at)
+
+    assert [webhook['idle_since'] for webhook in world.webhooks
+           ] == [_WINDOW, resumed + _WINDOW]
+    assert len(world.events) == 2
+
+
+def test_relaunch_forgets_the_warning_of_the_previous_launch(world):
+    cluster = world.add_cluster()
+    world.run_until(_WINDOW)
+    world.source_response = _vector(90)
+    cluster['launched_at'] = 200
+
+    world.run_until(2 * _WINDOW + _INTERVAL)
+
+    assert len(world.events) == 1
+
+
 def test_end_of_an_idle_period_nobody_was_told_about_is_not_recorded(world):
     world.add_cluster()
     world.webhook_response = _response({}, status_code=503)

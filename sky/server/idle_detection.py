@@ -179,13 +179,18 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
     # window: the source averages whatever samples exist, so a young cluster
     # would read idle. Provisioning rewrites launched_at; watching_since
     # changes when the daemon resumes after a pause.
-    if (previous is None or previous['watching_since'] != watching_since or
-            previous['launched_at'] != record['launched_at']):
+    relaunched = (previous is None or
+                  previous['launched_at'] != record['launched_at'])
+    if relaunched or previous['watching_since'] != watching_since:
         state = {
             'launched_at': record['launched_at'],
             'watching_since': watching_since,
             'up_since': now,
         }
+        # A warning sent for this launch is still the cluster's last event
+        # after a pause; keep it open so that its end gets recorded.
+        if not relaunched and 'notified_at' in previous:
+            state['notified_at'] = previous['notified_at']
     else:
         state = dict(previous)
 
