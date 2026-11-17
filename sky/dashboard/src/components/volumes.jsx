@@ -401,7 +401,7 @@ export function Volumes() {
                 </div>
               )}
 
-              {!showPurgeUI && wipesHostPath && (
+              {wipesHostPath && (
                 <div className="bg-amber-tint border border-amber-line rounded-md p-3 my-3 flex items-start gap-2">
                   <AlertTriangleIcon className="w-4 h-4 text-amber-fg mt-0.5 flex-shrink-0" />
                   <label className="text-sm text-amber-fg-stronger flex items-start gap-2 cursor-pointer">
