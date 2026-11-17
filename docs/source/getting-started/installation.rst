@@ -1266,9 +1266,13 @@ Current limitations:
   exits, times out, or is terminated from Modal, launch a new SkyPilot
   cluster.
 - ``disk_size`` is not applied: Modal sets the container's disk.
+- Modal bills CPU per physical core, which SkyPilot counts as 2 vCPUs. A
+  ``4CPU--16GB`` instance is 2 Modal cores, so the processes on it (and Ray)
+  see 2 CPUs, not 4. A task that asks for more CPUs than that still runs.
 - ``sky stop`` / ``sky start`` and stop/resume semantics are not supported; use
   ``sky down``.
-- Managed jobs and SkyServe controllers are not supported on Modal.
+- Managed jobs can run on Modal clusters, but the jobs and SkyServe
+  controllers cannot be hosted on Modal.
 - Modal Volumes do not have a SkyPilot ``size`` setting. Persist writes with
   ``sync <mount-path>`` before tearing down the cluster.
 - S3 bucket mounts use a copy of the AWS credentials taken when the cluster is
