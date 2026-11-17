@@ -171,6 +171,7 @@ Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
 Mithril = clouds.Mithril
+Daytona = clouds.Daytona
 Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
 Yotta = clouds.Yotta
@@ -199,6 +200,7 @@ __all__ = [
     'Nebius',
     'Hyperbolic',
     'Mithril',
+    'Daytona',
     'Shadeform',
     'Seeweb',
     'Yotta',
