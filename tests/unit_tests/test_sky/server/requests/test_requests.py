@@ -204,9 +204,9 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Verify old running request was NOT deleted
     assert requests.get_request('old-running-1') is not None
 
-    # Verify log file unlink was called for current, legacy, and debug paths
-    # (3 calls per deleted request: current path + legacy path + debug log)
-    assert mock_unlink.call_count == 3
+    # Verify unlink was called for the current, legacy, and debug log paths
+    # and the stored result (4 calls per deleted request)
+    assert mock_unlink.call_count == 4
 
     # Verify logging
     mock_logger.info.assert_called_once()
@@ -297,9 +297,9 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
     assert call_counts[1] == 10  # Second batch
     assert call_counts[2] == 5  # Third batch (remaining)
 
-    # Verify log file unlink was called for each deleted request
-    # (3 calls per request: current path + legacy path + debug log)
-    assert mock_unlink.call_count == 75
+    # Verify unlink was called for each deleted request (4 calls per request:
+    # current, legacy, and debug log paths and the stored result)
+    assert mock_unlink.call_count == 100
 
     # Verify logging shows correct total
     mock_logger.info.assert_called_once()
@@ -686,12 +686,15 @@ async def test_clean_finished_requests_cleans_both_paths(
                     retention_seconds)
 
     # Verify that unlink was called for current, legacy, and debug log paths
-    assert len(unlinked_paths) == 3
+    # and the stored result
+    assert len(unlinked_paths) == 4
 
     # All paths should contain the request ID
-    current_path_count = sum(
+    log_path_count = sum(
         1 for p in unlinked_paths if 'legacy-test-req-1.log' in p)
-    assert current_path_count == 3  # All paths should have the request ID
+    assert log_path_count == 3
+    assert any(
+        p.endswith('legacy-test-req-1.json.zlib') for p in unlinked_paths)
 
     # Verify the request was deleted
     assert requests.get_request('legacy-test-req-1') is None
@@ -2526,7 +2529,7 @@ def small_in_row_limit(monkeypatch):
 
 
 def _raw_return_value_column(request_id: str) -> str:
-    request = requests.get_request(request_id, fields=['return_value'])
+    request = requests.get_request(request_id)
     assert request is not None
     # pylint: disable=protected-access
     return request._encode(resolve_stored_result=False).return_value
