@@ -645,17 +645,60 @@ def test_allowed_node_pool_contexts_keeps_pools_not_set_up():
         assert ssh.SSH.allowed_node_pool_contexts() == ['ssh-a', 'ssh-c']
 
 
-def test_workspace_contexts_drop_disallowed_pools_all_contexts_does_not():
+def test_workspace_contexts_union_readable_workspaces_only():
     # get_all_contexts also feeds metrics federation, which keeps every pool.
+    workspaces = {
+        'ws-a': {
+            'ssh': {
+                'allowed_node_pools': ['a']
+            }
+        },
+        'ws-b': {
+            'ssh': {
+                'allowed_node_pools': ['b']
+            }
+        },
+        'ws-c': {
+            'ssh': {
+                'allowed_node_pools': ['c']
+            }
+        },
+    }
+    targets = {
+        ('ws-a', 'kubernetes'): {'k8s-1'},
+        ('ws-a', 'ssh'): {'ssh-a'},
+        ('ws-b', 'ssh'): {'ssh-b'},
+        ('ws-c', 'ssh'): {'ssh-c'},
+    }
+    with patch('sky.skypilot_config.get_nested', return_value=workspaces), \
+         patch('sky.workspaces.core.workspaces_for_user',
+               return_value={'ws-a': {}, 'ws-b': {}}), \
+         patch('sky.workspaces.visibility._workspace_targets',
+               side_effect=lambda ws, cloud: targets.get((ws, cloud), set())):
+        assert core.get_workspace_contexts() == ['k8s-1', 'ssh-a', 'ssh-b']
+    with patch.object(ssh.SSH,
+                      'get_ssh_node_pool_contexts',
+                      return_value=['ssh-a', 'ssh-b']), \
+         patch('sky.clouds.Kubernetes.existing_allowed_contexts',
+               return_value=['k8s-1']):
+        assert core.get_all_contexts() == ['k8s-1', 'ssh-a', 'ssh-b']
+
+
+def test_skipped_pool_warning_names_only_allowed_pools():
+    ssh.SSH._ssh_log_skipped_contexts_once.cache_clear()
     with patch.object(ssh.SSH,
                       'get_ssh_node_pool_contexts',
                       return_value=['ssh-a', 'ssh-b']), \
          patch('sky.skypilot_config.get_workspace_cloud',
                return_value={'allowed_node_pools': ['a']}), \
-         patch('sky.clouds.Kubernetes.existing_allowed_contexts',
-               return_value=['k8s-1']):
-        assert core.get_workspace_contexts() == ['k8s-1', 'ssh-a']
-        assert core.get_all_contexts() == ['k8s-1', 'ssh-a', 'ssh-b']
+         patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+               return_value=['other']), \
+         patch.object(ssh.logger, 'warning') as mock_warning:
+        assert ssh.SSH.existing_allowed_contexts() == []
+    mock_warning.assert_called_once()
+    message = mock_warning.call_args[0][0]
+    assert 'ssh-a' in message
+    assert 'ssh-b' not in message
 
 
 if __name__ == '__main__':

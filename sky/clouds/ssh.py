@@ -187,7 +187,9 @@ class SSH(kubernetes.Kubernetes):
                 else:
                     skipped_contexts.append(context)
             if not silent:
-                cls._ssh_log_skipped_contexts_once(tuple(skipped_contexts))
+                # Only name pools the caller's workspace may see.
+                cls._ssh_log_skipped_contexts_once(
+                    tuple(cls._filter_allowed_node_pools(skipped_contexts)))
             return cls._filter_allowed_node_pools(existing_contexts)
 
         # If no all_node_pool_contexts found, return all SSH contexts

@@ -4407,7 +4407,7 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
 
 @app.get('/all_contexts')
 async def all_contexts(request: fastapi.Request) -> None:
-    """Gets the Kubernetes and SSH node pool contexts of the workspace."""
+    """Gets the Kubernetes and SSH node pool contexts the caller can read."""
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,

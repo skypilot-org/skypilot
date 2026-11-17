@@ -49,6 +49,7 @@ from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
+from sky.workspaces import visibility
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -2120,14 +2121,16 @@ def get_all_contexts() -> List[str]:
 
 
 def get_workspace_contexts() -> List[str]:
-    """Kubernetes and SSH node pool contexts the active workspace allows.
+    """Kubernetes and SSH node pool contexts of the workspaces the user reads.
 
-    Unlike ``get_all_contexts``, SSH node pools other workspaces own are left
-    out, so this is safe to return to any user.
+    Unlike ``get_all_contexts``, contexts that only other workspaces allow are
+    left out, so this is safe to return to any user.
     """
-    kube_contexts = clouds.Kubernetes.existing_allowed_contexts()
-    ssh_contexts = clouds.SSH.allowed_node_pool_contexts()
-    return sorted(set(kube_contexts + ssh_contexts))
+    workspaces = list(
+        workspaces_core.workspaces_for_user(common_utils.get_current_user().id))
+    return sorted(
+        visibility.visible_for_workspaces(workspaces, 'kubernetes') |
+        visibility.visible_for_workspaces(workspaces, 'ssh'))
 
 
 def create_debug_dump(request_ids: Optional[List[str]] = None,
