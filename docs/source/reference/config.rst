@@ -1898,6 +1898,12 @@ One of:
   identity: no token is mounted and no roles are granted. Autodown is not
   available. See :ref:`kubernetes-remote-identity-none`.
 
+With a remote API server, a user who is not an admin cannot make the API
+server's kubeconfig reach clusters that the server's own config does not send
+it to, such as with ``LOCAL_CREDENTIALS`` or by overriding the server's
+``NO_UPLOAD``. Such a value in their client config, task or admin policy
+output is refused; set it in the API server's config instead.
+
 .. _config-yaml-kubernetes-allowed-contexts:
 
 ``kubernetes.allowed_contexts``

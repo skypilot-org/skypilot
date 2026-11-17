@@ -10,6 +10,7 @@ from sky import global_user_state
 from sky import models
 from sky import skypilot_config
 from sky.skylet import constants
+from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -219,6 +220,29 @@ def volume_error_may_resolve(error_message: Optional[str]) -> bool:
     return PVC_PROVISIONING_MESSAGE in error_message
 
 
+def check_hostpath_volume_mountable(volume_name: str,
+                                    record: Dict[str, Any]) -> None:
+    """Raises if `record` is a k8s-hostpath volume a non-admin registered.
+
+    Only an admin may register one; a row registered before that rule can
+    point at any node directory.
+
+    Raises:
+        exceptions.PermissionDeniedError: if the volume may not be mounted.
+    """
+    volume_config = record.get('handle')
+    if (volume_config is None or
+            volume_config.type != VolumeType.HOSTPATH.value):
+        return
+    if permission.is_admin(record.get('user_hash') or ''):
+        return
+    raise exceptions.PermissionDeniedError(
+        f'Volume {volume_name!r} is a k8s-hostpath volume that was not '
+        'registered by an admin, so it cannot be mounted. An admin can '
+        f're-register it: `sky volumes delete {volume_name} --no-cleanup`, '
+        'then `sky volumes apply <volume.yaml>`.')
+
+
 def mount_is_read_write_many_pvc(volume_mount: 'VolumeMount') -> bool:
     """`is_read_write_many_pvc` for a volume declared on a task.
 
@@ -416,6 +440,7 @@ class VolumeMount:
                     msg += f' Error: {error_message}'
                 raise exceptions.VolumeNotReadyError(msg)
         assert 'handle' in record, 'Volume handle is None.'
+        check_hostpath_volume_mountable(volume_name, record)
         volume_config: models.VolumeConfig = record['handle']
         return cls(path, volume_name, volume_config, sub_path=sub_path)
 

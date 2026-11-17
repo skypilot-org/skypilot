@@ -121,6 +121,8 @@ export function Volumes() {
   const [showPurgeUI, setShowPurgeUI] = useState(false);
   const [purgeConfirmed, setPurgeConfirmed] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
+  // A k8s-hostpath volume with cleanup wipes its host path on every node.
+  const [cleanupHostPath, setCleanupHostPath] = useState(true);
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
   const [activeTab, setActiveTab] = useState('volumes');
@@ -177,7 +179,13 @@ export function Volumes() {
     setDeleteError(null);
     setShowPurgeUI(false);
     setPurgeConfirmed(false);
+    setCleanupHostPath(true);
   };
+
+  const wipesHostPath =
+    volumeToDelete?.type === 'k8s-hostpath' &&
+    !!volumeToDelete?.config?.cleanup_on_deletion;
+  const noCleanup = wipesHostPath && !cleanupHostPath;
 
   const handleDeleteVolumeConfirm = async () => {
     if (!volumeToDelete) return;
@@ -186,7 +194,7 @@ export function Volumes() {
     setDeleteError(null);
 
     try {
-      const result = await deleteVolume(volumeToDelete.name);
+      const result = await deleteVolume(volumeToDelete.name, { noCleanup });
       if (!result.success) {
         throw new Error(result.msg);
       }
@@ -209,7 +217,10 @@ export function Volumes() {
     setDeleteError(null);
 
     try {
-      const result = await deleteVolume(volumeToDelete.name, { purge: true });
+      const result = await deleteVolume(volumeToDelete.name, {
+        purge: true,
+        noCleanup,
+      });
       if (!result.success) {
         throw new Error(result.msg);
       }
@@ -344,7 +355,7 @@ export function Volumes() {
                     <>
                       Remove &quot;
                       {volumeToDelete?.name || 'this volume'}&quot; from
-                      SkyPilot records. The underlying volume will not be
+                      SkyPilot records. The underlying volume may not be
                       deleted.
                     </>
                   ) : (
@@ -387,6 +398,28 @@ export function Volumes() {
                       <>; the underlying resource will be left intact.</>
                     )}
                   </div>
+                </div>
+              )}
+
+              {!showPurgeUI && wipesHostPath && (
+                <div className="bg-amber-tint border border-amber-line rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-fg mt-0.5 flex-shrink-0" />
+                  <label className="text-sm text-amber-fg-stronger flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cleanupHostPath}
+                      onChange={(e) => setCleanupHostPath(e.target.checked)}
+                      disabled={deleteLoading}
+                      className="cursor-pointer mt-0.5"
+                    />
+                    <span>
+                      Also delete everything under{' '}
+                      <code className="bg-amber-tint-strong px-1 rounded">
+                        {volumeToDelete?.config?.host_path}
+                      </code>{' '}
+                      on every node
+                    </span>
+                  </label>
                 </div>
               )}
 

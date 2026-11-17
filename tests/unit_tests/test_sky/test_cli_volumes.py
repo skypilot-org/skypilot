@@ -311,7 +311,9 @@ class TestVolumeCommands:
         # Test deleting all volumes
         result = cli_runner.invoke(command.volumes_delete, ['--all'])
         assert not result.exit_code
-        mock_delete.assert_called_once_with(['volume1', 'volume2'], purge=False)
+        mock_delete.assert_called_once_with(['volume1', 'volume2'],
+                                            purge=False,
+                                            no_cleanup=False)
         mock_async_call.assert_called_once_with('delete-request-id', False,
                                                 'sky.volumes.delete')
 
@@ -349,6 +351,57 @@ class TestVolumeCommands:
         assert set(mock_delete.call_args[0][0]) == deleted
         assert ('Skipping 1 volume(s)'
                 in result.output) == (deleted == {'mine'})
+
+    _HOSTPATH_VOLUMES = [{
+        'name': 'hp',
+        'type': 'k8s-hostpath',
+        'region': 'ctx1',
+        'config': {
+            'host_path': '/mnt/data',
+            'cleanup_on_deletion': True
+        },
+    }, {
+        'name': 'pvc',
+        'type': 'k8s-pvc',
+        'config': {}
+    }]
+
+    @pytest.mark.parametrize('role, deleted', [('admin', {'hp', 'pvc'}),
+                                               ('user', {'pvc'})])
+    def test_volumes_delete_all_skips_hostpath_for_a_non_admin(
+            self, monkeypatch, role, deleted):
+        _mock_ls_and_workspaces(monkeypatch, self._HOSTPATH_VOLUMES, {})
+        monkeypatch.setattr(
+            'sky.server.common.make_authenticated_request',
+            lambda *a, **kw: mock.MagicMock(json=lambda: {'role': role}))
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                ['--all', '-y'])
+        assert not result.exit_code, result.output
+        assert set(mock_delete.call_args[0][0]) == deleted
+
+    @pytest.mark.parametrize('args, warned', [([], True),
+                                              (['--no-cleanup'], False)])
+    def test_volumes_delete_warns_before_wiping_a_host_path(
+            self, monkeypatch, args, warned):
+        _mock_ls_and_workspaces(monkeypatch, self._HOSTPATH_VOLUMES, {})
+        confirm = mock.MagicMock(return_value=True)
+        monkeypatch.setattr('click.confirm', confirm)
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                ['hp'] + args)
+        assert not result.exit_code, result.output
+        prompt = confirm.call_args[0][0]
+        assert ('/mnt/data on every node of ctx1' in prompt) == warned
+        # Wiping defaults to no.
+        assert confirm.call_args[1]['default'] is (not warned)
+        assert mock_delete.call_args[1]['no_cleanup'] is (not warned)
 
     def test_volumes_delete_all_without_writable_flag(self, monkeypatch):
         """A server too old to report `writable` is not filtered against."""

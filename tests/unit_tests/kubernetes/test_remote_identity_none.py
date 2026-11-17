@@ -22,6 +22,8 @@ from sky.clouds import kubernetes as kubernetes_cloud
 from sky.provision.azure import config as azure_config
 from sky.provision.kubernetes import config as kubernetes_config
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import constants
+from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -385,7 +387,7 @@ class TestCheckedAtSubmit:
         with mock.patch.object(kubernetes_cloud.Kubernetes,
                                'existing_allowed_contexts',
                                return_value=[_CTX]):
-            kubernetes_cloud.Kubernetes.check_task_keeps_server_none(task)
+            kubernetes_cloud.Kubernetes.check_task_keeps_server_identity(task)
 
     @pytest.mark.parametrize('region', [_CTX, None],
                              ids=['context', 'any-context'])
@@ -452,7 +454,7 @@ class TestCheckedAtSubmit:
         with mock.patch.object(kubernetes_cloud.Kubernetes,
                                'existing_allowed_contexts', **side), \
                 skypilot_config.override_skypilot_config(client_config):
-            kubernetes_cloud.Kubernetes.check_request_keeps_server_none()
+            kubernetes_cloud.Kubernetes.check_request_keeps_server_identity()
 
     @pytest.mark.parametrize('client,match', [
         (_k8s(remote_identity='SERVICE_ACCOUNT'), 'cannot override it'),
@@ -854,3 +856,245 @@ class TestSchema:
         # pylint: disable=protected-access
         assert azure_config._resolve_custom_managed_identity(
             _NONE, 'sub', 'rg').endswith('/userAssignedIdentities/NONE')
+
+
+_LC = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+_NO_UPLOAD = schemas.RemoteIdentityOptions.NO_UPLOAD.value
+
+
+@pytest.fixture
+def caller(monkeypatch):
+    """Sets whether the user behind the request is an admin, on the server."""
+
+    def set_admin(is_admin):
+        monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
+        monkeypatch.setattr(common_utils, 'get_current_user',
+                            lambda: mock.MagicMock(id='u'))
+        monkeypatch.setattr(permission, 'is_admin', lambda user_id: is_admin)
+
+    return set_admin
+
+
+class TestKubeconfigUploadNeedsAdmin:
+    """A non-admin's config cannot send the API server's kubeconfig where the
+    server's own config does not.
+
+    Checked where the upload is decided, so a plain launch is covered too.
+    Each refusal is paired with an accepted arm that differs in one thing.
+    """
+
+    def _launch(self,
+                cloud=_K8S,
+                region=_CTX,
+                task_config=None,
+                client_config=None):
+        """Runs write_cluster_config; returns whether the kubeconfig would
+        be uploaded."""
+        to_provision = mock.MagicMock()
+        to_provision.cloud = cloud
+        to_provision.kubernetes_identity = None
+        to_provision.region = region
+        to_provision.cluster_config_overrides = task_config or {}
+        to_provision.make_deploy_variables.return_value = {}
+        excluded = []
+
+        def capture(excluded_clouds):
+            excluded.append(excluded_clouds)
+            raise _CredentialsChosen()
+
+        with mock.patch('sky.check.get_cloud_credential_file_mounts',
+                        side_effect=capture), \
+                skypilot_config.override_skypilot_config(client_config), \
+                pytest.raises(_CredentialsChosen):
+            backend_utils.write_cluster_config(
+                to_provision=to_provision,
+                num_nodes=1,
+                cluster_config_template='kubernetes-ray.yml.j2',
+                cluster_name='c-1',
+                local_wheel_path=mock.MagicMock(),
+                wheel_hash='h',
+                region=clouds.Region(name=region),
+                zones=None,
+                dryrun=True)
+        return kubernetes_cloud.Kubernetes.uploads_kubeconfig(excluded[0])
+
+    @pytest.mark.parametrize('layer', [
+        dict(task_config=_k8s(remote_identity=_LC)),
+        dict(client_config=_k8s(remote_identity=_LC)),
+        dict(client_config=_per_context(_LC)),
+    ],
+                             ids=['task', 'client', 'client-context'])
+    def test_a_non_admin_cannot_turn_on_local_credentials(
+            self, server_config, caller, layer):
+        server_config({})
+        caller(False)
+        with pytest.raises(exceptions.InvalidCloudConfigs,
+                           match='only an admin'):
+            self._launch(**layer)
+
+    def test_an_admin_can(self, server_config, caller):
+        server_config({})
+        caller(True)
+        assert self._launch(task_config=_k8s(remote_identity=_LC))
+
+    def test_a_non_admin_keeps_what_the_server_set(self, server_config, caller):
+        server_config(_k8s(remote_identity=_LC))
+        caller(False)
+        assert self._launch(task_config=_k8s(remote_identity=_LC))
+
+    @pytest.mark.parametrize('identity', ['SERVICE_ACCOUNT', 'named-sa'])
+    def test_other_identities_upload_nothing(self, server_config, caller,
+                                             identity):
+        server_config({})
+        caller(False)
+        assert not self._launch(task_config=_k8s(remote_identity=identity))
+
+    def test_ssh_node_pools_share_the_kubeconfig(self, server_config, caller):
+        server_config({})
+        caller(False)
+        with pytest.raises(exceptions.InvalidCloudConfigs,
+                           match='only an admin'):
+            self._launch(cloud=clouds.SSH(),
+                         region='ssh-pool',
+                         task_config={'ssh': {
+                             'remote_identity': _LC
+                         }})
+
+    _SERVER_NO_UPLOAD = {
+        'kubernetes': {
+            'remote_identity': _NO_UPLOAD
+        },
+        'ssh': {
+            'remote_identity': _NO_UPLOAD
+        },
+    }
+
+    # SSH's NO_UPLOAD is the one that keeps the shared kubeconfig off a VM.
+    _CLIENT_SSH_SA = {'ssh': {'remote_identity': 'SERVICE_ACCOUNT'}}
+
+    def test_a_non_admin_cannot_undo_no_upload_on_a_vm(self, server_config,
+                                                       caller):
+        server_config(self._SERVER_NO_UPLOAD)
+        caller(False)
+        with pytest.raises(exceptions.InvalidCloudConfigs, match='NO_UPLOAD'):
+            self._launch(cloud=clouds.AWS(),
+                         region='us-east-1',
+                         client_config=self._CLIENT_SSH_SA)
+
+    def test_an_admin_can_undo_no_upload_on_a_vm(self, server_config, caller):
+        server_config(self._SERVER_NO_UPLOAD)
+        caller(True)
+        assert self._launch(cloud=clouds.AWS(),
+                            region='us-east-1',
+                            client_config=self._CLIENT_SSH_SA)
+
+    def test_a_vm_without_no_upload_gets_the_kubeconfig_as_before(
+            self, server_config, caller):
+        server_config({})
+        caller(False)
+        assert self._launch(cloud=clouds.AWS(), region='us-east-1')
+
+    def test_a_controller_is_not_asked(self, server_config, monkeypatch):
+        """Off the API server the request was authorized already."""
+        server_config({})
+        monkeypatch.delenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, raising=False)
+        monkeypatch.setattr(permission, 'is_admin', lambda user_id: False)
+        assert self._launch(task_config=_k8s(remote_identity=_LC))
+
+    def test_the_refusal_survives_the_failover_loop(self, server_config,
+                                                    caller):
+        """It is reported as a config error, not as no resources found."""
+        server_config({})
+        caller(False)
+        with pytest.raises(exceptions.InvalidCloudConfigs) as refusal:
+            self._launch(task_config=_k8s(remote_identity=_LC))
+        provisioner = backends.cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            backends.cloud_vm_ray_backend.RetryingVmProvisioner)
+        provisioner._blocked_resources = set()  # pylint: disable=protected-access
+        provisioner._extra_launch_context = None  # pylint: disable=protected-access
+        provisioner._is_launched_by_jobs_controller = False  # pylint: disable=protected-access
+        provisioner.log_dir = '/tmp'
+        provisioner._local_wheel_path = mock.MagicMock()  # pylint: disable=protected-access
+        provisioner._wheel_hash = 'h'  # pylint: disable=protected-access
+        to_provision = mock.MagicMock()
+        to_provision.region = _CTX
+        setattr(to_provision, 'assert_launchable', lambda: to_provision)
+        to_provision.cloud.check_quota_available.return_value = True
+        to_provision.cloud.yield_cloud_specific_failover_overrides.return_value = [
+            None
+        ]
+        with mock.patch.object(provisioner, '_yield_zones',
+                               return_value=iter([None])), \
+                mock.patch.object(backends.cloud_vm_ray_backend,
+                                  '_get_cluster_config_template',
+                                  return_value='t.j2'), \
+                mock.patch('sky.provision.get_registered_provisioner',
+                           return_value=None), \
+                mock.patch.object(backend_utils, 'write_cluster_config',
+                                  side_effect=refusal.value), \
+                pytest.raises(exceptions.ResourcesUnavailableError,
+                              match='only an admin'):
+            provisioner._retry_zones(  # pylint: disable=protected-access
+                to_provision,
+                1,
+                requested_resources=set(),
+                dryrun=True,
+                stream_logs=False,
+                cluster_name='c-1',
+                cloud_user_identity=None,
+                prev_cluster_status=None,
+                prev_handle=None,
+                prev_cluster_ever_up=False,
+                skip_if_config_hash_matches=None,
+                volume_mounts=None,
+                task=mock.MagicMock())
+
+
+class TestKubeconfigUploadCheckedAtSubmit:
+    """jobs launch / serve up refuse it too: on the controller the request's
+    config is the server config, so the launch can no longer tell."""
+
+    def _check(self, client_config=None, task_config=None):
+        task = mock.MagicMock()
+        resources = _resources(task_config)
+        resources.cloud = _K8S
+        task.resources = [resources]
+        with mock.patch.object(kubernetes_cloud.Kubernetes,
+                               'existing_allowed_contexts',
+                               return_value=[_CTX]), \
+                mock.patch.object(clouds.SSH, 'existing_allowed_contexts',
+                                  return_value=[]), \
+                skypilot_config.override_skypilot_config(client_config):
+            kubernetes_cloud.Kubernetes.check_request_keeps_server_identity()
+            kubernetes_cloud.Kubernetes.check_task_keeps_server_identity(task)
+
+    @pytest.mark.parametrize('layer', [
+        dict(client_config=_per_context(_LC)),
+        dict(task_config=_k8s(remote_identity=_LC)),
+    ],
+                             ids=['client', 'task'])
+    @pytest.mark.parametrize('is_admin', [False, True])
+    def test_local_credentials(self, server_config, caller, layer, is_admin):
+        server_config({})
+        caller(is_admin)
+        if is_admin:
+            self._check(**layer)
+        else:
+            with pytest.raises(exceptions.InvalidCloudConfigs,
+                               match='kubeconfig'):
+                self._check(**layer)
+
+    def test_no_upload_undone(self, server_config, caller):
+        server_config(TestKubeconfigUploadNeedsAdmin._SERVER_NO_UPLOAD)  # pylint: disable=protected-access
+        caller(False)
+        with pytest.raises(exceptions.InvalidCloudConfigs, match='kubeconfig'):
+            self._check(
+                client_config={'ssh': {
+                    'remote_identity': 'SERVICE_ACCOUNT'
+                }})
+        self._check()
+
+    def test_nothing_loosened(self, server_config, caller):
+        server_config({})
+        caller(False)
+        self._check(client_config=_k8s(remote_identity='SERVICE_ACCOUNT'))

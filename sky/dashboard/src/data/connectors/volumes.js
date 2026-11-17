@@ -63,12 +63,16 @@ export async function getVolumes() {
   }
 }
 
-export async function deleteVolume(volumeName, { purge = false } = {}) {
+export async function deleteVolume(
+  volumeName,
+  { purge = false, noCleanup = false } = {}
+) {
   let msg = '';
   try {
     const response = await apiClient.post('/volumes/delete', {
       names: [volumeName],
       purge,
+      no_cleanup: noCleanup,
     });
     if (!response.ok) {
       console.error(

@@ -1700,6 +1700,31 @@ def _policy_lock() -> Generator[None, None, None]:
 permission_service = PermissionService()
 
 
+def is_admin(user_id: str) -> bool:
+    """Whether `user_id` holds exactly the admin role.
+
+    An unknown role or a failed lookup is not admin.
+    """
+    try:
+        roles = permission_service.get_user_roles(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to look up roles of {user_id}; '
+                       f'treating as non-admin: {e}')
+        return False
+    return roles == [rbac.RoleName.ADMIN.value]
+
+
+def caller_is_admin() -> bool:
+    """Whether the user behind the current request is an admin.
+
+    Off the API server (e.g. on a controller) the request was authorized on
+    the server already.
+    """
+    if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    return is_admin(common_utils.get_current_user().id)
+
+
 def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:
     """Reload config, then set up policies for a newly-created user.
 
