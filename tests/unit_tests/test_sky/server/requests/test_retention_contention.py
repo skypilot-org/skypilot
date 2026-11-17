@@ -244,6 +244,35 @@ async def test_shared_backend_releases_role_on_error(shared, gc_lock,
         pass
 
 
+class _LostRole:
+    """An elector that wins the bid and fails every renewal."""
+    renew_interval_seconds = 0.
+
+    def __init__(self):
+        self.released = False
+
+    def try_acquire(self):
+        return True
+
+    def renew(self):
+        return False
+
+    def release(self):
+        self.released = True
+
+
+@pytest.mark.asyncio
+async def test_shared_backend_stops_when_role_is_lost(shared, monkeypatch):
+    for request_id in ('a', 'b', 'c'):
+        insert(shared, request_id)
+    role = _LostRole()
+    monkeypatch.setattr(requests.leader_election, 'get_elector',
+                        lambda *args, **kwargs: role)
+    await requests.clean_finished_requests_with_retention(0, batch_size=1)
+    assert len(remaining(shared)) == 2
+    assert role.released
+
+
 @pytest.mark.asyncio
 async def test_unshared_backend_deletes_regardless_of_role(retention, gc_lock):
     db, _ = retention

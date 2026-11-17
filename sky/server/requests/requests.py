@@ -15,8 +15,8 @@ import stat
 import threading
 import time
 import traceback
-from typing import (Any, AsyncIterator, Callable, Dict, Generator, List,
-                    NamedTuple, NoReturn, Optional, Set, Tuple)
+from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generator,
+                    List, NamedTuple, NoReturn, Optional, Set, Tuple)
 import uuid
 
 import anyio
@@ -79,8 +79,6 @@ DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 _REQUESTS_GC_INTERVAL_SECONDS = 3600  # 1 hour
 # Must be the same on every API server that shares the request backend.
 _REQUESTS_GC_LOCK_ID = 'requests_gc'
-# A pass does not renew its leader lease, so the lease must outlast the pass.
-_REQUESTS_GC_LEASE_SECONDS = _REQUESTS_GC_INTERVAL_SECONDS
 # File locks are thread-local: acquire and release on this one thread.
 _requests_gc_lock_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=1, thread_name_prefix='requests-gc-lock')
@@ -1508,31 +1506,50 @@ async def _clean_orphan_request_logs() -> None:
                     f'{removed_bytes} bytes freed')
 
 
+_StillLeading = Callable[[], Awaitable[bool]]
+
+
+async def _always_leading() -> bool:
+    return True
+
+
 def _try_lead_requests_gc() -> Optional[leader_election.LeaderElector]:
-    elector = leader_election.get_elector(
-        _REQUESTS_GC_LOCK_ID, ttl_seconds=_REQUESTS_GC_LEASE_SECONDS)
+    elector = leader_election.get_elector(_REQUESTS_GC_LOCK_ID)
     return elector if elector.try_acquire() else None
 
 
 @contextlib.asynccontextmanager
-async def _requests_gc_role() -> AsyncIterator[bool]:
-    """Yield whether this server deletes expired requests in this pass.
+async def _requests_gc_role() -> AsyncIterator[Optional[_StillLeading]]:
+    """Yield a check that this server still deletes expired requests.
 
     Servers that share the request backend take turns: while one of them
-    deletes, the others yield False instead of deleting the same rows.
+    holds the role, the others get None instead of deleting the same rows.
     """
     if not request_storage.get_request_backend().shared_across_servers:
-        yield True
+        yield _always_leading
         return
     loop = asyncio.get_running_loop()
     elector = await loop.run_in_executor(_requests_gc_lock_executor,
                                          _try_lead_requests_gc)
+    if elector is None:
+        yield None
+        return
+    renewed_at = time.monotonic()
+
+    async def still_leading() -> bool:
+        nonlocal renewed_at
+        if time.monotonic() - renewed_at < elector.renew_interval_seconds:
+            return True
+        if not await loop.run_in_executor(_requests_gc_lock_executor,
+                                          elector.renew):
+            return False
+        renewed_at = time.monotonic()
+        return True
+
     try:
-        yield elector is not None
+        yield still_leading
     finally:
-        if elector is not None:
-            await loop.run_in_executor(_requests_gc_lock_executor,
-                                       elector.release)
+        await loop.run_in_executor(_requests_gc_lock_executor, elector.release)
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,
@@ -1560,12 +1577,13 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     """
     if batch_size <= 0:
         raise ValueError('batch_size must be positive')
-    async with _requests_gc_role() as deletes_rows:
-        if deletes_rows:
-            await _delete_expired_requests(retention_seconds, batch_size)
-        else:
+    async with _requests_gc_role() as still_leading:
+        if still_leading is None:
             logger.info('Skipped deleting finished requests: another API '
                         'server is deleting them.')
+        else:
+            await _delete_expired_requests(retention_seconds, batch_size,
+                                           still_leading)
 
     # Try to clean up the legacy directory if it's empty
     # TODO Remove this on or after v0.15.0
@@ -1574,9 +1592,13 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     await _clean_orphan_request_logs()
 
 
-async def _delete_expired_requests(retention_seconds: int,
-                                   batch_size: int) -> None:
-    """Delete expired finished requests and their log files on this server."""
+async def _delete_expired_requests(retention_seconds: int, batch_size: int,
+                                   still_leading: _StillLeading) -> None:
+    """Delete expired finished requests and their log files on this server.
+
+    Stops early once ``still_leading`` reports that another server may have
+    taken over the deletion.
+    """
     # Do not expand the retention window while draining a backlog.
     cutoff = time.time() - retention_seconds
     started = time.monotonic()
@@ -1616,6 +1638,10 @@ async def _delete_expired_requests(retention_seconds: int,
         await _delete_requests([req.request_id for req in reqs])
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
+            break
+        if not await still_leading():
+            logger.warning('Stopped deleting finished requests: this server '
+                           'no longer holds the requests GC role.')
             break
 
     # To avoid leakage of the log file, logs must be deleted before the
