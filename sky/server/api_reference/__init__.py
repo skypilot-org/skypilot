@@ -12,7 +12,6 @@ from sky.server.api_reference.extensions import Extension
 from sky.server.api_reference.extensions import register
 from sky.server.api_reference.routes import CATALOG_LINK
 from sky.server.api_reference.routes import router
-from sky.server.api_reference.routes import ROUTES
 from sky.server.api_reference.schema import Submission
 from sky.server.api_reference.visibility import Rule
 from sky.server.api_reference.visibility import Visibility
@@ -21,7 +20,6 @@ __all__ = [
     'CATALOG_LINK',
     'Extension',
     'register',
-    'ROUTES',
     'router',
     'Rule',
     'Submission',

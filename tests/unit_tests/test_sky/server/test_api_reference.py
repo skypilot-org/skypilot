@@ -1,6 +1,5 @@
 """Tests for the public API reference."""
 
-import ast
 import json
 import logging
 import re
@@ -224,20 +223,18 @@ def test_build_passes_background_operations_to_extensions():
 
     def annotate(operation: Dict[str, Any],
                  submission: schema.Submission) -> None:
-        names = {
-            keyword.value.attr
-            for call in submission.calls
-            for keyword in call.keywords
-            if keyword.arg == 'request_name' and
-            isinstance(keyword.value, ast.Attribute)
-        }
-        seen.append(names)
+        seen.append(dict(submission.keywords))
         operation['x-test'] = submission.has_body
 
     extensions.register('test', extensions.Extension(annotate=annotate))
     paths = schema.build(_app(), '')['paths']
 
-    assert seen == [{'CLUSTER_LAUNCH'}]
+    assert seen == [{
+        'request_id': 'request.state.request_id',
+        'request_name': 'request_names.RequestName.CLUSTER_LAUNCH',
+        'request_body': 'payloads.RequestBody()',
+        'func': '_users',
+    }]
     assert paths['/launch']['post']['x-test'] is False
     assert 'x-test' not in paths['/users/list']['get']
 

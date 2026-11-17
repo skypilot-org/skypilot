@@ -17,7 +17,7 @@ from sky.server.api_reference import extensions
 from sky.server.api_reference import visibility
 
 REQUEST_ID_HEADER = 'X-Skypilot-Request-ID'
-SCHEMA_REF = '#/components/schemas/'
+_SCHEMA_REF = '#/components/schemas/'
 
 _NO_BODY = (None, type(None), 'None', inspect.Signature.empty)
 
@@ -34,10 +34,12 @@ class Submission:
     Attributes:
         has_body: Whether the response has a JSON body besides the request ID
             header.
-        calls: Every call in the source of the operation's handler.
+        keywords: The keyword arguments of every call in the operation's
+            handler, as (name, source text) in source order, e.g.
+            ``('request_name', 'request_names.RequestName.CLUSTER_LAUNCH')``.
     """
     has_body: bool
-    calls: Tuple[ast.Call, ...]
+    keywords: Tuple[Tuple[str, str], ...]
 
 
 def _return_annotation(endpoint: Any) -> Any:
@@ -75,7 +77,8 @@ def _submission(route: Any) -> Optional[Submission]:
     scheduling call, or passes the request itself to a scheduling helper.
     """
     try:
-        tree = ast.parse(textwrap.dedent(inspect.getsource(route.endpoint)))
+        source = textwrap.dedent(inspect.getsource(route.endpoint))
+        tree = ast.parse(source)
     except (OSError, TypeError, SyntaxError):
         return None
     calls = tuple(node for node in ast.walk(tree) if isinstance(node, ast.Call))
@@ -105,7 +108,11 @@ def _submission(route: Any) -> Optional[Submission]:
     return Submission(
         has_body=(route.response_model is not None or
                   annotation not in _NO_BODY),
-        calls=calls,
+        keywords=tuple(
+            (keyword.arg, ast.get_source_segment(source, keyword.value) or '')
+            for call in calls
+            for keyword in call.keywords
+            if keyword.arg is not None),
     )
 
 
@@ -128,8 +135,8 @@ def _mark_submitting(operation: Dict[str, Any], submission: Submission) -> None:
 def _collect_refs(node: Any, out: Set[str]) -> None:
     if isinstance(node, dict):
         ref = node.get('$ref')
-        if isinstance(ref, str) and ref.startswith(SCHEMA_REF):
-            out.add(ref[len(SCHEMA_REF):])
+        if isinstance(ref, str) and ref.startswith(_SCHEMA_REF):
+            out.add(ref[len(_SCHEMA_REF):])
         for value in node.values():
             _collect_refs(value, out)
     elif isinstance(node, list):

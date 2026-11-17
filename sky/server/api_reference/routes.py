@@ -5,7 +5,6 @@ import hashlib
 import json
 import pathlib
 import re
-import threading
 from typing import Optional, Tuple
 
 import fastapi
@@ -51,17 +50,12 @@ _BLANK_LINES = re.compile(r'\n{3,}')
 
 router = fastapi.APIRouter(include_in_schema=False)
 
-_lock = threading.Lock()
-_openapi_body: Optional[bytes] = None
-
 
 def _slot_text(name: str) -> str:
     if name == 'request_headers':
         return '\n'.join(
             f'{header}: {value}'
             for header, value in extensions.request_headers().items())
-    if name not in extensions.GUIDE_SLOTS:
-        raise ValueError(f'Unknown API reference guide slot: {name}')
     return extensions.guide_slot(name)
 
 
@@ -109,16 +103,16 @@ def api_catalog() -> fastapi.Response:
     )
 
 
+@functools.lru_cache(maxsize=None)
+def _openapi_body(app: fastapi.FastAPI) -> bytes:
+    return json.dumps(schema.build(app, guide())).encode()
+
+
 # Sync handlers run in the threadpool: the first build reads the whole app
 # schema, which takes about a second.
 @router.get(OPENAPI_PATH)
 def openapi_document(request: fastapi.Request) -> fastapi.Response:
-    global _openapi_body
-    with _lock:
-        if _openapi_body is None:
-            document = schema.build(request.app, guide())
-            _openapi_body = json.dumps(document).encode()
-    return fastapi.Response(content=_openapi_body,
+    return fastapi.Response(content=_openapi_body(request.app),
                             media_type='application/json')
 
 
@@ -210,8 +204,6 @@ ROUTES: Tuple[Tuple[str, str], ...] = tuple(
 
 def clear_caches() -> None:
     """Forgets the rendered guide, page script and OpenAPI document."""
-    global _openapi_body
-    with _lock:
-        _openapi_body = None
+    _openapi_body.cache_clear()
     guide.cache_clear()
     _init_script.cache_clear()
