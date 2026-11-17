@@ -6,18 +6,23 @@
 Installation
 ============
 
-SkyPilot can be set up with the steps below, or ask your agents to do so:
+SkyPilot can be set up with the steps below, or you can ask your AI agent (Claude Code, Codex, etc.) to do it for you:
 
 .. code-block:: text
 
-   Read https://docs.skypilot.ai/en/latest/getting-started/installation.html.md and walk me through SkyPilot setup.
+   Read https://docs.skypilot.ai/en/latest/getting-started/installation.html.md and set up SkyPilot for me, including the SkyPilot skill.
+
+.. note::
+
+   **For AI agents:** do all of the following, in order, unless the user says otherwise. Do not stop after installing the CLI.
+
+   1. `Install SkyPilot <#install-skypilot>`__.
+   2. `Install the SkyPilot skill <#install-skypilot-skill>`__. This is part of the default setup. Skip it only if the user declines.
+   3. `Connect to the team's API server, or set up cloud credentials <#run-locally-or-connect-to-a-remote-api-server>`__ if running locally.
+   4. `Verify <#verify-cloud-access>`__ with ``sky api info`` and ``sky check``.
 
 Install SkyPilot
 ----------------
-
-.. tip::
-
-   To use SkyPilot with AI agent (Claude Code, Codex, etc.), install :ref:`SkyPilot Skill <skill>` to give your agent full SkyPilot expertise.
 
 SkyPilot supports installation with ``uv`` or ``pip``.
 
@@ -142,6 +147,19 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
+.. _install-skill:
+
+Install SkyPilot skill
+----------------------
+
+Install the `SkyPilot skill <https://docs.skypilot.ai/en/latest/getting-started/skill.html>`__ so your AI agent knows how to launch clusters, run jobs, and serve models with SkyPilot. Tell your agent:
+
+.. code-block:: text
+
+   Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the SkyPilot skill
+
+You may need to restart the agent afterwards so it picks up the skill.
+
 Run locally or connect to a remote API server
 ---------------------------------------------
 
@@ -200,26 +218,26 @@ If your team has set up a :ref:`SkyPilot remote API server <sky-api-server>`, co
 
 .. code-block:: shell
 
-  sky api login
+  sky api login -e <API_SERVER_ENDPOINT>
 
 There is no need to install any dependencies locally.
+
+.. tip::
+
+  On a machine without a browser (an SSH session, a container, or an AI agent), add ``--no-browser``:
+
+  .. code-block:: shell
+
+    sky api login -e <API_SERVER_ENDPOINT> --no-browser
+
+  SkyPilot prints a URL. Open it in a browser on any device and click **Authorize**; the command finishes once you do.
+  It waits up to 5 minutes, so an AI agent should run it in the background, show the URL to the user, and wait for it to exit.
 
 See :ref:`sky-api-server-connect` for more details.
 
 **To deploy a remote API server:**
 
 See :ref:`sky-api-server-deploy` for detailed instructions on how to deploy a remote API server.
-
-.. _install-skill:
-
-Install SkyPilot skill
-----------------------
-
-Install the :ref:`SkyPilot Skill <skill>` to give your AI agent full SkyPilot expertise. Simply use this prompt:
-
-.. code-block:: text
-
-   Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the SkyPilot skill
 
 .. _verify-cloud-access:
 
