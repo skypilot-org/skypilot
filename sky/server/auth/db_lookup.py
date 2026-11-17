@@ -344,6 +344,27 @@ def jwt_secret_unavailable_response(
         })
 
 
+def db_unavailable_response(
+        request: fastapi.Request) -> fastapi.responses.JSONResponse:
+    """503 for service-account auth whose token lookup raised a DB error.
+
+    Not a 401, for the reason `jwt_secret_unavailable_response` gives: the
+    database failed, not the token. Not `db_timeout_response` either: the
+    lookup did not time out, the database raised an error instead of
+    answering (a dropped or refused connection, for example).
+    """
+    _mark(request, middleware_utils.REJECT_REASON_AUTH_DB_UNAVAILABLE)
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
+        content={
+            'detail': ('Service account authentication is temporarily '
+                       'unavailable: the server database could not be '
+                       'reached. Your token was not rejected -- please try '
+                       'again.')
+        })
+
+
 def worker_exhausted_response(
     request: Optional[fastapi.Request] = None
 ) -> fastapi.responses.JSONResponse:
