@@ -17,6 +17,10 @@ include sky/templates/*
 include sky/utils/kubernetes/*
 include sky/ssh_node_pools/deploy/tunnel/*
 include sky/server/html/*
+include sky/server/api_reference/*.md
+include sky/server/api_reference/*.html
+include sky/server/api_reference/*.js
+include sky/server/api_reference/swagger_ui/*
 recursive-include sky/dashboard/out *
 include sky/users/*.conf
 include sky/utils/*.sh

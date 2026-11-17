@@ -65,6 +65,7 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
+from sky.server import api_reference
 from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
@@ -1398,7 +1399,11 @@ class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
             versions.get_local_readable_version())
 
 
-app = fastapi.FastAPI(debug=True, lifespan=lifespan)
+# api_reference serves the documentation pages instead of FastAPI's own.
+app = fastapi.FastAPI(debug=True,
+                      lifespan=lifespan,
+                      docs_url=None,
+                      redoc_url=None)
 # Middleware wraps in the order defined here. E.g., given
 #   app.add_middleware(Middleware1)
 #   app.add_middleware(Middleware2)
@@ -1502,6 +1507,7 @@ app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
 app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
+app.include_router(api_reference.router)
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
@@ -3747,12 +3753,14 @@ async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     # response_model_exclude_unset omits unset fields
     # in the response JSON.
     response_model_exclude_unset=True)
-async def health(request: fastapi.Request) -> responses.APIHealthResponse:
+async def health(request: fastapi.Request,
+                 response: fastapi.Response) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
         responses.APIHealthResponse: The health response.
     """
+    response.headers.append('Link', api_reference.CATALOG_LINK)
     user = request.state.auth_user
     server_status = common.ApiServerStatus.HEALTHY
     if getattr(request.state, 'anonymous_user', False):
