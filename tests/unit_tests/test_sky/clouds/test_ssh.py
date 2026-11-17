@@ -670,12 +670,17 @@ def test_workspace_contexts_union_readable_workspaces_only():
         ('ws-b', 'ssh'): {'ssh-b'},
         ('ws-c', 'ssh'): {'ssh-c'},
     }
-    with patch('sky.skypilot_config.get_nested', return_value=workspaces), \
+    with patch('sky.skypilot_config.get_nested',
+               side_effect=lambda keys, default_value=None: workspaces
+               if keys == ('workspaces',) else default_value), \
+         patch('sky.utils.common_utils.get_current_user',
+               return_value=mock.Mock(id='alice-id')), \
          patch('sky.workspaces.core.workspaces_for_user',
-               return_value={'ws-a': {}, 'ws-b': {}}), \
+               return_value={'ws-a': {}, 'ws-b': {}}) as mock_workspaces, \
          patch('sky.workspaces.visibility._workspace_targets',
                side_effect=lambda ws, cloud: targets.get((ws, cloud), set())):
         assert core.get_workspace_contexts() == ['k8s-1', 'ssh-a', 'ssh-b']
+    mock_workspaces.assert_called_once_with('alice-id')
     with patch.object(ssh.SSH,
                       'get_ssh_node_pool_contexts',
                       return_value=['ssh-a', 'ssh-b']), \

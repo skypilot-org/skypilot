@@ -4413,7 +4413,9 @@ async def all_contexts(request: fastapi.Request) -> None:
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
         request_body=payloads.RequestBody(),
-        func=core.get_workspace_contexts,
+        # Without an authenticated user nothing is scoped.
+        func=(core.get_all_contexts if request.state.auth_user is None else
+              core.get_workspace_contexts),
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
