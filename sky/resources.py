@@ -249,6 +249,9 @@ class Resources:
             - recover_on_exit_codes: a list of exit codes that should trigger
               job recovery. If any task exits with a code in this list, the job
               will be recovered regardless of max_restarts_on_errors limit.
+            - try_other_locations_first: with EAGER_NEXT_REGION, relaunch
+              outside the region (spot) or zone (on-demand) where the job
+              recently failed before trying anywhere. Defaults to False.
 
           region: the region to use. Deprecated. Use `infra` instead.
           zone: the zone to use. Deprecated. Use `infra` instead.
@@ -1506,14 +1509,20 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self._job_recovery is None or self._job_recovery['strategy'] is None:
+        if self._job_recovery is None:
             return
+        strategy_registry = registry.JOBS_RECOVERY_STRATEGY_REGISTRY
+        strategy = self._job_recovery['strategy']
+        if strategy is None:
+            if not self._job_recovery.get('try_other_locations_first'):
+                return
+            # Filled in after this check; a plugin can change the default.
+            strategy = strategy_registry.default
         # Validate the job recovery strategy
-        assert isinstance(self._job_recovery['strategy'],
+        assert isinstance(strategy,
                           str), 'Job recovery strategy must be a string'
         try:
-            registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
-                self._job_recovery['strategy'])
+            strategy_cls = strategy_registry.from_str(strategy)
         except ValueError:
             # On the server side, plugins are loaded before validation,
             # so all valid strategies are in the registry. Re-raise to
@@ -1522,6 +1531,21 @@ class Resources:
             # registered, so we pass to let the server validate.
             if annotations.is_on_api_server:
                 raise
+            strategy_cls = None
+        # Only EAGER_NEXT_REGION and its subclasses read the flag. Others
+        # would ignore it silently.
+        if (self._job_recovery.get('try_other_locations_first') and
+                strategy_cls is not None):
+            eager_cls = strategy_registry.from_str('EAGER_NEXT_REGION')
+            assert eager_cls is not None  # Built in, so always registered.
+            if not issubclass(strategy_cls, eager_cls):
+                default = ('' if self._job_recovery['strategy'] else
+                           ', the default')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'job_recovery.try_other_locations_first needs the '
+                        f'EAGER_NEXT_REGION strategy, not {strategy.upper()}'
+                        f'{default}.')
 
     def extract_docker_image(self) -> Optional[str]:
         if self._docker_image is not None:

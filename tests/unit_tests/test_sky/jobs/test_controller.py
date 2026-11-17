@@ -2388,7 +2388,9 @@ class TestUserJobFailureRecoveryEventReason:
     async def _run_recovery(self,
                             controller,
                             executor,
-                            cluster_status=status_lib.ClusterStatus.UP):
+                            cluster_status=status_lib.ClusterStatus.UP,
+                            job_status=job_lib.JobStatus.FAILED,
+                            **monitor_kwargs):
         """Drive _monitor_one_task through one failed-job iteration up to
         set_recovering_async, returning its call kwargs."""
         mock_task = MagicMock()
@@ -2404,8 +2406,7 @@ class TestUserJobFailureRecoveryEventReason:
              patch('sky.backends.backend_utils.async_check_network_connection',
                    new=AsyncMock()), \
              patch('sky.jobs.utils.get_job_status',
-                   new=AsyncMock(
-                       return_value=(job_lib.JobStatus.FAILED, None))), \
+                   new=AsyncMock(return_value=(job_status, None))), \
              patch('sky.jobs.utils.try_to_get_job_end_time',
                    return_value=12345.0), \
              patch('sky.backends.backend_utils.refresh_cluster_status_handle',
@@ -2425,6 +2426,7 @@ class TestUserJobFailureRecoveryEventReason:
                     cluster_name='test-cluster',
                     executor=executor,
                     callback_func=MagicMock(),
+                    **monitor_kwargs,
                 )
 
         mock_set_recovering.assert_awaited_once()
@@ -2482,6 +2484,66 @@ class TestUserJobFailureRecoveryEventReason:
             controller, executor, cluster_status=status_lib.ClusterStatus.INIT)
 
         assert kwargs['user_job_failure_reason'] is None
+
+    @pytest.mark.parametrize(
+        'cluster_status,job_status,forced,recover_on_exit_codes,expected', [
+            pytest.param(status_lib.ClusterStatus.UP,
+                         job_lib.JobStatus.FAILED,
+                         False,
+                         None,
+                         False,
+                         id='user-program-failed'),
+            pytest.param(status_lib.ClusterStatus.UP,
+                         job_lib.JobStatus.FAILED,
+                         False, [1],
+                         False,
+                         id='recover-on-exit-codes'),
+            pytest.param(status_lib.ClusterStatus.INIT,
+                         job_lib.JobStatus.FAILED,
+                         False,
+                         None,
+                         True,
+                         id='cluster-preempted'),
+            pytest.param(status_lib.ClusterStatus.UP,
+                         None,
+                         False,
+                         None,
+                         True,
+                         id='job-unreachable-on-up-cluster'),
+            pytest.param(status_lib.ClusterStatus.INIT,
+                         job_lib.JobStatus.FAILED,
+                         True,
+                         None,
+                         False,
+                         id='resumed-without-cluster-state'),
+        ])
+    @pytest.mark.asyncio
+    async def test_recover_knows_whether_the_cluster_failed(
+            self, cluster_status, job_status, forced, recover_on_exit_codes,
+            expected):
+        """An UP cluster whose job can't be reached counts as failed."""
+        controller = self._make_controller(exit_codes=[1])
+        executor = self._make_executor(
+            recover_on_exit_codes=recover_on_exit_codes)
+        seen = []
+
+        async def recover():
+            seen.append(executor.recovering_from_cluster_failure)
+            raise TestUserJobFailureRecoveryEventReason._StopLoop()
+
+        executor.recover = AsyncMock(side_effect=recover)
+        with patch.object(
+                controller_module.managed_job_state,
+                'get_job_status_with_task_id_async',
+                new=AsyncMock(
+                    return_value=managed_job_state.ManagedJobStatus.RUNNING)):
+            await self._run_recovery(controller,
+                                     executor,
+                                     cluster_status=cluster_status,
+                                     job_status=job_status,
+                                     force_transit_to_recovering=forced)
+
+        assert seen == [expected]
 
     @pytest.mark.asyncio
     async def test_recovery_capture_retains_handle_removed_by_refresh(self):

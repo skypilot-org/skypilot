@@ -17,13 +17,16 @@ import typing
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
 
 from sky import backends
+from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
+from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import file_content_utils
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
@@ -46,11 +49,11 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -85,6 +88,10 @@ MAX_JOB_CHECKING_RETRY = 10
 # managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS, to avoid tearing down the
 # cluster before its status can be updated by the job controller.
 _AUTODOWN_MINUTES = 10
+
+# How long try_other_locations_first keeps skipping a failed location: long
+# enough to cover a quick second preemption, short enough to come back later.
+_FAILED_LOCATION_SKIP_SECONDS = 60 * 60
 
 # Substrings (case-insensitive) that identify an out-of-memory failure in a
 # launch/setup exception message. The Kubernetes command runner enriches exec
@@ -352,6 +359,9 @@ class StrategyExecutor:
         self.pool = pool
         self.restart_cnt_on_failure = 0
         self.runtime_restart_cnt_on_failure = 0
+        # Set by the controller before each recover(): False if the user
+        # program failed or the controller lost track of the cluster.
+        self.recovering_from_cluster_failure = False
         self.job_id_on_pool_cluster: Optional[int] = None
         self.starting = starting
         self.starting_lock = starting_lock
@@ -2215,13 +2225,17 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
 
     This strategy is an extension of the FAILOVER strategy. Instead of waiting
     in the same region when the preemption happens, it immediately terminates
-    the cluster and relaunches it in a different region. This is based on the
+    the cluster and relaunches it wherever the optimizer picks.
+
+    With `try_other_locations_first: true`, the relaunch first skips where the
+    job recently failed. A spot preemption skips the region, based on the
     observation that the preemption is likely to happen again shortly in the
     same region, so trying other regions first is more likely to get a longer
-    running cluster.
+    running cluster. An on-demand failure skips only the zone.
 
-    Example: Assume the user has access to 3 regions, R1, R2, R3, in that price
-    order. Then the following are some possible event sequences:
+    Example with it on: Assume the user has access to 3 regions, R1, R2, R3, in
+    that price order. Then the following are some possible event sequences for
+    a spot job:
 
         R1Z1 (preempted) -> R2 (success)
 
@@ -2232,13 +2246,98 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
 
         R1Z1 (preempted) -> R2 (failed to launch) -> R3 (failed to launch)
                                                   -> R1Z1 (success)
+
+        R1Z1 (preempted) -> R2 (preempted soon after) -> R3 (success)
     """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.try_other_locations_first = False
+        # Sent by extra_launch_context() during recover()'s step 2.
+        self._blocks: Optional[List[Dict[str, Any]]] = None
+        # Recent failures: (monotonic expiry time, block, block YAML config).
+        self._failed_locations: List[Tuple[float, 'resources.Resources',
+                                           Dict[str, Any]]] = []
+
+    def set_strategy_config(self, config: dict) -> None:
+        config = dict(config)
+        self.try_other_locations_first = config.pop('try_other_locations_first',
+                                                    False)
+        super().set_strategy_config(config)
+
+    def extra_launch_context(self) -> Dict[str, Any]:
+        context = super().extra_launch_context()
+        if self._blocks:
+            key = managed_job_constants.BLOCKED_RESOURCES_LAUNCH_CONTEXT_KEY
+            context[key] = self._blocks
+        return context
+
+    async def on_resume(self, cluster_name: str) -> None:
+        await super().on_resume(cluster_name)
+        if not self.try_other_locations_first:
+            return
+        # _launch() sets this, so a restarted controller has to restore it.
+        handle = await asyncio.to_thread(
+            global_user_state.get_handle_from_cluster_name, cluster_name)
+        if isinstance(handle, backends.CloudVmRayResourceHandle):
+            self._launched_resources = handle.launched_resources
+
+    async def _locations_to_skip(self) -> List[Dict[str, Any]]:
+        """Blocks for recover()'s step 2, or [] to skip that step.
+
+        Blocks the location that just failed and those that failed in the
+        last _FAILED_LOCATION_SKIP_SECONDS. If the job was relaunched in one
+        of those, nothing else had capacity, so they are forgotten, as in
+        SkyServe's DynamicFallbackSpotPlacer.
+        """
+        if not self.try_other_locations_first:
+            return []
+        launched = self._launched_resources
+        reason = None
+        if launched is None:
+            reason = 'where the cluster ran is unknown'
+        elif self.pool is not None:
+            reason = 'the job runs on a pool'
+        elif not self.recovering_from_cluster_failure:
+            reason = 'no preemption or node failure was detected'
+        elif isinstance(launched.cloud, (clouds.Kubernetes, clouds.Slurm)):
+            # Includes SSH Node Pools. A lost pod or node is not a shortage.
+            reason = f'on {launched.cloud}, a region is a single cluster'
+        elif launched.use_spot:
+            if all(r.region == launched.region
+                   for r in self.dag.tasks[0].resources):
+                reason = f'every candidate is pinned to {launched.region}'
+        elif launched.zone is None:
+            reason = ('an on-demand cluster skips only its zone, and '
+                      f'{launched.cloud} has none')
+        elif resources_utils.need_to_query_reservations():
+            # The failed node's reservation is free again, and skipping its
+            # zone would move the job to paid capacity.
+            reason = 'reservations are configured, and the zone may hold one'
+        elif all(r.zone == launched.zone for r in self.dag.tasks[0].resources):
+            reason = f'every candidate is pinned to {launched.zone}'
+        if reason is not None:
+            logger.info('Recovering without skipping the failed location: '
+                        f'{reason}.')
+            return []
+        assert launched is not None
+        now = time.monotonic()
+        failed = [f for f in self._failed_locations if f[0] > now]
+        if any(launched.should_be_blocked_by(block) for _, block, _ in failed):
+            # Nothing outside them had capacity: start over.
+            failed = []
+        # In a thread: it can read the catalog, which may download.
+        block = await asyncio.to_thread(_location_block, launched)
+        if block is not None:
+            failed.append((now + _FAILED_LOCATION_SKIP_SECONDS, *block))
+        self._failed_locations = failed
+        return [config for _, _, config in failed]
 
     async def recover(self) -> float:
         # 1. Terminate the current cluster
-        # 2. Launch again by explicitly blocking the previously launched region
-        # (this will failover through the entire search space except the
-        # previously launched region)
+        # 2. (With try_other_locations_first) Launch again by explicitly
+        # blocking the locations where the job recently failed (this will
+        # failover through the entire search space except those locations)
         # 3. (If step 2 failed) Retry forever: Launch again with no blocked
         # locations (this will failover through the entire search space)
         #
@@ -2250,29 +2349,21 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
         await asyncio.to_thread(self._cleanup_cluster)
 
         # Step 2
-        logger.debug('Relaunch the cluster skipping the previously launched '
-                     'cloud/region.')
-        if self._launched_resources is not None:
-            task = self.dag.tasks[0]
-            requested_resources = self._launched_resources
-            if (requested_resources.region is None and
-                    requested_resources.zone is None):
-                # Optimization: We only block the previously launched region,
-                # if the requested resources does not specify a region or zone,
-                # because, otherwise, we will spend unnecessary time for
-                # skipping the only specified region/zone.
-                launched_cloud = self._launched_resources.cloud
-                launched_region = self._launched_resources.region
-                task.blocked_resources = {
-                    requested_resources.copy(cloud=launched_cloud,
-                                             region=launched_region)
-                }
+        blocks = await self._locations_to_skip()
+        if blocks:
+            skipped = ', '.join(str(b.get('infra')) for b in blocks)
+            logger.info(f'Trying to relaunch outside {skipped} first.')
+            self._blocks = blocks
+            try:
+                # One pass: on failure, step 3 retries the whole search space.
                 # Not using self.launch to avoid the retry until up logic.
-                job_submitted_at = await self._launch(raise_on_failure=False,
+                job_submitted_at = await self._launch(max_retry=1,
+                                                      raise_on_failure=False,
                                                       recovery=True)
-                task.blocked_resources = None
-                if job_submitted_at is not None:
-                    return job_submitted_at
+            finally:
+                self._blocks = None
+            if job_submitted_at is not None:
+                return job_submitted_at
 
         while True:
             # Step 3
@@ -2291,6 +2382,32 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                 continue
 
             return job_submitted_at
+
+
+def _location_block(
+    launched: 'resources.Resources'
+) -> Optional[Tuple['resources.Resources', Dict[str, Any]]]:
+    """Returns a block for `launched` and its YAML config, or None.
+
+    It covers the region for spot and the zone for on-demand. Only the fields
+    should_be_blocked_by() reads are set, so nothing else from `launched`
+    (e.g. docker login) goes into the launch request.
+    """
+    try:
+        block = resources.Resources(
+            cloud=launched.cloud,
+            region=launched.region,
+            zone=None if launched.use_spot else launched.zone,
+            instance_type=launched.instance_type,
+            accelerators=launched.accelerators,
+            use_spot=launched.use_spot)
+        return block, block.to_yaml_config()
+    except Exception as e:  # pylint: disable=broad-except
+        # E.g. the catalog dropped the instance type or failed to download.
+        # The block only orders the search, so recover without it.
+        logger.warning('Recovering without skipping the failed location: '
+                       f'{common_utils.format_exception(e)}')
+        return None
 
 
 def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:

@@ -493,6 +493,23 @@ def _check_tpu_multi_host_api_version(dag: 'sky.Dag') -> None:
                 f'{server_constants.MIN_TPU_MULTI_HOST_API_VERSION}.')
 
 
+def _check_try_other_locations_first_api_version(dag: 'sky.Dag') -> None:
+    """Raises if a task sets job_recovery.try_other_locations_first and the
+    API server is too old to know it."""
+    if not any('try_other_locations_first' in (resources.job_recovery or {})
+               for task in dag.tasks
+               for resources in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    min_version = server_constants.MIN_TRY_OTHER_LOCATIONS_FIRST_API_VERSION
+    if remote_api_version is None or remote_api_version < min_version:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'The API server does not support '
+                '`job_recovery.try_other_locations_first`; upgrade it to a '
+                f'version that supports API_VERSION >= {min_version}.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -523,6 +540,7 @@ def optimize(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_tpu_multi_host_api_version(dag)
+    _check_try_other_locations_first_api_version(dag)
     _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -665,6 +683,7 @@ def validate(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_tpu_multi_host_api_version(dag)
+    _check_try_other_locations_first_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
