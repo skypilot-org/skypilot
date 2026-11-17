@@ -65,7 +65,6 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
-from sky.server import api_reference
 from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
@@ -84,6 +83,7 @@ from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
 from sky.server import websocket_utils
+from sky.server.api_reference import routes as api_reference_rest
 from sky.server.auth import db_lookup
 from sky.server.auth import impersonation
 from sky.server.auth import loopback
@@ -1507,7 +1507,7 @@ app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
 app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
-app.include_router(api_reference.router)
+app.include_router(api_reference_rest.router)
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
@@ -3760,7 +3760,7 @@ async def health(request: fastapi.Request,
     Returns:
         responses.APIHealthResponse: The health response.
     """
-    response.headers.append('Link', api_reference.CATALOG_LINK)
+    response.headers.append('Link', api_reference_rest.CATALOG_LINK)
     user = request.state.auth_user
     server_status = common.ApiServerStatus.HEALTHY
     if getattr(request.state, 'anonymous_user', False):
