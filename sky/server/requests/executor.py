@@ -1657,6 +1657,10 @@ def stamp_request_body(request_body: payloads.RequestBody,
     impersonator = caller_usage.impersonator()
     request_body.impersonator_id = impersonator.id if impersonator else None
     request_body.impersonator_name = impersonator.name if impersonator else None
+    # Persist only the env the worker will apply: the row is kept in the DB
+    # and may hold the server's own env (bodies built on the server).
+    request_body.env_vars = _sanitize_request_env_vars(
+        request_body.env_vars, request_body.from_loopback)
     return user_id
 
 
