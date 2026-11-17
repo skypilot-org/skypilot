@@ -3309,11 +3309,18 @@ def iter_clusters_from_history(
 
 
 @metrics_lib.time_me
-def get_cluster_names_start_with(starts_with: str) -> List[str]:
+def get_cluster_names_start_with(
+        starts_with: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+    """``workspaces_filter``: None means every workspace."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(cluster_table.c.name).filter(
-            cluster_table.c.name.like(f'{starts_with}%')).all()
+        query = session.query(cluster_table.c.name).filter(
+            cluster_table.c.name.like(f'{starts_with}%'))
+        if workspaces_filter is not None:
+            query = query.filter(
+                cluster_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
     return [row[0] for row in rows]
 
 
