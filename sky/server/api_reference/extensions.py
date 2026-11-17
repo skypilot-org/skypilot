@@ -1,8 +1,7 @@
 """What plugins add to the API reference."""
 
 import dataclasses
-from typing import (Any, Callable, Dict, List, Mapping, Optional, Tuple,
-                    TYPE_CHECKING)
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sky.server.api_reference import schema
@@ -70,10 +69,6 @@ def register(extension_id: str, extension: Extension) -> None:
         raise ValueError(
             f'Unknown API reference guide slots: {sorted(unknown)}')
     _EXTENSIONS[extension_id] = extension
-
-
-def registered() -> List[Extension]:
-    return list(_EXTENSIONS.values())
 
 
 def rules() -> Tuple['visibility.Rule', ...]:
