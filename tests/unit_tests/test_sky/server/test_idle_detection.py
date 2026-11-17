@@ -97,7 +97,7 @@ class _World:
         self.saves = 0
         self.system_config = {}
         self.source_seconds = 0
-        self.relaunch_during_source_call = None
+        self.during_source_call = lambda: None
         self.now = 0
 
         original_get_nested = skypilot_config.get_nested
@@ -118,9 +118,8 @@ class _World:
                             lambda lock_id: self)
         monkeypatch.setattr(requests, 'get', self._get)
         monkeypatch.setattr(requests, 'post', self._post)
-        monkeypatch.setattr(
-            global_user_state, 'get_cluster_launch_time',
-            lambda cluster_name: self.clusters[cluster_name]['launched_at'])
+        monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                            self._get_cluster_from_name)
         monkeypatch.setattr(global_user_state, 'get_system_config',
                             self.system_config.get)
         monkeypatch.setattr(global_user_state, 'set_system_config',
@@ -184,6 +183,13 @@ class _World:
         assert exclude_managed_clusters
         return [dict(record) for record in self.clusters.values()]
 
+    def _get_cluster_from_name(self,
+                               cluster_name,
+                               include_user_info=True,
+                               summary_response=False):
+        assert not include_user_info and summary_response
+        return self.clusters.get(cluster_name)
+
     def _set_cluster_info(self, cluster_name, metadata):
         self.saves += 1
         self.clusters[cluster_name]['metadata'] = json.loads(
@@ -193,9 +199,7 @@ class _World:
         assert timeout
         self.queries.append((url, params, headers))
         self.now += self.source_seconds
-        if self.relaunch_during_source_call is not None:
-            self.clusters[
-                self.relaunch_during_source_call]['launched_at'] = self.now
+        self.during_source_call()
         if isinstance(self.source_response, Exception):
             raise self.source_response
         return self.source_response
@@ -520,17 +524,37 @@ def test_leadership_lost_during_a_source_call_stops_before_acting(world):
     assert world.system_config == marker
 
 
-def test_cluster_relaunched_during_the_source_call_is_not_reported(world):
-    """The answer describes the cluster before it was relaunched."""
+def _relaunch(world):
+    world.clusters['train']['launched_at'] = world.now + 1
+
+
+def _stop(world):
+    world.clusters['train']['status'] = status_lib.ClusterStatus.STOPPED
+
+
+def _down(world):
+    del world.clusters['train']
+
+
+@pytest.mark.parametrize('change', [_relaunch, _stop, _down])
+def test_cluster_that_changed_during_the_source_call_is_not_reported(
+        world, monkeypatch, change):
+    """The answer describes the cluster as it was when the pass read it."""
     world.add_cluster()
+    world.add_cluster('eval')
+    world.source_response = _vector(90)
     world.run_until(_WINDOW - _INTERVAL)
-    world.relaunch_during_source_call = 'train'
+    world.source_response = _vector(0)
+    calls = iter([lambda: change(world), lambda: None])
+    world.during_source_call = lambda: next(calls)()
 
-    world.run(_WINDOW)
+    info, warning = _run_and_capture_summary(world, monkeypatch, _WINDOW)
 
-    assert len(world.queries) == 1
-    assert not world.webhooks
-    assert not world.events
+    assert [webhook['cluster'] for webhook in world.webhooks] == ['eval']
+    assert len(world.events) == 1
+    info.assert_called_once_with(
+        'Idle detection pass: checked=2 idle=2 notified=1 errors=0')
+    warning.assert_not_called()
 
 
 def test_pause_is_handled_again_if_its_reset_could_not_be_saved(

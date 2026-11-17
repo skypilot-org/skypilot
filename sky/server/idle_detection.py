@@ -212,9 +212,14 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
             state.setdefault('idle_since', now)
             if now - state.get('notified_at', now - window) >= window:
                 # The answer describes the cluster as it was when this pass
-                # read it; it may have been relaunched since.
-                if global_user_state.get_cluster_launch_time(
-                        record['name']) != record['launched_at']:
+                # read it; it may have been stopped or relaunched since.
+                current = global_user_state.get_cluster_from_name(
+                    record['name'],
+                    include_user_info=False,
+                    summary_response=True)
+                if (current is None or
+                        current['status'] != status_lib.ClusterStatus.UP or
+                        current['launched_at'] != record['launched_at']):
                     return
                 try:
                     _notify(config, record, reason, state['idle_since'])
