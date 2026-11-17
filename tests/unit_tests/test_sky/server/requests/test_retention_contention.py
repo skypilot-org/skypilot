@@ -220,7 +220,6 @@ async def test_shared_backend_skips_rows_while_another_server_deletes(
         await requests.clean_finished_requests_with_retention(0)
     delete.assert_not_awaited()
     assert remaining(shared) == ['expired']
-    # Log files are local to each server, so every server still sweeps them.
     assert not orphan.exists()
 
 
