@@ -847,11 +847,8 @@ def add_or_update_user(
             if existing_user is not None:
                 return (False, user) if return_user else False
 
-        # Request authentication calls this for every request, almost always
-        # with values the row already holds. The write below locks the row
-        # until COMMIT even then, so concurrent requests of one user would
-        # queue on it; a plain read takes no lock. Write only a new or
-        # changed user.
+        # Read first: the upsert below locks the row until COMMIT even when
+        # nothing changes, which serializes concurrent requests of one user.
         row = session.execute(
             sqlalchemy.select(user_table).where(
                 user_table.c.id == user.id)).fetchone()
