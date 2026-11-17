@@ -3734,7 +3734,7 @@ When set, the API server asks the source whether each ``UP`` cluster has been id
 ``notify.webhook``
     URL that receives a ``POST`` for each idle cluster, with a JSON body of ``event`` (``idle_warning``), ``cluster``, ``user``, ``workspace``, ``reason``, ``action`` (``notify``), ``idle_since`` (Unix time) and ``deadline`` (``null``). Sent again once per ``window`` while the cluster stays idle.
 
-The check runs every 15 minutes; set ``daemons.idle-detection-daemon.interval_seconds`` to change that.
+The check runs every 15 minutes; set ``daemons.idle-detection-daemon.interval_seconds`` to change that. With several API servers, the source is still asked once per interval.
 
 Example with GPU utilization from the NVIDIA DCGM exporter on Kubernetes:
 

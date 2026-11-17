@@ -170,7 +170,7 @@ Autostop runs on the cluster and only sees SkyPilot jobs and SSH sessions, so a 
     notify:
       webhook: https://example.com/idle-clusters
 
-Every 15 minutes the API server sends the query for each ``UP`` cluster. A cluster whose result stays below ``threshold`` for the whole ``window`` gets an event in ``sky status -v`` and a ``POST`` to the webhook naming the cluster and its owner, repeated once per ``window`` while it stays idle. Clusters are not stopped.
+Every 15 minutes the API server sends the query for each ``UP`` cluster. A cluster whose result stays below ``threshold`` for the whole ``window`` gets an event in ``sky status -v`` and a ``POST`` to the webhook naming the cluster and its owner, repeated once per ``window`` while it stays idle. A second event marks the end of the idle period. Clusters are not stopped.
 
 SkyPilot does not collect the metrics or know what they mean: the query is yours, and a source that is not PromQL-compatible can be put behind ``source.http``. See :ref:`idle_detection <config-yaml-idle-detection>` for all fields.
 
