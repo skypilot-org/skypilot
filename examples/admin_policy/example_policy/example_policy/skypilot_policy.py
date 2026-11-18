@@ -716,9 +716,11 @@ class CriticalityTierPolicy(sky.AdminPolicy):
     Tasks without the label and CPU-only resources are left unchanged. If the
     task lists its resources in order of preference, the policy keeps that
     order, and in the ``standard`` tier each GPU choice is tried on spot and
-    then on-demand. Labels are matched case-insensitively. The policy rejects
-    a request whose label names an unknown tier or whose resources carry
-    different tiers.
+    then on-demand. A spot choice whose on-demand copy is also listed keeps
+    its place, so applying the policy twice gives the same result. Managed
+    jobs can apply it on the client and again on the server. Labels are
+    matched case-insensitively. The policy rejects a request whose label
+    names an unknown tier or whose resources carry different tiers.
 
     Services and pools are left unchanged. SkyServe needs all resources of a
     service to use the same capacity, and it has its own on-demand fallback
@@ -755,7 +757,16 @@ class CriticalityTierPolicy(sky.AdminPolicy):
             return sky.MutatedUserRequest(task, user_request.skypilot_config)
         mode = cls._capacity(tier)
 
-        choices = [c for r in task.resources for c in cls._choices(r, mode)]
+        # The on-demand GPU choices the task already lists, as YAML config.
+        listed_on_demand = [
+            r.copy(use_spot=False).to_yaml_config()
+            for r in task.resources
+            if r.accelerators and not r.use_spot
+        ]
+        choices = [
+            c for r in task.resources
+            for c in cls._choices(r, mode, listed_on_demand)
+        ]
         if not isinstance(task.resources, list):
             # The user gave no order, so every spot choice comes before every
             # on-demand one, and resources without GPUs come last.
@@ -778,7 +789,8 @@ class CriticalityTierPolicy(sky.AdminPolicy):
             task=task, skypilot_config=user_request.skypilot_config)
 
     @classmethod
-    def _choices(cls, r: sky.Resources, mode: str) -> List[sky.Resources]:
+    def _choices(cls, r: sky.Resources, mode: str,
+                 listed_on_demand: List[Dict]) -> List[sky.Resources]:
         """Returns the capacity choices for one resource, in order."""
         if not r.accelerators:
             return [r]
@@ -787,7 +799,13 @@ class CriticalityTierPolicy(sky.AdminPolicy):
             return [r.copy(use_spot=False, zone=zone)]
         if mode == 'spot_only':
             return [r.copy(use_spot=True)]
-        return [r.copy(use_spot=True), r.copy(use_spot=False)]
+        on_demand = r.copy(use_spot=False)
+        if r.use_spot and on_demand.to_yaml_config() in listed_on_demand:
+            # The task lists the on-demand choice itself, so it keeps its
+            # place. A list this policy built is then unchanged by a second
+            # pass.
+            return [r]
+        return [r.copy(use_spot=True), on_demand]
 
     @classmethod
     def _capacity(cls, tier: str) -> str:

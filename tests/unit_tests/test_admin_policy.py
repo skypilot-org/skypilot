@@ -1086,6 +1086,42 @@ def test_criticality_tier_policy_keeps_user_order(add_example_policy_paths,
                                         ('H100', True)]
 
 
+@pytest.mark.parametrize('ordered', [False, True])
+@pytest.mark.parametrize('tier', ['critical', 'standard', 'preemptible'])
+def test_criticality_tier_policy_applied_twice(add_example_policy_paths, task,
+                                               tier, ordered):
+    from example_policy.skypilot_policy import CriticalityTierPolicy
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+    resources = [
+        sky.Resources(accelerators={gpu: 1}, labels={'criticality': tier})
+        for gpu in ('A100', 'H100')
+    ] + [sky.Resources(cpus='8+', labels={'criticality': tier})]
+    task.set_resources(resources if ordered else set(resources))
+
+    def apply(t):
+        with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                               ('preemptible',)):
+            dag, _ = _load_task_and_apply_policy(t, config_path)
+        return dag.tasks[0]
+
+    def choices(t):
+        found = [(list(r.accelerators)[0] if r.accelerators else 'cpu',
+                  r.use_spot) for r in t.resources]
+        # A set has no order to compare.
+        return found if isinstance(t.resources, list) else sorted(found)
+
+    # Managed jobs apply the policy on the client, then again on the server
+    # after the task is sent as YAML. The second pass must keep the order.
+    once = apply(task)
+    first = choices(once)
+    twice = apply(sky.Task.from_yaml_config(once.to_yaml_config()))
+    assert choices(twice) == first
+    assert isinstance(twice.resources, type(once.resources))
+    if tier == 'standard' and not ordered:
+        # Every spot choice still comes before every on-demand one.
+        assert [spot for _, spot in first] == [True, True, False, False, False]
+
+
 @pytest.mark.parametrize('pool', [False, True])
 def test_criticality_tier_policy_leaves_services_unchanged(
         add_example_policy_paths, pool):
