@@ -289,7 +289,9 @@ class TestServeAndPoolDown:
                                                 input='\n')
         assert not result.exception, result.output
         assert 'Terminating 1 service: own. Proceed? [Y/n]' in result.output
-        services.assert_called_once()
+        services.assert_called_once_with(service_names=['own'],
+                                         all=False,
+                                         purge=False)
 
     def test_pattern_stays_in_the_workspace_exact_name_does_not(
             self, services, monkeypatch):
@@ -299,7 +301,33 @@ class TestServeAndPoolDown:
                                                 input='\n')
         assert not result.exception, result.output
         assert 'Terminating 2 services: own-b, own.' in result.output
-        services.assert_called_once()
+        services.assert_called_once_with(service_names=['own-b', 'own'],
+                                         all=False,
+                                         purge=False)
+
+    def test_exact_name_that_matches_nothing_is_still_sent(
+            self, services, monkeypatch):
+        self._role(monkeypatch, 'user')
+        result = cli_testing.CliRunner().invoke(command.serve_down,
+                                                ['none*', 'missing'],
+                                                input='\n')
+        assert not result.exception, result.output
+        services.assert_called_once_with(service_names=['missing'],
+                                         all=False,
+                                         purge=False)
+
+    def test_label_names_the_target_workspace(self, services, monkeypatch):
+        self._role(monkeypatch, 'admin')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get',
+            mock.MagicMock(return_value=[
+                _record('x-b', 'bob', 'ws-b', workspace_name='team-b'),
+                _record('x-a', 'bob', workspace_name='team-a'),
+            ]))
+        result = cli_testing.CliRunner().invoke(command.serve_down,
+                                                ['x-b', 'x*'],
+                                                input='\n')
+        assert "in workspace 'team-a'" in result.output, result.output
 
     def test_listing_failure_keeps_the_plain_prompt(self, services,
                                                     monkeypatch):
@@ -310,10 +338,13 @@ class TestServeAndPoolDown:
                                                 input='\n')
         assert not result.exception, result.output
         assert 'Terminating all services. Proceed? [Y/n]' in result.output
+        services.assert_called_once_with(service_names=(),
+                                         all=True,
+                                         purge=False)
 
-    def test_pool_down_all_cancels_only_reached_pools_jobs(
-            self, services, monkeypatch):
-        self._role(monkeypatch, 'user')
+    def _pools(self, monkeypatch, role):
+        """Pools own (alice) and bobs (bob), one running job in each."""
+        self._role(monkeypatch, role)
         jobs = [
             dict(job_id=1,
                  pool='own',
@@ -345,7 +376,24 @@ class TestServeAndPoolDown:
         jobs_after = []
         monkeypatch.setattr('sky.client.cli.command.time.sleep',
                             lambda _: jobs.clear() or jobs_after)
+        return cancel, pool_down
+
+    def test_pool_down_all_cancels_only_reached_pools_jobs(
+            self, services, monkeypatch):
+        cancel, pool_down = self._pools(monkeypatch, 'user')
         result = cli_testing.CliRunner().invoke(command.jobs_pool_down,
                                                 ['-a', '-y'])
         assert not result.exception, result.output
         assert cancel.call_args.kwargs['job_ids'] == [1]
+        pool_down.assert_called_once_with(['own'], all=False, purge=False)
+
+    def test_pool_down_all_asks_about_the_pools_first(self, services,
+                                                      monkeypatch):
+        cancel, pool_down = self._pools(monkeypatch, 'admin')
+        result = cli_testing.CliRunner().invoke(command.jobs_pool_down, ['-a'],
+                                                input='\n')
+        assert 'Aborted' in result.output, result.output
+        assert 'other users (1): bob: bobs' in result.output
+        assert 'Would you like to cancel' not in result.output
+        cancel.assert_not_called()
+        pool_down.assert_not_called()

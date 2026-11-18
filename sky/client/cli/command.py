@@ -397,6 +397,13 @@ def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
     ]
 
 
+def _down_names(targets: List[Any], names: List[str]) -> List[str]:
+    """The names to send `down` after a preview: the targets, plus any exact
+    name that matched nothing so the server still reports it."""
+    found = [r['name'] for r in targets]
+    return found + [n for n in names if '*' not in n and n not in found]
+
+
 def _confirm_bulk(operation: str,
                   noun: str,
                   records: List[Any],
@@ -420,7 +427,11 @@ def _confirm_bulk(operation: str,
                       show_default=True)
         return
     if workspace_id is not None:
-        label = records[0].get('workspace_name') or workspace_id
+        label = next(
+            (r['workspace_name']
+             for r in records
+             if r.get('workspace') == workspace_id and r.get('workspace_name')),
+            workspace_id)
         head += f' in workspace {label!r}'
     num_others = len(records) - len(own)
     lines = [f'{head}:']
@@ -7289,8 +7300,6 @@ def jobs_pool_down(
             # If len is 0 then we are using -a option, so we include all jobs
             # if they're associated with a pool.
             if all:
-                if target_pools is not None:
-                    return job.get('pool') in target_pools
                 return job.get('pool') is not None
             # Otherwise we are using specific pool names, so we include the job
             # if it's associated with one of the specified pools.
@@ -7300,28 +7309,29 @@ def jobs_pool_down(
         pool_jobs = [job for job in jobs_list if _should_include_job(job)]
         return pool_jobs
 
-    quoted_pool_names = [f'{name!r}' for name in pool_names]
-    list_pool_str = ', '.join(quoted_pool_names)
-    pool_identity_str = f'pool(s) {list_pool_str}'
-    if all:
-        pool_identity_str = 'all pools'
-    # The pools -a or a pattern reaches; with -a, only their jobs are
-    # cancelled first.
-    targets = None
-    target_workspace = None
+    already_confirmed = False
     if all or any('*' in name for name in pool_names):
         target_workspace = _bulk_workspace()
         targets = _service_down_targets(list(pool_names),
                                         all,
                                         is_pool=True,
                                         workspace_id=target_workspace)
-        if targets is not None and not targets:
-            click.echo('No pool to terminate.')
-            return
-    target_pools = (None if targets is None else
-                    {record['name'] for record in targets})
+        if targets is not None:
+            # Tear down exactly the pools listed, whatever the server would
+            # expand -a or the patterns to.
+            pool_names, all = _down_names(targets, pool_names), False
+            if not pool_names:
+                click.echo('No pool to terminate.')
+                return
+            if not yes and targets:
+                _confirm_bulk('Terminating', 'pool', targets, target_workspace)
+                already_confirmed = True
 
-    already_confirmed = False
+    quoted_pool_names = [f'{name!r}' for name in pool_names]
+    list_pool_str = ', '.join(quoted_pool_names)
+    pool_identity_str = f'pool(s) {list_pool_str}'
+    if all:
+        pool_identity_str = 'all pools'
     try:
         pool_jobs = _get_nonterminal_jobs(pool_names, all)
         if pool_jobs:
@@ -7380,9 +7390,7 @@ def jobs_pool_down(
             f'Failed to check for running jobs in pool(s): {pool_names!r}: {e}.'
             ' Proceeding with pool down.')
 
-    if not yes and not already_confirmed and targets is not None:
-        _confirm_bulk('Terminating', 'pool', targets, target_workspace)
-    elif not yes and not already_confirmed:
+    if not yes and not already_confirmed:
         click.confirm(f'Terminating {pool_identity_str}. Proceed?',
                       default=True,
                       abort=True,
@@ -8212,10 +8220,14 @@ def serve_down(
                                                 all,
                                                 is_pool=False,
                                                 workspace_id=target_workspace)
-            if targets is not None and not targets:
-                click.echo('No service to terminate.')
-                return
             if targets is not None:
+                # Tear down exactly the services listed, whatever the server
+                # would expand -a or the patterns to.
+                service_names, all = _down_names(targets, service_names), False
+                if not service_names:
+                    click.echo('No service to terminate.')
+                    return
+            if targets:
                 _confirm_bulk('Terminating', 'service', targets,
                               target_workspace)
             else:
