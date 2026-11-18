@@ -272,7 +272,23 @@ def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
     # `allowed_users`: they add or remove no infra.
     access_fields = set(_ACCESS_AND_NAME_FIELDS)
     access_fields |= schemas.access_only_workspace_properties()
-    return {k: v for k, v in config.items() if k not in access_fields}
+    stripped = {k: v for k, v in config.items() if k not in access_fields}
+    # Allowed queues only affect new jobs, so changing them is not an infra
+    # change. An empty block counts as no block.
+    for cloud in ('kubernetes', 'slurm'):
+        if cloud not in stripped:
+            continue
+        cloud_config = dict(stripped.pop(cloud) or {})
+        quota = {
+            k: v
+            for k, v in (cloud_config.pop('quota', None) or {}).items()
+            if k != 'allowed_queues'
+        }
+        if quota:
+            cloud_config['quota'] = quota
+        if cloud_config:
+            stripped[cloud] = cloud_config
+    return stripped
 
 
 def _check_workspace_names_unique(old_workspaces: Dict[str, Any],

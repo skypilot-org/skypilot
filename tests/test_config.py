@@ -5,6 +5,7 @@ import errno
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import textwrap
@@ -3030,6 +3031,100 @@ def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
                 'mount_paths': ['/s']
             }], server_mounts
         ]
+
+
+def _ws_quota(cloud: str, **quota) -> dict:
+    return {'workspaces': {'team-a': {cloud: {'quota': quota}}}}
+
+
+@pytest.mark.parametrize(
+    'config,error',
+    [
+        # No allowed_queues: nothing to check.
+        (_ws_quota('kubernetes', queue='q'), None),
+        # The default is in the list.
+        (_ws_quota('kubernetes', queue='q', allowed_queues=['q', 'other']), None
+        ),
+        # A list and no default: nothing to check.
+        (_ws_quota('kubernetes', allowed_queues=['q']), None),
+        # The default left out of the list.
+        (_ws_quota('kubernetes', queue='q', allowed_queues=['other']),
+         "Queue 'q' is not allowed in workspace 'team-a'. Allowed queues: "
+         "['other']"),
+        (_ws_quota('slurm', queue='q', allowed_queues=['other']),
+         "Queue 'q' is not allowed in workspace 'team-a'"),
+        # The workspace's display name is used when it has one.
+        ({
+            'workspaces': {
+                'ws-1234': {
+                    'name': 'team-a',
+                    'kubernetes': {
+                        'quota': {
+                            'queue': 'q',
+                            'allowed_queues': ['other']
+                        }
+                    },
+                }
+            }
+        }, "workspace 'team-a'"),
+    ])
+def test_check_queue_allowed_for_default_queue(config, error) -> None:
+    """A workspace's default queue must be in its allowed_queues."""
+    workspace, workspace_config = next(iter(config['workspaces'].items()))
+    for cloud in ('kubernetes', 'slurm'):
+        queue = workspace_config.get(cloud, {}).get('quota', {}).get('queue')
+        if error is None or cloud not in workspace_config:
+            skypilot_config.check_queue_allowed(workspace, workspace_config,
+                                                cloud, queue)
+        else:
+            with pytest.raises(ValueError, match=re.escape(error)):
+                skypilot_config.check_queue_allowed(workspace, workspace_config,
+                                                    cloud, queue)
+
+
+def test_update_config_refuses_default_queue_outside_allowed_queues(
+        monkeypatch, tmp_path) -> None:
+    """Saving a default queue that is not allowed leaves the file as it was."""
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    config_path = tmp_path / 'server_config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            workspaces:
+              team-a:
+                kubernetes:
+                  quota:
+                    queue: team-q
+                    allowed_queues: [team-q]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        str(config_path))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    queue_key = ('workspaces', 'team-a', 'kubernetes', 'quota', 'queue')
+    new_config.set_nested(queue_key, 'other-q')
+    with pytest.raises(ValueError, match="'other-q'"):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+    assert yaml_utils.read_yaml(str(config_path)) == {
+        'workspaces': {
+            'team-a': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'team-q',
+                        'allowed_queues': ['team-q'],
+                    }
+                }
+            }
+        }
+    }
+
+    # Adding the new default to the list lets the save through.
+    new_config.set_nested(
+        ('workspaces', 'team-a', 'kubernetes', 'quota', 'allowed_queues'),
+        ['team-q', 'other-q'])
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    saved = config_utils.Config(yaml_utils.read_yaml(str(config_path)))
+    assert saved.get_nested(queue_key, None) == 'other-q'
 
 
 # --- The server config is reloaded only when its source changed -------------

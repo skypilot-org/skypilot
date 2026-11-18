@@ -1172,3 +1172,66 @@ def test_ssh_into_cluster_in_new_workspace(generic_cloud: str):
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test allowed_queues ----------
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_workspace_allowed_queues(generic_cloud: str):
+    """A job that names a queue outside its workspace's allowed_queues is
+    rejected at submission; an allowed queue and the default are not."""
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip('Restarts the API server; only runs in Buildkite.')
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Needs a local API server that can be restarted.')
+
+    server_config_content = textwrap.dedent("""\
+        workspaces:
+          default: {}
+          queues-ws:
+            kubernetes:
+              quota:
+                queue: normal
+                allowed_queues: [high, normal]
+    """)
+    task_content = textwrap.dedent("""\
+        run: echo hi
+        config:
+          kubernetes:
+            quota:
+              queue: {queue}
+    """)
+    paths = {}
+    for key, content in [('server', server_config_content),
+                         ('other', task_content.format(queue='other')),
+                         ('high', task_content.format(queue='high'))]:
+        with tempfile.NamedTemporaryFile(prefix=f'{key}_',
+                                         suffix='.yaml',
+                                         delete=False,
+                                         mode='w') as f:
+            f.write(content)
+            paths[key] = f.name
+
+    launch = (f'sky launch -y --dryrun --config active_workspace=queues-ws '
+              f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG}')
+    test = smoke_tests_utils.Test(
+        'test_workspace_allowed_queues',
+        [
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={paths["server"]} && {smoke_tests_utils.SKY_API_RESTART}',
+            # A queue outside the list is rejected.
+            f's=$({launch} {paths["other"]} 2>&1); echo "$s"; '
+            f'echo "$s" | grep "Queue \'other\'" | '
+            f'grep "is not allowed in workspace \'queues-ws\'"',
+            # A queue in the list, and the default, pass the check.
+            f's=$({launch} {paths["high"]} 2>&1); echo "$s"; '
+            f'echo "$s" | grep "is not allowed" && exit 1 || true',
+            f's=$({launch} echo hi 2>&1); echo "$s"; '
+            f'echo "$s" | grep "is not allowed" && exit 1 || true',
+        ],
+        teardown=(f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+    for path in paths.values():
+        os.unlink(path)

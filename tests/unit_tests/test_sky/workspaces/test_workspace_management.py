@@ -931,6 +931,99 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertEqual(set(result.added_users), {'user2'})
         self.assertEqual(result.removed_users, [])
 
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_allowed_queues_changes(
+            self, mock_get_users_for_role, mock_get_users):
+        """Any allowed_queues-only change is safe while resources run."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        def k8s(**quota):
+            return {'kubernetes': {'quota': quota}}
+
+        # (current_config, new_config, expected_safe)
+        cases = [
+            # Add, remove, turn on, turn off.
+            (k8s(allowed_queues=['a']), k8s(allowed_queues=['a', 'b']), True),
+            (k8s(allowed_queues=['a', 'b']), k8s(allowed_queues=['a']), True),
+            (k8s(queue='a'), k8s(queue='a', allowed_queues=['a']), True),
+            ({}, {
+                'slurm': {
+                    'quota': {
+                        'allowed_queues': ['qos']
+                    }
+                }
+            }, True),
+            ({
+                'slurm': {
+                    'quota': {
+                        'allowed_queues': ['qos']
+                    }
+                }
+            }, {}, True),
+            # Removing the field and leaving an empty block behind.
+            (k8s(allowed_queues=['a']), k8s(), True),
+            (k8s(allowed_queues=['a']), {
+                'kubernetes': {}
+            }, True),
+            ({
+                'kubernetes': {}
+            }, k8s(allowed_queues=['a']), True),
+            # Together with an infra change, it is an infra change.
+            ({
+                'kubernetes': {
+                    'namespace': 'ns-1',
+                    'quota': {
+                        'allowed_queues': ['a']
+                    }
+                }
+            }, {
+                'kubernetes': {
+                    'namespace': 'ns-2',
+                    'quota': {
+                        'allowed_queues': ['b']
+                    }
+                }
+            }, False),
+        ]
+        for current_config, new_config, expected in cases:
+            with self.subTest(current=current_config, new=new_config):
+                result = core._compare_workspace_configs(
+                    current_config, new_config)
+                self.assertEqual(result.only_user_access_changes, expected)
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_validate_workspace_config_changes_allowed_queues(
+            self, mock_get_users_for_role, mock_get_users,
+            mock_check_resources):
+        """Editing allowed_queues never asks for the workspace to be empty."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        def k8s(allowed_queues, **extra):
+            return {
+                'kubernetes': {
+                    'quota': {
+                        'allowed_queues': allowed_queues
+                    },
+                    **extra
+                }
+            }
+
+        core._validate_workspace_config_changes('test-workspace', k8s(['a']),
+                                                k8s(['b']))
+        mock_check_resources.assert_not_called()
+
+        # An infra change in the same edit still needs the empty-workspace
+        # check.
+        core._validate_workspace_config_changes('test-workspace', k8s(['a']),
+                                                k8s(['b'], namespace='ns'))
+        mock_check_resources.assert_called_once()
+
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
     @mock.patch('sky.workspaces.core._compare_workspace_configs')

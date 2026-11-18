@@ -1673,6 +1673,18 @@ def get_effective_queue_name(cloud: str,
                                               partition=partition)
 
 
+def check_queue_allowed(workspace: str, workspace_config: Dict[str, Any],
+                        cloud: str, queue: Optional[str]) -> None:
+    """Checks that `queue` is one of the workspace's allowed queues."""
+    allowed = ((workspace_config.get(cloud) or {}).get('quota') or
+               {}).get('allowed_queues')
+    if allowed is None or queue is None or queue in allowed:
+        return
+    name = workspace_config.get('name') or workspace
+    raise ValueError(f'Queue {queue!r} is not allowed in workspace {name!r}. '
+                     f'Allowed queues: {allowed}')
+
+
 def get_effective_slurm_account(
         cluster: Optional[str] = None,
         partition: Optional[str] = None,
@@ -1917,6 +1929,15 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     if not is_running_pytest() and os.environ.get(
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
+
+    # A workspace's default queue must be one of its allowed queues.
+    for workspace, workspace_config in (config.get('workspaces') or {}).items():
+        workspace_config = workspace_config or {}
+        for cloud in ('kubernetes', 'slurm'):
+            default_queue = ((workspace_config.get(cloud) or {}).get('quota') or
+                             {}).get('queue')
+            check_queue_allowed(workspace, workspace_config, cloud,
+                                default_queue)
 
     # Capture the currently persisted config before it is overwritten, for
     # save validators and post-save hooks (to_dict() returns a fresh copy).
