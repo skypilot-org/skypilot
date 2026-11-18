@@ -312,6 +312,24 @@ def test_heavy_worker_releases_the_lock_when_submission_fails(heavy_worker):
     assert list(pool.futures) == ['a2']
 
 
+def test_heavy_worker_requeues_when_the_lock_fails(heavy_worker, monkeypatch):
+
+    class _BrokenLock:
+        lock_id = 'broken'
+
+        def acquire(self, blocking=True):
+            del blocking
+            raise RuntimeError('database is down')
+
+    monkeypatch.setattr(executor.locks, 'get_lock',
+                        lambda lock_id: _BrokenLock())
+    queue = _ListQueue([_element('a1')])
+    pool = _PendingExecutor()
+    heavy_worker.process_request(pool, queue)
+    assert not pool.futures
+    assert queue.items == [_element('a1')]
+
+
 def test_heavy_worker_releases_the_lock_of_a_failed_request(heavy_worker):
     queue = _ListQueue([_element('a1'), _element('a2')])
     pool = _PendingExecutor()

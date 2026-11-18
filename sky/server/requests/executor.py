@@ -530,12 +530,19 @@ class RequestWorker:
 
     def _try_lock_user(self, user_id: str,
                        request_name: str) -> Optional[locks.DistributedLock]:
-        """Locks the user's heavy requests of a name; None if one runs."""
+        """Locks the user's heavy requests of a name.
+
+        Returns None if one of them runs, or if the lock cannot be taken now.
+        """
         lock = locks.get_lock(heavy_requests.user_lock_id(
             user_id, request_name))
         try:
             lock.acquire(blocking=False)
         except locks.LockTimeout:
+            return None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'[{self}] Failed to lock {lock.lock_id}: '
+                         f'{common_utils.format_exception(e)}')
             return None
         return lock
 
