@@ -200,17 +200,19 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                          f'{namespace!r}.')
     served = None
     if isinstance(consistency, Cached) and context is not None:
-        served = plugin_extensions.ClusterStateSource.get(
-            plugin_extensions.ObjectQuery(
-                context=context,
-                group=resource.group,
-                version=resource.version,
-                resource=resource.plural,
-                namespace=namespace,
-                name=name,
-                label_selector=label_selector,
-                field_selector=field_selector,
-                max_staleness_seconds=consistency.max_age))
+        object_query = plugin_extensions.ObjectQuery(
+            context=context,
+            group=resource.group,
+            version=resource.version,
+            resource=resource.plural,
+            namespace=namespace,
+            name=name,
+            label_selector=label_selector,
+            field_selector=field_selector,
+            max_staleness_seconds=consistency.max_age)
+        served = _IN_FLIGHT.do(
+            object_query,
+            lambda: plugin_extensions.ClusterStateSource.get(object_query))
     if isinstance(served, plugin_extensions.CachedObjects):
         metrics_utils.count_kube_read(context or '', resource.label,
                                       SOURCE_CACHE, '')

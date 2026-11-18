@@ -182,6 +182,38 @@ def test_cached_read_is_served_by_the_source(api, metrics):
     metrics.observe_kube_read_staleness.assert_called_once_with('pods', 12.5)
 
 
+def test_cached_reads_share_in_flight_source_calls(api, monkeypatch):
+    api(_POD_LIST)
+    plugin_extensions.ClusterStateSource.register(
+        lambda query: plugin_extensions.CachedObjects(
+            items=[], resource_version='1', staleness_seconds=0))
+    keys = []
+    in_flight = reads._IN_FLIGHT  # pylint: disable=protected-access
+
+    class _Recording:
+
+        def do(self, key, fn):
+            keys.append(key)
+            return in_flight.do(key, fn)
+
+    monkeypatch.setattr(reads, '_IN_FLIGHT', _Recording())
+
+    result = reads.list_objects('ctx', reads.PODS, namespace='ns')
+
+    assert result.source == reads.SOURCE_CACHE
+    assert keys == [
+        plugin_extensions.ObjectQuery(context='ctx',
+                                      group='',
+                                      version='v1',
+                                      resource='pods',
+                                      namespace='ns',
+                                      name=None,
+                                      label_selector=None,
+                                      field_selector=None,
+                                      max_staleness_seconds=60)
+    ]
+
+
 def test_default_consistency_accepts_a_minute_of_watch_failure(api):
     api(_POD_LIST)
     queries = []
