@@ -19,6 +19,8 @@ def _handle():
     handle.launched_resources.assert_launchable.return_value = (
         handle.launched_resources)
     handle.num_ips_per_node = 1
+    handle.provision_runtime_metadata = mock.Mock()
+    handle.provision_runtime_metadata.has_ray = True
     return handle
 
 
