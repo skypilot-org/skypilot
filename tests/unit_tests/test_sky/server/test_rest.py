@@ -208,6 +208,41 @@ class TestRetryTransientErrorsDecorator:
         assert 'Persistent error' in str(exc_info.value)
         assert call_count == 2  # Should have retried exactly max_retries times
 
+    def test_interrupted_request_is_retried(self):
+        """A plain RequestInterruptedError is retried at once."""
+        call_count = 0
+
+        @rest.retry_transient_errors(max_retries=3)
+        def interrupted_once():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise exceptions.RequestInterruptedError('retry me')
+            return 'success'
+
+        with mock.patch('time.sleep') as mock_sleep:
+            assert interrupted_once() == 'success'
+        assert call_count == 2
+        mock_sleep.assert_not_called()
+
+    def test_request_not_resumed_is_not_retried(self):
+        """RequestNotResumedError is raised at once, even after progress."""
+        call_count = 0
+
+        @rest.retry_transient_errors(max_retries=3)
+        def not_resumed():
+            nonlocal call_count
+            call_count += 1
+            # Fail instead of hanging if it is retried: with progress on every
+            # attempt, the failure count never reaches max_retries.
+            assert call_count < 10, 'retried a request that will not resume'
+            rest.get_retry_context().progress_count += 1
+            raise exceptions.RequestNotResumedError('re-submit it')
+
+        with pytest.raises(exceptions.RequestNotResumedError):
+            not_resumed()
+        assert call_count == 1
+
     def test_decorator_preserves_function_metadata(self):
         """Test that decorator preserves original function metadata."""
 
