@@ -13,7 +13,6 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky.client.cli import command
-from sky.skylet import constants
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils.db import db_utils
@@ -59,15 +58,6 @@ def test_job_nonexist_strategy():
                 task.validate()
     finally:
         annotations.is_on_api_server = original
-
-
-@pytest.fixture(autouse=True)
-def _active_workspace(monkeypatch):
-    """The test server has no authenticated user to resolve a workspace for;
-    every cluster here is in the default one."""
-    monkeypatch.setattr(
-        'sky.client.sdk.get_user_workspace',
-        lambda: {'workspace': constants.SKYPILOT_DEFAULT_WORKSPACE})
 
 
 @pytest.fixture

@@ -345,12 +345,18 @@ def _is_glob_pattern(name: str) -> bool:
 
 def _bulk_workspace() -> Optional[str]:
     """The id of the workspace that -a, -u and globs act on: the one the
-    server runs this command in. None from a server too old to say, which
-    leaves the selection as it was."""
+    server runs this command in. None from a server too old to say, or one
+    without authentication, which leaves the selection as it was."""
     try:
         info = sdk.get_user_workspace()
     except exceptions.APINotSupportedError:
         return None
+    except Exception as e:  # pylint: disable=broad-except
+        # Whatever HTTP client raised it.
+        response = getattr(e, 'response', None)
+        if getattr(response, 'status_code', None) == 401:
+            return None
+        raise
     if info.get('workspace') is None:
         message = f'Cannot tell which workspace to act on: {info.get("note")}'
         if info.get('source') == workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS:

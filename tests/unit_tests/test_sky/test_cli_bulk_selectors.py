@@ -5,6 +5,7 @@ from unittest import mock
 
 from click import testing as cli_testing
 import pytest
+import requests
 
 from sky import exceptions
 from sky.client.cli import command
@@ -128,6 +129,16 @@ class TestClusters:
         result = cli_testing.CliRunner().invoke(command.down, ['-u', '-y'])
         assert not result.exception, result.output
         assert _names(down) == ['bobs', 'own', 'own-b']
+
+    def test_server_without_auth_is_not_narrowed(self, clusters, monkeypatch):
+        response = requests.Response()
+        response.status_code = 401
+        monkeypatch.setattr(
+            'sky.client.sdk.get_user_workspace',
+            mock.MagicMock(side_effect=requests.HTTPError(response=response)))
+        result = cli_testing.CliRunner().invoke(command.down, ['-a', '-y'])
+        assert not result.exception, result.output
+        assert _names(clusters[0]) == ['own', 'own-b']
 
     def test_ambiguous_workspace_stops_before_acting(self, clusters,
                                                      monkeypatch):
