@@ -986,6 +986,8 @@ def override_request_env_and_config(
             sync_refresh=sync_refresh)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
+        # A new request: forget any workspace left on this (reused) thread.
+        skypilot_config.clear_active_workspace()
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path,

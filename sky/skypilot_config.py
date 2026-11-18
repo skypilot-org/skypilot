@@ -661,10 +661,10 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
     # try/finally is required: a caller that lets an exception escape the
     # `with` block would otherwise leak this thread-local workspace to
     # subsequent callers in the same worker process (ProcessPoolExecutor
-    # reuses workers). For most callers the leak is masked because
-    # `override_skypilot_config` resets the current thread's workspace per
-    # request, but tightening this here is the right shape for a
-    # contextmanager and removes the implicit dependency on that reset.
+    # reuses workers). For most callers the leak is masked because the
+    # request executor resets the current thread's workspace per request
+    # (`clear_active_workspace`), but tightening this here is the right shape
+    # for a contextmanager and removes the implicit dependency on that reset.
     try:
         yield
     finally:
@@ -677,6 +677,16 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
                 del _active_workspace_context.workspace
             except AttributeError:
                 pass
+
+
+def clear_active_workspace() -> None:
+    """Forgets this thread's active workspace, e.g. for a fresh request.
+
+    Only this thread's: the module-level thread-local is not rebound, so other
+    threads in this process (e.g. inline API server handlers) keep theirs.
+    """
+    if hasattr(_active_workspace_context, 'workspace'):
+        del _active_workspace_context.workspace
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:
@@ -1332,12 +1342,13 @@ def override_skypilot_config(
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Use `sky check` to see if it is defined on the API '
                          'server and try again.')
-    # Reset this thread's active workspace, so that a new request is not
-    # affected by the previous request's workspace. Do not rebind the
-    # module-level thread-local: other threads in this process (e.g. inline
-    # API server handlers) keep theirs.
-    if hasattr(_active_workspace_context, 'workspace'):
-        del _active_workspace_context.workspace
+    # Nested overrides keep this thread's workspace (e.g. the one the request
+    # executor resolved) unless they name one; restored on exit either way.
+    had_workspace = hasattr(_active_workspace_context, 'workspace')
+    prior_workspace = getattr(_active_workspace_context, 'workspace', None)
+    was_overridden = _is_config_overridden()
+    if override_configs.get('active_workspace') is not None:
+        clear_active_workspace()
 
     try:
         common_utils.validate_schema(
@@ -1368,8 +1379,10 @@ def override_skypilot_config(
     finally:
         _get_config_context().server_config = outer_server_config
         _set_loaded_config(original_config)
-        _set_config_overridden(False)
+        _set_config_overridden(was_overridden)
         _set_loaded_config_path_serialized(original_config_path)
+        if had_workspace:
+            _active_workspace_context.workspace = prior_workspace
 
 
 @contextlib.contextmanager
