@@ -3176,6 +3176,8 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
             ('api_server', 'endpoint'), None)
         endpoint = click.prompt('Enter your SkyPilot API server endpoint',
                                 default=default_endpoint)
+    # Default to https:// when no scheme is given, e.g. a bare hostname.
+    endpoint = server_common.add_default_scheme(endpoint)
     # Check endpoint is a valid URL
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
@@ -3212,7 +3214,12 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
                 'value, which makes every command resolve to an empty server '
                 'URL. Set it to an endpoint, or run unset '
                 f'{constants.SKY_API_SERVER_URL_ENV_VAR}.')
-    if endpoint is not None and endpoint.rstrip('/') != env_endpoint:
+    # Compare with the default scheme added, so that `api.example.com` and
+    # `https://api.example.com` count as the same endpoint.
+    env_endpoint = server_common.add_default_scheme(env_endpoint)
+    if (endpoint is not None and
+            server_common.add_default_scheme(endpoint).rstrip('/') !=
+            env_endpoint):
         # Two different explicit endpoints; we cannot tell which one the user
         # meant, and logging into one of them would leave the other in effect.
         with ux_utils.print_exception_no_traceback():
