@@ -2474,7 +2474,10 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
 Override the APT mirrors tried when installing packages on a pod (optional).
 Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
 fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
-(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``). The image's own sources are
+tried first. A mirror replaces only the image's Ubuntu sources
+(``*.ubuntu.com/ubuntu``), so it must serve Ubuntu packages over HTTP at
+``/ubuntu``.
 
 Example:
 

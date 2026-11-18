@@ -18,6 +18,9 @@ WORKSPACE_SOURCE_PREFERRED = 'preferred'
 # after upgrade.
 WORKSPACE_SOURCE_DEFAULT_FALLBACK = 'default-fallback'
 WORKSPACE_SOURCE_SINGLE_MEMBERSHIP = 'single-membership'
+# A read by a user with several writable workspaces and none chosen: the first
+# by name. Writes raise WorkspaceAmbiguousError instead.
+WORKSPACE_SOURCE_READ_FIRST = 'read-first'
 
 # Resolver-error states surfaced through `GET /users/me/workspace`. Not
 # returned by `resolve_workspace_for_user()` itself (that path raises) —
