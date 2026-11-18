@@ -169,6 +169,37 @@ class TestForceStopLocalJobControllers:
         kill.assert_not_called()
 
 
+class TestControllerPoolWithoutDatabase:
+
+    @pytest.fixture
+    def pool(self, monkeypatch, tmp_path):
+        monkeypatch.setenv('HOME', str(tmp_path))
+        monkeypatch.delenv(scheduler.constants.OVERRIDE_CONSOLIDATION_MODE,
+                           raising=False)
+        # The signal file is the real source of truth; only its read is pinned.
+        monkeypatch.setattr(scheduler.controller_utils,
+                            '_read_jobs_consolidation_signal', lambda: True)
+        # The DB-backed warning predicate must not be consulted for ownership.
+        monkeypatch.setattr(
+            scheduler.managed_job_utils, 'is_consolidation_mode',
+            mock.Mock(side_effect=RuntimeError('database unavailable')))
+        path = tmp_path / 'controllers_draining'
+        monkeypatch.setattr(scheduler.managed_job_constants,
+                            'CONTROLLERS_DRAINING_PATH', str(path))
+        return path
+
+    def test_drain_marks_pool_without_database(self, pool):
+        scheduler.drain_local_job_controllers()
+        assert pool.exists()
+
+    def test_force_stop_kills_pool_without_database(self, monkeypatch, pool):
+        pool.touch()
+        kill = mock.Mock(return_value=2)
+        monkeypatch.setattr(scheduler, 'kill_local_job_controllers', kill)
+        assert scheduler.force_stop_local_job_controllers() == 2
+        kill.assert_called_once_with(signal.SIGKILL)
+
+
 def _gone(pid: int) -> bool:
     """Whether a process has exited, collected by its parent or not."""
     try:

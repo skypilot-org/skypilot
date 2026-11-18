@@ -246,7 +246,7 @@ def runs_local_controller_pool() -> bool:
     """
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return False
-    return managed_job_utils.is_consolidation_mode()
+    return controller_utils.effective_jobs_consolidation_mode()
 
 
 def drain_local_job_controllers() -> None:

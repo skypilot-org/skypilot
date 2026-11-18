@@ -615,7 +615,7 @@ class TestStart:
         with mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
                                'start') as start_mock, \
                 mock.patch(
-                    'sky.jobs.utils.is_consolidation_mode',
+                    'sky.utils.controller_utils.effective_jobs_consolidation_mode',
                     return_value=False):
             mjrt.start_managed_job_refresh_daemon()
         start_mock.assert_not_called()
@@ -624,7 +624,7 @@ class TestStart:
         with mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
                                'start') as start_mock, \
                 mock.patch(
-                    'sky.jobs.utils.is_consolidation_mode',
+                    'sky.utils.controller_utils.effective_jobs_consolidation_mode',
                     return_value=True):
             mjrt.start_managed_job_refresh_daemon()
         start_mock.assert_called_once_with()
@@ -642,7 +642,7 @@ class TestStart:
         with mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
                                'start') as start_mock, \
                 mock.patch(
-                    'sky.jobs.utils.is_consolidation_mode',
+                    'sky.utils.controller_utils.effective_jobs_consolidation_mode',
                     return_value=True):
             mjrt.start_managed_job_refresh_daemon()
         start_mock.assert_not_called()
@@ -652,7 +652,7 @@ class TestStart:
         draining.touch()
         with mock.patch.object(mjrt.ManagedJobRefreshDaemonThread, 'start'), \
                 mock.patch(
-                    'sky.jobs.utils.is_consolidation_mode',
+                    'sky.utils.controller_utils.effective_jobs_consolidation_mode',
                     return_value=True):
             mjrt.start_managed_job_refresh_daemon()
         assert not draining.exists()
