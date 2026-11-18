@@ -644,8 +644,8 @@ class RequestWorker:
             # Happens when the worker process dies unexpectedly, e.g. OOM
             # killed.
             request_id, _, retryable = request_element
-            # Ensure the request status.
-            api_requests.set_request_failed(request_id, e)
+            # Ensure the request status; a cancelled request stays cancelled.
+            api_requests.set_request_failed_if_active(request_id, e)
             logger.error(
                 f'Request {request_id} failed to get processed '
                 f'{common_utils.format_exception(e, use_bracket=True)}')

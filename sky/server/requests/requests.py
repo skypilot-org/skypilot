@@ -1339,6 +1339,23 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
         request_task.set_error(e)
 
 
+def set_request_failed_if_active(request_id: str, e: BaseException) -> bool:
+    """Set a request to failed unless it already finished.
+
+    Returns:
+        True if the request was set to failed.
+    """
+    set_exception_stacktrace(e)
+    with update_request(request_id) as request_task:
+        if (request_task is None or
+                request_task.status not in RequestStatus.active_statuses()):
+            return False
+        request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
+        request_task.set_error(e)
+        return True
+
+
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_failed_async(request_id: str, e: BaseException) -> None:
