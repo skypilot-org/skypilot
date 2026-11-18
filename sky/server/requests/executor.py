@@ -36,7 +36,6 @@ import typing
 from typing import (Any, Awaitable, Callable, ContextManager, Dict, Generator,
                     List, Optional, Set, TextIO, Tuple)
 
-import fastapi
 import psutil
 import setproctitle
 
@@ -1851,7 +1850,6 @@ async def schedule_request_async(
     if (schedule_type == api_requests.ScheduleType.SHORT and
             heavy_requests.enabled() and
             heavy_requests.is_heavy(request_name, request_body)):
-        await _reject_over_heavy_backlog(user_id, request_name)
         schedule_type = api_requests.ScheduleType.HEAVY
     mode = ExecutionMode.QUEUE
     if (_execution_policy is not None and precondition is None and
@@ -1878,29 +1876,6 @@ async def schedule_request_async(
                                     precondition,
                                     retryable,
                                     in_process=mode == ExecutionMode.IN_PROCESS)
-
-
-async def _reject_over_heavy_backlog(user_id: str, request_name: str) -> None:
-    """Raises 503 when the user has too many heavy requests of a name waiting.
-
-    Raises:
-        fastapi.HTTPException: 503 with Retry-After.
-    """
-    full_name = server_constants.REQUEST_NAME_PREFIX + request_name
-    pending = await api_requests.get_request_tasks_async(
-        api_requests.RequestTaskFilter(
-            status=[api_requests.RequestStatus.PENDING],
-            user_id=user_id,
-            include_request_names=[full_name],
-            fields=['request_id', 'schedule_type']))
-    waiting = sum(1 for r in pending
-                  if r.schedule_type == api_requests.ScheduleType.HEAVY)
-    if waiting >= heavy_requests.MAX_WAITING_PER_USER:
-        raise fastapi.HTTPException(
-            status_code=503,
-            detail=(f'{waiting} {full_name} requests of this user are already '
-                    'waiting to run'),
-            headers={'Retry-After': str(heavy_requests.RETRY_AFTER_SECONDS)})
 
 
 async def schedule_internal_daemon_async(

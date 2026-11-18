@@ -4,7 +4,6 @@ import time
 from typing import List
 from unittest import mock
 
-import fastapi
 import pytest
 
 from sky.server import config as server_config
@@ -114,7 +113,7 @@ def heavy_pool(monkeypatch):
 @pytest.fixture()
 def scheduled(monkeypatch):
     """Captures the schedule type of every request schedule_request_async
-    writes, with no waiting heavy requests."""
+    writes."""
     schedule_types: List[requests_lib.ScheduleType] = []
 
     async def create(request_id, request_name, request_body, func,
@@ -128,8 +127,6 @@ def scheduled(monkeypatch):
     monkeypatch.setattr(executor, '_create_request_async', create)
     monkeypatch.setattr(executor, 'schedule_prepared_request', mock.AsyncMock())
     monkeypatch.setattr(executor, '_execution_policy', None)
-    monkeypatch.setattr(requests_lib, 'get_request_tasks_async',
-                        mock.AsyncMock(return_value=[]))
     return schedule_types
 
 
@@ -174,49 +171,6 @@ async def test_long_requests_stay_long(heavy_pool, scheduled):
         func=lambda: None,
         schedule_type=requests_lib.ScheduleType.LONG)
     assert scheduled == [requests_lib.ScheduleType.LONG]
-
-
-def _pending(schedule_type):
-    return mock.Mock(schedule_type=schedule_type)
-
-
-@pytest.mark.asyncio
-async def test_user_over_heavy_backlog_gets_503(heavy_pool, scheduled,
-                                                monkeypatch):
-    lookup = mock.AsyncMock(return_value=[_pending(_HEAVY)] *
-                            heavy_requests.MAX_WAITING_PER_USER)
-    monkeypatch.setattr(requests_lib, 'get_request_tasks_async', lookup)
-    with pytest.raises(fastapi.HTTPException) as e:
-        await _schedule(_RN.CLUSTER_COST_REPORT, payloads.CostReportBody())
-    assert e.value.status_code == 503
-    assert e.value.headers == {
-        'Retry-After': str(heavy_requests.RETRY_AFTER_SECONDS)
-    }
-    assert scheduled == []
-    req_filter = lookup.call_args.args[0]
-    assert req_filter.user_id == 'user-a'
-    assert req_filter.include_request_names == ['sky.cost_report']
-    assert req_filter.status == [requests_lib.RequestStatus.PENDING]
-
-
-@pytest.mark.asyncio
-async def test_short_requests_do_not_count_toward_the_backlog(
-        heavy_pool, scheduled, monkeypatch):
-    waiting = ([_pending(_HEAVY)] * (heavy_requests.MAX_WAITING_PER_USER - 1) +
-               [_pending(_SHORT)] * 5)
-    monkeypatch.setattr(requests_lib, 'get_request_tasks_async',
-                        mock.AsyncMock(return_value=waiting))
-    await _schedule(_RN.CLUSTER_COST_REPORT, payloads.CostReportBody())
-    assert scheduled == [_HEAVY]
-
-
-@pytest.mark.asyncio
-async def test_light_shapes_skip_the_backlog_lookup(heavy_pool, scheduled,
-                                                    monkeypatch):
-    lookup = mock.AsyncMock(return_value=[])
-    monkeypatch.setattr(requests_lib, 'get_request_tasks_async', lookup)
-    await _schedule(_RN.JOBS_QUEUE_V2, payloads.JobsQueueV2Body(limit=10))
-    lookup.assert_not_called()
 
 
 class _ListQueue:

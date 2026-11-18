@@ -7,10 +7,8 @@ small pool of processes, one process per request, instead of the short pool:
 
 - At most ``SKYPILOT_SERVER_HEAVY_WORKERS`` run at a time in each API server,
   and the memory a request keeps is returned when its process exits.
-- One user runs one heavy request of each name at a time.
-- A user with ``MAX_WAITING_PER_USER`` heavy requests of one name already
-  waiting gets HTTP 503 for the next one. The check is not atomic: requests a
-  user sends at the same moment can all pass it.
+- One user runs one heavy request of each name at a time; the rest wait in
+  the queue.
 
 Whether a request is heavy depends on its arguments as well as its name: a cost
 report for named clusters, or a job queue page, is a normal short request.
@@ -23,10 +21,6 @@ from sky.server import config as server_config
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 
-# Heavy requests of one name that a user can have waiting at a time.
-MAX_WAITING_PER_USER = 3
-# Sent with the 503 for a user over MAX_WAITING_PER_USER.
-RETRY_AFTER_SECONDS = 30
 # A job queue call with a larger limit is heavy.
 MAX_LIGHT_JOBS_LIMIT = 100
 
