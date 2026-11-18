@@ -428,8 +428,8 @@ export function sortContextsByLoadState(
 
 /**
  * The "(workspaces: a, b, ...)" text under a context name. It is capped at
- * two lines; when the names don't fit, it ends in an ellipsis and a
- * "Show more" button that expands the full list in place.
+ * two lines; when the names don't fit, it ends in an ellipsis with a
+ * "Show more" button below it that expands the full list in place.
  */
 function ContextWorkspaces({ workspaces, workspaceName }) {
   const textRef = React.useRef(null);
@@ -458,31 +458,24 @@ function ContextWorkspaces({ workspaces, workspaceName }) {
     };
   }, [text, expanded]);
 
-  const toggle = (overflows || expanded) && (
-    <button
-      type="button"
-      className="shrink-0 ml-1.5 text-blue-fg hover:underline"
-      aria-expanded={expanded}
-      onClick={() => setExpanded((value) => !value)}
-    >
-      {expanded ? 'Show less' : 'Show more'}
-    </button>
-  );
-
-  if (expanded) {
-    return (
-      <div className="text-sm text-content-tertiary mt-1.5 break-words">
-        {text}
-        {toggle}
-      </div>
-    );
-  }
   return (
-    <div className="text-sm text-content-tertiary mt-1.5 flex items-end">
-      <span ref={textRef} className="line-clamp-2 min-w-0 break-words">
+    <div className="text-sm text-content-tertiary mt-1.5">
+      <div
+        ref={textRef}
+        className={`break-words ${expanded ? '' : 'line-clamp-2'}`}
+      >
         {text}
-      </span>
-      {toggle}
+      </div>
+      {(overflows || expanded) && (
+        <button
+          type="button"
+          className="mt-0.5 text-blue-fg hover:underline"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
     </div>
   );
 }
