@@ -868,6 +868,9 @@ def caller(monkeypatch):
 
     def set_admin(is_admin):
         monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
+        monkeypatch.delenv(constants.OVERRIDE_CONSOLIDATION_MODE, raising=False)
+        monkeypatch.delenv(constants.IS_SKYPILOT_SERVE_CONTROLLER,
+                           raising=False)
         monkeypatch.setattr(common_utils, 'get_current_user',
                             lambda: mock.MagicMock(id='u'))
         monkeypatch.setattr(permission, 'is_admin', lambda user_id: is_admin)
@@ -999,6 +1002,23 @@ class TestKubeconfigUploadNeedsAdmin:
         server_config({})
         monkeypatch.delenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, raising=False)
         monkeypatch.setattr(permission, 'is_admin', lambda user_id: False)
+        assert self._launch(task_config=_k8s(remote_identity=_LC))
+
+    @pytest.mark.parametrize('env', [
+        {
+            constants.OVERRIDE_CONSOLIDATION_MODE: 'true'
+        },
+        {
+            constants.IS_SKYPILOT_SERVE_CONTROLLER: 'false'
+        },
+    ])
+    def test_a_controllers_api_server_is_not_asked(self, server_config, caller,
+                                                   monkeypatch, env):
+        """It runs with IS_SKYPILOT_SERVER, but its roles are default seeds."""
+        server_config({})
+        caller(False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
         assert self._launch(task_config=_k8s(remote_identity=_LC))
 
     def test_the_refusal_survives_the_failover_loop(self, server_config,

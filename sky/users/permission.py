@@ -1717,10 +1717,20 @@ def is_admin(user_id: str) -> bool:
 def caller_is_admin() -> bool:
     """Whether the user behind the current request is an admin.
 
-    Off the API server (e.g. on a controller) the request was authorized on
-    the server already.
+    Off the API server the request was authorized on the server already. So
+    was a request to a jobs or serve controller's own API server: the job was
+    checked when it was submitted, and that server only knows default roles.
+    That server copies its env from the controller process that started it,
+    which has one of the controller variables below; the main API server never
+    does, and a client cannot send them. Consolidated controller processes
+    have them too, so they must keep reaching these checks via the main
+    server, never in-process.
     """
     if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    # Presence, not value: a jobs controller sets the serve one to 'false'.
+    if (os.getenv(constants.OVERRIDE_CONSOLIDATION_MODE) is not None or
+            os.getenv(constants.IS_SKYPILOT_SERVE_CONTROLLER) is not None):
         return True
     return is_admin(common_utils.get_current_user().id)
 

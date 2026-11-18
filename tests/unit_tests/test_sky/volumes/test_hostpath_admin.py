@@ -233,6 +233,8 @@ def test_a_failed_role_lookup_is_not_admin(monkeypatch):
 @pytest.fixture
 def non_admin_on_server(monkeypatch):
     monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+    monkeypatch.delenv('IS_SKYPILOT_SERVE_CONTROLLER', raising=False)
     monkeypatch.setattr(core.common_utils, 'get_current_user', lambda: _ALICE)
     monkeypatch.setattr(permission.permission_service, 'get_user_roles',
                         lambda user_id: ['user'])
