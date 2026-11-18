@@ -1251,8 +1251,8 @@ def override_skypilot_config(
         # what the admin wrote (the config editor shows it).
         server_workspace = get_nested(keys=('active_workspace',),
                                       default_value=None)
-        if (server_workspace is None or
-                hasattr(_active_workspace_context, 'workspace')):
+        if (server_workspace is None or getattr(_active_workspace_context,
+                                                'workspace', None) is not None):
             # Keep this thread's workspace, as a non-empty override does.
             yield
             return
