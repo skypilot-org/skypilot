@@ -869,8 +869,7 @@ def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
 
 
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
-    if (response.headers.get(server_constants.SYNC_CALL_HEADER) == '1' and
-            response.status_code in (200, 500)):
+    if rest.is_sync_response(response) and response.status_code in (200, 500):
         body = response.json()
         payload = body if response.status_code == 200 else body['detail']
         sync_request_id: RequestId[T] = RequestId[T](payload['request_id'])

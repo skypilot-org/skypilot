@@ -1,7 +1,6 @@
 """Unit tests for sync calls: results returned in the response itself."""
 # pylint: disable=protected-access
 import asyncio
-import contextvars
 import types
 from unittest import mock
 
@@ -54,12 +53,16 @@ def _sync_response(status_code, json_body=None, headers=None):
     return _response(status_code, {_SYNC: '1', **(headers or {})}, json_body)
 
 
+@pytest.fixture(autouse=True)
+def no_sync_server(monkeypatch):
+    """Each test starts against a server that does not answer sync calls."""
+    monkeypatch.setattr(rest, '_sync_call_max_limit', None)
+
+
 @pytest.fixture
-def sync_server():
-    """Runs the test in a context where the server answers sync calls."""
-    token = rest._sync_call_max_limit.set(100)
-    yield
-    rest._sync_call_max_limit.reset(token)
+def sync_server(monkeypatch):
+    """The server answers sync calls with limits up to 100."""
+    monkeypatch.setattr(rest, '_sync_call_max_limit', 100)
 
 
 def _sent_headers(call):
@@ -72,9 +75,20 @@ class TestRequestLayer:
     @mock.patch('sky.server.rest._session')
     def test_no_header_without_capability(self, mock_session):
         mock_session.request.return_value = _response(200)
-        contextvars.Context().run(rest.request_without_retry, 'GET',
-                                  'http://test.com')
+        rest.request_without_retry('GET', 'http://test.com')
         assert _SYNC not in _sent_headers(mock_session.request.call_args)
+
+    @pytest.mark.usefixtures('sync_server')
+    @pytest.mark.parametrize('limit,sync', [(None, False), (0, False),
+                                            (101, False), (1, True),
+                                            (100, True)])
+    @mock.patch('sky.server.rest._session')
+    def test_header_only_within_limit(self, mock_session, limit, sync):
+        mock_session.request.return_value = _response(200)
+        rest.request_without_retry('POST',
+                                   'http://test.com',
+                                   json={'limit': limit})
+        assert (_SYNC in _sent_headers(mock_session.request.call_args)) is sync
 
     @pytest.mark.usefixtures('sync_server')
     @mock.patch('sky.server.rest._session')
@@ -143,31 +157,30 @@ class TestRequestLayer:
 class TestCapability:
     """The sync call capability in /api/health."""
 
+    @pytest.mark.parametrize('health,max_limit', [({
+        'sync_call_max_limit': 100
+    }, 100), ({}, None)])
+    @mock.patch('sky.server.common.set_api_cookie_jar')
+    @mock.patch('sky.server.common.get_cookies_from_response')
+    @mock.patch('sky.server.versions.check_compatibility_at_client',
+                return_value=versions.VersionInfo(api_version=1,
+                                                  version='1.0.0'))
     @mock.patch('sky.server.common.get_api_server_status_response')
-    def test_health_sets_capability(self, mock_health):
-
-        def check(health):
-            mock_health.return_value = _response(200,
-                                                 json_body={
-                                                     'status': 'healthy',
-                                                     'api_version': '1',
-                                                     'version': '1.0.0',
-                                                     'commit': 'abc',
-                                                     **health,
-                                                 })
-            with mock.patch(
-                    'sky.server.versions.check_compatibility_at_client',
-                    return_value=versions.VersionInfo(api_version=1,
-                                                      version='1.0.0')), \
-                    mock.patch('sky.server.common.get_cookies_from_response'), \
-                    mock.patch('sky.server.common.set_api_cookie_jar'):
-                info = server_common.get_api_server_status()
-            return info.sync_call_max_limit, rest.get_sync_call_max_limit()
-
-        assert contextvars.Context().run(check,
-                                         {'sync_call_max_limit': 100}) == (100,
-                                                                           100)
-        assert contextvars.Context().run(check, {}) == (None, None)
+    def test_health_sets_capability(self, mock_health, *mocks, health,
+                                    max_limit):
+        del mocks
+        rest.set_sync_call_max_limit(50)
+        mock_health.return_value = _response(200,
+                                             json_body={
+                                                 'status': 'healthy',
+                                                 'api_version': '1',
+                                                 'version': '1.0.0',
+                                                 'commit': 'abc',
+                                                 **health,
+                                             })
+        info = server_common.get_api_server_status()
+        assert info.sync_call_max_limit == max_limit
+        assert rest._sync_call_max_limit == max_limit
 
     @pytest.mark.parametrize('max_limit', [None, 100])
     def test_health_advertises_capability(self, max_limit):
@@ -180,11 +193,7 @@ class TestCapability:
             response = asyncio.run(server.health(request))
         finally:
             executor.set_sync_calls(None)
-        fields = response.model_dump(exclude_unset=True)
-        if max_limit is None:
-            assert 'sync_call_max_limit' not in fields
-        else:
-            assert fields['sync_call_max_limit'] == max_limit
+        assert response.sync_call_max_limit == max_limit
 
 
 class TestResults:

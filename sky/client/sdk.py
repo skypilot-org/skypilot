@@ -59,7 +59,6 @@ from sky.utils import common_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
-from sky.utils import env_options
 from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -622,16 +621,6 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     return response.json()
 
 
-def _raise_exception_object_on_client(e: BaseException) -> None:
-    """Raise the exception object on the client."""
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stacktrace = getattr(e, 'stacktrace', str(e))
-        logger.error('=== Traceback on SkyPilot API Server ===\n'
-                     f'{stacktrace}')
-    with ux_utils.print_exception_no_traceback():
-        raise e
-
-
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -732,7 +721,7 @@ def validate(
     response = server_common.make_authenticated_request(
         'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
-        _raise_exception_object_on_client(
+        client_common.raise_exception_object_on_client(
             exceptions.deserialize_exception(response.json().get('detail')))
 
 
@@ -2545,7 +2534,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
     except ValueError:
         body = None
     return client_common.request_result(request_id, response.status_code, body,
-                                        response.text)
+                                        lambda: response.text)
 
 
 @typing.overload

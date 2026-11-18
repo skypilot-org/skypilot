@@ -65,10 +65,10 @@ class RetryContext:
 _RETRY_CONTEXT: contextvars.ContextVar[Optional[RetryContext]] = (
     contextvars.ContextVar('retry_context', default=None))
 
-# The largest `limit` the server accepts in a sync call, from its /api/health.
-# None when the server does not answer sync calls.
-_sync_call_max_limit: contextvars.ContextVar[Optional[int]] = (
-    contextvars.ContextVar('sync_call_max_limit', default=None))
+# The largest `limit` the server accepts in a sync call, from the latest
+# /api/health; None when it does not answer sync calls. A stale value is
+# harmless: servers that do not answer sync calls ignore the header.
+_sync_call_max_limit: Optional[int] = None
 # Retries of a sync call the server answered with 429, before giving up.
 _SYNC_CALL_BUSY_RETRIES = 5
 _SYNC_CALL_MAX_RETRY_AFTER_SECONDS = 5.0
@@ -387,16 +387,23 @@ def request(method, url, **kwargs) -> 'requests.Response':
 
 def set_sync_call_max_limit(max_limit: Optional[int]) -> None:
     """Records whether the server answers sync calls, from its /api/health."""
-    _sync_call_max_limit.set(max_limit)
+    global _sync_call_max_limit
+    _sync_call_max_limit = max_limit
 
 
-def get_sync_call_max_limit() -> Optional[int]:
-    """The largest `limit` the server accepts in a sync call, or None."""
-    return _sync_call_max_limit.get()
-
-
-def _is_sync_response(response: 'requests.Response') -> bool:
+def is_sync_response(response: 'requests.Response') -> bool:
+    """Whether the server answered the request as a sync call."""
     return response.headers.get(constants.SYNC_CALL_HEADER) == '1'
+
+
+def _allows_sync_call(kwargs) -> bool:
+    if _sync_call_max_limit is None:
+        return False
+    body = kwargs.get('json')
+    if isinstance(body, dict) and 'limit' in body:
+        limit = body['limit']
+        return isinstance(limit, int) and 1 <= limit <= _sync_call_max_limit
+    return True
 
 
 def _retry_after_seconds(response: 'requests.Response') -> float:
@@ -409,13 +416,13 @@ def _retry_after_seconds(response: 'requests.Response') -> float:
 
 def _send(method, url, **kwargs) -> 'requests.Response':
     """Sends a request, as a sync call when the server answers sync calls."""
-    if _sync_call_max_limit.get() is None:
+    if not _allows_sync_call(kwargs):
         return _session.request(method, url, **kwargs)
     headers = dict(kwargs.pop('headers', None) or {})
     sync_headers = {**headers, constants.SYNC_CALL_HEADER: '1'}
     for _ in range(_SYNC_CALL_BUSY_RETRIES):
         response = _session.request(method, url, headers=sync_headers, **kwargs)
-        if not _is_sync_response(response):
+        if not is_sync_response(response):
             return response
         if response.status_code == 400:
             # These arguments do not allow a sync call: run it in the

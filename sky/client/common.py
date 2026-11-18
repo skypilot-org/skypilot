@@ -515,9 +515,21 @@ def upload_mounts_to_api_server(
     return dag, None
 
 
+def raise_exception_object_on_client(e: BaseException) -> None:
+    """Raise the exception object on the client."""
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stacktrace = getattr(e, 'stacktrace', str(e))
+        logger.error('=== Traceback on SkyPilot API Server ===\n'
+                     f'{stacktrace}')
+    with ux_utils.print_exception_no_traceback():
+        raise e
+
+
 def request_result(request_id: str, status_code: int, body: Any,
-                   text: str) -> Any:
+                   text: Callable[[], str]) -> Any:
     """The result of a request from an /api/get response, or raises its error.
+
+    text returns the raw response body, for the error message.
     """
     request_task = None
     if status_code == 200 and body is not None:
@@ -533,16 +545,10 @@ def request_result(request_id: str, status_code: int, body: Any,
     if request_task is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to get request {request_id}: '
-                               f'{status_code} {text}')
+                               f'{status_code} {text()}')
     error = request_task.get_error()
     if error is not None:
-        error_obj = error['object']
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
-            logger.error('=== Traceback on SkyPilot API Server ===\n'
-                         f'{stacktrace}')
-        with ux_utils.print_exception_no_traceback():
-            raise error_obj
+        raise_exception_object_on_client(error['object'])
     if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.RequestCancelled(
@@ -558,7 +564,8 @@ def _sync_call_result(request_id: Optional[str]) -> Tuple[bool, Any]:
     if request_id is None or sync_response is None:
         return False, None
     status_code, body = sync_response
-    return True, request_result(request_id, status_code, body, str(body))
+    return True, request_result(request_id, status_code, body,
+                                lambda: str(body))
 
 
 def return_sync_call_result(func: F) -> F:
