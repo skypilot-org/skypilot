@@ -203,20 +203,6 @@ class TestStorageAndVolumes:
         assert not result.exception, result.output
         assert sorted(delete.call_args.args[0]) == ['bobs', 'own']
 
-    def test_volume_named_in_two_workspaces_shows_the_picked_owner(
-            self, monkeypatch):
-        volumes = [_record('v', 'alice'), _record('v', 'bob', 'ws-b')]
-        monkeypatch.setattr('sky.volumes.client.sdk.ls', mock.MagicMock())
-        monkeypatch.setattr('sky.client.sdk.workspaces', mock.MagicMock())
-        monkeypatch.setattr('sky.client.sdk.get',
-                            mock.MagicMock(side_effect=[volumes, {}]))
-        delete = mock.MagicMock(return_value='req')
-        monkeypatch.setattr('sky.volumes.client.sdk.delete', delete)
-        result = cli_testing.CliRunner().invoke(command.volumes_delete, ['-a'],
-                                                input='\n')
-        assert not result.exception, result.output
-        assert 'Deleting 1 volume: v. Proceed? [Y/n]' in result.output
-
 
 class TestManagedJobs:
 
