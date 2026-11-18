@@ -380,6 +380,11 @@ def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Cannot list what down reaches: {e}')
         return None
+    if workspace_id is not None and records and all(
+            r.get('workspace') is None for r in records):
+        # A controller older than the workspace field: the server does not
+        # scope these either.
+        return None
     in_workspace = _in_workspace(records, workspace_id)
     if apply_to_all:
         if caller.get('role') == 'admin':

@@ -378,6 +378,19 @@ class TestServeAndPoolDown:
                             lambda _: jobs.clear() or jobs_after)
         return cancel, pool_down
 
+    def test_old_controller_keeps_the_plain_prompt(self, services, monkeypatch):
+        self._role(monkeypatch, 'user')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get',
+            mock.MagicMock(return_value=[_record('own', 'alice', None)]))
+        result = cli_testing.CliRunner().invoke(command.serve_down, ['-a'],
+                                                input='\n')
+        assert not result.exception, result.output
+        assert 'Terminating all services. Proceed? [Y/n]' in result.output
+        services.assert_called_once_with(service_names=(),
+                                         all=True,
+                                         purge=False)
+
     def test_pool_down_all_cancels_only_reached_pools_jobs(
             self, services, monkeypatch):
         cancel, pool_down = self._pools(monkeypatch, 'user')
