@@ -530,23 +530,28 @@ class RequestWorker:
                 return
             self._release_user_lock(lock)
 
-    def _try_lock_user(self, user_id: str,
-                       request_name: str) -> Optional[locks.DistributedLock]:
+    def _lock_user(
+            self, user_id: str,
+            request_name: str) -> Tuple[bool, Optional[locks.DistributedLock]]:
         """Locks the user's heavy requests of a name.
 
-        Returns None if one of them runs, or if the lock cannot be taken now.
+        Returns:
+            Whether the request may run, and the lock it holds. A request runs
+            without the lock when the lock fails for another reason than
+            being held: the pool still bounds it, and requeueing it would
+            retry for as long as the failure lasts.
         """
         lock_id = heavy_requests.user_lock_id(user_id, request_name)
-        lock = locks.get_lock(lock_id)
         try:
+            lock = locks.get_lock(lock_id)
             lock.acquire(blocking=False)
         except locks.LockTimeout:
-            return None
+            return False, None
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'[{self}] Failed to lock {lock_id}: '
-                         f'{common_utils.format_exception(e)}')
-            return None
-        return lock
+            logger.warning(f'[{self}] Running without lock {lock_id}: '
+                           f'{common_utils.format_exception(e)}')
+            return True, None
+        return True, lock
 
     def process_request(self, executor: process.BurstableExecutor,
                         queue: RequestQueue) -> None:
@@ -567,8 +572,9 @@ class RequestWorker:
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
             if heavy:
-                user_lock = self._try_lock_user(request.user_id, request.name)
-                if user_lock is None:
+                may_run, user_lock = self._lock_user(request.user_id,
+                                                     request.name)
+                if not may_run:
                     queue.put(request_element)
                     time.sleep(_HEAVY_USER_BUSY_BACKOFF_SECONDS)
                     return

@@ -268,7 +268,7 @@ def test_heavy_worker_releases_the_lock_when_submission_fails(heavy_worker):
     assert list(pool.futures) == ['a2']
 
 
-def test_heavy_worker_requeues_when_the_lock_fails(heavy_worker, monkeypatch):
+def test_heavy_worker_runs_without_a_lock_that_fails(heavy_worker, monkeypatch):
 
     class _BrokenLock:
         lock_id = 'broken'
@@ -282,8 +282,8 @@ def test_heavy_worker_requeues_when_the_lock_fails(heavy_worker, monkeypatch):
     queue = _ListQueue([_element('a1')])
     pool = _PendingExecutor()
     heavy_worker.process_request(pool, queue)
-    assert not pool.futures
-    assert queue.items == [_element('a1')]
+    assert list(pool.futures) == ['a1']
+    assert not queue.items
 
 
 def test_heavy_worker_releases_the_lock_of_a_failed_request(heavy_worker):
