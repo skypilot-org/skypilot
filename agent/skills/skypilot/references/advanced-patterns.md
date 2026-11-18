@@ -515,8 +515,10 @@ controller that monitors and relaunches your workload.
 The `job_recovery` field controls how managed jobs handle failures.
 
 **Strategy options:**
-- `EAGER_NEXT_REGION` (default): On preemption, immediately try a different
-  region/cloud before retrying the same region.
+- `EAGER_NEXT_REGION` (default): On preemption, immediately tear down and
+  relaunch on the cheapest available resources, which can be in the same
+  region. `try_other_locations_first: true` tries other regions (spot) or
+  zones (on-demand) first.
 - `FAILOVER`: On preemption, first retry in the same region, then fail over
   to other regions.
 
@@ -554,6 +556,7 @@ resources:
 | `strategy` | string | `EAGER_NEXT_REGION` | Recovery strategy name |
 | `max_restarts_on_errors` | int | 0 | Max restarts on non-preemption errors |
 | `recover_on_exit_codes` | int or list[int] | none | Exit codes that always trigger recovery (ignores max_restarts_on_errors counter) |
+| `try_other_locations_first` | bool | false | With `EAGER_NEXT_REGION`, relaunch outside the region (spot) or zone (on-demand) where the job failed in the last hour before trying anywhere else. No effect on Kubernetes, Slurm or pools; see the YAML spec for other exceptions |
 
 When `recover_on_exit_codes` is set, any job failure with a matching exit code
 triggers recovery without counting against `max_restarts_on_errors`. This is

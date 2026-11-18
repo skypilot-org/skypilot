@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 69  # accelerator_args.multi_host for TPU slices on Kubernetes
+API_VERSION = 70  # job_recovery.try_other_locations_first
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -86,6 +86,11 @@ MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
 # its schema, and dropping it on the client would launch different hardware
 # (one 8-chip VM instead of a 2x4 slice), so the client raises instead.
 MIN_TPU_MULTI_HOST_API_VERSION = 69
+# Minimum server API version that accepts
+# `job_recovery.try_other_locations_first`. An older server rejects it in its
+# schema, and dropping it would change where recovery relaunches, so the
+# client raises instead.
+MIN_TRY_OTHER_LOCATIONS_FIRST_API_VERSION = 70
 
 # Servers >= this version omit the bulky pickled `handle` from each replica
 # in serve/pool status responses, shipping pre-computed `infra` /

@@ -386,8 +386,10 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
         for resource in new_resources_list:
             if resource.job_recovery != job_recovery_strategy:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('All resources in the task must have'
-                                     'the same job recovery strategy.')
+                    raise ValueError(
+                        'All resources in the task must have the same '
+                        'job_recovery. Set it once at the top level of '
+                        '`resources`, not in its any_of or ordered entries.')
 
         task_.set_resources(type(task_.resources)(new_resources_list))
 

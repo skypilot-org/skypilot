@@ -3,15 +3,29 @@ import ast
 import asyncio
 import inspect
 import pickle
+import threading
+import time
 import types
 from unittest import mock
 
 import pytest
 
+from sky import backends
+from sky import clouds
 from sky import exceptions
+from sky import resources as resources_lib
+from sky import skypilot_config
+from sky import task as task_lib
+from sky.client import sdk
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
+from sky.server import common as server_common
+from sky.server import constants as server_constants
+from sky.server import versions
 from sky.skylet import constants
+from sky.utils import config_utils
+from sky.utils import dag_utils
 
 
 def test_is_oom_failure_detects_oomkilled():
@@ -62,9 +76,8 @@ def test_is_oom_failure_still_reads_the_reason_before_the_output():
 # ---------------------------------------------------------------------------
 
 
-def _make_bare_executor():
-    executor = recovery_strategy.StrategyExecutor.__new__(
-        recovery_strategy.StrategyExecutor)
+def _make_bare_executor(cls=recovery_strategy.StrategyExecutor):
+    executor = cls.__new__(cls)
     return executor
 
 
@@ -253,9 +266,9 @@ async def test_wait_for_parked_request_raises_on_persistent_poll_errors(
     executor._cancel_launch_request.assert_not_awaited()
 
 
-def _make_launch_executor():
+def _make_launch_executor(cls=recovery_strategy.StrategyExecutor):
     """Build a minimally-initialized StrategyExecutor for _launch tests."""
-    executor = _make_bare_executor()
+    executor = _make_bare_executor(cls)
     executor.job_id = 1
     executor.max_restarts_on_errors = 0
     executor.restart_cnt_on_failure = 0
@@ -2411,3 +2424,591 @@ def test_fixed_submit_reasons_are_exempt_from_the_metric_cap():
         with metrics_utils._launch_retry_kinds_lock:
             metrics_utils._launch_retry_kinds.clear()
             metrics_utils._launch_retry_kinds.update(saved)
+
+
+# ---------------------------------------------------------------------------
+# job_recovery.try_other_locations_first (EAGER_NEXT_REGION).
+# ---------------------------------------------------------------------------
+
+
+def _eager_executor(requested, launched, step2_result=1.0):
+    """An EagerFailoverStrategyExecutor whose launches are recorded, each with
+    the blocked resources its launch context would carry."""
+    task = task_lib.Task(run='echo hi')
+    task.set_resources(requested)
+    executor = recovery_strategy.EagerFailoverStrategyExecutor(
+        'cluster',
+        mock.MagicMock(spec=backends.CloudVmRayBackend),
+        task,
+        max_restarts_on_errors=0,
+        job_id=1,
+        task_id=0,
+        pool=None,
+        starting=set(),
+        starting_lock=mock.Mock(),
+        starting_signal=mock.Mock())
+    executor.set_strategy_config({'try_other_locations_first': True})
+    executor.recovering_from_cluster_failure = True
+    executor._launched_resources = launched
+    executor._cleanup_cluster = mock.MagicMock()
+    executor.RETRY_INIT_GAP_SECONDS = 0
+    executor.launches = []
+
+    async def fake_launch(max_retry=3, raise_on_failure=True, recovery=False):
+        del raise_on_failure, recovery
+        blocked = executor.extra_launch_context().get(
+            managed_job_constants.BLOCKED_RESOURCES_LAUNCH_CONTEXT_KEY)
+        executor.launches.append((max_retry, blocked))
+        # Step 2 and one step-3 launch at most; more means a stale block.
+        assert len(executor.launches) <= 2, executor.launches
+        return step2_result if blocked else 2.0
+
+    executor._launch = fake_launch
+    return executor
+
+
+def _spot_l4_anywhere():
+    return resources_lib.Resources(cloud=clouds.AWS(),
+                                   accelerators={'L4': 1},
+                                   use_spot=True)
+
+
+def _launched_spot_l4():
+    return resources_lib.Resources(infra='aws/us-east-1/us-east-1a',
+                                   instance_type='g6.xlarge',
+                                   use_spot=True)
+
+
+def _sent_block(executor):
+    """The one block step 2 sent, parsed as the API server parses it."""
+    [config] = executor.launches[0][1]
+    [block] = resources_lib.Resources.from_yaml_config(config)
+    return config, block
+
+
+def _skip_reason(info):
+    """What recover() logged for not skipping the region, or None."""
+    logged = [
+        c.args[0] for c in info.call_args_list if c.args[0].startswith(
+            'Recovering without skipping the failed location')
+    ]
+    assert len(logged) <= 1, logged
+    return logged[0] if logged else None
+
+
+def test_eager_recover_blocks_the_failed_region_once(enable_all_clouds):
+    executor = _eager_executor(_spot_l4_anywhere(), _launched_spot_l4())
+
+    assert asyncio.run(executor.recover()) == 1.0
+
+    assert len(executor.launches) == 1 and executor.launches[0][0] == 1
+    _, block = _sent_block(executor)
+    assert (block.cloud, block.region, block.zone) == (clouds.AWS(),
+                                                       'us-east-1', None)
+    # Another zone of the same region is blocked; another region is not, and
+    # neither is on-demand capacity in the same region.
+    launched = _launched_spot_l4()
+    assert launched.copy(zone='us-east-1b').should_be_blocked_by(block)
+    assert not launched.copy(region='us-west-2',
+                             zone=None).should_be_blocked_by(block)
+    assert not launched.copy(use_spot=False).should_be_blocked_by(block)
+
+
+def test_eager_recover_blocks_only_the_zone_on_demand(enable_all_clouds):
+    """Even a job pinned to the region can move zone."""
+    launched = _launched_spot_l4().copy(use_spot=False)
+    executor = _eager_executor(
+        _spot_l4_anywhere().copy(region='us-east-1', use_spot=False), launched)
+
+    assert asyncio.run(executor.recover()) == 1.0
+
+    _, block = _sent_block(executor)
+    assert (block.region, block.zone, block.use_spot) == ('us-east-1',
+                                                          'us-east-1a', False)
+    assert launched.should_be_blocked_by(block)
+    assert not launched.copy(zone='us-east-1b').should_be_blocked_by(block)
+
+
+@pytest.mark.parametrize('use_spot,skipped', [(True, 'us-east-1'),
+                                              (False, None)])
+def test_eager_recover_with_reservations_keeps_on_demand_in_its_zone(
+        enable_all_clouds, use_spot, skipped):
+    """Spot capacity can't be reserved, so spot jobs still skip."""
+    launched = _launched_spot_l4().copy(use_spot=use_spot)
+    executor = _eager_executor(_spot_l4_anywhere().copy(use_spot=use_spot),
+                               launched)
+    config = config_utils.Config.from_dict(
+        {'aws': {
+            'prioritize_reservations': True
+        }})
+
+    with skypilot_config.replace_skypilot_config(config), mock.patch.object(
+            recovery_strategy.logger, 'info') as info:
+        asyncio.run(executor.recover())
+
+    if skipped is None:
+        assert executor.launches == [(executor._MAX_RETRY_CNT, None)]
+        assert 'reservations are configured' in _skip_reason(info)
+    else:
+        _, block = _sent_block(executor)
+        assert (block.region, block.zone) == (skipped, None)
+
+
+def _recover_after_failing_in(executor, infra):
+    """Fails the job's cluster in `infra`, recovers, and returns the
+    locations step 2 skipped."""
+    region, zone = infra.split('/')[1:]
+    executor._launched_resources = _launched_spot_l4().copy(region=region,
+                                                            zone=zone)
+    executor.launches = []
+    asyncio.run(executor.recover())
+    blocked = []
+    for config in executor.launches[0][1] or []:
+        [block] = resources_lib.Resources.from_yaml_config(config)
+        blocked.append(block.region)
+    return blocked
+
+
+def test_eager_recover_skips_every_recent_failure(enable_all_clouds):
+    """A second quick preemption doesn't send the job back to the first."""
+    executor = _eager_executor(_spot_l4_anywhere(), _launched_spot_l4())
+
+    assert _recover_after_failing_in(
+        executor, 'aws/us-east-1/us-east-1a') == ['us-east-1']
+    assert _recover_after_failing_in(
+        executor, 'aws/us-east-2/us-east-2a') == ['us-east-1', 'us-east-2']
+
+
+def test_eager_recover_forgets_old_failures(enable_all_clouds):
+    executor = _eager_executor(_spot_l4_anywhere(), _launched_spot_l4())
+    _recover_after_failing_in(executor, 'aws/us-east-1/us-east-1a')
+    # As if _FAILED_LOCATION_SKIP_SECONDS had passed.
+    executor._failed_locations = [
+        (time.monotonic() - 1, block, config)
+        for _, block, config in executor._failed_locations
+    ]
+
+    assert _recover_after_failing_in(
+        executor, 'aws/us-east-2/us-east-2a') == ['us-east-2']
+
+
+def test_eager_recover_starts_over_after_relaunching_in_a_skipped_region(
+        enable_all_clouds):
+    """Landing in a skipped region means nothing else had capacity."""
+    executor = _eager_executor(_spot_l4_anywhere(), _launched_spot_l4())
+    _recover_after_failing_in(executor, 'aws/us-east-1/us-east-1a')
+    _recover_after_failing_in(executor, 'aws/us-east-2/us-east-2a')
+
+    assert _recover_after_failing_in(
+        executor, 'aws/us-east-1/us-east-1b') == ['us-east-1']
+
+
+def test_eager_recover_falls_back_to_unblocked_launch(enable_all_clouds):
+    executor = _eager_executor(_spot_l4_anywhere(),
+                               _launched_spot_l4(),
+                               step2_result=None)
+
+    assert asyncio.run(executor.recover()) == 2.0
+
+    assert [(r, b is not None) for r, b in executor.launches
+           ] == [(1, True), (executor._MAX_RETRY_CNT, False)]
+
+
+@pytest.mark.parametrize('cloud', [clouds.Kubernetes, clouds.SSH, clouds.Slurm])
+def test_eager_recover_retries_the_same_kubernetes_or_slurm_cluster(
+        enable_all_clouds, cloud):
+    """A region there is one cluster; a lost pod or node isn't a shortage."""
+    executor = _eager_executor(
+        resources_lib.Resources(cloud=cloud()),
+        resources_lib.Resources(cloud=cloud(), region='ctx-a'))
+
+    with mock.patch.object(recovery_strategy.logger, 'info') as info:
+        asyncio.run(executor.recover())
+
+    assert executor.launches == [(executor._MAX_RETRY_CNT, None)]
+    assert 'a region is a single cluster' in _skip_reason(info)
+
+
+@pytest.mark.parametrize('case,reason', [
+    ('opted_out', None),
+    ('region', 'every candidate is pinned to us-east-1'),
+    ('zone', 'every candidate is pinned to us-east-1'),
+    ('pool', 'the job runs on a pool'),
+    ('not_a_cluster_failure', 'no preemption or node failure was detected'),
+    ('unknown_cluster', 'where the cluster ran is unknown'),
+    ('on_demand_zone', 'every candidate is pinned to us-east-1a'),
+    ('on_demand_without_zone',
+     'an on-demand cluster skips only its zone, and AWS has none'),
+])
+def test_eager_recover_says_why_it_skips_nothing(enable_all_clouds, case,
+                                                 reason):
+    """An opted-in job that stays where it failed says why in the log."""
+    requested = _spot_l4_anywhere()
+    launched = _launched_spot_l4()
+    if case == 'region':
+        requested = requested.copy(region='us-east-1')
+    elif case in ('zone', 'on_demand_zone'):
+        requested = requested.copy(region='us-east-1', zone='us-east-1a')
+    if case.startswith('on_demand'):
+        requested = requested.copy(use_spot=False)
+        launched = launched.copy(use_spot=False)
+    if case == 'on_demand_without_zone':
+        # As on a cloud that provisions without zones, e.g. Azure.
+        launched = launched.copy(zone=None)
+    executor = _eager_executor(requested, launched)
+    if case == 'opted_out':
+        executor.set_strategy_config({})
+    executor.pool = 'my-pool' if case == 'pool' else None
+    executor.recovering_from_cluster_failure = case != 'not_a_cluster_failure'
+    if case == 'unknown_cluster':
+        executor._launched_resources = None
+
+    with mock.patch.object(recovery_strategy.logger, 'info') as info:
+        asyncio.run(executor.recover())
+
+    assert executor.launches == [(executor._MAX_RETRY_CNT, None)]
+    logged = _skip_reason(info)
+    if reason is None:
+        assert logged is None
+    else:
+        assert reason in logged
+
+
+def _job_dag(job_recovery, **other_resources):
+    task = task_lib.Task.from_yaml_config({
+        'name': 'job',
+        'run': 'true',
+        'resources': {
+            'job_recovery': job_recovery,
+            **other_resources
+        }
+    })
+    return dag_utils.convert_entrypoint_to_dag(task)
+
+
+def _executor_after_submission(dag):
+    """Through what `sky jobs launch` and the controller do: validate, fill in
+    the default strategy, write the DAG YAML, load it, build the executor."""
+    dag.validate()
+    dag_utils.fill_default_config_in_dag_for_job_launch(dag)
+    loaded = dag_utils.load_dag_from_yaml_str(
+        dag_utils.dump_dag_to_yaml_str(dag))
+    return recovery_strategy.StrategyExecutor.make(
+        'cluster', mock.MagicMock(spec=backends.CloudVmRayBackend),
+        loaded.tasks[0], 1, 0, None, set(), mock.Mock(), mock.Mock())
+
+
+@pytest.mark.parametrize('job_recovery,opted_in', [
+    pytest.param(None, False, id='unset'),
+    pytest.param('EAGER_NEXT_REGION', False, id='strategy-name-only'),
+    pytest.param({'max_restarts_on_errors': 1}, False, id='other-keys-only'),
+    pytest.param(
+        {'try_other_locations_first': True}, True, id='default-strategy'),
+    pytest.param(
+        {
+            'strategy': 'eager_next_region',
+            'try_other_locations_first': True
+        },
+        True,
+        id='explicit-strategy'),
+    pytest.param({'try_other_locations_first': False}, False, id='false'),
+])
+def test_try_other_locations_first_reaches_the_strategy(enable_all_clouds,
+                                                        job_recovery, opted_in):
+    executor = _executor_after_submission(_job_dag(job_recovery))
+
+    assert type(executor) is recovery_strategy.EagerFailoverStrategyExecutor
+    assert executor.try_other_locations_first is opted_in
+
+
+def test_try_other_locations_first_applies_to_every_any_of_entry(
+        enable_all_clouds):
+    """Set at the top level, as the docs suggest for limiting regions."""
+    dag = _job_dag({'try_other_locations_first': True},
+                   any_of=[{
+                       'infra': 'aws/us-east-1'
+                   }, {
+                       'infra': 'aws/us-west-2'
+                   }])
+    assert all(r.job_recovery['try_other_locations_first']
+               for r in dag.tasks[0].resources)
+
+    assert _executor_after_submission(dag).try_other_locations_first is True
+
+
+def test_job_recovery_in_one_any_of_entry_says_where_it_goes(enable_all_clouds):
+    dag = _job_dag(None,
+                   any_of=[{
+                       'infra': 'aws/us-east-1',
+                       'job_recovery': {
+                           'try_other_locations_first': True
+                       }
+                   }, {
+                       'infra': 'aws/us-west-2'
+                   }])
+    dag.validate()
+    with pytest.raises(ValueError, match='at the top level of `resources`'):
+        dag_utils.fill_default_config_in_dag_for_job_launch(dag)
+
+
+@pytest.mark.parametrize('base,accepted', [
+    pytest.param(recovery_strategy.EagerFailoverStrategyExecutor,
+                 True,
+                 id='built-on-eager-next-region'),
+    pytest.param(recovery_strategy.FailoverStrategyExecutor,
+                 False,
+                 id='built-on-failover'),
+    pytest.param(recovery_strategy.StrategyExecutor, False, id='its-own'),
+])
+@pytest.mark.parametrize('as_default', [False, True],
+                         ids=['named', 'as-the-default'])
+def test_try_other_locations_first_with_a_plugin_strategy(
+        enable_all_clouds, monkeypatch, base, accepted, as_default):
+    """A strategy that does not read the key must not accept it silently,
+    including a plugin's default when the job names no strategy."""
+    strategy_registry = recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY
+    monkeypatch.setitem(strategy_registry, 'plugin_strategy',
+                        type('PluginStrategy', (base,), {}))
+    job_recovery = {'try_other_locations_first': True}
+    if as_default:
+        monkeypatch.setattr(strategy_registry, '_default', 'plugin_strategy')
+    else:
+        job_recovery['strategy'] = 'plugin_strategy'
+    dag = _job_dag(job_recovery)
+
+    if accepted:
+        dag.validate()
+    else:
+        error = 'not PLUGIN_STRATEGY' + (', the default' if as_default else '.')
+        with pytest.raises(ValueError, match=error):
+            dag.validate()
+
+
+@pytest.mark.parametrize('job_recovery,error', [
+    pytest.param({
+        'strategy': 'FAILOVER',
+        'try_other_locations_first': True
+    },
+                 'needs the EAGER_NEXT_REGION strategy, not FAILOVER',
+                 id='failover'),
+    pytest.param({
+        'strategy': 'failover',
+        'try_other_locations_first': True
+    },
+                 'not FAILOVER',
+                 id='failover-lowercase'),
+    pytest.param({'try_other_locations_first': 'yes'},
+                 'not of type',
+                 id='not-a-boolean'),
+    pytest.param({
+        'strategy': 'FAILOVER',
+        'try_other_locations_first': False
+    },
+                 None,
+                 id='failover-off'),
+])
+def test_try_other_locations_first_is_checked_at_submission(
+        enable_all_clouds, job_recovery, error):
+    """Parsing and dag.validate(), as the jobs launch endpoint runs them."""
+    if error is None:
+        _job_dag(job_recovery).validate()
+        return
+    with pytest.raises(ValueError, match=error):
+        _job_dag(job_recovery).validate()
+
+
+_MIN_VERSION = server_constants.MIN_TRY_OTHER_LOCATIONS_FIRST_API_VERSION
+
+
+@pytest.mark.parametrize('entry', ['validate', 'optimize'])
+@pytest.mark.parametrize('server_version', [_MIN_VERSION - 1, None])
+def test_try_other_locations_first_is_refused_by_an_older_server(
+        enable_all_clouds, monkeypatch, entry, server_version):
+    """An older server would reject the key in its schema."""
+    monkeypatch.setattr(server_common, 'check_server_healthy_or_start_fn',
+                        lambda *args: None)
+    monkeypatch.setattr(versions, 'get_remote_api_version',
+                        lambda: server_version)
+    dag = _job_dag({'try_other_locations_first': True})
+
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='try_other_locations_first'):
+        getattr(sdk, entry)(dag)
+
+
+@pytest.mark.parametrize('job_recovery,server_version', [
+    pytest.param({'try_other_locations_first': True},
+                 _MIN_VERSION,
+                 id='new-enough-server'),
+    pytest.param(
+        {'max_restarts_on_errors': 1}, _MIN_VERSION - 1, id='key-not-set'),
+])
+def test_try_other_locations_first_version_check_passes(enable_all_clouds,
+                                                        monkeypatch,
+                                                        job_recovery,
+                                                        server_version):
+    monkeypatch.setattr(versions, 'get_remote_api_version',
+                        lambda: server_version)
+    sdk._check_try_other_locations_first_api_version(_job_dag(job_recovery))
+
+
+@pytest.mark.parametrize('other', [
+    pytest.param(lambda: _spot_l4_anywhere(), id='unpinned'),
+    pytest.param(lambda: _spot_l4_anywhere().copy(region='us-west-2'),
+                 id='pinned-to-another-region'),
+])
+def test_eager_recover_blocks_when_a_candidate_can_run_elsewhere(
+        enable_all_clouds, other):
+    requested = {_spot_l4_anywhere().copy(region='us-east-1'), other()}
+    executor = _eager_executor(requested, _launched_spot_l4())
+
+    asyncio.run(executor.recover())
+
+    _, block = _sent_block(executor)
+    assert (block.region, block.zone) == ('us-east-1', None)
+
+
+@pytest.mark.parametrize('error', [
+    ValueError('No instance type g6.xlarge found.'),
+    ConnectionError('Failed to download the catalog.'),
+])
+def test_eager_recover_without_block_when_it_cannot_be_built(
+        enable_all_clouds, monkeypatch, error):
+    """E.g. the catalog dropped the instance type or failed to download."""
+    executor = _eager_executor(_spot_l4_anywhere(), _launched_spot_l4())
+
+    def catalog_lookup(cls, instance_type):
+        del cls, instance_type
+        raise error
+
+    monkeypatch.setattr(clouds.AWS, 'get_vcpus_mem_from_instance_type',
+                        classmethod(catalog_lookup))
+
+    assert asyncio.run(executor.recover()) == 2.0
+
+    assert executor.launches == [(executor._MAX_RETRY_CNT, None)]
+
+
+def test_eager_recover_builds_the_block_off_the_event_loop(
+        enable_all_clouds, monkeypatch):
+    """It can download the catalog, which would stall the other jobs."""
+    executor = _eager_executor(_spot_l4_anywhere(), _launched_spot_l4())
+    threads = []
+    real = recovery_strategy._location_block
+
+    def recording(launched):
+        threads.append(threading.current_thread())
+        return real(launched)
+
+    monkeypatch.setattr(recovery_strategy, '_location_block', recording)
+
+    asyncio.run(executor.recover())
+
+    assert threads and threads[0] is not threading.main_thread()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('opted_in,has_handle,restored', [
+    (True, True, True),
+    (True, False, False),
+    (False, True, False),
+])
+async def test_on_resume_restores_the_launched_region(monkeypatch, opted_in,
+                                                      has_handle, restored):
+    """After a controller restart, recover() still knows the failed region."""
+    executor = _make_bare_executor(
+        recovery_strategy.EagerFailoverStrategyExecutor)
+    executor.set_strategy_config({'try_other_locations_first': opted_in})
+    executor.job_id, executor.task_id = 1, 0
+    executor._launched_resources = None
+    launched = mock.Mock()
+    handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+    handle.launched_resources = launched
+    monkeypatch.setattr(recovery_strategy.state,
+                        'get_runtime_user_restarts_async',
+                        mock.AsyncMock(return_value=0))
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda name: handle
+                        if has_handle else None)
+
+    await executor.on_resume('test-cluster')
+
+    assert executor._launched_resources is (launched if restored else None)
+
+
+@pytest.mark.parametrize('launched', [
+    pytest.param(lambda: _launched_spot_l4(), id='aws-spot'),
+    pytest.param(lambda: _launched_spot_l4().copy(use_spot=False),
+                 id='aws-on-demand'),
+    pytest.param(
+        lambda: resources_lib.Resources(infra='gcp/us-central1/us-central1-a',
+                                        instance_type='g2-standard-4',
+                                        accelerators={'L4': 1},
+                                        use_spot=True),
+        id='gcp-gpu'),
+])
+def test_block_survives_the_launch_context(enable_all_clouds, launched):
+    """The server parses the block back to the launched cloud, region,
+    instance type, spot setting and (for on-demand) zone, and nothing else."""
+    launched = launched()
+    executor = _eager_executor(resources_lib.Resources(cloud=launched.cloud),
+                               launched)
+
+    asyncio.run(executor.recover())
+
+    config, block = _sent_block(executor)
+    # memory comes from the instance type.
+    assert set(config) <= {
+        'infra', 'instance_type', 'accelerators', 'use_spot', 'memory'
+    }
+    assert (block.cloud, block.region, block.zone, block.instance_type,
+            block.accelerators,
+            block.use_spot) == (launched.cloud, launched.region,
+                                None if launched.use_spot else launched.zone,
+                                launched.instance_type, launched.accelerators,
+                                launched.use_spot)
+    assert launched.should_be_blocked_by(block)
+
+
+@pytest.mark.asyncio
+async def test_launch_sends_the_block_in_the_launch_context(monkeypatch):
+    """The real _launch sends the block, and stops once it is cleared."""
+    executor = _make_launch_executor(
+        recovery_strategy.EagerFailoverStrategyExecutor)
+    patches = _patch_launch_environment(monkeypatch)
+    handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+    handle.launched_resources = None
+    handle.cached_cluster_info = None
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda name: handle)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    config = {'infra': 'aws/us-east-1', 'instance_type': 'g6.xlarge'}
+
+    executor._blocks = [config]
+    await executor._launch(max_retry=1)
+    executor._blocks = None
+    await executor._launch(max_retry=1)
+
+    first, second = (c.kwargs['_extra_launch_context']
+                     for c in patches.sdk_launch.call_args_list)
+    key = managed_job_constants.BLOCKED_RESOURCES_LAUNCH_CONTEXT_KEY
+    assert first[key] == [config]
+    assert 'managed_job_recovery' in first
+    assert key not in second
+
+
+@pytest.mark.asyncio
+async def test_eager_recover_clears_the_block_when_the_launch_is_cancelled(
+        enable_all_clouds):
+    """Later launches must not keep skipping the region."""
+    executor = _eager_executor(_spot_l4_anywhere(), _launched_spot_l4())
+
+    async def cancelled(max_retry=3, raise_on_failure=True, recovery=False):
+        del max_retry, raise_on_failure, recovery
+        assert executor._blocks is not None
+        raise asyncio.CancelledError
+
+    executor._launch = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await executor.recover()
+    assert executor._blocks is None

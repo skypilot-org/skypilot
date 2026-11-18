@@ -969,7 +969,7 @@ We can specify the strategy for which region to recover the job to when it fails
 
 If `FAILOVER` is specified, the job will be restarted in the same region if the node fails, and go to the next region if no available resources are found in the same region.
 
-If `EAGER_NEXT_REGION` is specified, the job will go to the next region directly if the node fails. This is useful for spot instances, as in practice, preemptions in a region usually indicate a shortage of resources in that region.
+If `EAGER_NEXT_REGION` is specified, the cluster is terminated as soon as the node fails, and the job is relaunched on the cheapest available resources, which can be in the same region. To try other locations first, set `try_other_locations_first` (see below).
 
 Default: `EAGER_NEXT_REGION`
 
@@ -988,6 +988,34 @@ resources:
   job_recovery:
     strategy: EAGER_NEXT_REGION
 ```
+
+With `EAGER_NEXT_REGION`, we can also have recovery try other locations first. After a spot preemption, it skips the region, as in practice a preemption usually means the region is short of spot capacity. After an on-demand node failure, it skips only the zone. This is off by default, as moving regions can change the job's cost and how far it runs from its data.
+
+```yaml
+resources:
+  job_recovery:
+    strategy: EAGER_NEXT_REGION
+    try_other_locations_first: true
+```
+
+A failed location is skipped for an hour, and only for the instance type and spot setting that failed. If nothing else has capacity, recovery tries everywhere, the failed locations included. A controller restart forgets earlier failures.
+
+To limit where the job can go, list regions with `any_of`. With `ordered`, recovery moves to the first listed region it is not skipping, rather than the cheapest. Set `job_recovery` at the top level of `resources`, not inside the `any_of` or `ordered` entries.
+
+```yaml
+resources:
+  accelerators: L4
+  use_spot: true
+  job_recovery:
+    strategy: EAGER_NEXT_REGION
+    try_other_locations_first: true
+  ordered:
+    - infra: aws/us-east-1
+    - infra: aws/us-east-2
+    - infra: aws/us-west-2
+```
+
+Nothing is skipped on Kubernetes, SSH Node Pools or Slurm, for jobs on a pool, or when the user program failed. Spot jobs in a job group stay in the group's region. On-demand jobs also skip nothing on clouds without zones, such as Azure, or when `prioritize_reservations` or `specific_reservations` is set, since the failed node's reservation is free again. The controller log (`sky jobs logs --controller`) says why nothing was skipped.
 
 We can also specify the maximum number of times to restart the job on user code errors (non-zero exit codes).
 
@@ -1022,6 +1050,7 @@ Available fields:
 - `strategy`: The recovery strategy to use (`FAILOVER` or `EAGER_NEXT_REGION`)
 - `max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
 - `recover_on_exit_codes`: Exit code(s) (0-255) that should always trigger recovery. Can be a single integer (e.g., `33`) or a list (e.g., `[33, 34]`). Restarts triggered by these exit codes do not count towards the `max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
+- `try_other_locations_first`: With `EAGER_NEXT_REGION` only. Relaunch outside the region (spot) or zone (on-demand) where the job recently failed before trying anywhere else. Default: `false`.
 
 
 
