@@ -466,11 +466,13 @@ FAQs
 
 * **Can pods run without internet access?**
 
-  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above, system packages included: SkyPilot installs missing ones at pod startup. In both ``skypilot-nightly`` lines of the recipe, use your API server's package and version instead (``skypilot==<version>`` or ``skypilot-nightly==<version>``, see ``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
+  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above. In both ``skypilot-nightly`` lines of the recipe, use your API server's package and version instead (``skypilot==<version>`` or ``skypilot-nightly==<version>``, see ``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
+
+  Keep ``rsync`` and ``curl`` from the recipe's system packages, and ``fuse3`` for storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes: SkyPilot installs missing ones at pod startup, which needs package access. The others may be left out. Without ``openssh-server`` the cluster still launches, but ``ssh <cluster>``, VS Code and ``mpirun`` between nodes do not work; pods on host networking (``hostNetwork: true`` in ``kubernetes.pod_config``, or the default on OCI with RoCE) require it.
 
   Pod startup then downloads nothing. ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers still download their own tools.
 
-  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` to skip the built-in public ones, and uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
+  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` when pods can reach no package source, so that launches do not also wait on the built-in public ones; and set uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
 
 * **Are multi-node jobs supported on Kubernetes?**
 
