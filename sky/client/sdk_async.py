@@ -74,6 +74,7 @@ DEFAULT_STREAM_CONFIG = StreamConfig()
 
 
 @usage_lib.entrypoint
+@sdk.return_sync_call_result
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 async def get(request_id: str) -> Any:
@@ -222,6 +223,7 @@ async def _stream_and_get(
     )
 
 
+@sdk.return_sync_call_result
 async def stream_and_get(
     request_id: Optional[str] = None,
     log_path: Optional[str] = None,

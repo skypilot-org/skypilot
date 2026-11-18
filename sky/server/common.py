@@ -158,7 +158,8 @@ P = ParamSpec('P')
 
 
 class RequestId(str, Generic[T]):
-    pass
+    # (status code, body) when the server answered a sync call in its response.
+    sync_response: Optional[Tuple[int, Any]] = None
 
 
 ApiVersion = Optional[str]
@@ -197,6 +198,7 @@ class ApiServerInfo:
     basic_auth_enabled: bool = False
     error: Optional[str] = None
     latest_version: Optional[str] = None
+    sync_call_max_limit: Optional[int] = None
 
 
 def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
@@ -715,6 +717,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         commit = result.get('commit')
         user = result.get('user')
         latest_version = result.get('latest_version')
+        sync_call_max_limit = result.get('sync_call_max_limit')
+        rest.set_sync_call_max_limit(sync_call_max_limit)
         # Cache basic_auth_enabled and set client user hash on the
         # client-side usage singleton.
         global basic_auth_enabled, client_user_hash
@@ -730,7 +734,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                     commit=commit,
                                     user=user,
                                     basic_auth_enabled=basic_auth_enabled,
-                                    latest_version=latest_version)
+                                    latest_version=latest_version,
+                                    sync_call_max_limit=sync_call_max_limit)
         if api_version is None or version is None or commit is None:
             server_url = endpoint if endpoint is not None else get_server_url()
             logger.warning(f'API server response missing '
@@ -863,6 +868,13 @@ def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
 
 
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
+    if (response.headers.get(server_constants.SYNC_CALL_HEADER) == '1' and
+            response.status_code in (200, 500)):
+        body = response.json()
+        payload = body if response.status_code == 200 else body['detail']
+        sync_request_id: RequestId[T] = RequestId[T](payload['request_id'])
+        sync_request_id.sync_response = (response.status_code, body)
+        return sync_request_id
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:

@@ -11,7 +11,9 @@ Usage example:
 
 """
 import contextlib
+import functools
 from http import cookiejar
+import inspect
 import json
 import logging
 import os
@@ -20,8 +22,8 @@ import re
 import subprocess
 import sys
 import typing
-from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional,
+                    Tuple, TypeVar, Union)
 from urllib import parse as urlparse
 
 import click
@@ -106,6 +108,7 @@ logging.getLogger('httpx').setLevel(logging.CRITICAL)
 _LINE_PROCESSED_KEY = 'line_processed'
 
 T = TypeVar('T')
+F = TypeVar('F', bound=Callable[..., Any])
 
 
 def reload_config() -> None:
@@ -2512,7 +2515,79 @@ def status_kubernetes() -> server_common.RequestId[
 
 
 # === API request APIs ===
+def _request_result(request_id: str, status_code: int, body: Any,
+                    text: str) -> Any:
+    """The result of a request from an /api/get response, or raises its error.
+    """
+    request_task = None
+    if status_code == 200 and body is not None:
+        request_task = requests_lib.Request.decode(
+            payloads.RequestPayload(**body))
+    elif status_code == 500:
+        try:
+            request_task = requests_lib.Request.decode(
+                payloads.RequestPayload(**body.get('detail')))
+            logger.debug(f'Got request with error: {request_task.name}')
+        except Exception:  # pylint: disable=broad-except
+            request_task = None
+    if request_task is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to get request {request_id}: '
+                               f'{status_code} {text}')
+    error = request_task.get_error()
+    if error is not None:
+        error_obj = error['object']
+        _raise_exception_object_on_client(error_obj)
+    if request_task.status == requests_lib.RequestStatus.CANCELLED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.RequestCancelled(
+                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
+                f'({request_task.request_id}) is cancelled by another process.'
+                f'{colorama.Style.RESET_ALL}')
+    return request_task.get_return_value()
+
+
+def _sync_call_result(request_id: Optional[str]) -> Tuple[bool, Any]:
+    """(True, result) when the server answered the call in its response."""
+    sync_response = getattr(request_id, 'sync_response', None)
+    if request_id is None or sync_response is None:
+        return False, None
+    status_code, body = sync_response
+    return True, _request_result(request_id, status_code, body, str(body))
+
+
+def return_sync_call_result(func: F) -> F:
+    """Returns the result a sync call already carries instead of calling func.
+
+    func takes the request ID as its first argument.
+    """
+
+    def _request_id(args, kwargs) -> Optional[str]:
+        return args[0] if args else kwargs.get('request_id')
+
+    if inspect.iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            answered, result = _sync_call_result(_request_id(args, kwargs))
+            if answered:
+                return result
+            return await func(*args, **kwargs)
+
+        return typing.cast(F, async_wrapper)
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        answered, result = _sync_call_result(_request_id(args, kwargs))
+        if answered:
+            return result
+        return func(*args, **kwargs)
+
+    return typing.cast(F, wrapper)
+
+
 @usage_lib.entrypoint
+@return_sync_call_result
 @annotations.client_api
 def get(request_id: server_common.RequestId[T]) -> T:
     """Waits for and gets the result of a request.
@@ -2540,32 +2615,12 @@ def get(request_id: server_common.RequestId[T]) -> T:
         retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
-    request_task = None
-    if response.status_code == 200:
-        request_task = requests_lib.Request.decode(
-            payloads.RequestPayload(**response.json()))
-    elif response.status_code == 500:
-        try:
-            request_task = requests_lib.Request.decode(
-                payloads.RequestPayload(**response.json().get('detail')))
-            logger.debug(f'Got request with error: {request_task.name}')
-        except Exception:  # pylint: disable=broad-except
-            request_task = None
-    if request_task is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to get request {request_id}: '
-                               f'{response.status_code} {response.text}')
-    error = request_task.get_error()
-    if error is not None:
-        error_obj = error['object']
-        _raise_exception_object_on_client(error_obj)
-    if request_task.status == requests_lib.RequestStatus.CANCELLED:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.RequestCancelled(
-                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
-                f'({request_task.request_id}) is cancelled by another process.'
-                f'{colorama.Style.RESET_ALL}')
-    return request_task.get_return_value()
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    return _request_result(request_id, response.status_code, body,
+                           response.text)
 
 
 @typing.overload
@@ -2589,6 +2644,7 @@ def stream_and_get(request_id: None = None,
 
 
 @usage_lib.entrypoint
+@return_sync_call_result
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 @rest.retry_transient_errors()

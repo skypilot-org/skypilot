@@ -65,6 +65,14 @@ class RetryContext:
 _RETRY_CONTEXT: contextvars.ContextVar[Optional[RetryContext]] = (
     contextvars.ContextVar('retry_context', default=None))
 
+# The largest `limit` the server accepts in a sync call, from its /api/health.
+# None when the server does not answer sync calls.
+_sync_call_max_limit: contextvars.ContextVar[Optional[int]] = (
+    contextvars.ContextVar('sync_call_max_limit', default=None))
+# Retries of a sync call the server answered with 429, before giving up.
+_SYNC_CALL_BUSY_RETRIES = 5
+_SYNC_CALL_MAX_RETRY_AFTER_SECONDS = 5.0
+
 _session = requests.Session()
 # Tune connection pool size, otherwise the default max is just 10.
 adapter = requests.adapters.HTTPAdapter(
@@ -377,9 +385,53 @@ def request(method, url, **kwargs) -> 'requests.Response':
     return request_without_retry(method, url, **kwargs)
 
 
+def set_sync_call_max_limit(max_limit: Optional[int]) -> None:
+    """Records whether the server answers sync calls, from its /api/health."""
+    _sync_call_max_limit.set(max_limit)
+
+
+def get_sync_call_max_limit() -> Optional[int]:
+    """The largest `limit` the server accepts in a sync call, or None."""
+    return _sync_call_max_limit.get()
+
+
+def _is_sync_response(response: 'requests.Response') -> bool:
+    return response.headers.get(constants.SYNC_CALL_HEADER) == '1'
+
+
+def _retry_after_seconds(response: 'requests.Response') -> float:
+    try:
+        seconds = float(response.headers.get('Retry-After', 1))
+    except ValueError:
+        seconds = 1.0
+    return min(max(seconds, 0.0), _SYNC_CALL_MAX_RETRY_AFTER_SECONDS)
+
+
+def _send(method, url, **kwargs) -> 'requests.Response':
+    """Sends a request, as a sync call when the server answers sync calls."""
+    if _sync_call_max_limit.get() is None:
+        return _session.request(method, url, **kwargs)
+    headers = dict(kwargs.pop('headers', None) or {})
+    headers[constants.SYNC_CALL_HEADER] = '1'
+    for _ in range(_SYNC_CALL_BUSY_RETRIES):
+        response = _session.request(method, url, headers=headers, **kwargs)
+        if not _is_sync_response(response):
+            return response
+        if response.status_code == 400:
+            # These arguments do not allow a sync call: run it in the
+            # background like any other request.
+            del headers[constants.SYNC_CALL_HEADER]
+            return _session.request(method, url, headers=headers, **kwargs)
+        if response.status_code != 429:
+            return response
+        time.sleep(_retry_after_seconds(response))
+    raise exceptions.ServerTemporarilyUnavailableError(
+        'SkyPilot API server is busy.')
+
+
 def request_without_retry(method, url, **kwargs) -> 'requests.Response':
     """Send a request to the API server without retry."""
-    response = _session.request(method, url, **kwargs)
+    response = _send(method, url, **kwargs)
     handle_server_unavailable(response)
     # TODO (kyuds): investigate into whether we can remove this as we
     # explicitly set in `get_api_server_status`.

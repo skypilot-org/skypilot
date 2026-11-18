@@ -3793,6 +3793,11 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     # or if not available)
     latest_version = version_check.get_latest_version_for_current()
 
+    optional_fields: Dict[str, Any] = {}
+    sync_call_max_limit = executor.get_sync_call_max_limit()
+    if sync_call_max_limit is not None:
+        optional_fields['sync_call_max_limit'] = sync_call_max_limit
+
     return responses.APIHealthResponse(
         status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
@@ -3824,6 +3829,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         # Whether GET /workspaces/config is restricted to admins (so the
         # dashboard can hide the config UI for non-admins when enabled)
         restrict_config_to_admins=rbac.restrict_config_to_admins(),
+        **optional_fields,
     )
 
 
