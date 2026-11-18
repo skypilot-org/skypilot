@@ -373,7 +373,8 @@ class Kubernetes(clouds.Cloud):
             return (_match_remote_identity(server, context),
                     _match_remote_identity(requested, context))
 
-        loosened = None
+        # Worded as the launch-time check in backend_utils words it.
+        refusal = None
         # Clusters on another cloud get the kubeconfig unless NO_UPLOAD
         # excludes it.
         both = {'kubernetes': cls(), 'ssh': clouds.SSH()}
@@ -382,9 +383,11 @@ class Kubernetes(clouds.Cloud):
                                        if values[cloud][0] == no_upload) and
                 cls.uploads_kubeconfig(obj for cloud, obj in both.items()
                                        if values[cloud][1] == no_upload)):
-            loosened = 'remote_identity: NO_UPLOAD'
+            refusal = ('`remote_identity: NO_UPLOAD` is set for Kubernetes on '
+                       'the API server, so its kubeconfig is not uploaded to '
+                       'clusters; your config cannot override it.')
         for cloud_cls in (cls, clouds.SSH):
-            if loosened is not None:
+            if refusal is not None:
                 break
             cloud = str(cloud_cls()).lower()
             try:
@@ -394,14 +397,14 @@ class Kubernetes(clouds.Cloud):
             for context in contexts:
                 server, requested = server_and_requested(cloud, context)
                 if requested == lc and server != lc:
-                    loosened = f'{cloud}.remote_identity (context {context!r})'
+                    refusal = (
+                        '`remote_identity: LOCAL_CREDENTIALS` would upload the '
+                        'API server\'s kubeconfig to your clusters on '
+                        f'{cloud} ({context}); only an admin can set it, in '
+                        'the API server\'s config.')
                     break
-        if loosened is not None and not permission.caller_is_admin():
-            raise exceptions.InvalidCloudConfigs(
-                f'{loosened} in your config or task would upload the API '
-                'server\'s kubeconfig to your clusters, which the API '
-                'server\'s config does not; only an admin can change it, in '
-                'the API server\'s config.')
+        if refusal is not None and not permission.caller_is_admin():
+            raise exceptions.InvalidCloudConfigs(refusal)
 
     @classmethod
     def check_request_keeps_server_identity(cls) -> None:
