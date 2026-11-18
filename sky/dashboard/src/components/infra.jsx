@@ -441,18 +441,27 @@ function ContextWorkspaces({ workspaces, workspaceName }) {
   React.useLayoutEffect(() => {
     const el = textRef.current;
     if (!el || expanded) return undefined;
-    const check = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    let active = true;
+    const check = () => {
+      if (active) setOverflows(el.scrollHeight > el.clientHeight + 1);
+    };
     check();
-    if (typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    return () => observer.disconnect();
+    // A late web font can change the line count without resizing the
+    // clamped box, so check again once fonts finish loading.
+    document.fonts?.ready.then(check);
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);
+    observer?.observe(el);
+    return () => {
+      active = false;
+      observer?.disconnect();
+    };
   }, [text, expanded]);
 
   const toggle = (overflows || expanded) && (
     <button
       type="button"
-      className="shrink-0 ml-1.5 text-blue-600 hover:underline"
+      className="shrink-0 ml-1.5 text-blue-fg hover:underline"
       aria-expanded={expanded}
       onClick={() => setExpanded((value) => !value)}
     >
