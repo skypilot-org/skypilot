@@ -240,6 +240,17 @@ class Server(uvicorn.Server):
             logger.exception('Error during graceful shutdown drain; '
                              'proceeding to exit anyway.')
         finally:
+            # The coordinator can fail before stopping controllers, or another
+            # worker can exhaust its lock wait. Do not leave this host's
+            # draining controllers alive for a successor to recover twice.
+            # The normal path first gives acknowledged cancels their bounded
+            # chance to reach the DB; this fallback cannot promise durability
+            # if that DB is unavailable.
+            try:
+                managed_job_scheduler.force_stop_local_job_controllers()
+            except Exception:  # pylint: disable=broad-except
+                logger.exception('Failed to gate or force-stop job controllers '
+                                 'during shutdown; proceeding to exit.')
             logger.info('Shutting down server...')
             self.should_exit = True
             super().handle_exit(sig, frame)

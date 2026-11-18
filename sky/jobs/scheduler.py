@@ -259,6 +259,35 @@ def drain_local_job_controllers() -> None:
         pathlib.Path(managed_job_constants.CONTROLLERS_DRAINING_PATH).touch()
 
 
+def _gate_controller_recovery() -> None:
+    """Keep failure detection from recovering controllers stopped for exit."""
+    recovery_gate = pathlib.Path(
+        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
+    recovery_gate.parent.mkdir(parents=True, exist_ok=True)
+    recovery_gate.touch()
+
+
+def force_stop_local_job_controllers() -> int:
+    """Last-resort shutdown when draining or cancel-state reads failed.
+
+    Only a server whose host is draining owns this stop, not a worker restart
+    or a controller's local API server. Gate recovery before signalling PIDs;
+    neither step needs the database. Unrecorded cancels may be lost, as when
+    the normal stop exhausts its cancel-record deadline.
+    """
+    if (not runs_local_controller_pool() or not os.path.exists(
+            managed_job_constants.CONTROLLERS_DRAINING_PATH)):
+        return 0
+    _gate_controller_recovery()
+    stopped = kill_local_job_controllers(signal.SIGKILL)
+    if stopped:
+        logger.warning(
+            f'Force-stopped {stopped} job controller(s) during shutdown; '
+            'acknowledged cancels not yet recorded in the database may be lost.'
+        )
+    return stopped
+
+
 def stop_local_job_controllers(cancel_record_timeout_seconds: float) -> None:
     """Stop this host's job controllers, once they are draining.
 
@@ -284,6 +313,7 @@ def stop_local_job_controllers(cancel_record_timeout_seconds: float) -> None:
     ]
     if not controllers:
         return
+    _gate_controller_recovery()
 
     # A cancel request has returned once its signal file is written, but the
     # file is lost with this host: only the CANCELLING status the job's

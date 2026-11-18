@@ -26,7 +26,7 @@ def _make_server() -> sky_uvicorn.Server:
     return sky_uvicorn.Server(uvicorn.Config(app=_dummy_app))
 
 
-def _patch_fast(monkeypatch) -> None:
+def _patch_fast(monkeypatch) -> mock.Mock:
     # Skip the real sleeps, the block-requests side effect and the stop of
     # this host's job controllers.
     monkeypatch.setattr(sky_uvicorn.time, 'sleep', lambda *_a, **_k: None)
@@ -34,12 +34,16 @@ def _patch_fast(monkeypatch) -> None:
                         lambda *_a, **_k: None)
     monkeypatch.setattr(managed_job_scheduler, 'stop_local_job_controllers',
                         lambda **_k: None)
+    force_stop = mock.Mock()
+    monkeypatch.setattr(managed_job_scheduler,
+                        'force_stop_local_job_controllers', force_stop)
+    return force_stop
 
 
 def test_graceful_shutdown_exits_when_backend_unreachable(monkeypatch):
     """A drain failure must not prevent the worker from exiting."""
     server = _make_server()
-    _patch_fast(monkeypatch)
+    force_stop = _patch_fast(monkeypatch)
 
     backend = mock.Mock()
     backend.get_shutdown_active_requests.side_effect = RuntimeError('db down')
@@ -49,6 +53,7 @@ def test_graceful_shutdown_exits_when_backend_unreachable(monkeypatch):
     server._graceful_shutdown(signal.SIGTERM, None)  # pylint: disable=protected-access
 
     assert server.should_exit is True
+    force_stop.assert_called_once_with()
 
 
 def test_graceful_shutdown_exits_when_no_requests(monkeypatch):
@@ -69,7 +74,7 @@ def test_graceful_shutdown_exits_when_no_requests(monkeypatch):
 def test_graceful_shutdown_exits_when_coordinator_lock_times_out(monkeypatch):
     """A worker that cannot acquire the coordinator lock still exits."""
     server = _make_server()
-    _patch_fast(monkeypatch)
+    force_stop = _patch_fast(monkeypatch)
 
     class _StuckLock:
 
@@ -83,6 +88,37 @@ def test_graceful_shutdown_exits_when_coordinator_lock_times_out(monkeypatch):
 
     server._graceful_shutdown(signal.SIGTERM, None)  # pylint: disable=protected-access
 
+    assert server.should_exit is True
+    force_stop.assert_called_once_with()
+
+
+@pytest.mark.parametrize('failure', ['drain', 'cancel-state'])
+def test_shutdown_force_stops_controllers_after_error(monkeypatch, failure):
+    server = _make_server()
+    force_stop = _patch_fast(monkeypatch)
+    if failure == 'drain':
+        monkeypatch.setattr(server, '_wait_requests',
+                            mock.Mock(side_effect=RuntimeError('drain failed')))
+    else:
+        monkeypatch.setattr(server, '_wait_requests', mock.Mock())
+        monkeypatch.setattr(
+            managed_job_scheduler, 'stop_local_job_controllers',
+            mock.Mock(side_effect=RuntimeError('cancel state DB unavailable')))
+    with mock.patch.object(uvicorn.Server, 'handle_exit') as parent_exit:
+        force_stop.side_effect = lambda: parent_exit.assert_not_called()
+        server._graceful_shutdown(signal.SIGTERM, None)  # pylint: disable=protected-access
+    force_stop.assert_called_once_with()
+    parent_exit.assert_called_once_with(signal.SIGTERM, None)
+    assert server.should_exit is True
+
+
+def test_shutdown_exits_even_when_force_stop_fails(monkeypatch):
+    server = _make_server()
+    force_stop = _patch_fast(monkeypatch)
+    monkeypatch.setattr(server, '_wait_requests', mock.Mock())
+    force_stop.side_effect = OSError('cannot gate recovery')
+    server._graceful_shutdown(signal.SIGTERM, None)  # pylint: disable=protected-access
+    force_stop.assert_called_once_with()
     assert server.should_exit is True
 
 

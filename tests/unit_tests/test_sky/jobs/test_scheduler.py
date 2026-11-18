@@ -118,6 +118,57 @@ class TestKillLocalConsolidationControllers:
         kill_mock.assert_called_once_with(101, signal.SIGKILL)
 
 
+class TestForceStopLocalJobControllers:
+
+    @pytest.fixture
+    def draining(self, monkeypatch, tmp_path):
+        monkeypatch.setenv('HOME', str(tmp_path))
+        path = tmp_path / 'controllers_draining'
+        path.touch()
+        monkeypatch.setattr(scheduler.managed_job_constants,
+                            'CONTROLLERS_DRAINING_PATH', str(path))
+        monkeypatch.setattr(scheduler, 'runs_local_controller_pool',
+                            lambda: True)
+        return path
+
+    def test_gates_before_killing_without_reading_cancel_db(
+            self, monkeypatch, draining):
+        gate = draining.parent / '.sky/.controller_recovery_restarting_signal'
+
+        def kill(sig):
+            assert gate.exists()
+            assert sig == signal.SIGKILL
+            return 2
+
+        monkeypatch.setattr(scheduler, 'kill_local_job_controllers', kill)
+        monkeypatch.setattr(
+            scheduler.state, 'get_status',
+            mock.Mock(side_effect=RuntimeError('database unavailable')))
+        assert scheduler.force_stop_local_job_controllers() == 2
+        scheduler.state.get_status.assert_not_called()
+
+    @pytest.mark.parametrize('owns_pool,is_draining', [(False, True),
+                                                       (True, False)])
+    def test_leaves_other_pools_and_worker_restarts_alone(
+            self, monkeypatch, draining, owns_pool, is_draining):
+        monkeypatch.setattr(scheduler, 'runs_local_controller_pool',
+                            lambda: owns_pool)
+        if not is_draining:
+            draining.unlink()
+        kill = mock.Mock()
+        monkeypatch.setattr(scheduler, 'kill_local_job_controllers', kill)
+        assert scheduler.force_stop_local_job_controllers() == 0
+        kill.assert_not_called()
+
+    def test_gate_failure_prevents_kill(self, monkeypatch, draining):
+        (draining.parent / '.sky').write_text('not a directory')
+        kill = mock.Mock()
+        monkeypatch.setattr(scheduler, 'kill_local_job_controllers', kill)
+        with pytest.raises(OSError):
+            scheduler.force_stop_local_job_controllers()
+        kill.assert_not_called()
+
+
 def _gone(pid: int) -> bool:
     """Whether a process has exited, collected by its parent or not."""
     try:
@@ -136,6 +187,7 @@ class TestStopLocalJobControllers:
         As in a container whose init does not collect orphans, the controller
         is not this process's child and stays a zombie once it is killed.
         """
+        monkeypatch.setenv('HOME', str(tmp_path))
         draining = tmp_path / 'job_controllers_draining'
         signals = tmp_path / 'signals'
         signals.mkdir()
@@ -233,6 +285,19 @@ class TestStopLocalJobControllers:
             scheduler.stop_local_job_controllers(-1)
 
         assert _gone(controller_pid)
+
+    def test_cancel_db_failure_is_not_silently_ignored(self, pool):
+        controller_pid, _, draining, signals = pool
+        draining.touch()
+        (signals / '7').touch()
+        with mock.patch.object(
+                scheduler.state, 'get_status',
+                side_effect=RuntimeError('database unavailable')), \
+                pytest.raises(RuntimeError, match='database unavailable'):
+            scheduler.stop_local_job_controllers(30)
+        assert not _gone(controller_pid)
+        assert (draining.parent /
+                '.sky/.controller_recovery_restarting_signal').exists()
 
     @pytest.mark.parametrize('target,attribute,replacement', [
         (scheduler, 'get_controller_process_records', lambda: None),
