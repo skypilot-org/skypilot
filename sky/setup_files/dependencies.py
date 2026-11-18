@@ -41,8 +41,8 @@ install_requires = [
     # Light weight requirement, can be removed after we deprecate Python 3.9.
     # ParamSpec is available in typing module starting from Python 3.10, so
     # we can replace "from typing_extensions import ParamSpec" with
-    # "from typing import ParamSpec" once we require Python >= 3.10.
-    'typing_extensions',
+    # >= 4.5.0 is required for typing_extensions.deprecated (PEP 702).
+    'typing_extensions >= 4.5.0',
     # filelock 3.15.0 or higher is required for async file locking.
     'filelock >= 3.15.0',
     'packaging',
