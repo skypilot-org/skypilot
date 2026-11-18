@@ -1279,11 +1279,12 @@ available_node_types:
 
                 # Per candidate source (the image's own, then each mirror):
                 # refresh; if it reached any source, install the missing
-                # required packages, then each optional one best-effort. Move
-                # on while a required package is missing, or while an optional
-                # one is after the Ubuntu archive partly failed to refresh (it
+                # required packages, then, once they are in, each optional one
+                # best-effort. Move on while a required package (or sshd under
+                # host networking) is missing, or while an optional one is
+                # missing after the Ubuntu archive partly failed to refresh (it
                 # may sit behind the failing entry, which the next mirror
-                # replaces), or the refresh timed out. Otherwise a missing
+                # replaces) or the refresh timed out. Otherwise a missing
                 # optional package is taken as absent from this distro, or
                 # behind a source no mirror fixes.
                 run_apt_install_with_fallback() {
@@ -1329,10 +1330,11 @@ available_node_types:
                       echo "Install failed with ${candidate:-default sources}: $core_left" >> /tmp/apt-update.log
                     fi
                   fi
-                  if [ -z "$core_left" ]; then
-                    # Unblock STEP 2 before the best-effort packages below.
-                    touch "$CORE_PKGS_READY"
-                  fi
+                  # Optional installs here would only add retries and timeouts:
+                  # the launch fails without core, and a later source retries them.
+                  [ -n "$core_left" ] && continue
+                  # Unblock STEP 2 before the best-effort packages below.
+                  touch "$CORE_PKGS_READY"
                   if [ -n "$optional_left" ]; then
                     echo "Installing missing packages individually: $optional_left" >> /tmp/apt-update.log
                     still_missing=""
@@ -1345,7 +1347,10 @@ available_node_types:
                     optional_left="$still_missing"
                   fi
 
-                  [ -n "$core_left" ] && continue
+                  {% if k8s_host_network %}
+                  # Host networking cannot launch without sshd (below).
+                  case " $optional_left " in *" openssh-server "*) continue ;; esac
+                  {% endif %}
                   if [ "$refresh_clean" = "false" ] && [ -n "$optional_left" ] && { [ "$APT_TIMED_OUT" = "true" ] || \
                     echo "$APT_FAILED_URLS" | grep -qE "^https?://([a-zA-Z0-9.-]+\.ubuntu\.com${candidate:+|$candidate})/ubuntu"; }; then
                     continue

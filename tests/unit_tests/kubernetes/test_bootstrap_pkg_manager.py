@@ -419,7 +419,8 @@ def _apt_loop(updates,
               missing: str = '',
               image_quiet: int = 1,
               install_fails: str = '',
-              source_host: str = 'archive.ubuntu.com'):
+              source_host: str = 'archive.ubuntu.com',
+              host_network: bool = False):
     """Runs the real apt fallback loop against a scripted `apt-get update`.
 
     updates: one entry per `apt-get update` call -- 'zero' (reaches no source),
@@ -435,7 +436,8 @@ def _apt_loop(updates,
     sources.list.d/debian.sources (Debian 12+), so a mirror has nothing to
     rewrite. after_loop: shell run after the loop. install_fails: packages
     whose install fails, as `pkg` (every source) or `host/pkg`.
-    source_host: the host in the image's own sources.
+    source_host: the host in the image's own sources. host_network: render
+    the loop for a host-networking pod.
     Returns the apt-get calls (updates tagged with the source host) and
     INSTALL_SUCCESS.
     """
@@ -443,7 +445,8 @@ def _apt_loop(updates,
         '# Set by apt_update_with_retries when none of its attempts',
         '# Surface /tmp/apt-update.log to the pod')
     loop = _extract('run_apt_install_with_fallback() {',
-                    '# Non-apt install path (dnf/microdnf/yum/apk/zypper)')
+                    '# Non-apt install path (dnf/microdnf/yum/apk/zypper)',
+                    k8s_host_network=host_network)
     tmp = tempfile.mkdtemp()
     try:
         bindir = os.path.join(tmp, 'bin')
@@ -709,24 +712,81 @@ def test_apt_mirror_failing_its_own_archive_moves_on_for_optional_ones():
     assert ok
 
 
-def test_apt_optional_package_missing_after_a_clean_refresh_stops_there():
+@pytest.mark.parametrize('host_network', [True, False])
+def test_apt_optional_package_missing_after_a_clean_refresh_stops_there(
+        host_network):
     """E.g. no fuse3 in Ubuntu 18.04: the mirrors carry the same distro."""
     made, ok = _apt_loop(['ok'] * 3,
                          mirrors='m1.example',
                          missing='fuse3',
-                         install_fails='fuse3')
+                         install_fails='fuse3',
+                         host_network=host_network)
     assert _updates(made) == ['http://archive.ubuntu.com']
     assert 'rsync' in _installed(made)
     assert ok
 
 
 def test_apt_core_install_failing_moves_on_and_keeps_optional_ones():
+    """Optional installs wait for the source where core lands: on a source
+    whose downloads fail they would only burn retries and timeouts."""
     made, ok = _apt_loop(['ok'] * 3,
                          mirrors='m1.example',
                          missing='gcc',
                          install_fails='archive.ubuntu.com/rsync')
     assert _updates(made) == ['http://archive.ubuntu.com', 'http://m1.example']
     assert _installed(made) == {'rsync', 'gcc'}
+    on_own_source = made[:made.index('update LC_ALL=C http://m1.example')]
+    assert not any('gcc' in c for c in on_own_source), made
+    assert ok
+
+
+@pytest.mark.parametrize('host_network', [True, False])
+def test_apt_missing_sshd_tries_a_mirror_only_under_host_networking(
+        host_network):
+    """Host networking fails the launch without sshd, so a mirror is worth a
+    try; otherwise sshd is optional and a clean refresh ends the walk."""
+    made, ok = _apt_loop(['ok'] * 3,
+                         mirrors='m1.example',
+                         missing='openssh-server',
+                         install_fails='archive.ubuntu.com/openssh-server',
+                         host_network=host_network)
+    if host_network:
+        assert _updates(made) == [
+            'http://archive.ubuntu.com', 'http://m1.example'
+        ]
+        assert 'openssh-server' in _installed(made), made
+    else:
+        assert _updates(made) == ['http://archive.ubuntu.com']
+        assert 'openssh-server' not in _installed(made), made
+    assert ok
+
+
+_RECORD_READY = '[ -f "$CORE_PKGS_READY" ] && apt-get install READY || true'
+
+
+def test_apt_core_marker_not_published_while_core_is_missing():
+    """STEP 2 waits on the marker for curl; it must not start without it."""
+    made, ok = _apt_loop(['ok'] * 3,
+                         mirrors='m1.example',
+                         install_fails='rsync',
+                         after_loop=_RECORD_READY)
+    assert 'install READY' not in made
+    assert not ok
+
+
+def test_apt_missing_sshd_under_host_networking_does_not_hold_the_marker():
+    """sshd only keeps the mirror walk going; STEP 2 starts once core is in.
+    The launch then fails clearly at the sshd check."""
+    made, ok = _apt_loop(['ok'] * 3,
+                         mirrors='m1.example m2.example',
+                         missing='gcc openssh-server',
+                         install_fails='openssh-server',
+                         host_network=True,
+                         after_loop=_RECORD_READY)
+    assert _updates(made) == [
+        'http://archive.ubuntu.com', 'http://m1.example', 'http://m2.example'
+    ]
+    assert 'install READY' in made
     assert ok
 
 
