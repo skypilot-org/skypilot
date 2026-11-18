@@ -1291,13 +1291,27 @@ def down(
             service_records = None
         if service_records is not None:
             # `--all` and globs only reach the active workspace; an exact
-            # name reaches its service wherever it is.
+            # name reaches its service wherever it is. A controller older
+            # than the records' `workspace` field cannot be scoped.
             active_workspace = skypilot_config.get_active_workspace()
+            scoped = not any(
+                'workspace' not in record for record in service_records)
+            unknown = [
+                record['name']
+                for record in service_records
+                if scoped and record['workspace'] is None
+            ]
+
+            def _reached(record: Dict[str, Any]) -> bool:
+                return not scoped or _in_workspace(record, active_workspace)
+
             if all:
+                if unknown:
+                    logger.info(f'Skipped {noun}s whose workspace is unknown '
+                                f'(tear them down by name): {unknown}')
                 # `down --all` from a non-admin means all of the caller's own.
                 in_workspace = [
-                    record for record in service_records
-                    if _in_workspace(record, active_workspace)
+                    record for record in service_records if _reached(record)
                 ]
                 targets = _own_service_records(in_workspace)
                 skipped = len(in_workspace) - len(targets)
@@ -1309,8 +1323,7 @@ def down(
                 targets = [
                     record for record in service_records if any(
                         _matches_service_pattern(record['name'], pattern) and
-                        ('*' not in pattern or
-                         _in_workspace(record, active_workspace))
+                        ('*' not in pattern or _reached(record))
                         for pattern in service_names)
                 ]
                 _check_service_ownership(targets, pool)

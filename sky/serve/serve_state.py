@@ -537,6 +537,8 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
         'hash': r['hash'],
         'entrypoint': r['entrypoint'],
         'user_hash': r['user_hash'],
+        # Recorded at `up` since the column exists; None before.
+        'workspace': r.get('workspace'),
         'yaml_content': r.get('yaml_content'),
         # The protocol version of the controller that produced the record,
         # so the API server can tell what the controller does with the

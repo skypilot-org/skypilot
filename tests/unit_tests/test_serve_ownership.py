@@ -266,6 +266,28 @@ class TestDown:
             impl.down(service_names=['alice-lost'])
         assert _terminated(terminate) == ['alice-lost']
 
+    def test_controller_without_workspace_field_is_not_scoped(self):
+        """A controller older than the records' `workspace` field: --all and
+        patterns behave as before rather than reaching nothing."""
+        records = [{k: v for k, v in r.items()} for r in _RECORDS]
+        with _caller(), _down_env() as terminate:
+            serve_runner.current().get_service_status.side_effect = (
+                lambda **kwargs: [dict(r) for r in records])
+            impl.down(all=True)
+        assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
+
+    def test_unknown_workspace_is_reported(self):
+        records = [{
+            'name': 'alice-lost',
+            'user_hash': 'alice-hash',
+            'workspace': None
+        }]
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(all=True)
+        terminate.assert_not_called()
+        assert any('alice-lost' in str(call) for call in info.call_args_list)
+
     def test_workspace_stored_as_a_name_is_resolved(self):
         records = [
             {
@@ -440,6 +462,28 @@ def _seed(engine, records):
     with engine.begin() as conn:
         conn.execute(serve_state.services_table.insert(),
                      [dict(r, status='READY') for r in records])
+
+
+def test_workspace_falls_back_to_the_one_recorded_at_up(serve_db):
+    """The config file next to the service YAML may be gone."""
+    _seed(serve_db, [{
+        'name': 'svc',
+        'user_hash': 'alice-hash',
+        'workspace': 'ws-a',
+        'pool': False
+    }])
+    with serve_db.begin() as conn:
+        conn.execute(serve_state.version_specs_table.insert(), [{
+            'service_name': 'svc',
+            'version': 1,
+            'spec': pickle.dumps(None)
+        }])
+    with mock.patch('sky.serve.serve_utils.get_service_workspace',
+                    return_value=None):
+        record = serve_utils._get_service_status('svc',
+                                                 pool=False,
+                                                 with_replica_info=False)
+    assert record['workspace'] == 'ws-a'
 
 
 class TestGlobServiceNames:

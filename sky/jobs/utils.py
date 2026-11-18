@@ -1877,7 +1877,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       cancel_launched_from: bool = True) -> str:
     """Cancel jobs by id.
 
-    If job_ids is None, cancel all jobs.
+    If job_ids is None, cancel all of the user's jobs, or with all_users,
+    every job in the current workspace.
 
     Args:
         cancel_request_info: who requested the cancellation, recorded in each
