@@ -558,30 +558,34 @@ def request_result(request_id: str, status_code: int, body: Any,
     return request_task.get_return_value()
 
 
-def _sync_call_result(request_id: Optional[str]) -> Tuple[bool, Any]:
-    """(True, result) when the server answered the call in its response."""
-    sync_response = getattr(request_id, 'sync_response', None)
-    if request_id is None or sync_response is None:
-        return False, None
-    status_code, body = sync_response
-    return True, request_result(request_id, status_code, body,
-                                lambda: str(body))
-
-
 def return_sync_call_result(func: F) -> F:
     """Returns the result a sync call already carries instead of calling func.
 
-    func takes the request ID as its first argument.
+    func takes `request_id` and optionally `follow`; with follow=False it
+    returns None, as streaming without following does.
     """
+    signature = inspect.signature(func)
 
-    def _request_id(args, kwargs) -> Optional[str]:
-        return args[0] if args else kwargs.get('request_id')
+    def _answer(args, kwargs) -> Tuple[bool, Any]:
+        """(True, result) when the server answered the call in its response."""
+        bound = signature.bind_partial(
+            *args,
+            **{k: v for k, v in kwargs.items() if k in signature.parameters})
+        request_id = bound.arguments.get('request_id')
+        sync_response = getattr(request_id, 'sync_response', None)
+        if sync_response is None:
+            return False, None
+        if not bound.arguments.get('follow', True):
+            return True, None
+        status_code, body = sync_response
+        return True, request_result(request_id, status_code, body,
+                                    lambda: str(body))
 
     if inspect.iscoroutinefunction(inspect.unwrap(func)):
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
-            answered, result = _sync_call_result(_request_id(args, kwargs))
+            answered, result = _answer(args, kwargs)
             if answered:
                 return result
             return await func(*args, **kwargs)
@@ -590,7 +594,7 @@ def return_sync_call_result(func: F) -> F:
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        answered, result = _sync_call_result(_request_id(args, kwargs))
+        answered, result = _answer(args, kwargs)
         if answered:
             return result
         return func(*args, **kwargs)

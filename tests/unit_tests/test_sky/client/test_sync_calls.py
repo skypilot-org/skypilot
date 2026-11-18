@@ -214,6 +214,8 @@ class TestResults:
                        ) as mock_make_request:
             assert sdk.get(request_id) == ['aws']
             assert sdk.stream_and_get(request_id) == ['aws']
+            assert sdk.stream_and_get(request_id, follow=False) is None
+            assert sdk.stream_and_get(request_id, None, None, False) is None
         mock_make_request.assert_not_called()
 
     def test_sync_error_raises_like_api_get(self):
