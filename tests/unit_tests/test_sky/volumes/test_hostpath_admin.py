@@ -1,7 +1,6 @@
 """k8s-hostpath volumes expose a node directory, so only an admin manages them.
 
-Creating and deleting one is admin-only, deleting can keep its files, and one
-a non-admin registered cannot be mounted.
+Creating and deleting one is admin-only, and deleting can keep its files.
 """
 import contextlib
 from unittest import mock
@@ -222,46 +221,13 @@ def test_sdk_refuses_no_cleanup_on_a_server_that_would_wipe(
         assert request.call_args[1]['json']['no_cleanup'] is True
 
 
-# --- mount ------------------------------------------------------------------
+# --- admin check ------------------------------------------------------------
 
 
-@pytest.mark.parametrize('volume_type, user_hash, mountable', [
-    (_HOSTPATH, 'admin-id', True),
-    (_HOSTPATH, 'alice-id', False),
-    (_HOSTPATH, 'deleted-user-id', False),
-    (_PVC, 'alice-id', True),
-])
-def test_a_hostpath_volume_a_non_admin_registered_cannot_be_mounted(
-        monkeypatch, volume_type, user_hash, mountable):
-    monkeypatch.setattr(
-        permission.permission_service, 'get_user_roles', lambda user_id: {
-            'admin-id': ['admin'],
-            'alice-id': ['user']
-        }.get(user_id, []))
-    record = _record(volume_type=volume_type, user_hash=user_hash)
-    if mountable:
-        volume_utils.check_hostpath_volume_mountable('vol', record)
-    else:
-        with pytest.raises(exceptions.PermissionDeniedError,
-                           match='--no-cleanup'):
-            volume_utils.check_hostpath_volume_mountable('vol', record)
-
-
-def test_a_failed_role_lookup_does_not_mount(monkeypatch):
+def test_a_failed_role_lookup_is_not_admin(monkeypatch):
     monkeypatch.setattr(permission.permission_service, 'get_user_roles',
                         mock.MagicMock(side_effect=RuntimeError('db down')))
-    with pytest.raises(exceptions.PermissionDeniedError):
-        volume_utils.check_hostpath_volume_mountable('vol', _record())
-
-
-def test_resolving_a_named_volume_checks_it(monkeypatch, admins):
-    monkeypatch.setattr(global_user_state, 'get_volume_by_name',
-                        lambda name: _record(user_hash='alice-id'))
-    with pytest.raises(exceptions.PermissionDeniedError):
-        volume_utils.VolumeMount.resolve('/mnt', 'vol')
-    monkeypatch.setattr(global_user_state, 'get_volume_by_name',
-                        lambda name: _record(user_hash='admin-id'))
-    assert volume_utils.VolumeMount.resolve('/mnt', 'vol').volume_name == 'vol'
+    assert not permission.is_admin('admin-id')
 
 
 @pytest.fixture

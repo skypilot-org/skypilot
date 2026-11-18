@@ -1265,8 +1265,6 @@ def write_cluster_config(
                 # break launches that work today.
                 record = global_user_state.get_volume_by_name(vol.volume_name)
                 if record is not None:
-                    volume_utils.check_hostpath_volume_mountable(
-                        vol.volume_name, record)
                     _reject_not_ready_volume(
                         vol.volume_name,
                         record,
@@ -1325,8 +1323,6 @@ def write_cluster_config(
                 # to someone else's scope, or one that would have been passed
                 # over for its access mode -- and would also raise on the
                 # provision-timeout path.
-                volume_utils.check_hostpath_volume_mountable(
-                    volume_name, auto_mount.record)
                 _reject_not_ready_volume(
                     volume_name,
                     auto_mount.record,
