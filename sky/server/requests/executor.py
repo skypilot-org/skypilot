@@ -202,6 +202,26 @@ def set_execution_policy(policy: Optional[ExecutionPolicy]) -> None:
     _execution_policy = policy
 
 
+_sync_call_max_limit: Optional[int] = None
+
+
+def set_sync_calls(max_limit: Optional[int]) -> None:
+    """Advertises in /api/health that this process answers sync calls.
+
+    Clients then send server_constants.SYNC_CALL_HEADER, and a request with a
+    `limit` argument is answered in the response only when the limit is at most
+    max_limit. None stops advertising. Must be called in every API server
+    process that answers sync calls, e.g. from a plugin's install().
+    """
+    global _sync_call_max_limit
+    _sync_call_max_limit = max_limit
+
+
+def get_sync_call_max_limit() -> Optional[int]:
+    """The max_limit set by set_sync_calls, or None."""
+    return _sync_call_max_limit
+
+
 def run_request_inline(
         request: RequestToSchedule,
         executor: concurrent.futures.Executor) -> 'asyncio.Task[Any]':
