@@ -570,7 +570,7 @@ def return_sync_call_result(func: F) -> F:
     def _request_id(args, kwargs) -> Optional[str]:
         return args[0] if args else kwargs.get('request_id')
 
-    if inspect.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(inspect.unwrap(func)):
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):

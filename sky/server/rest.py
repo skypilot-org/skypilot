@@ -412,15 +412,14 @@ def _send(method, url, **kwargs) -> 'requests.Response':
     if _sync_call_max_limit.get() is None:
         return _session.request(method, url, **kwargs)
     headers = dict(kwargs.pop('headers', None) or {})
-    headers[constants.SYNC_CALL_HEADER] = '1'
+    sync_headers = {**headers, constants.SYNC_CALL_HEADER: '1'}
     for _ in range(_SYNC_CALL_BUSY_RETRIES):
-        response = _session.request(method, url, headers=headers, **kwargs)
+        response = _session.request(method, url, headers=sync_headers, **kwargs)
         if not _is_sync_response(response):
             return response
         if response.status_code == 400:
             # These arguments do not allow a sync call: run it in the
             # background like any other request.
-            del headers[constants.SYNC_CALL_HEADER]
             return _session.request(method, url, headers=headers, **kwargs)
         if response.status_code != 429:
             return response
