@@ -166,9 +166,10 @@ class TestCapability:
                 return_value=versions.VersionInfo(api_version=1,
                                                   version='1.0.0'))
     @mock.patch('sky.server.common.get_api_server_status_response')
-    def test_health_sets_capability(self, mock_health, *mocks, health,
+    def test_health_sets_capability(self, mock_health, mock_compatibility,
+                                    mock_cookies, mock_cookie_jar, health,
                                     max_limit):
-        del mocks
+        del mock_compatibility, mock_cookies, mock_cookie_jar
         rest.set_sync_call_max_limit(50)
         mock_health.return_value = _response(200,
                                              json_body={
