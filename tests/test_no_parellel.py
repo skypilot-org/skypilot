@@ -14,19 +14,28 @@ from sky.client.cli import command
 from sky.utils import registry
 
 
-def _test_optimize_speed(resources: sky.Resources):
+def _optimize(resources: sky.Resources) -> float:
     with sky.Dag() as dag:
         task = sky.Task(run='echo hi')
         task.set_resources(resources)
     start = time.time()
     sky.optimize(dag)
-    end = time.time()
+    return time.time() - start
+
+
+def _test_optimize_speed(resources: sky.Resources):
+    duration = _optimize(resources)
     # 8.0 seconds = somewhat flaky.
-    assert end - start < 8.0, (f'optimize took too long for {resources}, '
-                               f'{end - start} seconds')
+    assert duration < 8.0, (f'optimize took too long for {resources}, '
+                            f'{duration} seconds')
 
 
 def test_optimize_speed(enable_all_clouds):
+    # The first optimize in the process also pays one-time setup: on a fresh
+    # runner it downloads every cloud's catalog from GitHub, then loads each
+    # one. That costs as much as the optimization itself and varies with the
+    # network, so leave it out of the timing; every call below is still timed.
+    _optimize(sky.Resources(cpus=4))
     _test_optimize_speed(sky.Resources(cpus=4))
     for cloud in registry.CLOUD_REGISTRY.values():
         _test_optimize_speed(sky.Resources(infra=str(cloud), cpus='4+'))
