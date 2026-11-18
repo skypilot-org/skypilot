@@ -2,7 +2,9 @@
 
 import contextlib
 import dataclasses
+import functools
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -11,12 +13,15 @@ import pathlib
 import tempfile
 import time
 import typing
-from typing import Dict, Generator, Iterable, Optional, Tuple
+from typing import (Any, Callable, Dict, Generator, Iterable, Optional, Tuple,
+                    TypeVar)
 import uuid
 import zipfile
 
+import colorama
 import filelock
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
@@ -27,8 +32,10 @@ from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -44,6 +51,8 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
+
+F = TypeVar('F', bound=Callable[..., Any])
 
 # The chunk size for downloading the logs from the API server.
 _DOWNLOAD_CHUNK_BYTES = 8192
@@ -504,3 +513,79 @@ def upload_mounts_to_api_server(
         if use_v2:
             return dag, blob_id
     return dag, None
+
+
+def request_result(request_id: str, status_code: int, body: Any,
+                   text: str) -> Any:
+    """The result of a request from an /api/get response, or raises its error.
+    """
+    request_task = None
+    if status_code == 200 and body is not None:
+        request_task = requests_lib.Request.decode(
+            payloads.RequestPayload(**body))
+    elif status_code == 500:
+        try:
+            request_task = requests_lib.Request.decode(
+                payloads.RequestPayload(**body.get('detail')))
+            logger.debug(f'Got request with error: {request_task.name}')
+        except Exception:  # pylint: disable=broad-except
+            request_task = None
+    if request_task is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to get request {request_id}: '
+                               f'{status_code} {text}')
+    error = request_task.get_error()
+    if error is not None:
+        error_obj = error['object']
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
+            logger.error('=== Traceback on SkyPilot API Server ===\n'
+                         f'{stacktrace}')
+        with ux_utils.print_exception_no_traceback():
+            raise error_obj
+    if request_task.status == requests_lib.RequestStatus.CANCELLED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.RequestCancelled(
+                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
+                f'({request_task.request_id}) is cancelled by another process.'
+                f'{colorama.Style.RESET_ALL}')
+    return request_task.get_return_value()
+
+
+def _sync_call_result(request_id: Optional[str]) -> Tuple[bool, Any]:
+    """(True, result) when the server answered the call in its response."""
+    sync_response = getattr(request_id, 'sync_response', None)
+    if request_id is None or sync_response is None:
+        return False, None
+    status_code, body = sync_response
+    return True, request_result(request_id, status_code, body, str(body))
+
+
+def return_sync_call_result(func: F) -> F:
+    """Returns the result a sync call already carries instead of calling func.
+
+    func takes the request ID as its first argument.
+    """
+
+    def _request_id(args, kwargs) -> Optional[str]:
+        return args[0] if args else kwargs.get('request_id')
+
+    if inspect.iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            answered, result = _sync_call_result(_request_id(args, kwargs))
+            if answered:
+                return result
+            return await func(*args, **kwargs)
+
+        return typing.cast(F, async_wrapper)
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        answered, result = _sync_call_result(_request_id(args, kwargs))
+        if answered:
+            return result
+        return func(*args, **kwargs)
+
+    return typing.cast(F, wrapper)

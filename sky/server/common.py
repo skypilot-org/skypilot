@@ -189,6 +189,7 @@ class ApiServerStatus(enum.Enum):
 
 @dataclasses.dataclass
 class ApiServerInfo:
+    """What the API server reports in /api/health."""
     status: ApiServerStatus
     api_version: ApiVersion = None
     version: Optional[str] = None
