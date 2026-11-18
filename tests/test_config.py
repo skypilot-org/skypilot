@@ -3049,10 +3049,11 @@ def _ws_quota(cloud: str, **quota) -> dict:
         (_ws_quota('kubernetes', allowed_queues=['q']), None),
         # The default left out of the list.
         (_ws_quota('kubernetes', queue='q', allowed_queues=['other']),
-         "Queue 'q' is not allowed in workspace 'team-a'. Allowed queues: "
-         "['other']"),
+         "Default queue 'q' of workspace 'team-a' is not in its allowed "
+         "queues: ['other']. Add it to the allowed queues, or change the "
+         'default queue first.'),
         (_ws_quota('slurm', queue='q', allowed_queues=['other']),
-         "Queue 'q' is not allowed in workspace 'team-a'"),
+         "Default queue 'q' of workspace 'team-a' is not in its allowed"),
         # The workspace's display name is used when it has one.
         ({
             'workspaces': {
@@ -3074,12 +3075,18 @@ def test_check_queue_allowed_for_default_queue(config, error) -> None:
     for cloud in ('kubernetes', 'slurm'):
         queue = workspace_config.get(cloud, {}).get('quota', {}).get('queue')
         if error is None or cloud not in workspace_config:
-            skypilot_config.check_queue_allowed(workspace, workspace_config,
-                                                cloud, queue)
+            skypilot_config.check_queue_allowed(workspace,
+                                                workspace_config,
+                                                cloud,
+                                                queue,
+                                                is_default=True)
         else:
             with pytest.raises(ValueError, match=re.escape(error)):
-                skypilot_config.check_queue_allowed(workspace, workspace_config,
-                                                    cloud, queue)
+                skypilot_config.check_queue_allowed(workspace,
+                                                    workspace_config,
+                                                    cloud,
+                                                    queue,
+                                                    is_default=True)
 
 
 def test_update_config_refuses_default_queue_outside_allowed_queues(

@@ -1673,14 +1673,22 @@ def get_effective_queue_name(cloud: str,
                                               partition=partition)
 
 
-def check_queue_allowed(workspace: str, workspace_config: Dict[str, Any],
-                        cloud: str, queue: Optional[str]) -> None:
+def check_queue_allowed(workspace: str,
+                        workspace_config: Dict[str, Any],
+                        cloud: str,
+                        queue: Optional[str],
+                        is_default: bool = False) -> None:
     """Checks that `queue` is one of the workspace's allowed queues."""
     allowed = ((workspace_config.get(cloud) or {}).get('quota') or
                {}).get('allowed_queues')
     if allowed is None or queue is None or queue in allowed:
         return
     name = workspace_config.get('name') or workspace
+    if is_default:
+        raise ValueError(
+            f'Default queue {queue!r} of workspace {name!r} is not in its '
+            f'allowed queues: {allowed}. Add it to the allowed queues, or '
+            'change the default queue first.')
     raise ValueError(f'Queue {queue!r} is not allowed in workspace {name!r}. '
                      f'Allowed queues: {allowed}')
 
@@ -1936,8 +1944,11 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         for cloud in ('kubernetes', 'slurm'):
             default_queue = ((workspace_config.get(cloud) or {}).get('quota') or
                              {}).get('queue')
-            check_queue_allowed(workspace, workspace_config, cloud,
-                                default_queue)
+            check_queue_allowed(workspace,
+                                workspace_config,
+                                cloud,
+                                default_queue,
+                                is_default=True)
 
     # Capture the currently persisted config before it is overwritten, for
     # save validators and post-save hooks (to_dict() returns a fresh copy).
