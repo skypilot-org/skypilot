@@ -1,6 +1,7 @@
 """Utilities for REST API."""
 import asyncio
 import atexit
+import concurrent.futures
 import contextlib
 import copy
 import dataclasses
@@ -15,8 +16,8 @@ import stat
 import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, Generator, List, NamedTuple, NoReturn,
-                    Optional, Set, Tuple)
+from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generator,
+                    List, NamedTuple, NoReturn, Optional, Set, Tuple)
 import uuid
 
 import anyio
@@ -43,6 +44,7 @@ from sky.server.requests.serializers import return_value_serializers
 from sky.skylet import constants as skylet_constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
+from sky.utils import leader_election
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
@@ -77,6 +79,11 @@ LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 # Interval between two runs of the requests GC daemon.
 _REQUESTS_GC_INTERVAL_SECONDS = 3600  # 1 hour
+# Must be the same on every API server that shares the request backend.
+_REQUESTS_GC_LOCK_ID = 'requests_gc'
+# File locks are thread-local: acquire and release on this one thread.
+_requests_gc_lock_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix='requests-gc-lock')
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -1610,6 +1617,52 @@ async def _clean_orphan_request_files() -> None:
                     f'{removed_bytes} bytes freed')
 
 
+_StillLeading = Callable[[], Awaitable[bool]]
+
+
+async def _always_leading() -> bool:
+    return True
+
+
+def _try_lead_requests_gc() -> Optional[leader_election.LeaderElector]:
+    elector = leader_election.get_elector(_REQUESTS_GC_LOCK_ID)
+    return elector if elector.try_acquire() else None
+
+
+@contextlib.asynccontextmanager
+async def _requests_gc_role() -> AsyncIterator[Optional[_StillLeading]]:
+    """Yield a check that this server still deletes expired requests.
+
+    Servers that share the request backend take turns: while one of them
+    holds the role, the others get None instead of deleting the same rows.
+    """
+    if not request_storage.get_request_backend().shared_across_servers:
+        yield _always_leading
+        return
+    loop = asyncio.get_running_loop()
+    elector = await loop.run_in_executor(_requests_gc_lock_executor,
+                                         _try_lead_requests_gc)
+    if elector is None:
+        yield None
+        return
+    renewed_at = time.monotonic()
+
+    async def still_leading() -> bool:
+        nonlocal renewed_at
+        if time.monotonic() - renewed_at < elector.renew_interval_seconds:
+            return True
+        if not await loop.run_in_executor(_requests_gc_lock_executor,
+                                          elector.renew):
+            return False
+        renewed_at = time.monotonic()
+        return True
+
+    try:
+        yield still_leading
+    finally:
+        await loop.run_in_executor(_requests_gc_lock_executor, elector.release)
+
+
 async def clean_finished_requests_with_retention(retention_seconds: int,
                                                  batch_size: int = 100):
     """Clean up finished requests older than the retention period.
@@ -1617,6 +1670,9 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
     from the database and cleans up their associated log files. It then sweeps
     the log directories for files that no longer have a request row at all.
+
+    When several servers share the request backend, only one of them deletes
+    rows at a time; the others skip to the orphan file sweep.
 
     For backward compatibility, it also cleans up log files from the legacy
     path (~/sky_logs/api_server/requests/) to handle server upgrades.
@@ -1632,6 +1688,28 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     """
     if batch_size <= 0:
         raise ValueError('batch_size must be positive')
+    async with _requests_gc_role() as still_leading:
+        if still_leading is None:
+            logger.info('Skipped deleting finished requests: another API '
+                        'server is deleting them.')
+        else:
+            await _delete_expired_requests(retention_seconds, batch_size,
+                                           still_leading)
+
+    # Try to clean up the legacy directory if it's empty
+    # TODO Remove this on or after v0.15.0
+    await _cleanup_legacy_directory_if_empty()
+
+    await _clean_orphan_request_files()
+
+
+async def _delete_expired_requests(retention_seconds: int, batch_size: int,
+                                   still_leading: _StillLeading) -> None:
+    """Delete expired finished requests and their log files on this server.
+
+    Stops early once ``still_leading`` reports that another server may have
+    taken over the deletion.
+    """
     # Do not expand the retention window while draining a backlog.
     cutoff = time.time() - retention_seconds
     started = time.monotonic()
@@ -1672,18 +1750,16 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
             break
-
-    # Try to clean up the legacy directory if it's empty
-    # TODO Remove this on or after v0.15.0
-    await _cleanup_legacy_directory_if_empty()
+        if not await still_leading():
+            logger.warning('Stopped deleting finished requests: this server '
+                           'no longer holds the requests GC role.')
+            break
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
     logger.info(f'Cleaned up {total_deleted} finished requests '
                 f'older than {retention_seconds} seconds '
                 f'in {time.monotonic() - started:.3f}s')
-
-    await _clean_orphan_request_files()
 
 
 async def requests_gc_daemon():
