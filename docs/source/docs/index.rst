@@ -365,6 +365,7 @@ Follow updates:
    Task YAML <../reference/yaml-spec>
    CLI <../reference/cli>
    ../reference/api
+   REST API <../reference/rest-api>
    ../reference/config
    SkyPilot Internals <../reference/architecture/internals>
    ../developers/index

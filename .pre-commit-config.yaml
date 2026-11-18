@@ -6,14 +6,16 @@ repos:
     # The Ray patch files are diffs: a blank context line is a line holding a
     # single space, and stripping it makes the hunk disagree with its own @@
     # header. Same for the trailing newline these hooks would add.
+    # swagger_ui/ holds upstream files that ship unmodified.
     -   id: trailing-whitespace
-        exclude: ^sky/skylet/ray_patches/.*\.(patch|diff)$
+        exclude: (^sky/skylet/ray_patches/.*\.(patch|diff)$|^sky/server/api_reference/swagger_ui/)
     -   id: end-of-file-fixer
-        exclude: ^sky/skylet/ray_patches/.*\.(patch|diff)$
+        exclude: (^sky/skylet/ray_patches/.*\.(patch|diff)$|^sky/server/api_reference/swagger_ui/)
     -   id: check-yaml
         args: ['--allow-multiple-documents']
         exclude: ^charts/
     -   id: check-added-large-files
+        exclude: ^sky/server/api_reference/swagger_ui/
 
 -   repo: https://github.com/pycqa/isort
     rev: 5.12.0  # Match the version from requirements
