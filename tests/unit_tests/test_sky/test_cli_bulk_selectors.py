@@ -9,6 +9,7 @@ import requests
 
 from sky import exceptions
 from sky.client.cli import command
+from sky.server.requests.serializers import decoders
 from sky.utils import status_lib
 
 
@@ -212,7 +213,15 @@ class TestStorageAndVolumes:
 
     def test_storage_from_a_server_without_the_field_is_not_narrowed(
             self, monkeypatch):
-        storages = [dict(name='own'), dict(name='own-b')]
+        # As an older server sends them: no user or workspace.
+        rows = [
+            dict(name=name,
+                 launched_at=0,
+                 store=[],
+                 last_use='',
+                 status='READY') for name in ('own', 'own-b')
+        ]
+        storages = decoders.decode_storage_ls(rows)
         monkeypatch.setattr('sky.client.sdk.storage_ls', mock.MagicMock())
         monkeypatch.setattr('sky.client.sdk.get',
                             mock.MagicMock(return_value=storages))

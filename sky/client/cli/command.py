@@ -375,9 +375,10 @@ def _bulk_workspace() -> Optional[str]:
 
 
 def _in_workspace(records: List[Any], workspace_id: Optional[str]) -> List[Any]:
-    # Records from a server older than their `workspace` field cannot be
-    # scoped; leave them as they were.
-    if workspace_id is None or not any('workspace' in r for r in records):
+    # Records from a server older than their `workspace` field (which the
+    # response models default to None) cannot be scoped; leave them as they
+    # were.
+    if workspace_id is None or all(r.get('workspace') is None for r in records):
         return list(records)
     return [r for r in records if r.get('workspace') == workspace_id]
 
