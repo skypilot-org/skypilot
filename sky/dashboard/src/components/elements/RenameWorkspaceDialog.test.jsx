@@ -24,6 +24,7 @@ import { RenameWorkspaceDialog } from '@/components/elements/RenameWorkspaceDial
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaceContexts } from '@/data/connectors/infra';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { getVolumes } from '@/data/connectors/volumes';
 
 const workspacesConfig = {
   default: {},
@@ -104,9 +105,10 @@ test('Enter renames, sending the stored config as expected_config', async () => 
   });
   // The infra page keeps its own context-to-workspace map; it must refresh.
   expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
-  // Cluster and job rows show the name; every cached query of them.
+  // Cluster, job and volume rows show the name; every cached query of them.
   expect(mockInvalidateFunction).toHaveBeenCalledWith(getClusters);
   expect(mockInvalidateFunction).toHaveBeenCalledWith(getManagedJobs);
+  expect(mockInvalidateFunction).toHaveBeenCalledWith(getVolumes);
   expect(onRenamed).toHaveBeenCalledWith('ml-v2', renamed);
 });
 

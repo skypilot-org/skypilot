@@ -710,6 +710,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'set_pod_resource_limits'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
+    ('azure', 'subnet_id'),
     ('gcp', 'vpc_name'),
     ('gcp', 'subnet_names'),
     ('gcp', 'managed_instance_group'),
@@ -756,6 +757,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     # Enforced by the jobs controllers from the server's config, so the jobs
     # queue must explain held jobs with the same value.
     ('jobs', 'max_launching_jobs_per_user'),
+    # Opt-in for the deprecated managed-job `event_callback`; set by the API
+    # server's administrator, not by clients.
+    ('jobs', 'allow_event_callback'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
     ('jobs', 'controller', 'stream_task_logs_to_controller_log'),
@@ -770,6 +774,10 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
 # A loopback client (the local API server, or a controller) still layers them.
 REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('kubernetes', 'allowed_contexts'),
+    # Auto-mounts attach volumes without checking who may use them, so only
+    # the server's own entries count. Per-context entries are stripped in
+    # `override_skypilot_config`.
+    ('kubernetes', 'auto_mounts'),
     ('ssh', 'allowed_node_pools'),
     ('slurm', 'allowed_clusters'),
 ]
@@ -860,6 +868,12 @@ ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
 # at server startup.
 ENV_VAR_SERVER_EXEC_AUTH_CACHE = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}EXEC_AUTH_CACHE')
+
+# Server-side only: `1` stores large request results outside the requests table
+# (sky.server.requests.stored_results). Set it only once every API server
+# process that shares the requests table runs a version that reads them.
+ENV_VAR_SERVER_STORE_LARGE_RESULTS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}STORE_LARGE_RESULTS')
 
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
@@ -1048,7 +1062,8 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'verda')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'modal',
+              'verda')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

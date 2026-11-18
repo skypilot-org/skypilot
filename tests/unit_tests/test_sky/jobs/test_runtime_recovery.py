@@ -212,8 +212,14 @@ async def test_controller_fast_terminal_does_not_repeat_user_retry(
     monkeypatch.setattr(controller_module.managed_job_utils,
                         'try_to_get_job_end_time',
                         mock.Mock(return_value=12345))
-    monkeypatch.setattr(controller_module.backend_utils, 'get_clusters',
-                        mock.Mock(return_value=[]))
+    # The SUCCEEDED path finds the cluster by name with no workspace filter.
+    succeeded_handle = mock.MagicMock()
+    get_cluster = mock.Mock(return_value={
+        'handle': succeeded_handle,
+        'workspace': None
+    })
+    monkeypatch.setattr(controller_module.global_user_state,
+                        'get_cluster_from_name', get_cluster)
     refresh = mock.Mock(side_effect=AssertionError('must not refresh'))
     monkeypatch.setattr(controller_module.backend_utils,
                         'refresh_cluster_status_handle', refresh)
@@ -227,6 +233,12 @@ async def test_controller_fast_terminal_does_not_repeat_user_retry(
         callback_func=mock.AsyncMock())
     assert result == (terminal_status == job_lib.JobStatus.SUCCEEDED)
     assert task_row(database)['recovery_count'] == restarts
+    if terminal_status == job_lib.JobStatus.SUCCEEDED:
+        get_cluster.assert_called_once_with('cluster',
+                                            include_user_info=False,
+                                            summary_response=True)
+        controller.download_log_and_stream.assert_called_once_with(
+            0, succeeded_handle, None)
     executor.should_restart_on_failure.assert_not_called()
     executor.recover.assert_not_called()
     refresh.assert_not_called()

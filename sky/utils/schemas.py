@@ -606,6 +606,9 @@ def _get_single_resources_schema():
                     'gcp_queued_resource': {
                         'type': 'boolean',
                     },
+                    'multi_host': {
+                        'type': 'boolean',
+                    },
                 }
             },
             '_no_missing_accel_warnings': {
@@ -778,6 +781,9 @@ def get_volume_schema():
                     },
                     'cleanup_on_deletion': {
                         'type': 'boolean',
+                    },
+                    'environment_name': {
+                        'type': 'string',
                     },
                 },
             },
@@ -1542,6 +1548,11 @@ def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
     if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
+    if cloud == 'modal':
+        # A Modal cluster is a Modal container, which has its own identity
+        # (see sky/provision/modal/modal_utils.py); modal ignores a token
+        # there. Other clusters, e.g. a jobs controller, still get the token.
+        return RemoteIdentityOptions.NO_UPLOAD.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
 
@@ -2276,6 +2287,10 @@ def get_config_schema():
                 },
                 'resource_group_vm': {
                     'type': 'string',
+                },
+                'subnet_id': {
+                    'type': 'string',
+                    'minLength': 1,
                 },
                 'vpc_name': {
                     'oneOf': [{
@@ -3354,6 +3369,12 @@ def get_config_schema():
                     'max_launching_jobs_per_user': {
                         'type': 'integer',
                         'minimum': 1,
+                    },
+                    # Opt-in for the deprecated managed-job `event_callback`
+                    # (off by default); see
+                    # sky.jobs.utils.event_callbacks_allowed.
+                    'allow_event_callback': {
+                        'type': 'boolean',
                     },
                     **_extra_jobs_properties,
                 },),

@@ -171,9 +171,13 @@ def get_readable_workspace_names() -> Optional[Set[str]]:
 
     See `PermissionService.get_readable_workspace_names`.
     """
-    workspaces = _load_workspaces()
+    return readable_workspace_names_for_user(common_utils.get_current_user().id)
+
+
+def readable_workspace_names_for_user(user_id: str) -> Optional[Set[str]]:
+    """`get_readable_workspace_names` for the given user."""
     return permission.permission_service.get_readable_workspace_names(
-        common_utils.get_current_user().id, set(workspaces.keys()))
+        user_id, set(_load_workspaces().keys()))
 
 
 def workspace_label_for_caller(workspace_id: str) -> str:
@@ -503,6 +507,10 @@ def _validate_workspace_config_changes_with_lock(
             f'{common_utils.format_exception(e)}') from None
 
 
+def _quote_users(names: List[str]) -> str:
+    return ', '.join(repr(name) for name in names)
+
+
 def _validate_workspace_config_changes(
     workspace_name: str,
     current_config: Dict[str, Any],
@@ -579,67 +587,59 @@ def _validate_workspace_config_changes(
                         config_comparison.allowed_users_new, [workspace_name],
                         resources=resources))
                 if error_summary:
-                    error_msg=f'Cannot change workspace {ws_name!r}' \
-                    f' to private '
-                    if missed_users_names:
-                        missed_users_list = ', '.join(missed_users_names)
-                        if len(missed_users_names) == 1:
-                            error_msg += f'because the user ' \
-                            f'{missed_users_list!r} has {error_summary}'
-                        else:
-                            error_msg += f'because the users ' \
-                            f'{missed_users_list!r} have {error_summary}'
-                        error_msg += ' but not in the allowed_users list.' \
-                        ' Please either add the users to allowed_users or' \
-                        ' ask them to terminate their resources.'
-                    raise ValueError(error_msg)
+                    users = _quote_users(missed_users_names)
+                    if len(missed_users_names) == 1:
+                        reason = (f'the user {users} is not in allowed_users '
+                                  'but has')
+                        advice = ('add the user to allowed_users, or '
+                                  'terminate these resources first')
+                    elif missed_users_names:
+                        reason = (f'the users {users} are not in '
+                                  'allowed_users but have')
+                        advice = ('add the users to allowed_users, or '
+                                  'terminate these resources first')
+                    else:
+                        # The owners are gone from the user table, so they
+                        # cannot be added to allowed_users.
+                        reason = 'users not in allowed_users have'
+                        advice = 'terminate these resources first'
+                    raise ValueError(
+                        f'Cannot change workspace {ws_name!r} to private '
+                        f'because {reason} {error_summary}. Please {advice}.')
         else:
             # Private setting didn't change, but allowed_users changed
             if (config_comparison.allowed_users_changed and
                     config_comparison.removed_users):
-                # Check that removed users don't have active resources
+                # Check that removed users don't have active resources.
+                # Resources of other non-members do not block the removal.
                 logger.info(f'Checking that removed users'
                             f' {config_comparison.removed_users} do not have'
                             f' active resources in workspace {ws_label}.')
-                error_summary, missed_users_names, missed_user_dict = (
+                error_summary, error_user_names, _ = (
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison.allowed_users_new, [workspace_name],
-                        resources=resources))
+                        resources=resources,
+                        owners=config_comparison.removed_users))
                 if error_summary:
-                    error_user_ids = []
-                    for user_id in config_comparison.removed_users:
-                        if user_id in missed_user_dict:
-                            error_user_ids.append(user_id)
-                    error_user_names = []
-                    if error_user_ids:
-                        error_user_names = [
-                            missed_user_dict[user_id]
-                            for user_id in error_user_ids
-                        ]
-
-                    error_msg = 'Cannot '
-                    error_users_list = ', '.join(error_user_names)
                     if len(error_user_names) == 1:
-                        error_msg += f'remove user {error_users_list!r} ' \
-                        f'from workspace {ws_name!r} because the ' \
-                        f'user has {error_summary}'
+                        target = f'user {_quote_users(error_user_names)}'
+                        who, has = 'the user', 'has'
                     else:
-                        error_msg += f'remove users {error_users_list!r}' \
-                        f' from workspace {ws_name!r} because the' \
-                        f' users have {error_summary}'
-                    error_msg += ', but not in the allowed_users list.' \
-                    ' Please either add the users to allowed_users or' \
-                    ' ask them to terminate their resources.'
-                    raise ValueError(error_msg)
+                        target = f'users {_quote_users(error_user_names)}'
+                        who, has = 'the users', 'have'
+                    raise ValueError(
+                        f'Cannot remove {target} from workspace {ws_name!r} '
+                        f'because {who} {has} {error_summary}. Please '
+                        f'terminate these resources first, or keep {who} in '
+                        'allowed_users.')
     else:
         # Other configuration changes - check that workspace has no active
         # resources
         logger.info(f'Non-user-access configuration changes detected for'
                     f' workspace {ws_label}. Checking that workspace has'
                     f' no active resources.')
-        resource_checker.check_no_active_resources_for_workspaces([
-            (workspace_name, 'update')
-        ])
+        resource_checker.check_no_active_resources_for_workspaces(
+            [(workspace_name, 'update')], resources=resources)
 
 
 def _check_expected_workspace_config(
@@ -919,6 +919,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Collect all workspaces that need to be checked for active resources
     workspaces_to_check: List[Tuple[str, str]] = []
+    # One fetch for every changed or deleted workspace, made only if a check
+    # needs it.
+    resources = resource_checker.ResourceSnapshot.deferred_for_workspaces([
+        name for name in current_workspaces
+        if current_workspaces[name] != new_workspaces.get(name)
+    ])
 
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
@@ -936,7 +942,10 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             _validate_workspace_config(workspace_name, new_workspace_config,
                                        current_workspace_config)
             _validate_workspace_config_changes_with_lock(
-                workspace_name, current_workspace_config, new_workspace_config)
+                workspace_name,
+                current_workspace_config,
+                new_workspace_config,
+                resources=resources)
 
     # Check for workspace deletions
     for workspace_name in current_workspaces:
@@ -947,9 +956,11 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                                  f'{constants.SKYPILOT_DEFAULT_WORKSPACE!r}.')
             workspaces_to_check.append((workspace_name, 'delete'))
 
-    # Check all workspaces for active resources in one efficient call
+    # Check all workspaces for active resources in one efficient call. It
+    # reuses the snapshot above rather than refetching: racing creates are an
+    # accepted gap here, as on every other path.
     resource_checker.check_no_active_resources_for_workspaces(
-        workspaces_to_check)
+        workspaces_to_check, resources=resources)
 
     _save_config_and_sync_members(config)
 
@@ -1050,6 +1061,31 @@ def check_cluster_write_permission(user: models.User,
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have permission to access '
             f'the workspace of cluster {cluster_name!r}')
+
+
+def check_volume_write_permission(user: models.User, volume_name: str) -> None:
+    """Checks a user may delete or mount an existing volume.
+
+    The volume counterpart of ``check_cluster_write_permission``: gated by the
+    workspace the volume belongs to, not the caller's active workspace. A
+    missing volume is left to the caller's own not-found handling.
+
+    Raises:
+        PermissionDeniedError: If the user cannot write to the volume's
+            workspace.
+    """
+    record = global_user_state.get_volume_by_name(volume_name)
+    if record is None:
+        return
+    # Volumes recorded before workspaces existed belong to the default one.
+    workspace = (record.get('workspace') or
+                 constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have permission to access '
+            f'the workspace of volume {volume_name!r}')
 
 
 def _save_config_and_sync_members(config: Optional[Dict[str, Any]]) -> None:
@@ -1251,8 +1287,11 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
 
 
 @usage_lib.entrypoint
-def batch_remove_users_from_workspaces(workspace_names: List[str],
-                                       user_ids: List[str]) -> Dict[str, Any]:
+def batch_remove_users_from_workspaces(
+        workspace_names: List[str],
+        user_ids: List[str],
+        *,
+        check_resources: bool = True) -> Dict[str, Any]:
     """Removes users from the ``allowed_users`` of multiple private workspaces.
 
     Per-workspace failures are isolated. Removal of a user with active
@@ -1263,6 +1302,10 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
         workspace_names: Names of workspaces to update.
         user_ids: User IDs to remove. Both the user_id and the username
             forms are stripped from each workspace's ``allowed_users``.
+        check_resources: If False, a user is removed even while owning
+            active resources in the workspace. Only for in-process callers
+            that revoke access (identity provider sync); not exposed over
+            the API.
 
     Returns:
         ``{'succeeded': [workspace_name, ...], 'failed': [{
@@ -1307,14 +1350,13 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     # workers/servers can't clobber each other via a stale read-modify-write.
     validated_changes: Set[str] = set()
 
-    # Pre-fetch active resources for the WHOLE batch of workspaces ONCE.
+    # Fetch active resources for the WHOLE batch of workspaces at most ONCE.
     # Otherwise each per-workspace _validate_workspace_config_changes call
-    # would re-query clusters + managed jobs from scratch (the
-    # managed-jobs fetch in particular is a blocking RPC to the
-    # controller), giving O(W * (C+J)) instead of O(C+J). The
-    # snapshot's per-workspace index is built lazily on first
-    # ``for_workspace`` call.
-    resources = resource_checker.ResourceSnapshot.fetch_for_workspaces(
+    # would re-query them from scratch (the managed-jobs fetch in
+    # particular is a blocking RPC to the controller), giving
+    # O(W * (C+J)) instead of O(C+J). Deferred, so a batch that changes
+    # nothing fetches nothing.
+    resources = resource_checker.ResourceSnapshot.deferred_for_workspaces(
         workspace_names)
 
     for workspace_name in workspace_names:
@@ -1347,11 +1389,13 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
             new_ws_config['allowed_users'] = new_allowed
             _validate_workspace_config(workspace_name, new_ws_config,
                                        current_ws_config)
-            _validate_workspace_config_changes_with_lock(workspace_name,
-                                                         current_ws_config,
-                                                         new_ws_config,
-                                                         resources=resources,
-                                                         resolver=resolver)
+            if check_resources:
+                _validate_workspace_config_changes_with_lock(
+                    workspace_name,
+                    current_ws_config,
+                    new_ws_config,
+                    resources=resources,
+                    resolver=resolver)
             validated_changes.add(workspace_name)
         except ValueError as e:
             failed.append({
@@ -1557,6 +1601,7 @@ def resolve_workspace_for_user(
     requested: Optional[str] = None,
     action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
     requested_ref: Optional[str] = None,
+    pick_for_read: bool = False,
 ) -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
 
@@ -1567,7 +1612,10 @@ def resolve_workspace_for_user(
     affects the fallback: for 'read' (vs the 'write' default), when the user
     has *no* writable workspace at all, read-only workspaces are considered so
     a read-only-only user can still resolve an active workspace instead of
-    hitting NoWorkspaceAccessError.
+    hitting NoWorkspaceAccessError, and several of them resolve to the first by
+    name. With ``pick_for_read``, a read by a user with several writable
+    workspaces also resolves to the first by name instead of raising
+    WorkspaceAmbiguousError.
 
     Precedence (a future admin-assignment tier can splice in between
     `preferred_workspace` and the default-fallback step without changing
@@ -1589,13 +1637,17 @@ def resolve_workspace_for_user(
       5. zero accessible -> one-shot policy re-sync and recompute (heals a
          first-login re-sync that failed transiently); still zero ->
          NoWorkspaceAccessError
-      6. multiple, none chosen, no 'default' access -> WorkspaceAmbiguousError
+      6. multiple, none chosen, no 'default' access -> the first by name for
+         a read with ``pick_for_read`` (or a read-only-only user);
+         WorkspaceAmbiguousError otherwise
 
     Args:
         user: the user the resolution is for.
         requested: workspace explicitly named by the caller, or None.
         requested_ref: what the user typed for `requested`, shown in a
             denial instead of the id.
+        pick_for_read: for a read, pick the first workspace by name instead
+            of raising WorkspaceAmbiguousError.
 
     Returns:
         WorkspaceResolution carrying the workspace name + source + optional
@@ -1606,7 +1658,8 @@ def resolve_workspace_for_user(
             requested workspace not accessible (PermissionDeniedError
             subclass).
         exceptions.WorkspaceAmbiguousError: multiple accessible and none
-            chosen, and the user has no access to 'default'.
+            chosen, the user has no access to 'default', and the request is
+            not a read with ``pick_for_read``.
     """
     if requested is not None:
         try:
@@ -1707,20 +1760,17 @@ def resolve_workspace_for_user(
         raise exceptions.NoWorkspaceAccessError(
             f'User {user.name} ({user.id}) has no accessible workspaces.')
 
-    if read_only_only:
-        # Several read-only-visible workspaces and no writable one. Ambiguity
-        # is a *write* problem — a new resource lands in exactly one workspace
-        # and only the user can say which. A read just needs a config context,
-        # and listings filter by every accessible workspace regardless of the
-        # pick, so any candidate serves. Raising here would leave such a user
-        # unable to read ANYTHING (every request resolves the active workspace
-        # first), and `WorkspaceAmbiguousError`'s recovery hint would be a dead
-        # end for them: it says to set a preferred workspace, but
-        # `set_user_preferred_workspace` requires write access. Pick
-        # deterministically instead.
+    if read_only_only or (pick_for_read and
+                          action == workspace_constants.WORKSPACE_ACTION_READ):
+        # Ambiguity is a *write* problem: only the user can say where a new
+        # resource lands. Listings cover every accessible workspace whatever
+        # the pick, and raising would fail every read (e.g. every dashboard
+        # page). By name, so users can tell which workspace their reads use.
         return WorkspaceResolution(
-            workspace=accessible[0],
-            source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY,
+            workspace=min(accessible, key=skypilot_config.get_workspace_name),
+            source=(workspace_constants.WORKSPACE_SOURCE_READ_ONLY
+                    if read_only_only else
+                    workspace_constants.WORKSPACE_SOURCE_READ_FIRST),
             note=drift_note)
 
     # The user is a member of each, so names are safe to show.

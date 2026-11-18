@@ -25,13 +25,23 @@ def _isolate_context():
     to order the suite, so the failures move between files and between runs.
     Resetting here removes the coupling instead of chasing it one victim at
     a time.
+
+    The process-scope fallback store, ``context._PROCESS_GLOBAL_VARS``, leaks
+    the same way: with no context set, ``context.set_context_var()`` writes
+    there, so a test that runs ``common_utils.set_request_context()`` (e.g.
+    via ``executor.override_request_env_and_config()``) leaves its user and
+    request ID behind, and every later test on the worker thinks it runs
+    inside that API request. Restore it too.
     """
     # pylint: disable=protected-access
+    process_vars = dict(context._PROCESS_GLOBAL_VARS)
     token = context._CONTEXT.set(None)
     try:
         yield
     finally:
         context._CONTEXT.reset(token)
+        context._PROCESS_GLOBAL_VARS.clear()
+        context._PROCESS_GLOBAL_VARS.update(process_vars)
 
 
 @pytest.fixture(autouse=True)
