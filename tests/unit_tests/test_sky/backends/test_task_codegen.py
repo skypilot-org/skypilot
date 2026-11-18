@@ -8,9 +8,16 @@ for various configurations. The expected outputs are stored in:
 To update snapshots when intentional changes are made:
     UPDATE_SNAPSHOT=1 pytest tests/unit_tests/test_sky/backends/test_task_codegen.py
 """
+import ast
 import os
 from pathlib import Path
+import shlex
 import subprocess
+import sys
+import textwrap
+from types import SimpleNamespace
+from typing import Callable, cast, Optional
+from unittest import mock
 
 import pytest
 
@@ -335,3 +342,125 @@ class TestRcloneFlushScript:
                                 capture_output=True,
                                 check=False)
         assert result.returncode == expected_code
+
+
+def _fresh_slurm_driver(command: Optional[str] = 'echo raw setup') -> str:
+    codegen = task_codegen.SlurmCodeGen(
+        '42',
+        'outer-container',
+        setup_srun_options=[
+            '--mpi=pmix',
+            '--container-image=/images/fresh image.sqsh',
+            '--container-mounts=/nvme/JOB_{slurm_job_id}:/scratch',
+        ],
+        setup_container_mode='fresh',
+        fresh_setup_cmd=command,
+        fresh_setup_env={'PUBLIC_VALUE': "quote ' ; $(false)"},
+    )
+    codegen.add_prologue(7)
+    env = {'SETUP_SECRET': 'must-not-forward'}
+    codegen.add_setup(2, {'CPU': 1.0}, ['10.0.0.1', '10.0.0.2'], env, '/logs',
+                      'bash /tmp/named-container-only-setup')
+    codegen.add_task(2, 'echo run', 'task', {'CPU': 1.0}, '/logs', env)
+    codegen.add_epilogue()
+    return codegen.build()
+
+
+@pytest.mark.parametrize('command',
+                         ['exit 0', 'exit 23', "printf '%s' 'a; $(false)'"])
+def test_slurm_fresh_setup_command_argv(command: str) -> None:
+    rendered = _fresh_slurm_driver(command)
+    compile(rendered, '<slurm-driver>', 'exec')
+    start = rendered.index('setup_options =')
+    end = rendered.index('# Run setup srun', start)
+    block = textwrap.dedent(' ' * 8 + rendered[start:end])
+    launch = mock.Mock(return_value=subprocess.CompletedProcess([], 0))
+    namespace: dict[str, object] = {'shlex': shlex, 'subprocess': subprocess}
+    with mock.patch.object(subprocess, 'run', launch):
+        exec(block + '\nsubprocess.run(setup_srun, shell=True, check=True)\n',
+             namespace)
+    shell_command = cast(str, launch.call_args.args[0])
+    argv = shlex.split(shell_command.rsplit(' && ', 1)[1])
+    assert argv[0] == 'srun'
+    assert '--container-image=/images/fresh image.sqsh' in argv
+    assert '--container-mounts=/nvme/JOB_42:/scratch' in argv
+    assert '--overlap' in argv
+    assert '--nodes=2' in argv
+    assert '--ntasks-per-node=1' in argv
+    assert '--job-name=sky-7-setup' in argv
+    payload = argv[argv.index('/usr/bin/env'):]
+    assert payload == [
+        '/usr/bin/env',
+        "PUBLIC_VALUE=quote ' ; $(false)",
+        'SKYPILOT_NUM_NODES=2',
+        '/bin/bash',
+        '-c',
+        command,
+    ]
+    assert 'SETUP_SECRET' not in shell_command
+    assert 'must-not-forward' not in shell_command
+    assert 'named-container-only-setup' not in shell_command
+    assert '--container-name=outer-container:exec' not in shell_command
+    failure = rendered[rendered.index('if setup_returncode != 0:'):rendered.
+                       index('job_lib.set_job_started')]
+    assert 'FAILED_SETUP' in failure
+    assert '_cancel_slurm_job_steps()' in failure
+    assert 'sys.exit(1)' in failure
+    assert rendered.index('if setup_returncode != 0:') < rendered.index(
+        'pathlib.Path(setup_done_signal_file).touch()')
+
+
+def test_slurm_fresh_setup_requires_explicit_command() -> None:
+    with pytest.raises(ValueError, match='explicit setup command'):
+        _fresh_slurm_driver(None)
+
+
+def test_slurm_cancellation_targets_only_this_jobs_run_and_setup() -> None:
+    rendered = _fresh_slurm_driver()
+    function = next(node for node in ast.parse(rendered).body
+                    if isinstance(node, ast.FunctionDef) and
+                    node.name == '_cancel_slurm_job_steps')
+    module = ast.Module(body=[function], type_ignores=[])
+    query = subprocess.CompletedProcess(
+        [], 0, stdout='42.0 sky-7\n42.1 sky-7-setup\n42.2 sky-8\n42.3 sky-70\n')
+    namespace: dict[str, object] = {'subprocess': subprocess}
+    with mock.patch.object(subprocess, 'run', return_value=query) as run:
+        exec(compile(module, '<slurm-cancel>', 'exec'), namespace)
+        cast(Callable[[], None], namespace['_cancel_slurm_job_steps'])()
+    assert [call.args[0] for call in run.call_args_list] == [
+        ['squeue', '-s', '-j', '42', '-h', '-o', '%i %j'],
+        ['scancel', '42.0'],
+        ['scancel', '42.1'],
+    ]
+    assert 'signal.signal(signal.SIGTERM, _slurm_cleanup_handler)' in rendered
+
+
+@pytest.mark.parametrize('returncode', [0, 23])
+def test_slurm_setup_result_controls_failure_and_cancellation(
+        returncode: int) -> None:
+    rendered = _fresh_slurm_driver()
+    start = rendered.index('if setup_returncode != 0:')
+    end = rendered.index('job_lib.set_job_started', start)
+    block = textwrap.dedent(' ' * 8 + rendered[start:end])
+    set_status = mock.Mock()
+    cancel = mock.Mock()
+    namespace: dict[str, object] = {
+        'setup_returncode': returncode,
+        'setup_proc': SimpleNamespace(pid=123),
+        'colorama': task_codegen.colorama,
+        'job_lib': SimpleNamespace(
+            set_status=set_status,
+            JobStatus=SimpleNamespace(FAILED_SETUP='failed')),
+        '_cancel_slurm_job_steps': cancel,
+        'sys': sys,
+    }
+    if returncode:
+        with pytest.raises(SystemExit) as error:
+            exec(block, namespace)
+        assert error.value.code == 1
+        set_status.assert_called_once_with(7, 'failed')
+        cancel.assert_called_once_with()
+    else:
+        exec(block, namespace)
+        set_status.assert_not_called()
+        cancel.assert_not_called()

@@ -152,6 +152,7 @@ def run_with_log(
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
     timeout: Optional[int] = None,
+    forward_sigterm: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
@@ -169,6 +170,8 @@ def run_with_log(
         timeout: Optional timeout in seconds. If the command does not complete
             within this time, it will be terminated and TimeoutExpired will be
             raised. None means no timeout (default).
+        forward_sigterm: Whether to forward SIGTERM to the command's process
+            group while waiting for its exit. Only for dedicated executors.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -208,6 +211,18 @@ def run_with_log(
                           shell=shell,
                           stdin=stdin,
                           **kwargs) as proc:
+        previous_sigterm_handler = None
+        if forward_sigterm:
+
+            def _forward_sigterm(signum, frame):
+                del frame
+                try:
+                    os.killpg(proc.pid, signum)
+                except ProcessLookupError:
+                    pass
+
+            previous_sigterm_handler = signal.signal(signal.SIGTERM,
+                                                     _forward_sigterm)
         try:
             if ctx is not None:
                 # When runs in coroutine, use kill_pg if available to avoid
@@ -333,6 +348,9 @@ def run_with_log(
             # causing the stream handling stuck at `readline`.
             subprocess_utils.kill_children_processes()
             raise
+        finally:
+            if forward_sigterm:
+                signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
 def make_task_bash_script(codegen: str,
                           env_vars: Optional[Dict[str, str]] = None) -> str:
@@ -396,7 +414,8 @@ def run_bash_command_with_log(bash_command: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False,
-                              streaming_prefix: Optional[str] = None):
+                              streaming_prefix: Optional[str] = None,
+                              forward_sigterm: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
@@ -406,12 +425,16 @@ def run_bash_command_with_log(bash_command: str,
 
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'/bin/bash -i {script_path}'
+        if forward_sigterm:
+            # Keep the script's exit code when TERM reaches the whole group.
+            inner_command = f'exec {inner_command}'
 
         return run_with_log(inner_command,
                             log_path,
                             stream_logs=stream_logs,
                             with_ray=with_ray,
                             streaming_prefix=streaming_prefix,
+                            forward_sigterm=forward_sigterm,
                             shell=True)
 
 def run_bash_command_with_log_and_return_pid(
@@ -447,7 +470,7 @@ def _cancel_slurm_job_steps():
             parts = line.split()
             assert len(parts) >= 2, 'Expected at least 2 parts'
             step_id, step_name = parts[0], parts[1]
-            if step_name == f'sky-2':
+            if step_name in (f'sky-2', f'sky-2-setup'):
                 subprocess.run(['scancel', step_id],
                                 check=False, capture_output=True)
     except Exception as e:
@@ -632,11 +655,29 @@ if script or True:
 
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
-        setup_flags = f'--overlap --nodes=1'
-        setup_srun, setup_cleanup = build_task_runner_cmd(
-            'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
-            is_setup=True
-        )
+        setup_options = shlex.join(
+            option.replace('{slurm_job_id}', '12345')
+            for option in [])
+        setup_flags = f'--overlap --nodes=1 {setup_options}'
+        if 'named' == 'fresh':
+            setup_env = ' '.join(
+                shlex.quote(f'{key}={value}')
+                for key, value in {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'}.items())
+            setup_cmd = 'pip install torch'
+            setup_payload = (
+                f'/usr/bin/env {setup_env} /bin/bash -c '
+                f'{shlex.quote(setup_cmd)}')
+            setup_srun = (
+                "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {print $1}') && "
+                f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit '
+                f'--jobid=12345 --job-name=sky-2-setup '
+                f'--ntasks-per-node=1 {setup_flags} {setup_payload}')
+            setup_cleanup = lambda: None
+        else:
+            setup_srun, setup_cleanup = build_task_runner_cmd(
+                'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
+                is_setup=True
+            )
 
         # Run setup srun directly, streaming output to driver stdout
         setup_proc = subprocess.Popen(setup_srun, shell=True,
