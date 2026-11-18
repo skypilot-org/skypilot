@@ -485,6 +485,19 @@ def path_size_megabytes(path: str) -> int:
 class FileMountHelper(object):
     """Helper for handling file mounts."""
 
+    @staticmethod
+    def quote_shell_path(path: str) -> str:
+        """Quotes a file-mount path while preserving remote home expansion."""
+        if path == '~':
+            return '~'
+        if path.startswith('~/'):
+            return '~/' + shlex.quote(path[2:])
+        if path == '$HOME':
+            return '"$HOME"'
+        if path.startswith('$HOME/'):
+            return '"$HOME"/' + shlex.quote(path[len('$HOME/'):])
+        return shlex.quote(path)
+
     @classmethod
     def wrap_file_mount(cls, path: str) -> str:
         """Prepends ~/<opaque dir>/ to a path to work around permission issues.
