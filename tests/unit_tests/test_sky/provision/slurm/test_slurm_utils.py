@@ -178,7 +178,7 @@ class TestGetPartitionInfos:
             'hostname': 'login.example.com',
             'user': 'transport-user',
         }
-        monkeypatch.setattr(utils.SSHConfig, 'from_path',
+        monkeypatch.setattr(utils, 'get_slurm_ssh_config',
                             mock.Mock(return_value=ssh_config))
         submit_users = iter(['alice', 'bob', 'alice'])
         monkeypatch.setattr(utils, 'get_submit_user',
