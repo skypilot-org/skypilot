@@ -489,6 +489,27 @@ allowed_clouds:
                                       default_value=None) == ['gcp']
 
 
+@pytest.mark.parametrize(
+    'env_value,expected',
+    [
+        ('api.example.com', 'https://api.example.com'),
+        ('api.example.com/', 'https://api.example.com'),
+        ('https://api.example.com', 'https://api.example.com'),
+        ('http://127.0.0.1:46580', 'http://127.0.0.1:46580'),
+        # Set but empty stays empty; login reports it.
+        ('', ''),
+    ])
+def test_get_server_url_adds_default_scheme(monkeypatch, env_value, expected):
+    """An endpoint without a scheme resolves to https:// for every command."""
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_value)
+    monkeypatch.delenv(constants.OVERRIDE_CONSOLIDATION_MODE, raising=False)
+    common.get_server_url.cache_clear()
+    try:
+        assert common.get_server_url() == expected
+    finally:
+        common.get_server_url.cache_clear()
+
+
 def test_get_dashboard_url():
     """Test get_dashboard_url with default URL."""
     common.get_server_url.cache_clear()
