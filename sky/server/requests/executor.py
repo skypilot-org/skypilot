@@ -27,6 +27,7 @@ import functools
 import inspect
 import multiprocessing
 import os
+import queue as queue_lib
 import signal
 import sys
 import threading
@@ -35,6 +36,7 @@ import typing
 from typing import (Any, Awaitable, Callable, ContextManager, Dict, Generator,
                     List, Optional, Set, TextIO, Tuple)
 
+import fastapi
 import psutil
 import setproctitle
 
@@ -56,6 +58,7 @@ from sky.server import plugins
 from sky.server import versions
 from sky.server.auth import loopback
 from sky.server.requests import event_loop
+from sky.server.requests import heavy_requests
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -73,6 +76,7 @@ from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
@@ -122,6 +126,14 @@ _AUTH_THREADS_WARM = 8
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
+
+# How long a request worker waits before polling its empty queue again.
+_IDLE_POLL_SECONDS = 0.1
+# Heavy requests take seconds to minutes, so their queue is polled less often.
+_HEAVY_IDLE_POLL_SECONDS = 1.0
+# How long the heavy worker waits after requeueing a request whose user already
+# runs a heavy request of the same name.
+_HEAVY_USER_BUSY_BACKOFF_SECONDS = 1.0
 
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
@@ -476,6 +488,10 @@ class RequestWorker:
             config.num_db_connections_per_worker)
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
+        # Locks of heavy requests that finished. A lock is released by the
+        # thread that acquired it, since file locks are held per thread.
+        self._finished_user_locks: queue_lib.SimpleQueue = (
+            queue_lib.SimpleQueue())
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
@@ -493,18 +509,60 @@ class RequestWorker:
             self._cancel_event.set()
             self._thread.join()
 
+    def _executors_gauge(self) -> Any:
+        if self.schedule_type == api_requests.ScheduleType.LONG:
+            return metrics_utils.SKY_APISERVER_LONG_EXECUTORS
+        if self.schedule_type == api_requests.ScheduleType.SHORT:
+            return metrics_utils.SKY_APISERVER_SHORT_EXECUTORS
+        return metrics_utils.SKY_APISERVER_HEAVY_EXECUTORS
+
+    def _release_finished_user_locks(self) -> None:
+        while True:
+            try:
+                lock = self._finished_user_locks.get_nowait()
+            except queue_lib.Empty:
+                return
+            try:
+                lock.release()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'[{self}] Failed to release {lock.lock_id}: '
+                             f'{common_utils.format_exception(e)}')
+
+    def _try_lock_user(self, user_id: str,
+                       request_name: str) -> Optional[locks.DistributedLock]:
+        """Locks the user's heavy requests of a name; None if one runs."""
+        lock = locks.get_lock(heavy_requests.user_lock_id(
+            user_id, request_name))
+        try:
+            lock.acquire(blocking=False)
+        except locks.LockTimeout:
+            return None
+        return lock
+
     def process_request(self, executor: process.BurstableExecutor,
                         queue: RequestQueue) -> None:
+        heavy = self.schedule_type == api_requests.ScheduleType.HEAVY
+        if heavy:
+            self._release_finished_user_locks()
+        user_lock: Optional[locks.DistributedLock] = None
         try:
             request_element = queue.get()
             if request_element is None:
-                time.sleep(0.1)
+                time.sleep(
+                    _HEAVY_IDLE_POLL_SECONDS if heavy else _IDLE_POLL_SECONDS)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id, fields=['status'])
+            fields = ['status', 'user_id', 'name'] if heavy else ['status']
+            request = api_requests.get_request(request_id, fields=fields)
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
+            if heavy:
+                user_lock = self._try_lock_user(request.user_id, request.name)
+                if user_lock is None:
+                    queue.put(request_element)
+                    time.sleep(_HEAVY_USER_BUSY_BACKOFF_SECONDS)
+                    return
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
@@ -518,14 +576,11 @@ class RequestWorker:
                 self.num_db_connections_per_worker)
             # Decrement the free executor count when a request starts
             if metrics_utils.METRICS_ENABLED:
-                if self.schedule_type == api_requests.ScheduleType.LONG:
-                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.dec()
-                elif self.schedule_type == api_requests.ScheduleType.SHORT:
-                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
+                self._executors_gauge().dec()
             # Monitor the result of the request execution.
             try:
                 threading.Thread(target=self.handle_task_result,
-                                 args=(fut, request_element),
+                                 args=(fut, request_element, user_lock),
                                  daemon=True).start()
             except Exception:  # pylint: disable=broad-except
                 # handle_task_result owns the matching increment, so a thread
@@ -533,6 +588,8 @@ class RequestWorker:
                 # the process.
                 self._mark_executor_free()
                 raise
+            # handle_task_result hands the lock back once the request ends.
+            user_lock = None
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -541,6 +598,9 @@ class RequestWorker:
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+        finally:
+            if user_lock is not None:
+                user_lock.release()
 
     def _mark_executor_free(self) -> None:
         """Increment the free-executor gauge for this worker's schedule type.
@@ -551,13 +611,13 @@ class RequestWorker:
         """
         if not metrics_utils.METRICS_ENABLED:
             return
-        if self.schedule_type == api_requests.ScheduleType.LONG:
-            metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
-        elif self.schedule_type == api_requests.ScheduleType.SHORT:
-            metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
+        self._executors_gauge().inc()
 
-    def handle_task_result(self, fut: concurrent.futures.Future,
-                           request_element: Tuple[str, bool, bool]) -> None:
+    def handle_task_result(
+            self,
+            fut: concurrent.futures.Future,
+            request_element: Tuple[str, bool, bool],
+            user_lock: Optional[locks.DistributedLock] = None) -> None:
         try:
             try:
                 fut.result()
@@ -568,6 +628,8 @@ class RequestWorker:
                 # during the wait, instead of staying decremented until the
                 # request finishes or reschedules.
                 self._mark_executor_free()
+                if user_lock is not None:
+                    self._finished_user_locks.put(user_lock)
         except concurrent.futures.process.BrokenProcessPool as e:
             # Happens when the worker process dies unexpectedly, e.g. OOM
             # killed.
@@ -715,12 +777,7 @@ class RequestWorker:
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)
             if metrics_utils.METRICS_ENABLED:
-                if self.schedule_type == api_requests.ScheduleType.LONG:
-                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.set(
-                        total_executors)
-                elif self.schedule_type == api_requests.ScheduleType.SHORT:
-                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.set(
-                        total_executors)
+                self._executors_gauge().set(total_executors)
             while not self._cancel_event.is_set():
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
@@ -1764,6 +1821,11 @@ async def schedule_request_async(
     """
     caller_usage.mark_request_scheduled()
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
+    if (schedule_type == api_requests.ScheduleType.SHORT and
+            heavy_requests.enabled() and
+            heavy_requests.is_heavy(request_name, request_body)):
+        await _reject_over_heavy_backlog(user_id, request_name)
+        schedule_type = api_requests.ScheduleType.HEAVY
     mode = ExecutionMode.QUEUE
     if (_execution_policy is not None and precondition is None and
             not retryable):
@@ -1789,6 +1851,29 @@ async def schedule_request_async(
                                     precondition,
                                     retryable,
                                     in_process=mode == ExecutionMode.IN_PROCESS)
+
+
+async def _reject_over_heavy_backlog(user_id: str, request_name: str) -> None:
+    """Raises 503 when the user has too many heavy requests of a name waiting.
+
+    Raises:
+        fastapi.HTTPException: 503 with Retry-After.
+    """
+    full_name = server_constants.REQUEST_NAME_PREFIX + request_name
+    pending = await api_requests.get_request_tasks_async(
+        api_requests.RequestTaskFilter(
+            status=[api_requests.RequestStatus.PENDING],
+            user_id=user_id,
+            include_request_names=[full_name],
+            fields=['request_id', 'schedule_type']))
+    waiting = sum(1 for r in pending
+                  if r.schedule_type == api_requests.ScheduleType.HEAVY)
+    if waiting >= heavy_requests.MAX_WAITING_PER_USER:
+        raise fastapi.HTTPException(
+            status_code=503,
+            detail=(f'{waiting} {full_name} requests of this user are already '
+                    'waiting to run'),
+            headers={'Retry-After': str(heavy_requests.RETRY_AFTER_SECONDS)})
 
 
 async def schedule_internal_daemon_async(
@@ -1924,4 +2009,15 @@ def start(
                                  config=config.short_worker_config)
     short_worker.run_in_background()
     workers.append(short_worker)
+
+    # Start a worker for heavy requests. With the heavy pool disabled it still
+    # runs one process at a time, for requests queued while it was enabled.
+    heavy_config = dataclasses.replace(
+        config.heavy_worker_config,
+        burstable_parallelism=max(
+            1, config.heavy_worker_config.burstable_parallelism))
+    heavy_worker = RequestWorker(schedule_type=api_requests.ScheduleType.HEAVY,
+                                 config=heavy_config)
+    heavy_worker.run_in_background()
+    workers.append(heavy_worker)
     return queue_server, workers
