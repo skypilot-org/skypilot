@@ -142,6 +142,34 @@ class TestEnabledCloudsWorkspacePermission:
             core.enabled_clouds(workspace=None)
         mock_check.assert_not_called()
 
+    @mock.patch(
+        'sky.core.global_user_state.get_cached_enabled_clouds_by_workspace')
+    @mock.patch('sky.core.workspaces_core.workspaces_for_user')
+    @mock.patch('sky.core.workspaces_core.check_workspace_permission')
+    def test_batch_reads_once_and_omits_unauthorized(self, mock_check,
+                                                     mock_workspaces,
+                                                     mock_bulk):
+        """The dashboard asks for every workspace in one request.
+
+        Re-checking permission per workspace, or reading each row on its
+        own, is what made that request take over a second.
+        """
+        cloud = mock.Mock()
+        cloud.canonical_name.return_value = 'AWS'
+        mock_workspaces.return_value = {'alpha': {}, 'gamma': {}}
+        mock_bulk.return_value = {'alpha': [cloud], 'gamma': []}
+        mock_user = models.User(id='user-1', name='User1')
+        with mock.patch('sky.core.common_utils.get_current_user',
+                        return_value=mock_user), \
+             mock.patch('sky.core.skypilot_config.local_active_workspace_ctx'):
+            result = core.enabled_clouds_batch(['alpha', 'beta', 'gamma'],
+                                               expand=False)
+        assert result == {'alpha': ['AWS'], 'gamma': []}
+        mock_check.assert_not_called()
+        mock_bulk.assert_called_once()
+        assert mock_bulk.call_args.args[1] == ['alpha', 'gamma']
+        cloud.expand_infras.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Resize tests
