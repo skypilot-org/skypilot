@@ -3801,8 +3801,12 @@ def _update_cluster_status(
             include_user_info=include_user_info,
             summary_response=summary_response)
 
-    # Already recorded as STOPPED and still stopped: the cleanup below ran when
-    # the cluster stopped. Only record that the status was checked.
+    # Already recorded as STOPPED and still stopped: only record that the
+    # status was checked. This relies on STOPPED being written only by
+    # remove_cluster(terminate=False) via the post_teardown_cleanup() below,
+    # which removes the SSH config, clears the cached IPs and closes the usage
+    # interval. Anything else that records STOPPED must do the same cleanup,
+    # or refresh will never redo it.
     if not to_terminate and status == status_lib.ClusterStatus.STOPPED:
         global_user_state.set_cluster_status(cluster_name,
                                              status_lib.ClusterStatus.STOPPED)
