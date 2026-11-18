@@ -920,21 +920,13 @@ def test_failed_prefetch_does_not_fail_the_step():
     assert 'could not prefetch' in result.stdout
 
 
-@pytest.mark.parametrize(
-    'index_has,expect_warnings',
-    [
-        # No index at all (offline pod).
-        ('', ['setuptools<70', 'click<8.3.0']),
-        # An index with a compatible click but no setuptools<70: click must
-        # still be fixed, or the Ray CLI breaks on click 8.3.
-        ('click', ['setuptools<70']),
-    ])
-def test_ray_install_pins_are_independent_and_best_effort(
-        index_has, expect_warnings):
-    """setuptools/click pins must not fail a pod whose image already has Ray.
+@pytest.mark.parametrize('ray_in_image', [True, False])
+def test_ray_install_touches_the_index_only_to_install_ray(ray_in_image):
+    """An image that already has Ray must start without internet access.
 
-    SkyPilot's default image ships setuptools 84, so the pin needs the index;
-    without network that used to abort STEP 2 under `set -e`.
+    The setuptools/click pins are only applied together with a Ray install;
+    applied on their own, they made a pod with SkyPilot's default image
+    (setuptools 84) fetch setuptools from the index on every start.
     """
     tmp = tempfile.mkdtemp()
     try:
@@ -943,30 +935,34 @@ def test_ray_install_pins_are_independent_and_best_effort(
         os.makedirs(bindir)
         os.makedirs(uvdir)
         _gnu_env_shim(bindir)
+        listed = (
+            f'echo "ray                {constants.SKY_REMOTE_RAY_VERSION}"'
+            if ray_in_image else 'true')
         _write_exe(
             os.path.join(uvdir, 'uv'), f"""
             case "$1 $2" in
               "-V "*) exit 0 ;;
-              "pip list") echo "ray                {constants.SKY_REMOTE_RAY_VERSION}"; exit 0 ;;
-              "pip install")
-                echo "$*" >> {tmp}/installs
-                case "$*" in
-                  *{index_has or 'NOTHING'}*) exit 0 ;;
-                  *) echo "error: not in index" >&2; exit 2 ;;
-                esac ;;
+              "pip list") {listed}; exit 0 ;;
+              "pip install") echo "$*" >> {tmp}/installs; exit 0 ;;
               run*) echo /fake/ray; exit 0 ;;
             esac
-            exit 0
+            exit 1
             """)
         cmd = constants.RAY_INSTALLATION_COMMANDS.replace(
             '{ray_version}', constants.SKY_REMOTE_RAY_VERSION)
         result = _run(f'HOME={tmp}\nPATH={bindir}:$PATH\n' + cmd, errexit=True)
         assert result.returncode == 0, result.stdout + result.stderr
-        for pin in ('setuptools<70', 'click<8.3.0'):
-            assert (f'could not install {pin};'
-                    in result.stdout) == (pin in expect_warnings), result.stdout
-        with open(os.path.join(tmp, 'installs'), encoding='utf-8') as f:
-            assert any('click<8.3.0' in l for l in f.read().splitlines())
+        installs_path = os.path.join(tmp, 'installs')
+        installs = []
+        if os.path.exists(installs_path):
+            with open(installs_path, encoding='utf-8') as f:
+                installs = f.read().splitlines()
+        if ray_in_image:
+            assert installs == [], installs
+        else:
+            assert len(installs) == 1, installs
+            for pin in ('ray[default]==', 'click<8.3.0', 'setuptools<70'):
+                assert pin in installs[0], installs
     finally:
         shutil.rmtree(tmp)
 
