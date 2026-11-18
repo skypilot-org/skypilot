@@ -203,7 +203,7 @@ _RAY_VERSION_KEY = 'sky_ray_version'
 # cluster is on 2.9.3 -- the pinned version had not changed in 2.5 years.
 # TODO(hailong): one-shot migration constant; drop it once no marker-less
 # clusters remain (every cluster launched from this release on carries one).
-_LEGACY_RAY_VERSION = '2.9.3'
+_LEGACY_RAY_VERSION = constants.SKY_LEGACY_RAY_VERSION
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
 #    zone of the launched cluster is '1a'. If we restore, then on capacity errors
@@ -1421,6 +1421,9 @@ def write_cluster_config(
             # only this scope knows which Ray version this cluster is pinned to.
             'ray_installation_commands':
                 (constants.RAY_INSTALLATION_COMMANDS.replace(
+                    '{ray_version}', ray_version)),
+            'ray_installed_check_command':
+                (constants.SKY_RAY_INSTALLED_CHECK_CMD.replace(
                     '{ray_version}', ray_version)),
             'skypilot_wheel_installation_commands':
                 constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(

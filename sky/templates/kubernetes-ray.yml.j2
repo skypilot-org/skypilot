@@ -1501,11 +1501,26 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ uv_installation_commands }}
+                # Whether the image already carries the runtime (Ray at the
+                # pinned version). Checked before ray_installation_commands,
+                # which always leaves that Ray installed.
+                RUNTIME_PREBUILT=false
+                if {{ ray_installed_check_command }}; then
+                  RUNTIME_PREBUILT=true
+                fi
                 {{ ray_installation_commands }}
 
+                # Prefetch SkyPilot's dependencies from PyPI while the cluster
+                # is still provisioning, so the wheel install in setup_commands
+                # finds them. An image that already carries the runtime has
+                # them, and may have no internet access; a failed prefetch is
+                # not an error by itself (the wheel install reports a real one).
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
-                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                if [ "$RUNTIME_PREBUILT" = "false" ]; then
+                  VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote] \
+                    || echo "WARNING: could not prefetch SkyPilot dependencies; continuing."
+                fi
                 # Wait (bounded) for the best-effort `patch` install to land
                 # before applying the Ray patches. An image may ship no `patch`
                 # and have no usable repo, so proceed after 60s rather than hang
