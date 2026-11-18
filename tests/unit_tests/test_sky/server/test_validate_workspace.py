@@ -369,6 +369,18 @@ class TestNestedOverride:
                 assert skypilot_config.get_active_workspace() == 'ws-b'
             assert skypilot_config.get_active_workspace() == 'ws-a'
 
+    def test_an_empty_override_keeps_it_too(self, env):
+        env.configure(
+            {
+                'default': _private(),
+                'ws-a': _private('alice'),
+                'ws-b': _private('alice'),
+            },
+            extra={'active_workspace': 'ws-b'})
+        with skypilot_config.local_active_workspace_ctx('ws-a'):
+            with skypilot_config.override_skypilot_config(None):
+                assert skypilot_config.get_active_workspace() == 'ws-a'
+
     @pytest.mark.parametrize('workspace,error', [
         ('ws-b', RuntimeError),
         ('no-such-workspace', ValueError),

@@ -1239,6 +1239,9 @@ def override_skypilot_config(
             -- MUST pass the request's own from_loopback, so that on a remote
             request the REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS are ignored too.
             Keyword-only, so this is a deliberate choice at every such site.
+
+    Keeps this thread's active workspace unless the override names one, so a
+    new request must call `clear_active_workspace()` before entering this.
     """
     # TODO: allow admin user to extend the disallowed keys or specify
     # allowed keys.
@@ -1248,7 +1251,9 @@ def override_skypilot_config(
         # what the admin wrote (the config editor shows it).
         server_workspace = get_nested(keys=('active_workspace',),
                                       default_value=None)
-        if server_workspace is None:
+        if (server_workspace is None or
+                hasattr(_active_workspace_context, 'workspace')):
+            # Keep this thread's workspace, as a non-empty override does.
             yield
             return
         with local_active_workspace_ctx(
