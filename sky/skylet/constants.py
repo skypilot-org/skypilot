@@ -56,6 +56,9 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
 SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.56.1'
+# The Ray of clusters created before each cluster's Ray version was recorded
+# (backend_utils._ray_version_for_cluster).
+SKY_LEGACY_RAY_VERSION = '2.9.3'
 
 # To avoid user image causing issue with the SkyPilot runtime, we run SkyPilot
 # commands the following prefix:
@@ -402,6 +405,13 @@ RAY_INSTALLATION_COMMANDS = (
     f'{SETUP_SKY_DIRS_COMMANDS}'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
+    # The legacy Ray breaks on click>=8.3 (ray-project/ray#56747) and on
+    # setuptools>=70 (its dashboard agent imports pkg_resources and the node
+    # never joins), including when an image bakes it. Newer Ray needs neither.
+    f'[ "{{ray_version}}" != "{SKY_LEGACY_RAY_VERSION}" ] || '
+    f'{SKY_UV_PIP_CMD} install "setuptools<70" "click<8.3.0" || '
+    'echo "WARNING - could not install setuptools<70 and click<8.3.0 for '
+    'Ray {ray_version}."; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -419,13 +429,10 @@ RAY_INSTALLATION_COMMANDS = (
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
-    # click<8.3.0 and setuptools<70 are for clusters still on the legacy Ray
-    # 2.9.3 (ray-project/ray#56747; its dashboard breaks on setuptools>=70).
-    # Newer Ray needs neither, so they ride on the Ray install only.
     # No -U: uv's -U upgrades the whole dependency tree, so on an image baked
     # with another ray it also bumps unrelated packages (cryptography,
     # urllib3, ...) that other Python environments on the image rely on.
-    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0" "setuptools<70" '  # pylint: disable=line-too-long
+    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" '  # pylint: disable=line-too-long
     # Fail loudly: carrying on would leave the node on another Ray, with the
     # patches skipped. The usual cause is a runtime env older than the Python
     # this Ray supports (Ray 2.52+ needs 3.10+), on a cluster set up before
