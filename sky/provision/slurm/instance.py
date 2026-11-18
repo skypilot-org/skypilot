@@ -920,15 +920,6 @@ def _srun_on_node(job_id: str, node: str, script: str) -> str:
             f'bash -c {shlex.quote(script)}')
 
 
-class SlurmStartupError(RuntimeError):
-    """An allocation startup failure with its single diagnostic log read."""
-
-    def __init__(self, message: str, job_id: str, log_output: str) -> None:
-        super().__init__(message)
-        self.job_id = job_id
-        self.log_output = log_output
-
-
 def _wait_for_job_ready(
     login_node_runner: 'command_runner.SSHCommandRunner',
     client: 'slurm.SlurmClient',
@@ -975,7 +966,8 @@ def _wait_for_job_ready(
             logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
                          f'{stdout}'
                          f'=== End of Slurm job logs ===')
-        raise SlurmStartupError(str(error), job_id, stdout) from error
+        raise exceptions.SlurmStartupError(str(error), job_id,
+                                           stdout) from error
 
 
 def get_accelerator_count(resources: Dict[str, Any]) -> int:

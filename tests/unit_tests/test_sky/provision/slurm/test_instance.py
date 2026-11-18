@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import pickle
 import shlex
 import sqlite3
 import subprocess
@@ -2191,6 +2192,20 @@ def test_preview_and_submission_share_submit_argv():
         ]
 
 
+def test_startup_error_transport_round_trips():
+    error = exceptions.SlurmStartupError('startup failed', '42',
+                                         'failed rank\n')
+
+    for restored in (pickle.loads(pickle.dumps(error)),
+                     exceptions.deserialize_exception(
+                         exceptions.serialize_exception(error))):
+        assert type(restored) is exceptions.SlurmStartupError
+        assert isinstance(restored, RuntimeError)
+        assert str(restored) == 'startup failed'
+        assert restored.job_id == '42'
+        assert restored.log_output == 'failed rank\n'
+
+
 @pytest.mark.parametrize('diagnostic', ['output', 'empty', 'failed'])
 def test_readiness_failure_captures_logs_once_and_preserves_cause(
         monkeypatch, diagnostic):
@@ -2207,7 +2222,7 @@ def test_readiness_failure_captures_logs_once_and_preserves_cause(
     log = mock.Mock()
     monkeypatch.setattr(instance.logger, 'error', log)
 
-    with pytest.raises(instance.SlurmStartupError,
+    with pytest.raises(exceptions.SlurmStartupError,
                        match='before initialization completed') as caught:
         instance._wait_for_job_ready(runner, client, '123', '/sky/ready',
                                      '/sky/slurm.out')
