@@ -492,6 +492,9 @@ class RequestWorker:
         # thread that acquired it, since file locks are held per thread.
         self._finished_user_locks: queue_lib.SimpleQueue = (
             queue_lib.SimpleQueue())
+        # Ids of the user locks this worker holds. Checked before the lock
+        # itself: a file lock taken twice by one thread may not conflict.
+        self._held_user_lock_ids: Set[str] = set()
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
@@ -516,17 +519,21 @@ class RequestWorker:
             return metrics_utils.SKY_APISERVER_SHORT_EXECUTORS
         return metrics_utils.SKY_APISERVER_HEAVY_EXECUTORS
 
+    def _release_user_lock(self, lock: locks.DistributedLock) -> None:
+        self._held_user_lock_ids.discard(lock.lock_id)
+        try:
+            lock.release()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'[{self}] Failed to release {lock.lock_id}: '
+                         f'{common_utils.format_exception(e)}')
+
     def _release_finished_user_locks(self) -> None:
         while True:
             try:
                 lock = self._finished_user_locks.get_nowait()
             except queue_lib.Empty:
                 return
-            try:
-                lock.release()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'[{self}] Failed to release {lock.lock_id}: '
-                             f'{common_utils.format_exception(e)}')
+            self._release_user_lock(lock)
 
     def _try_lock_user(self, user_id: str,
                        request_name: str) -> Optional[locks.DistributedLock]:
@@ -534,16 +541,19 @@ class RequestWorker:
 
         Returns None if one of them runs, or if the lock cannot be taken now.
         """
-        lock = locks.get_lock(heavy_requests.user_lock_id(
-            user_id, request_name))
+        lock_id = heavy_requests.user_lock_id(user_id, request_name)
+        if lock_id in self._held_user_lock_ids:
+            return None
+        lock = locks.get_lock(lock_id)
         try:
             lock.acquire(blocking=False)
         except locks.LockTimeout:
             return None
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'[{self}] Failed to lock {lock.lock_id}: '
+            logger.error(f'[{self}] Failed to lock {lock_id}: '
                          f'{common_utils.format_exception(e)}')
             return None
+        self._held_user_lock_ids.add(lock_id)
         return lock
 
     def process_request(self, executor: process.BurstableExecutor,
@@ -607,7 +617,7 @@ class RequestWorker:
                 f'{common_utils.format_exception(e, use_bracket=True)}')
         finally:
             if user_lock is not None:
-                user_lock.release()
+                self._release_user_lock(user_lock)
 
     def _mark_executor_free(self) -> None:
         """Increment the free-executor gauge for this worker's schedule type.

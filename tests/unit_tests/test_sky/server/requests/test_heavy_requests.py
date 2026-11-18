@@ -298,6 +298,34 @@ def test_heavy_worker_runs_one_request_per_user(heavy_worker):
     assert queue.items == []
 
 
+def test_heavy_worker_runs_one_request_per_user_with_a_reentrant_lock(
+        heavy_worker, monkeypatch):
+
+    class _ReentrantLock:
+
+        def __init__(self, lock_id):
+            self.lock_id = lock_id
+
+        def acquire(self, blocking=True):
+            del blocking
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(executor.locks, 'get_lock', _ReentrantLock)
+    queue = _ListQueue([_element('a1'), _element('a2')])
+    pool = _PendingExecutor()
+    heavy_worker.process_request(pool, queue)
+    heavy_worker.process_request(pool, queue)
+    assert list(pool.futures) == ['a1']
+    assert queue.items == [_element('a2')]
+
+    pool.futures['a1'].set_result(None)
+    _wait_for_lock_handback(heavy_worker)
+    heavy_worker.process_request(pool, queue)
+    assert list(pool.futures) == ['a1', 'a2']
+
+
 def test_heavy_worker_releases_the_lock_when_submission_fails(heavy_worker):
 
     class _FailingExecutor:
