@@ -16,6 +16,7 @@ module.
 import dataclasses
 import enum
 import functools
+import inspect
 import typing
 from typing import Dict, List, Optional, Protocol, Tuple
 
@@ -118,6 +119,7 @@ def get_recovery_status(
     task_id: int,
     task: 'task_lib.Task',
     previous: Optional[RuntimeCursor] = None,
+    job_id_on_pool_cluster: Optional[int] = None,
 ) -> Optional[RuntimeObservation]:
     """Observe in-place recovery before refreshing or tearing down a cluster.
 
@@ -131,12 +133,22 @@ def get_recovery_status(
     for runtime in _claimants(handle):
         hook = getattr(runtime, 'get_recovery_status', None)
         if hook is not None:
-            result = hook(handle,
-                          cluster_name,
-                          job_id=job_id,
-                          task_id=task_id,
-                          task=task,
-                          previous=previous)
+            kwargs: Dict[str, typing.Any] = {
+                'job_id': job_id,
+                'task_id': task_id,
+                'task': task,
+                'previous': previous,
+            }
+            if job_id_on_pool_cluster is not None:
+                # Out-of-tree runtimes may predate the pool job id. Adapt at
+                # this boundary, without masking TypeError inside the hook.
+                params = inspect.signature(hook).parameters
+                accepts_pool_id = ('job_id_on_pool_cluster' in params or
+                                   any(p.kind == inspect.Parameter.VAR_KEYWORD
+                                       for p in params.values()))
+                if accepts_pool_id:
+                    kwargs['job_id_on_pool_cluster'] = job_id_on_pool_cluster
+            result = hook(handle, cluster_name, **kwargs)
             if result is not None:
                 return result
     return None
@@ -181,11 +193,14 @@ class ManagedJobRuntime(Protocol):
         task_id: int,
         task: 'task_lib.Task',
         previous: Optional[RuntimeCursor] = None,
+        job_id_on_pool_cluster: Optional[int] = None,
     ) -> Optional[RuntimeObservation]:
         """Observe runtime recovery, or defer to controller recovery.
 
         ``previous`` is the last persisted observation of the task and may
         belong to another allocation; use ``previous.baseline(runtime_id)``.
+        ``job_id_on_pool_cluster`` identifies this task's job on a shared
+        worker; None means no pool job id is available.
         Runtimes keep only the private progress their recovery actions need
         and report everything else through the returned observation."""
         ...

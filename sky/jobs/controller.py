@@ -1673,7 +1673,8 @@ class JobController:
                             job_id=self._job_id,
                             task_id=task_id,
                             task=task,
-                            previous=runtime_cursor)
+                            previous=runtime_cursor,
+                            job_id_on_pool_cluster=job_id_on_pool_cluster)
                     except Exception as exc:  # pylint: disable=broad-except
                         runtime_error = common_utils.format_exception(exc)
                         transient_job_check_error_reason = runtime_error

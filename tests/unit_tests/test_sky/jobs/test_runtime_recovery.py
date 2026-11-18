@@ -127,8 +127,9 @@ class StopMonitoring(BaseException):
 @pytest.mark.parametrize('nodes', [1, 2])
 @pytest.mark.parametrize('forced', [False, True])
 @pytest.mark.parametrize('query_error', [False, True])
+@pytest.mark.parametrize('pool_job_id', [None, 17])
 async def test_controller_observes_before_healthy_shortcut_and_refresh(
-        database, monkeypatch, nodes, forced, query_error):
+        database, monkeypatch, nodes, forced, query_error, pool_job_id):
     controller = controller_module.JobController.__new__(
         controller_module.JobController)
     controller._job_id = 42
@@ -163,10 +164,13 @@ async def test_controller_observes_before_healthy_shortcut_and_refresh(
             'cluster',
             executor,
             mock.MagicMock(),
+            job_id_on_pool_cluster=pool_job_id,
             callback_func=mock.AsyncMock(),
             force_transit_to_recovering=forced)
     assert task_row(database)['status'] == 'RECOVERING'
     assert task_row(database)['recovery_count'] == 2
+    assert all(call.kwargs['job_id_on_pool_cluster'] == pool_job_id
+               for call in hook.call_args_list)
     executor.recover.assert_not_called()
     refresh.assert_not_called()
 
@@ -656,7 +660,71 @@ async def test_placement_is_merged_with_accepted_running_observations(database):
     assert placement()[0] == [['node-a', 'node-b']]
 
 
-def test_recovery_dispatch_passes_previous_cursor(monkeypatch):
+@pytest.mark.parametrize('pool_job_id', [None, 17])
+def test_recovery_dispatch_preserves_legacy_runtime(monkeypatch, pool_job_id):
+    handle = mock.Mock()
+    handle.provision_runtime_metadata.has_ray = False
+    owner = mock.Mock()
+    owner.owns.return_value = True
+    record = runtime.RuntimeObservation('allocation', 0, None)
+    calls = []
+
+    def legacy(handle, cluster_name, *, job_id, task_id, task, previous=None):
+        calls.append((handle, cluster_name, job_id, task_id, task, previous))
+        return record
+
+    owner.get_recovery_status = legacy
+    monkeypatch.setattr(runtime, '_runtimes', [owner])
+    task = mock.Mock()
+    assert runtime.get_recovery_status(
+        handle,
+        'worker',
+        job_id=42,
+        task_id=0,
+        task=task,
+        job_id_on_pool_cluster=pool_job_id) is record
+    assert calls == [(handle, 'worker', 42, 0, task, None)]
+
+
+def test_recovery_dispatch_does_not_retry_internal_type_error(monkeypatch):
+    handle = mock.Mock()
+    handle.provision_runtime_metadata.has_ray = False
+    owner = mock.Mock()
+    owner.owns.return_value = True
+    owner.get_recovery_status.side_effect = TypeError('runtime bug')
+    monkeypatch.setattr(runtime, '_runtimes', [owner])
+    with pytest.raises(TypeError, match='runtime bug'):
+        runtime.get_recovery_status(handle,
+                                    'worker',
+                                    job_id=42,
+                                    task_id=0,
+                                    task=mock.Mock(),
+                                    job_id_on_pool_cluster=17)
+    owner.get_recovery_status.assert_called_once()
+
+
+def test_recovery_dispatch_preserves_signature_failure(monkeypatch):
+    handle = mock.Mock()
+    handle.provision_runtime_metadata.has_ray = False
+    owner = mock.Mock()
+    owner.owns.return_value = True
+    monkeypatch.setattr(runtime, '_runtimes', [owner])
+    error = ValueError('signature unavailable')
+    monkeypatch.setattr(runtime.inspect, 'signature',
+                        mock.Mock(side_effect=error))
+    with pytest.raises(ValueError, match='signature unavailable') as raised:
+        runtime.get_recovery_status(handle,
+                                    'worker',
+                                    job_id=42,
+                                    task_id=0,
+                                    task=mock.Mock(),
+                                    job_id_on_pool_cluster=17)
+    assert raised.value is error
+    owner.get_recovery_status.assert_not_called()
+
+
+@pytest.mark.parametrize('pool_job_id', [None, 17])
+def test_recovery_dispatch_passes_previous_cursor(monkeypatch, pool_job_id):
     handle = mock.Mock()
     handle.provision_runtime_metadata.has_ray = False
     owner = mock.Mock()
@@ -669,8 +737,11 @@ def test_recovery_dispatch_passes_previous_cursor(monkeypatch):
                                 job_id=42,
                                 task_id=0,
                                 task=mock.Mock(),
-                                previous=previous)
+                                previous=previous,
+                                job_id_on_pool_cluster=pool_job_id)
     assert owner.get_recovery_status.call_args.kwargs['previous'] is previous
+    assert owner.get_recovery_status.call_args.kwargs.get(
+        'job_id_on_pool_cluster') == pool_job_id
 
 
 @pytest.mark.asyncio
