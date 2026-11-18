@@ -402,25 +402,6 @@ RAY_INSTALLATION_COMMANDS = (
     f'{SETUP_SKY_DIRS_COMMANDS}'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
-    # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
-    # causing the error:
-    #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
-    # Always pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy
-    # issues with Sentinel values. We force this even when ray is already
-    # installed (e.g. baked into the SkyPilot AMI), since the ray-version
-    # idempotency guard below would otherwise skip the install and leave
-    # click at whatever the AMI shipped.
-    # See: https://github.com/ray-project/ray/issues/56747
-    # Best-effort: an image that violates a pin needs the index to fix it, and
-    # one without internet access must still be able to start. Separate
-    # installs, so an index that has one pin but not the other still fixes
-    # the one it has.
-    f'{SKY_UV_PIP_CMD} install "setuptools<70" || '
-    'echo "WARNING - could not install setuptools<70; continuing with the '
-    'version in the image."; '
-    f'{SKY_UV_PIP_CMD} install "click<8.3.0" || '
-    'echo "WARNING - could not install click<8.3.0; continuing with the '
-    'version in the image."; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -438,12 +419,13 @@ RAY_INSTALLATION_COMMANDS = (
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
-    # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
-    # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
+    # click<8.3.0 and setuptools<70 are for clusters still on the legacy Ray
+    # 2.9.3 (ray-project/ray#56747; its dashboard breaks on setuptools>=70).
+    # Newer Ray needs neither, so they ride on the Ray install only.
     # No -U: uv's -U upgrades the whole dependency tree, so on an image baked
     # with another ray it also bumps unrelated packages (cryptography,
     # urllib3, ...) that other Python environments on the image rely on.
-    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0" '  # pylint: disable=line-too-long
+    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0" "setuptools<70" '  # pylint: disable=line-too-long
     # Fail loudly: carrying on would leave the node on another Ray, with the
     # patches skipped. The usual cause is a runtime env older than the Python
     # this Ray supports (Ray 2.52+ needs 3.10+), on a cluster set up before

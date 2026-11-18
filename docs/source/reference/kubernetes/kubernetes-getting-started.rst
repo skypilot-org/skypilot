@@ -458,7 +458,7 @@ FAQs
         curl -LsSf https://astral.sh/uv/install.sh | sh && \
         ~/.local/bin/uv venv --seed ~/skypilot-runtime --python 3.10 && \
         PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.56.1' 'pycryptodome==3.12.0' 'setuptools<70' 'click<8.3.0' && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.56.1' 'pycryptodome==3.12.0' && \
         $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
@@ -466,16 +466,11 @@ FAQs
 
 * **Can pods run without internet access?**
 
-  Yes, if the image already contains what SkyPilot would otherwise download at pod startup. The SkyPilot default images do. For a custom image, pre-install the dependencies as shown above, replacing ``skypilot-nightly`` with the package and exact version of your API server (for example ``skypilot==<version>`` or ``skypilot-nightly==<version>``, where ``sky api info`` shows the version), so that no dependency has to be fetched. Keep the recipe's system packages, ``openssh-server`` included: SkyPilot installs some of them at pod startup if they are missing, which needs package access. Pod startup then downloads nothing. Some features still download their own tools: ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers.
+  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above. In the recipe, replace ``skypilot-nightly`` with your API server's version (``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
 
-  If pods can reach no package source at all, or only the image's own, also set ``kubernetes.apt_mirrors: []``. Otherwise each launch of an Ubuntu image with missing packages also tries the built-in public APT mirrors.
+  Pod startup then downloads nothing. ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers still download their own tools.
 
-  If pods can reach internal package mirrors instead:
-
-  * APT: set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>`. Each entry is a hostname serving Ubuntu packages over HTTP at ``/ubuntu``, and only Ubuntu sources are rewritten.
-  * Python packages: set uv's index variables (for example ``UV_DEFAULT_INDEX``) as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`.
-
-  The ``uv`` installer and storage mount tools are downloaded from the internet and have no mirror setting; pre-install them in the image if you need them.
+  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` (``[]`` when pods cannot reach any APT mirror), and uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`.
 
 * **Are multi-node jobs supported on Kubernetes?**
 
