@@ -563,7 +563,7 @@ class FileMountHelper(object):
                     target[len(prefix):])
                 break
         else:
-            target = shlex.quote(target)
+            target = cls.quote_shell_path(target)
         commands = [
             f'{sudo}mkdir -p {dir_of_symlink}',
             # Walk ancestors without splitting path components on whitespace.

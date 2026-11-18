@@ -790,6 +790,25 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
 
 
+@pytest.mark.parametrize('target', ['~', '$HOME'])
+def test_make_safe_symlink_command_expands_exact_home_target(
+        tmp_path, monkeypatch, target):
+    home = tmp_path / 'home dir'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+    source = tmp_path / 'source link'
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=target, sudo_cmd='')
+
+    result = subprocess.run(['bash', '-c', 'chown() { :; }; ' + command],
+                            capture_output=True,
+                            text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert source.is_symlink()
+    assert source.resolve() == home.resolve()
+
+
 @pytest.mark.parametrize('target_prefix', ['', '~/', '$HOME/'])
 @pytest.mark.parametrize('existing',
                          ['missing', 'symlink', 'file', 'directory'])

@@ -34,9 +34,9 @@ def test_command_length_local_shell_limit():
     assert backend_utils.is_command_length_over_limit(command, quote_levels=4)
 
 
-@pytest.mark.parametrize('destination', [
-    '/home/user/remote dir/mounted dir', '~/remote dir/mounted dir'
-])
+@pytest.mark.parametrize(
+    'destination',
+    ['/home/user/remote dir/mounted dir', '~/remote dir/mounted dir'])
 def test_execute_file_mounts_quotes_remote_destination_for_mkdir(
         tmp_path, monkeypatch, destination):
     source = tmp_path / 'source dir'
@@ -53,17 +53,15 @@ def test_execute_file_mounts_quotes_remote_destination_for_mkdir(
     handle.get_command_runners.return_value = [MagicMock()]
     transfer_calls = []
     monkeypatch.setattr(backend_utils, 'path_size_megabytes', lambda _: 0)
-    monkeypatch.setattr(
-        cloud_vm_ray_backend.backend_utils, 'parallel_data_transfer_to_nodes',
-        lambda *args, **kwargs: transfer_calls.append(kwargs))
-    monkeypatch.setattr(
-        cloud_vm_ray_backend.subprocess_utils,
-        'get_max_workers_for_file_mounts', lambda *args: 1)
-    monkeypatch.setattr(cloud_vm_ray_backend.rich_utils,
-                        'force_update_status', lambda _: None)
-    monkeypatch.setattr(
-        cloud_vm_ray_backend.subprocess_utils, 'run_in_parallel',
-        lambda *args, **kwargs: None)
+    monkeypatch.setattr(cloud_vm_ray_backend.backend_utils,
+                        'parallel_data_transfer_to_nodes',
+                        lambda *args, **kwargs: transfer_calls.append(kwargs))
+    monkeypatch.setattr(cloud_vm_ray_backend.subprocess_utils,
+                        'get_max_workers_for_file_mounts', lambda *args: 1)
+    monkeypatch.setattr(cloud_vm_ray_backend.rich_utils, 'force_update_status',
+                        lambda _: None)
+    monkeypatch.setattr(cloud_vm_ray_backend.subprocess_utils,
+                        'run_in_parallel', lambda *args, **kwargs: None)
 
     backend._execute_file_mounts(handle, {destination: str(source)})
 
