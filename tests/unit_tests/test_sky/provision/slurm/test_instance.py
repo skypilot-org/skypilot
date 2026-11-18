@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 
 from sky import exceptions
+from sky.provision import common
 from sky.provision.slurm import instance
 from sky.skylet import constants as skylet_constants
 from sky.utils import command_runner
@@ -2026,3 +2027,280 @@ def test_allocation_exit_code_without_system_python(tmp_path, has_database):
                             check=True)
     assert result.stdout.strip() == '0'
     assert result.stderr == ''
+
+
+@pytest.mark.parametrize('image', [None, '/images/test.sqsh'])
+def test_render_provision_script_has_no_control_plane_side_effects(
+        monkeypatch, image):
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail('Rendering must not construct clients or execute SSH')
+
+    monkeypatch.setattr(instance, '_make_slurm_client', unexpected)
+    monkeypatch.setattr(instance, '_make_login_node_runner', unexpected)
+    script = instance.render_provision_script(
+        cluster_name_on_cloud='test',
+        resources={
+            'image_id': image,
+            'cpus': 1,
+            'memory': 0
+        },
+        num_nodes=2,
+        partition='dev',
+        partition_info=instance.slurm.SlurmPartition('dev', False, 3600, None),
+        proctrack_type='cgroup',
+        remote_home_dir='/home/test',
+        sky_base_dir='/shared/sky',
+        skypilot_runtime_dir='/tmp/sky/test',
+        snapshot_dir='/shared/sky/.sky_snapshots/test')
+    assert '#SBATCH --nodes=2' in script
+    assert 'trap cleanup EXIT' in script
+    assert 'touch /shared/sky/.sky_clusters/test/.sky_sbatch_ready' in script
+    if image is not None:
+        assert '--kill-on-bad-exit=1' in script
+        assert '--container-name=test:create' in script
+    else:
+        assert '--container-image=' not in script
+
+
+@pytest.mark.parametrize(('existing', 'restoring'), [(False, False),
+                                                     (False, True),
+                                                     (True, False)])
+def test_create_keeps_staging_and_readiness_in_native_lifecycle(
+        monkeypatch, existing, restoring):
+    provider = dict(_PROVIDER_CONFIG,
+                    cluster='test',
+                    partition='dev',
+                    provision_timeout=60,
+                    sky_base_dir='/shared/sky')
+    config = common.ProvisionConfig(provider_config=provider,
+                                    authentication_config={},
+                                    docker_config={},
+                                    node_config={
+                                        'cpus': 1,
+                                        'memory': 0
+                                    },
+                                    count=1,
+                                    tags={},
+                                    resume_stopped_nodes=False,
+                                    ports_to_open_on_launch=None,
+                                    prev_cluster_ever_up=restoring)
+    client = mock.MagicMock()
+    client.query_jobs.side_effect = [[], ['123'] if existing else []]
+    client.get_job_nodes.return_value = (['node'], ['10.0.0.1'])
+    client.submit_job.return_value = '123'
+    client.get_remote_home_dir.return_value = '/home/owner'
+    runner = mock.MagicMock()
+    runner.get_remote_home_dir.return_value = '/home/different-login'
+    runner.run.return_value = (0, '', '')
+    events = []
+    monkeypatch.setattr(instance, '_make_login_node_runner', lambda _: runner)
+    monkeypatch.setattr(instance, '_read_snapshot_manifest',
+                        lambda *_a, **_k: {})
+    monkeypatch.setattr(instance, '_validate_snapshot_files', lambda *_: None)
+    monkeypatch.setattr(instance, '_remove_shared_state_script',
+                        lambda *_a, **_k: 'cleanup')
+    monkeypatch.setattr(instance, '_run_on_login_node',
+                        lambda *_a, **_k: events.append('cleanup') or (0, ''))
+    monkeypatch.setattr(instance.slurm_utils, 'get_proctrack_type',
+                        lambda _: 'cgroup')
+    monkeypatch.setattr(instance, '_resolve_skypilot_runtime_dir',
+                        lambda *_: '/tmp/sky/test')
+    monkeypatch.setattr(instance, '_record_allocation', lambda *_: None)
+    monkeypatch.setattr(instance, '_record_nodes_allocated', lambda *_: None)
+    monkeypatch.setattr(instance.rich_utils, 'force_update_status',
+                        lambda _: None)
+    wait_nodes = mock.Mock(side_effect=lambda *_a, **_k: events.append('nodes'))
+    ready = mock.Mock(side_effect=lambda *_: events.append('ready'))
+    monkeypatch.setattr(instance, '_wait_for_job_ready', ready)
+    renderer = mock.Mock(
+        side_effect=lambda **_: events.append('render') or '#!/bin/bash\n')
+    stage = mock.Mock(side_effect=lambda *_: events.append('stage'))
+    prepared = []
+    prepare = instance.prepare_provision_script_inputs
+
+    def capture_prepare(*args, **kwargs):
+        result = prepare(*args, **kwargs)
+        prepared.append(result)
+        return result
+
+    monkeypatch.setattr(instance, 'prepare_provision_script_inputs',
+                        capture_prepare)
+    submitted_argv = []
+
+    def submit(partition, _name, path):
+        events.append('submit')
+        submitted_argv.append(
+            instance.slurm.SlurmClient.build_submit_command(
+                partition, path, client.get_remote_home_dir()))
+        return '123'
+
+    client.submit_job.side_effect = submit
+
+    record = instance.create_virtual_instance(
+        'test',
+        'test',
+        'test',
+        config,
+        client=client,
+        render_script=renderer,
+        stage_files=stage,
+        wait_for_job_nodes=wait_nodes,
+        partition_info=instance.slurm.SlurmPartition('dev', False, 3600, None))
+
+    assert record.head_instance_id == 'job123-node'
+    wait_nodes.assert_called_once_with(client, '123', 60, 'dev', mock.ANY)
+    ready.assert_called_once_with(
+        runner, client, '123',
+        '/shared/sky/.sky_clusters/test/.sky_sbatch_ready',
+        '/shared/sky/.sky_provision/slurm-123.out')
+    if existing:
+        assert events == ['nodes', 'ready']
+        renderer.assert_not_called()
+        stage.assert_not_called()
+        client.submit_job.assert_not_called()
+        assert record.created_instance_ids == []
+        assert prepared == []
+        client.get_remote_home_dir.assert_not_called()
+    else:
+        expected = ['render'] + (['cleanup'] if restoring else [])
+        assert events == expected + ['stage', 'submit', 'nodes', 'ready']
+        stage.assert_called_once_with(runner, '/shared/sky/.sky_clusters/test')
+        inputs, argv = prepared[0]
+        assert renderer.call_args.kwargs == {
+            **inputs, 'snapshot_manifest': {} if restoring else None
+        }
+        assert inputs['remote_home_dir'] == '/home/owner'
+        assert submitted_argv == [argv]
+        runner.get_remote_home_dir.assert_not_called()
+
+
+@pytest.mark.parametrize(('raw', 'expected'), [(None, 0), ('2', 2), ('bad', 0),
+                                               ([], 0)])
+def test_accelerator_count_is_shared_with_provisioner_policy(raw, expected):
+    assert instance.get_accelerator_count({'accelerator_count': raw
+                                          }) == expected
+
+
+def test_preview_and_submission_share_submit_argv():
+    assert instance.slurm.SlurmClient.build_submit_command(
+        'dev', '/shared/sky/provision script.sh', '/home/test user') == [
+            'sbatch', '--partition=dev', '--chdir=/home/test user',
+            '/shared/sky/provision script.sh'
+        ]
+
+
+@pytest.mark.parametrize('diagnostic', ['output', 'empty', 'failed'])
+def test_readiness_failure_captures_logs_once_and_preserves_cause(
+        monkeypatch, diagnostic):
+    runner = mock.Mock()
+    runner.command_as_user.side_effect = shlex.join
+    output = 'container failed\n' if diagnostic == 'output' else ''
+    runner.run.return_value = (0, output, '')
+    if diagnostic == 'failed':
+        runner.run.side_effect = OSError('diagnostic read failed')
+    client = mock.Mock()
+    client.get_job_state.return_value = 'FAILED'
+    monkeypatch.setattr(instance, '_run_on_login_node', lambda *_a, **_k:
+                        (1, ''))
+    log = mock.Mock()
+    monkeypatch.setattr(instance.logger, 'error', log)
+
+    with pytest.raises(instance.SlurmStartupError,
+                       match='before initialization completed') as caught:
+        instance._wait_for_job_ready(runner, client, '123', '/sky/ready',
+                                     '/sky/slurm.out')
+
+    assert caught.value.job_id == '123'
+    assert caught.value.log_output == output
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert 'exited (FAILED)' in str(caught.value.__cause__)
+    runner.run.assert_called_once_with(['cat', '--', '/sky/slurm.out'],
+                                       require_outputs=True,
+                                       stream_logs=False)
+    if output:
+        assert output in log.call_args.args[0]
+    else:
+        log.assert_not_called()
+
+
+def test_preview_preparation_resolves_native_paths_without_lifecycle_writes(
+        monkeypatch):
+    provider = dict(_PROVIDER_CONFIG,
+                    cluster='test',
+                    partition='dev',
+                    sky_base_dir='/shared/sky',
+                    snapshot_id='a' * 32)
+    config = common.ProvisionConfig(provider_config=provider,
+                                    authentication_config={},
+                                    docker_config={},
+                                    node_config={
+                                        'cpus': 1,
+                                        'memory': 0
+                                    },
+                                    count=2,
+                                    tags={},
+                                    resume_stopped_nodes=False,
+                                    ports_to_open_on_launch=None)
+    client = mock.Mock()
+    client.get_remote_home_dir.return_value = '/home/test'
+    runner = mock.Mock()
+    runner.get_remote_home_dir.side_effect = AssertionError(
+        'use submission owner home')
+    monkeypatch.setattr(instance, '_make_slurm_client', lambda _: client)
+    monkeypatch.setattr(instance, '_make_login_node_runner', lambda _: runner)
+    monkeypatch.setattr(instance, '_resolve_skypilot_runtime_dir',
+                        lambda *_: '/tmp/runtime')
+    monkeypatch.setattr(instance.slurm_utils, 'get_proctrack_type',
+                        lambda _: 'cgroup')
+    partition_info = instance.slurm.SlurmPartition('dev', False, 3600, None)
+
+    inputs, argv = instance.prepare_provision_script_inputs(
+        'test', config, partition_info=partition_info)
+
+    assert inputs['resources'] is config.node_config
+    assert inputs['partition_info'] is partition_info
+    assert inputs['num_nodes'] == 2
+    assert inputs['sky_base_dir'] == '/shared/sky'
+    assert inputs['skypilot_runtime_dir'] == '/tmp/runtime'
+    assert inputs['snapshot_dir'] == instance._snapshot_dir(
+        '/shared/sky', 'test', 'a' * 32)
+    assert 'snapshot_manifest' not in inputs
+    assert argv == [
+        'sbatch', '--partition=dev', '--chdir=/home/test',
+        '/shared/sky/.sky_provision/test.sh'
+    ]
+    runner.run.assert_not_called()
+    runner.rsync.assert_not_called()
+    client.submit_job.assert_not_called()
+
+
+@pytest.mark.parametrize('field', [
+    'container_prolog', 'container_init_prefix', 'container_init_suffix',
+    'apt_install', 'runtime_setup'
+])
+@pytest.mark.parametrize('terminated', [False, True])
+def test_renderer_requires_newline_terminated_trusted_fragments(
+        field, terminated):
+    inputs = dict(cluster_name_on_cloud='test',
+                  resources={
+                      'cpus': 1,
+                      'memory': 0
+                  },
+                  num_nodes=1,
+                  partition='dev',
+                  partition_info=instance.slurm.SlurmPartition(
+                      'dev', False, 3600, None),
+                  proctrack_type='cgroup',
+                  remote_home_dir='/home/test',
+                  sky_base_dir='/shared/sky',
+                  skypilot_runtime_dir='/tmp/runtime',
+                  snapshot_dir='/shared/snapshot')
+    inputs[field] = 'true\n' if terminated else 'true'
+    if terminated:
+        assert instance.render_provision_script(
+            **inputs).startswith('#!/bin/bash\n')
+    else:
+        with pytest.raises(AssertionError,
+                           match=f'{field} must end with a newline'):
+            instance.render_provision_script(**inputs)

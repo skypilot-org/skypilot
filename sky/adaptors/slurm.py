@@ -1083,6 +1083,15 @@ class SlurmClient:
 
         return nodes, node_ips
 
+    @staticmethod
+    def build_submit_command(partition: str, script_path: str,
+                             remote_home_dir: str) -> List[str]:
+        """Build submission argv shared with read-only previews."""
+        return [
+            'sbatch', f'--partition={partition}', f'--chdir={remote_home_dir}',
+            script_path
+        ]
+
     def submit_job(
         self,
         partition: str,
@@ -1099,10 +1108,8 @@ class SlurmClient:
         Returns:
             The job ID of the submitted job.
         """
-        cmd = [
-            'sbatch', f'--partition={partition}',
-            f'--chdir={self.get_remote_home_dir()}', script_path
-        ]
+        cmd = self.build_submit_command(partition, script_path,
+                                        self.get_remote_home_dir())
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            shlex.join(cmd),
