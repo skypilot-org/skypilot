@@ -141,6 +141,7 @@ def base_variables() -> Dict[str, Any]:
         },
         'image_id': 'us-docker.pkg.dev/skypilot-oss/skypilot/skypilot:latest',
         'ray_installation_commands': 'RAY_INSTALLATION_COMMANDS',
+        'ray_installed_check_command': 'RAY_INSTALLED_CHECK_COMMAND',
         'ray_patches_cmd': 'RAY_PATCHES_CMD',
         'ray_head_start_command': 'RAY_HEAD_START_COMMAND',
         'skypilot_ray_port': 6380,

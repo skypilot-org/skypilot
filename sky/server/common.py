@@ -511,6 +511,20 @@ async def make_authenticated_request_async(
                                                       **kwargs)
 
 
+# A URL scheme at the start of an endpoint (RFC 3986), e.g. `https://`.
+_URL_SCHEME_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*://')
+
+
+def add_default_scheme(endpoint: str) -> str:
+    """Returns the endpoint with https:// added if it has no scheme.
+
+    An empty endpoint is returned as-is.
+    """
+    if not endpoint or _URL_SCHEME_RE.match(endpoint):
+        return endpoint
+    return f'https://{endpoint}'
+
+
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = get_default_server_url()
@@ -526,7 +540,7 @@ def get_server_url(host: Optional[str] = None) -> str:
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
-    return url.rstrip('/')
+    return add_default_scheme(url).rstrip('/')
 
 
 # Shown in place of a basic-auth password when a server URL is printed for
