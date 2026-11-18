@@ -419,14 +419,27 @@ def test_failed_prefetch_does_not_fail_the_step():
     assert 'could not prefetch' in result.stdout
 
 
-@pytest.mark.parametrize('ray_in_image', [True, False])
-def test_ray_install_touches_the_index_only_to_install_ray(ray_in_image):
-    """An image that already has Ray must start without internet access.
+_LEGACY_RAY = constants.SKY_LEGACY_RAY_VERSION
+_PINS = '"setuptools<70" "click<8.3.0"'
 
-    The setuptools/click pins are only applied together with a Ray install;
-    applied on their own, they made a pod with SkyPilot's default image
-    (setuptools 84) fetch setuptools from the index on every start.
-    """
+
+@pytest.mark.parametrize(
+    'ray_version,ray_in_image,index_ok,expect_installs',
+    [
+        # Current Ray: never touch the index for the pins, so an image that
+        # already has Ray starts without internet access.
+        (constants.SKY_REMOTE_RAY_VERSION, True, False, []),
+        (constants.SKY_REMOTE_RAY_VERSION, False, True, ['ray[default]']),
+        # A cluster left on an older, non-legacy Ray after a Ray bump.
+        ('9.9.9', True, False, []),
+        # Legacy Ray: pin even when an image bakes it, or its node never
+        # joins; an unreachable index only warns.
+        (_LEGACY_RAY, True, True, [_PINS]),
+        (_LEGACY_RAY, True, False, [_PINS]),
+        (_LEGACY_RAY, False, True, [_PINS, 'ray[default]']),
+    ])
+def test_ray_install_pins_only_the_legacy_ray(ray_version, ray_in_image,
+                                              index_ok, expect_installs):
     tmp = tempfile.mkdtemp()
     try:
         bindir = os.path.join(tmp, 'bin')
@@ -434,21 +447,20 @@ def test_ray_install_touches_the_index_only_to_install_ray(ray_in_image):
         os.makedirs(bindir)
         os.makedirs(uvdir)
         _gnu_env_shim(bindir)
-        listed = (
-            f'echo "ray                {constants.SKY_REMOTE_RAY_VERSION}"'
-            if ray_in_image else 'true')
+        listed = (f'echo "ray                {ray_version}"'
+                  if ray_in_image else 'true')
         _write_exe(
             os.path.join(uvdir, 'uv'), f"""
             case "$1 $2" in
               "-V "*) exit 0 ;;
               "pip list") {listed}; exit 0 ;;
-              "pip install") echo "$*" >> {tmp}/installs; exit 0 ;;
+              "pip install") echo "$*" >> {tmp}/installs; {'exit 0' if index_ok else 'exit 2'} ;;
               run*) echo /fake/ray; exit 0 ;;
             esac
             exit 1
             """)
         cmd = constants.RAY_INSTALLATION_COMMANDS.replace(
-            '{ray_version}', constants.SKY_REMOTE_RAY_VERSION)
+            '{ray_version}', ray_version)
         result = _run(f'HOME={tmp}\nPATH={bindir}:$PATH\n' + cmd, errexit=True)
         assert result.returncode == 0, result.stdout + result.stderr
         installs_path = os.path.join(tmp, 'installs')
@@ -456,12 +468,15 @@ def test_ray_install_touches_the_index_only_to_install_ray(ray_in_image):
         if os.path.exists(installs_path):
             with open(installs_path, encoding='utf-8') as f:
                 installs = f.read().splitlines()
-        if ray_in_image:
-            assert installs == [], installs
-        else:
-            assert len(installs) == 1, installs
-            for pin in ('ray[default]==', 'click<8.3.0', 'setuptools<70'):
-                assert pin in installs[0], installs
+        assert len(installs) == len(expect_installs), installs
+        for line, want in zip(installs, expect_installs):
+            assert want.replace('"', '') in line, installs
+        if 'ray[default]' in expect_installs:
+            assert f'ray[default]=={ray_version}' in installs[-1], installs
+            assert 'setuptools' not in installs[-1], installs
+        assert ('could not install setuptools<70'
+                in result.stdout) == (ray_version == _LEGACY_RAY and
+                                      not index_ok), result.stdout
     finally:
         shutil.rmtree(tmp)
 
