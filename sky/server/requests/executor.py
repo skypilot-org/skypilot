@@ -1294,6 +1294,8 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
+    # A heavy request runs in a process of its own, which exits afterwards.
+    one_request_process = False
     # Set _in_request_execution inside the try so `finally` always clears it,
     # even if a SIGTERM lands before any wrapper code runs.
     global _in_request_execution  # pylint: disable=global-statement
@@ -1318,6 +1320,8 @@ def _request_execution_wrapper(request_id: str,
             request_task.status_msg = None
             func = request_task.entrypoint
             request_name = request_task.name
+            one_request_process = (
+                request_task.schedule_type == api_requests.ScheduleType.HEAVY)
 
         # Store copies of the original stdout and stderr file descriptors
         # We do this in two steps because we should make sure to restore the
@@ -1421,9 +1425,11 @@ def _request_execution_wrapper(request_id: str,
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
-            _maybe_release_memory(proc)
+            if not one_request_process:
+                _maybe_release_memory(proc)
             if request_name is not None:
-                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss,
+                                       one_request_process)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to record memory metrics: '
                          f'{common_utils.format_exception(e)}')
@@ -1467,9 +1473,20 @@ def _maybe_release_memory(proc: psutil.Process) -> None:
 _first_request = True
 
 
-def _record_memory_metrics(request_name: str, proc: psutil.Process,
-                           rss_begin: int, peak_rss: int) -> None:
-    """Record the memory metrics for a request."""
+def _record_memory_metrics(request_name: str,
+                           proc: psutil.Process,
+                           rss_begin: int,
+                           peak_rss: int,
+                           one_request_process: bool = False) -> None:
+    """Record the memory metrics for a request.
+
+    A process that runs one request records its peak, which includes loading
+    the sky core modules, and no RSS increment, which it returns on exit.
+    """
+    if one_request_process:
+        metrics_utils.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+            name=request_name).observe(max(peak_rss - rss_begin, 0))
+        return
     # Do not record full memory delta for the first request as it
     # will loads the sky core modules and make the memory usage
     # estimation inaccurate.

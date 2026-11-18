@@ -393,3 +393,23 @@ def test_heavy_requests_reach_clients_as_short():
     assert row['schedule_type'] == 'heavy'
     assert requests_lib.Request.from_row(
         request.to_row()).schedule_type == _HEAVY
+
+
+def test_heavy_request_records_its_peak_memory(monkeypatch):
+    usage, incr = mock.Mock(), mock.Mock()
+    monkeypatch.setattr(executor.metrics_utils,
+                        'SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES', usage)
+    monkeypatch.setattr(executor.metrics_utils,
+                        'SKY_APISERVER_REQUEST_RSS_INCR_BYTES', incr)
+    # Every heavy request is the first request of its process.
+    monkeypatch.setattr(executor, '_first_request', True)
+    proc = mock.Mock()
+    proc.memory_info.return_value = mock.Mock(rss=500)
+    executor._record_memory_metrics('sky.cost_report',
+                                    proc,
+                                    rss_begin=100,
+                                    peak_rss=900,
+                                    one_request_process=True)
+    usage.labels.assert_called_once_with(name='sky.cost_report')
+    usage.labels.return_value.observe.assert_called_once_with(800)
+    incr.labels.assert_not_called()
