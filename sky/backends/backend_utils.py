@@ -3801,6 +3801,16 @@ def _update_cluster_status(
             include_user_info=include_user_info,
             summary_response=summary_response)
 
+    # Already recorded as STOPPED and still stopped: the cleanup below ran when
+    # the cluster stopped. Only record that the status was checked.
+    if not to_terminate and status == status_lib.ClusterStatus.STOPPED:
+        global_user_state.set_cluster_status(cluster_name,
+                                             status_lib.ClusterStatus.STOPPED)
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+
     backend = backends.CloudVmRayBackend()
     if to_terminate:
         # A refresh re-entering after a failed cleanup has already recorded
