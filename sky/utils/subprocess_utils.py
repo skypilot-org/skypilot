@@ -1,6 +1,7 @@
 """Utility functions for subprocesses."""
 import collections
 import contextvars
+import functools
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -146,6 +147,48 @@ def _fallback_children(parent_pid: int,
                 # degraded LSM fallback we drop the PID and keep walking
                 # so kill_children_processes can still clean up the rest.
                 pass
+    return descendants
+
+
+@functools.lru_cache(maxsize=1)
+def _procfs_lists_children() -> bool:
+    """Whether /proc/<pid>/task/<tid>/children exists on this kernel."""
+    if not sys.platform.startswith('linux'):
+        return False
+    pid = os.getpid()
+    return os.path.exists(f'{_PROCFS}/{pid}/task/{pid}/children')
+
+
+def _descendant_pids_from_procfs(pid: int) -> Optional[List[int]]:
+    """PIDs of the descendants of ``pid``, read from its children files.
+
+    Reads only the subtree, where ``psutil.Process.children(recursive=True)``
+    reads the stat file of every process in the PID namespace. The kernel
+    may miss a child that is exiting during the read. Returns None where the
+    kernel has no children file (non-Linux, or CONFIG_PROC_CHILDREN off).
+    """
+    if not _procfs_lists_children():
+        return None
+    descendants: List[int] = []
+    seen = {pid}
+    stack = [pid]
+    while stack:
+        cur = stack.pop()
+        try:
+            tids = os.listdir(f'{_PROCFS}/{cur}/task')
+        except OSError:
+            continue
+        for tid in tids:
+            try:
+                with open(f'{_PROCFS}/{cur}/task/{tid}/children', 'rb') as f:
+                    child_pids = [int(p) for p in f.read().split()]
+            except (OSError, ValueError):
+                continue
+            for child_pid in child_pids:
+                if child_pid not in seen:
+                    seen.add(child_pid)
+                    descendants.append(child_pid)
+                    stack.append(child_pid)
     return descendants
 
 
@@ -474,15 +517,18 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
             implementations have corner cases where subprocesses might not be
             killed. Refer to subprocess_daemon.py for more details.
     """
-    # Get initial children list via _safe_children so that an EACCES from
-    # a hardened-host LSM policy doesn't abort us before the daemon is
-    # registered. See _safe_children for the failure mode and rationale.
-    try:
-        process = psutil.Process(process_pid)
-    except psutil.NoSuchProcess:
-        initial_children: List[int] = []
-    else:
-        initial_children = [p.pid for p in _safe_children(process)]
+    # Runs for every command started through log_lib, so read only the
+    # process's own subtree. The daemon walks the tree again every second.
+    initial_children = _descendant_pids_from_procfs(process_pid)
+    if initial_children is None:
+        # _safe_children so that an EACCES from a hardened-host LSM policy
+        # doesn't abort us before the daemon is registered.
+        try:
+            process = psutil.Process(process_pid)
+        except psutil.NoSuchProcess:
+            initial_children = []
+        else:
+            initial_children = [p.pid for p in _safe_children(process)]
 
     parent_pid = os.getpid()
     daemon_script = os.path.join(

@@ -875,6 +875,12 @@ ENV_VAR_SERVER_EXEC_AUTH_CACHE = (
 ENV_VAR_SERVER_STORE_LARGE_RESULTS = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}STORE_LARGE_RESULTS')
 
+# Server-side only: number of processes per API server that run heavy requests
+# (sky.server.requests.heavy_requests); unset or 0 runs them as short requests.
+# Set it only once every API server process that shares the requests table runs
+# a version that knows the heavy schedule type.
+ENV_VAR_SERVER_HEAVY_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}HEAVY_WORKERS'
+
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
 # pooler while session-scoped advisory locks keep a direct connection (see

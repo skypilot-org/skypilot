@@ -157,6 +157,13 @@ AUTH_SESSION_TIMEOUT_SECONDS = 300  # 5 minutes
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
 
+# Sync calls. A client sends this header with value '1' to ask for the result
+# in the response itself. A response carrying it with value '1' was answered
+# that way: 200 and 500 have the /api/get body, 400 means the arguments do not
+# allow a sync call, and 429 means the server is busy (see Retry-After). Without
+# it, the response is the usual one and the client gets the result via /api/get.
+SYNC_CALL_HEADER = 'X-SkyPilot-Sync'
+
 # Valid empty values for pickled fields (base64-encoded pickled None)
 # base64.b64encode(pickle.dumps(None)).decode('utf-8')
 EMPTY_PICKLED_VALUE = 'gAROLg=='

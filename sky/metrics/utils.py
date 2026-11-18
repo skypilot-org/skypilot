@@ -571,6 +571,12 @@ SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     multiprocess_mode='livesum',
 )
 
+SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
+    'sky_apiserver_heavy_executors',
+    'Number of free heavy request executors in the API server',
+    multiprocess_mode='livesum',
+)
+
 # Active threads in on-demand thread executors. Each process has its own
 # executor with a per-process max_workers limit, so per-pid series are kept:
 # exhaustion is a per-process condition and a sum across processes can exceed

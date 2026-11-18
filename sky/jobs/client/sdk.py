@@ -492,7 +492,8 @@ def queue_v2(
         'POST',
         path,
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
+        timeout=(5, None),
+        sync_call=True)
     return server_common.get_request_id(response=response)
 
 

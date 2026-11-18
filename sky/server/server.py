@@ -3824,6 +3824,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         # Whether GET /workspaces/config is restricted to admins (so the
         # dashboard can hide the config UI for non-admins when enabled)
         restrict_config_to_admins=rbac.restrict_config_to_admins(),
+        sync_call_max_limit=executor.get_sync_call_max_limit(),
     )
 
 
