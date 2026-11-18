@@ -51,6 +51,7 @@ class TaskCodeGen:
             import pathlib
             import selectors
             import shlex
+            import signal
             import subprocess
             import sys
             import tempfile
@@ -80,6 +81,7 @@ class TaskCodeGen:
             inspect.getsource(log_lib._get_context),  # pylint: disable=protected-access
             inspect.getsource(log_lib._handle_io_stream),  # pylint: disable=protected-access
             inspect.getsource(log_lib.process_subprocess_stream),
+            inspect.getsource(log_lib._kill_process_group),  # pylint: disable=protected-access
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.add_ray_env_vars),
