@@ -140,6 +140,20 @@ class TestClusters:
         assert not result.exception, result.output
         assert _names(clusters[0]) == ['own', 'own-b']
 
+    def test_duplicate_workspace_name_stops_before_acting(
+            self, clusters, monkeypatch):
+        response = requests.Response()
+        response.status_code = 409
+        response._content = b'{"detail": "Workspace name team is not unique."}'  # pylint: disable=protected-access
+        monkeypatch.setattr(
+            'sky.client.sdk.get_user_workspace',
+            mock.MagicMock(side_effect=requests.HTTPError(response=response)))
+        down, _ = clusters
+        result = cli_testing.CliRunner().invoke(command.down, ['-u', '-y'])
+        assert result.exit_code == 2
+        assert 'team is not unique' in result.output
+        down.assert_not_called()
+
     def test_ambiguous_workspace_stops_before_acting(self, clusters,
                                                      monkeypatch):
         monkeypatch.setattr(
@@ -191,6 +205,19 @@ class TestStorageAndVolumes:
         result = cli_testing.CliRunner().invoke(command.storage_delete,
                                                 ['legacy', '-y'])
         assert _names(delete) == ['legacy']
+
+    def test_storage_from_a_server_without_the_field_is_not_narrowed(
+            self, monkeypatch):
+        storages = [dict(name='own'), dict(name='own-b')]
+        monkeypatch.setattr('sky.client.sdk.storage_ls', mock.MagicMock())
+        monkeypatch.setattr('sky.client.sdk.get',
+                            mock.MagicMock(return_value=storages))
+        delete = mock.MagicMock(return_value='req')
+        monkeypatch.setattr('sky.client.sdk.storage_delete', delete)
+        result = cli_testing.CliRunner().invoke(command.storage_delete,
+                                                ['-a', '-y'])
+        assert not result.exception, result.output
+        assert _names(delete) == ['own', 'own-b']
 
     def test_volumes_delete_all(self, monkeypatch):
         volumes = [
@@ -389,6 +416,38 @@ class TestServeAndPoolDown:
                             lambda _: jobs.clear() or jobs_after)
         return cancel, pool_down
 
+    def test_unscoped_server_keeps_the_plain_prompt(self, services,
+                                                    monkeypatch):
+        self._role(monkeypatch, 'admin')
+        monkeypatch.setattr(
+            'sky.client.sdk.get_user_workspace',
+            mock.MagicMock(side_effect=exceptions.APINotSupportedError('old')))
+        result = cli_testing.CliRunner().invoke(command.serve_down, ['-a'],
+                                                input='\n')
+        assert not result.exception, result.output
+        assert 'Terminating all services. Proceed? [Y/n]' in result.output
+        services.assert_called_once_with(service_names=(),
+                                         all=True,
+                                         purge=False)
+
+    def test_unknown_workspace_is_named_in_the_preview(self, services,
+                                                       monkeypatch):
+        self._role(monkeypatch, 'user')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get',
+            mock.MagicMock(return_value=[
+                _record('own', 'alice'),
+                _record('lost', 'alice', None),
+            ]))
+        result = cli_testing.CliRunner().invoke(command.serve_down, ['-a'],
+                                                input='\n')
+        assert not result.exception, result.output
+        assert 'workspace is unknown or not readable' in result.output
+        assert 'lost' in result.output
+        services.assert_called_once_with(service_names=['own'],
+                                         all=False,
+                                         purge=False)
+
     def test_old_controller_keeps_the_plain_prompt(self, services, monkeypatch):
         self._role(monkeypatch, 'user')
         monkeypatch.setattr(
@@ -410,6 +469,16 @@ class TestServeAndPoolDown:
         assert not result.exception, result.output
         assert cancel.call_args.kwargs['job_ids'] == [1]
         pool_down.assert_called_once_with(['own'], all=False, purge=False)
+
+    def test_pool_down_declining_the_job_question_aborts(
+            self, services, monkeypatch):
+        cancel, pool_down = self._pools(monkeypatch, 'user')
+        result = cli_testing.CliRunner().invoke(command.jobs_pool_down, ['-a'],
+                                                input='y\nn\n')
+        assert 'Would you like to cancel' in result.output, result.output
+        assert 'Aborted' in result.output, result.output
+        cancel.assert_not_called()
+        pool_down.assert_not_called()
 
     def test_pool_down_all_asks_about_the_pools_first(self, services,
                                                       monkeypatch):

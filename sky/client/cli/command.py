@@ -353,9 +353,13 @@ def _bulk_workspace() -> Optional[str]:
         return None
     except Exception as e:  # pylint: disable=broad-except
         # Whatever HTTP client raised it.
-        response = getattr(e, 'response', None)
-        if getattr(response, 'status_code', None) == 401:
+        response: Any = getattr(e, 'response', None)
+        status_code = getattr(response, 'status_code', None)
+        if status_code == 401:
             return None
+        if status_code == 409:
+            # The active workspace names more than one workspace.
+            raise click.UsageError(response.json().get('detail')) from e
         raise
     if info.get('workspace') is None:
         message = f'Cannot tell which workspace to act on: {info.get("note")}'
@@ -366,7 +370,9 @@ def _bulk_workspace() -> Optional[str]:
 
 
 def _in_workspace(records: List[Any], workspace_id: Optional[str]) -> List[Any]:
-    if workspace_id is None:
+    # Records from a server older than their `workspace` field cannot be
+    # scoped; leave them as they were.
+    if workspace_id is None or not any('workspace' in r for r in records):
         return list(records)
     return [r for r in records if r.get('workspace') == workspace_id]
 
@@ -375,7 +381,9 @@ def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
                           workspace_id: Optional[str]) -> Optional[List[Any]]:
     """The services or pools `down` reaches, as the server picks them: -a and
     patterns stay in the workspace, and -a takes only the caller's own unless
-    they are an admin. None when they cannot be listed."""
+    they are an admin. None when they cannot be listed or scoped."""
+    if workspace_id is None:
+        return None
     try:
         records = sdk.stream_and_get(
             managed_jobs.pool_status(None) if is_pool else serve_lib.status(None
@@ -386,26 +394,36 @@ def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Cannot list what down reaches: {e}')
         return None
-    if workspace_id is not None and records and all(
-            r.get('workspace') is None for r in records):
-        # A controller older than the workspace field: the server does not
-        # scope these either.
+    # Status reports None for a workspace the caller cannot read, so key
+    # presence cannot tell a controller older than the field apart.
+    if records and all(r.get('workspace') is None for r in records):
+        # The server does not scope these either.
         return None
-    in_workspace = _in_workspace(records, workspace_id)
-    if apply_to_all:
-        if caller.get('role') == 'admin':
-            return in_workspace
-        return [r for r in in_workspace if r.get('user_hash') == caller['id']]
     exact_names = {name for name in names if '*' not in name}
     patterns = [
         re.compile('.*'.join(map(re.escape, name.split('*'))))
         for name in names
         if '*' in name
     ]
-    return [r for r in records if r['name'] in exact_names] + [
-        r for r in in_workspace if r['name'] not in exact_names and any(
-            p.fullmatch(r['name']) for p in patterns)
-    ]
+
+    def _selected(candidates: List[Any]) -> List[Any]:
+        if apply_to_all:
+            if caller.get('role') == 'admin':
+                return candidates
+            return [r for r in candidates if r.get('user_hash') == caller['id']]
+        return [
+            r for r in candidates if r['name'] not in exact_names and any(
+                p.fullmatch(r['name']) for p in patterns)
+        ]
+
+    unknown = _selected([r for r in records if r.get('workspace') is None])
+    if unknown:
+        noun = 'pool' if is_pool else 'service'
+        click.echo(f'Skipping {noun}s whose workspace is unknown or not '
+                   f'readable (name them to tear them down): '
+                   f'{", ".join(r["name"] for r in unknown)}')
+    return [r for r in records if r['name'] in exact_names] + _selected(
+        _in_workspace(records, workspace_id))
 
 
 def _down_names(targets: List[Any], names: List[str]) -> List[str]:
@@ -7395,6 +7413,8 @@ def jobs_pool_down(
                         f'anyway.{colorama.Style.RESET_ALL}')
                 else:
                     click.echo('All jobs cancelled.')
+    except click.Abort:
+        raise
     except Exception as e:  # pylint: disable=broad-except
         # If API call fails, log warning but continue with pool down
         logger.warning(
