@@ -578,7 +578,7 @@ def return_sync_call_result(func: F) -> F:
         if not bound.arguments.get('follow', True):
             return True, None
         status_code, body = sync_response
-        return True, request_result(request_id, status_code, body,
+        return True, request_result(str(request_id), status_code, body,
                                     lambda: str(body))
 
     if inspect.iscoroutinefunction(inspect.unwrap(func)):
