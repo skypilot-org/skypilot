@@ -9,7 +9,8 @@ small pool of processes, one process per request, instead of the short pool:
   and the memory a request keeps is returned when its process exits.
 - One user runs one heavy request of each name at a time.
 - A user with ``MAX_WAITING_PER_USER`` heavy requests of one name already
-  waiting gets HTTP 503 for the next one.
+  waiting gets HTTP 503 for the next one. The check is not atomic: requests a
+  user sends at the same moment can all pass it.
 
 Whether a request is heavy depends on its arguments as well as its name: a cost
 report for named clusters, or a job queue page, is a normal short request.
