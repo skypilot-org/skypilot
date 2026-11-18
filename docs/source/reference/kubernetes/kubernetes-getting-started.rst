@@ -466,11 +466,11 @@ FAQs
 
 * **Can pods run without internet access?**
 
-  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above. In the recipe, replace ``skypilot-nightly`` with your API server's version (``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
+  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above, system packages included: SkyPilot installs missing ones at pod startup. In both ``skypilot-nightly`` lines of the recipe, use your API server's package and version instead (``skypilot==<version>`` or ``skypilot-nightly==<version>``, see ``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
 
   Pod startup then downloads nothing. ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers still download their own tools.
 
-  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` (``[]`` when pods cannot reach any APT mirror), and uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`.
+  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` to skip the built-in public ones, and uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
 
 * **Are multi-node jobs supported on Kubernetes?**
 
