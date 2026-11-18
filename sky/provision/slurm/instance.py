@@ -5,6 +5,7 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import tempfile
 import threading
 import time
@@ -1049,17 +1050,13 @@ def render_provision_script(
     container_prolog: str = '',
     container_init_prefix: str = '',
     container_init_suffix: str = '',
-    apt_install: str = (
-        'apt-get update\n'
-        'apt-get install -y ca-certificates rsync curl git wget fuse\n'),
+    apt_install: str = '  apt-get update\n  apt-get install -y $missing\n',
     runtime_setup: str = '',
 ) -> str:
-    """Render an allocation without SSH, submission, or global substitutions.
+    """Render an allocation without SSH or lifecycle I/O.
 
-    Optional shell fragments are trusted provisioner inputs, not task config.
-    Each nonempty fragment must end with a newline. Native lifecycle owns
-    readiness (including reattachment), snapshots, and cleanup. Container
-    keeper steps terminate their other ranks after a bad exit.
+    Trusted shell fragments must end with a newline. The apt_install fragment
+    receives $missing, the list of required packages not already installed.
     """
     for name, fragment in (('container_prolog', container_prolog),
                            ('container_init_prefix', container_init_prefix),
@@ -1160,7 +1157,13 @@ def render_provision_script(
 set -e
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
+missing=""
+for package in ca-certificates rsync curl git wget fuse; do
+  dpkg -s "$package" >/dev/null 2>&1 || missing="$missing $package"
+done
+if [ -n "$missing" ]; then
 """ + apt_install + """\
+fi
 echo 'alias sudo=""' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 """ + container_init_suffix
@@ -1547,14 +1550,14 @@ def create_virtual_instance(
             _make_login_node_runner(provider_config), client, job_id,
             f'{_sky_cluster_home_dir(base_dir, cluster_name_on_cloud)}'
             '/.sky_sbatch_ready', _sbatch_log_path(base_dir, job_id))
-        return common.ProvisionRecord(
-            provider_name='slurm',
-            region=region,
-            zone=partition,
-            cluster_name=cluster_name_on_cloud,
-            head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
-            resumed_instance_ids=[],
-            created_instance_ids=[])
+        return common.ProvisionRecord(provider_name='slurm',
+                                      region=region,
+                                      zone=partition,
+                                      cluster_name=cluster_name_on_cloud,
+                                      head_instance_id=slurm_utils.instance_id(
+                                          job_id, nodes[0]),
+                                      resumed_instance_ids=[],
+                                      created_instance_ids=[])
 
     inputs, submit_argv = prepare_provision_script_inputs(
         cluster_name_on_cloud,

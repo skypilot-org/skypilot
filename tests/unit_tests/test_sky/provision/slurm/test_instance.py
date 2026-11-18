@@ -1,6 +1,7 @@
 """Unit tests for sky.provision.slurm.instance."""
 import json
 import os
+from pathlib import Path
 import shlex
 import sqlite3
 import subprocess
@@ -2304,3 +2305,42 @@ def test_renderer_requires_newline_terminated_trusted_fragments(
         with pytest.raises(AssertionError,
                            match=f'{field} must end with a newline'):
             instance.render_provision_script(**inputs)
+
+
+@pytest.mark.parametrize('is_missing', [False, True])
+def test_package_fragment_receives_only_missing_packages(
+        tmp_path: Path, is_missing: bool) -> None:
+    package_probe = 'test "$2" != rsync' if is_missing else 'return 0'
+    script = instance.render_provision_script(
+        cluster_name_on_cloud='test',
+        resources={
+            'cpus': 1,
+            'memory': 0,
+            'image_id': '/image.sqsh'
+        },
+        num_nodes=1,
+        partition='dev',
+        partition_info=instance.slurm.SlurmPartition('dev', False, 3600, None),
+        proctrack_type='cgroup',
+        remote_home_dir=str(tmp_path),
+        sky_base_dir=str(tmp_path),
+        skypilot_runtime_dir=str(tmp_path / 'runtime'),
+        snapshot_dir=str(tmp_path / 'snapshot'),
+        container_init_prefix=f'dpkg() {{ {package_probe}; }}\n',
+        apt_install='printf "INSTALL:%s\\n" "$missing"\n',
+        container_init_suffix='exit 0\n')
+    tokens = shlex.split(script, comments=True)
+    container_flag = next(index for index, token in enumerate(tokens)
+                          if token.startswith('--container-image='))
+    payload = tokens[tokens.index('-c', container_flag) + 1]
+    completed = subprocess.run(['bash', '-c', payload],
+                               env={
+                                   **os.environ, 'HOME': str(tmp_path)
+                               },
+                               capture_output=True,
+                               text=True,
+                               check=True)
+    if is_missing:
+        assert 'INSTALL: rsync\n' in completed.stdout
+    else:
+        assert 'INSTALL:' not in completed.stdout
