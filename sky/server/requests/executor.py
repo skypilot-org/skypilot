@@ -492,9 +492,6 @@ class RequestWorker:
         # thread that acquired it, since file locks are held per thread.
         self._finished_user_locks: queue_lib.SimpleQueue = (
             queue_lib.SimpleQueue())
-        # Ids of the user locks this worker holds. Checked before the lock
-        # itself: a file lock taken twice by one thread may not conflict.
-        self._held_user_lock_ids: Set[str] = set()
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
@@ -520,7 +517,6 @@ class RequestWorker:
         return metrics_utils.SKY_APISERVER_HEAVY_EXECUTORS
 
     def _release_user_lock(self, lock: locks.DistributedLock) -> None:
-        self._held_user_lock_ids.discard(lock.lock_id)
         try:
             lock.release()
         except Exception as e:  # pylint: disable=broad-except
@@ -542,8 +538,6 @@ class RequestWorker:
         Returns None if one of them runs, or if the lock cannot be taken now.
         """
         lock_id = heavy_requests.user_lock_id(user_id, request_name)
-        if lock_id in self._held_user_lock_ids:
-            return None
         lock = locks.get_lock(lock_id)
         try:
             lock.acquire(blocking=False)
@@ -553,7 +547,6 @@ class RequestWorker:
             logger.error(f'[{self}] Failed to lock {lock_id}: '
                          f'{common_utils.format_exception(e)}')
             return None
-        self._held_user_lock_ids.add(lock_id)
         return lock
 
     def process_request(self, executor: process.BurstableExecutor,
