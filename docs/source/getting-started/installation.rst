@@ -149,7 +149,7 @@ Just tell your agent:
 
 .. code-block:: text
 
-   Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the SkyPilot skill.
+   Fetch and follow https://docs.skypilot.ai/en/latest/getting-started/skill.html.md to install the SkyPilot skill.
 
 Restart the agent afterwards so it loads the skill.
 
