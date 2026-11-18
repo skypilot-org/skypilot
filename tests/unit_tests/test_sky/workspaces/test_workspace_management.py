@@ -935,54 +935,30 @@ class TestWorkspaceManagement(unittest.TestCase):
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     def test_compare_workspace_configs_allowed_queues_changes(
             self, mock_get_users_for_role, mock_get_users):
-        """Any allowed_queues-only change is safe while resources run."""
+        """An allowed_queues-only change is safe while resources run."""
         mock_get_users.return_value = []
         mock_get_users_for_role.return_value = []
 
-        def k8s(**quota):
-            return {'kubernetes': {'quota': quota}}
+        def cfg(cloud='kubernetes', **quota):
+            return {cloud: {'quota': quota}}
 
         # (current_config, new_config, expected_safe)
         cases = [
-            # Add, remove, turn on, turn off.
-            (k8s(allowed_queues=['a']), k8s(allowed_queues=['a', 'b']), True),
-            (k8s(allowed_queues=['a', 'b']), k8s(allowed_queues=['a']), True),
-            (k8s(queue='a'), k8s(queue='a', allowed_queues=['a']), True),
-            ({}, {
-                'slurm': {
-                    'quota': {
-                        'allowed_queues': ['qos']
-                    }
-                }
-            }, True),
+            # Adding a queue, or removing the list, is safe.
+            (cfg(allowed_queues=['a']), cfg(allowed_queues=['a', 'b']), True),
+            (cfg(allowed_queues=['a']), cfg(), True),
+            # Dropping a queue, or starting to limit queues, is not.
+            (cfg(allowed_queues=['a', 'b']), cfg(allowed_queues=['a']), False),
+            ({}, cfg('slurm', allowed_queues=['qos']), False),
             ({
-                'slurm': {
-                    'quota': {
-                        'allowed_queues': ['qos']
-                    }
-                }
-            }, {}, True),
-            # Removing the field and leaving an empty block behind.
-            (k8s(allowed_queues=['a']), k8s(), True),
-            (k8s(allowed_queues=['a']), {
-                'kubernetes': {}
-            }, True),
-            ({
-                'kubernetes': {}
-            }, k8s(allowed_queues=['a']), True),
+                'kubernetes': None
+            }, cfg(allowed_queues=['a']), False),
             # Together with an infra change, it is an infra change.
-            ({
+            (cfg(allowed_queues=['a']), {
                 'kubernetes': {
-                    'namespace': 'ns-1',
+                    'namespace': 'ns',
                     'quota': {
-                        'allowed_queues': ['a']
-                    }
-                }
-            }, {
-                'kubernetes': {
-                    'namespace': 'ns-2',
-                    'quota': {
-                        'allowed_queues': ['b']
+                        'allowed_queues': ['a', 'b']
                     }
                 }
             }, False),
@@ -995,34 +971,37 @@ class TestWorkspaceManagement(unittest.TestCase):
 
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
-    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    def test_validate_workspace_config_changes_allowed_queues(
-            self, mock_get_users_for_role, mock_get_users,
-            mock_check_resources):
-        """Editing allowed_queues never asks for the workspace to be empty."""
-        mock_get_users.return_value = []
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_validate_allowed_queues_change_with_active_resources(
+            self, mock_get_users, mock_get_users_for_role, mock_check_users,
+            mock_check_no_active):
+        """Adding a queue is allowed while the workspace has active resources;
+        dropping one is not, even alongside an additive allowed_contexts
+        change."""
         mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = []
+        mock_check_users.return_value = ('', [], {})
+        # Simulate active resources: fail loudly if the strict check is reached.
+        mock_check_no_active.side_effect = ValueError('has active resources')
 
-        def k8s(allowed_queues, **extra):
+        def cfg(allowed_queues, allowed_contexts=('ctx-1',)):
             return {
                 'kubernetes': {
+                    'allowed_contexts': list(allowed_contexts),
                     'quota': {
                         'allowed_queues': allowed_queues
                     },
-                    **extra
                 }
             }
 
-        core._validate_workspace_config_changes('test-workspace', k8s(['a']),
-                                                k8s(['b']))
-        mock_check_resources.assert_not_called()
-
-        # An infra change in the same edit still needs the empty-workspace
-        # check.
-        core._validate_workspace_config_changes('test-workspace', k8s(['a']),
-                                                k8s(['b'], namespace='ns'))
-        mock_check_resources.assert_called_once()
+        core._validate_workspace_config_changes('ws', cfg(['a']),
+                                                cfg(['a', 'b']))
+        with self.assertRaisesRegex(ValueError, 'has active resources'):
+            core._validate_workspace_config_changes(
+                'ws', cfg(['a', 'b']), cfg(['a'], ('ctx-1', 'ctx-2')))
 
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
