@@ -55,6 +55,7 @@ class _ApiClient:
     def __init__(self, *answers):
         self.answers = list(answers)
         self.calls = []
+        self.contexts = []
 
     def call_api(self, path, method, **kwargs):
         self.calls.append((path, method, kwargs))
@@ -78,9 +79,11 @@ def api(monkeypatch):
         clients['client'] = _ApiClient(*answers)
         return clients['client']
 
-    monkeypatch.setattr(reads.kubernetes,
-                        'api_client',
-                        lambda context=None: clients['client'])
+    def api_client(context=None):
+        clients['client'].contexts.append(context)
+        return clients['client']
+
+    monkeypatch.setattr(reads.kubernetes, 'api_client', api_client)
     monkeypatch.setattr(kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS', [])
     monkeypatch.setattr(kubernetes_utils, '_CONTEXT_CALL_OBSERVERS', [])
     monkeypatch.setattr(plugin_extensions.ClusterStateSource, '_provider_func',
@@ -267,7 +270,7 @@ def test_get_from_the_source_passes_the_name(api):
     def provider(query):
         queries.append(query)
         return plugin_extensions.CachedObjects(items=[],
-                                               resource_version='1',
+                                               resource_version='42',
                                                staleness_seconds=0)
 
     plugin_extensions.ClusterStateSource.register(provider)
@@ -275,8 +278,36 @@ def test_get_from_the_source_passes_the_name(api):
     result = reads.get_object('ctx', reads.PODS, 'p', namespace='ns')
 
     assert not result.items
+    assert result.resource_version == ''
     assert result.source == reads.SOURCE_CACHE
     assert (queries[0].namespace, queries[0].name) == ('ns', 'p')
+
+
+def test_get_from_the_source_reports_the_object_version(api):
+    api(_POD_LIST)
+    node = {'metadata': {'name': 'n1', 'resourceVersion': '7'}}
+    plugin_extensions.ClusterStateSource.register(
+        lambda query: plugin_extensions.CachedObjects(
+            items=[node], resource_version='42', staleness_seconds=0))
+
+    result = reads.get_object('ctx', reads.NODES, 'n1')
+
+    assert result.items == [node]
+    assert result.resource_version == '7'
+
+
+def test_unnamed_context_reads_the_default_api_server(api, metrics):
+    client = api(_POD_LIST)
+    provider = mock.Mock()
+    plugin_extensions.ClusterStateSource.register(provider)
+
+    result = reads.list_objects(None, reads.PODS)
+
+    provider.assert_not_called()
+    assert client.contexts == [None]
+    assert result.reason == reads.REASON_UNNAMED_CONTEXT
+    metrics.count_kube_read.assert_called_once_with(
+        '', 'pods', reads.SOURCE_DIRECT, reads.REASON_UNNAMED_CONTEXT)
 
 
 def test_list_of_an_unserved_resource_raises(api):

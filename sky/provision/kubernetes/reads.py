@@ -39,6 +39,9 @@ SOURCE_DIRECT = 'direct'
 # plugin_extensions.cluster_state_source.
 REASON_FRESH = 'fresh'
 REASON_NO_SOURCE = 'no_source'
+# context=None, which the API client resolves in-cluster first; a source
+# serves named contexts only.
+REASON_UNNAMED_CONTEXT = 'unnamed_context'
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,7 +140,10 @@ def list_objects(
     """List the objects of a resource type.
 
     Args:
-        context: Kubernetes context; None for the current context.
+        context: Kubernetes context. None reads the API server that the
+            client picks by default (in-cluster config first, then the
+            kubeconfig current context); only named contexts are served
+            from a cache.
         resource: The resource type.
         namespace: Namespace to list; None for every namespace. Must be None
             for a cluster-scoped resource.
@@ -166,7 +172,10 @@ def get_object(
     """Get one object; its items hold the object, or nothing if it is absent.
 
     Args:
-        context: Kubernetes context; None for the current context.
+        context: Kubernetes context. None reads the API server that the
+            client picks by default (in-cluster config first, then the
+            kubeconfig current context); only named contexts are served
+            from a cache.
         resource: The resource type.
         name: Object name.
         namespace: The object's namespace. Required for a namespaced
@@ -189,13 +198,11 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
     if namespace is not None and not resource.namespaced:
         raise ValueError(f'{resource.label} is cluster-scoped; got namespace '
                          f'{namespace!r}.')
-    context_name = (context if context is not None else
-                    kubernetes_utils.get_current_kube_config_context_name())
     served = None
-    if isinstance(consistency, Cached) and context_name is not None:
+    if isinstance(consistency, Cached) and context is not None:
         served = plugin_extensions.ClusterStateSource.get(
             plugin_extensions.ObjectQuery(
-                context=context_name,
+                context=context,
                 group=resource.group,
                 version=resource.version,
                 resource=resource.plural,
@@ -205,24 +212,30 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                 field_selector=field_selector,
                 max_staleness_seconds=consistency.max_age))
     if isinstance(served, plugin_extensions.CachedObjects):
-        metrics_utils.count_kube_read(context_name or '', resource.label,
+        metrics_utils.count_kube_read(context or '', resource.label,
                                       SOURCE_CACHE, '')
         metrics_utils.observe_kube_read_staleness(resource.label,
                                                   served.staleness_seconds)
+        if name is None:
+            resource_version = served.resource_version
+        else:
+            resource_version = _object_version(served.items)
         return ReadResult(items=served.items,
-                          resource_version=served.resource_version,
+                          resource_version=resource_version,
                           staleness_seconds=served.staleness_seconds,
                           reason=None)
     if isinstance(served, plugin_extensions.Refusal):
         reason = served.reason
-        logger.debug(f'Reading {resource.label} of {context_name!r} from the '
+        logger.debug(f'Reading {resource.label} of {context!r} from the '
                      f'API server: {served.reason} {served.message}')
     elif isinstance(consistency, Fresh):
         reason = REASON_FRESH
+    elif context is None:
+        reason = REASON_UNNAMED_CONTEXT
     else:
         reason = REASON_NO_SOURCE
-    metrics_utils.count_kube_read(context_name or '', resource.label,
-                                  SOURCE_DIRECT, reason)
+    metrics_utils.count_kube_read(context or '', resource.label, SOURCE_DIRECT,
+                                  reason)
 
     path = resource.path(namespace, name)
     query = tuple((key, value)
@@ -238,7 +251,7 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
     if got is None:
         if name is None:
             raise exceptions.KubernetesResourceNotServedError(
-                f'Kubernetes context {context_name!r} does not serve '
+                f'Kubernetes context {context!r} does not serve '
                 f'{resource.label} ({resource.group}/{resource.version}).')
         items, resource_version = [], ''
     else:
@@ -271,7 +284,7 @@ def _get(*, context: Optional[str], resource_label: str, path: str,
                 got = _parse_list(response)
             else:
                 obj = json.loads(response.data)
-                got = [obj], obj['metadata'].get('resourceVersion', '')
+                got = [obj], _object_version([obj])
         finally:
             response.release_conn()
         outcome = 'ok'
@@ -284,6 +297,13 @@ def _get(*, context: Optional[str], resource_label: str, path: str,
     finally:
         metrics_utils.observe_kube_read_api_call(resource_label, outcome,
                                                  time.monotonic() - start)
+
+
+def _object_version(items: List[Dict[str, Any]]) -> str:
+    """The resourceVersion of the one object a get returned, or ''."""
+    if not items:
+        return ''
+    return items[0].get('metadata', {}).get('resourceVersion', '')
 
 
 def _parse_list(response: Any) -> Tuple[List[Dict[str, Any]], str]:
