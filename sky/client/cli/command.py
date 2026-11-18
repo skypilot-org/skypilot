@@ -6017,7 +6017,10 @@ def volumes_delete(
                                       resource_type='Volume'))))
     if names:
         if not yes and is_bulk:
+            # A name may exist in other workspaces too: prefer the one -a or
+            # the pattern picked.
             records_by_name = {v['name']: v for v in all_volumes}
+            records_by_name.update({v['name']: v for v in bulk_volumes})
             _confirm_bulk('Deleting', 'volume',
                           [records_by_name[name] for name in names],
                           target_workspace)
