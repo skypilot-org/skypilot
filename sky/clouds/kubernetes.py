@@ -356,8 +356,9 @@ class Kubernetes(clouds.Cloud):
         lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
         no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
 
-        def server_and_requested(cloud: str,
-                                 context: Optional[str]) -> Tuple[Any, Any]:
+        def server_and_requested(
+                cloud: str, context: Optional[str],
+                overrides: Optional[Dict[str, Any]]) -> Tuple[Any, Any]:
             default = schemas.get_default_remote_identity(cloud)
             server = skypilot_config.get_server_workspace_region_config(
                 cloud=cloud,
@@ -369,16 +370,18 @@ class Kubernetes(clouds.Cloud):
                 region=context,
                 keys=('remote_identity',),
                 default_value=default,
-                override_configs=cluster_config_overrides)
+                override_configs=overrides)
             return (_match_remote_identity(server, context),
                     _match_remote_identity(requested, context))
 
         # Worded as the launch-time check in backend_utils words it.
         refusal = None
         # Clusters on another cloud get the kubeconfig unless NO_UPLOAD
-        # excludes it.
+        # excludes it. As at launch, a task's own overrides do not count here.
         both = {'kubernetes': cls(), 'ssh': clouds.SSH()}
-        values = {cloud: server_and_requested(cloud, None) for cloud in both}
+        values = {
+            cloud: server_and_requested(cloud, None, None) for cloud in both
+        }
         if (not cls.uploads_kubeconfig(obj for cloud, obj in both.items()
                                        if values[cloud][0] == no_upload) and
                 cls.uploads_kubeconfig(obj for cloud, obj in both.items()
@@ -395,7 +398,8 @@ class Kubernetes(clouds.Cloud):
             except Exception:  # pylint: disable=broad-except
                 continue  # e.g. no kubernetes package: nothing to upload.
             for context in contexts:
-                server, requested = server_and_requested(cloud, context)
+                server, requested = server_and_requested(
+                    cloud, context, cluster_config_overrides)
                 if requested == lc and server != lc:
                     refusal = (
                         '`remote_identity: LOCAL_CREDENTIALS` would upload the '

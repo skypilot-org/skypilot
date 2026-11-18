@@ -1094,6 +1094,14 @@ class TestKubeconfigUploadCheckedAtSubmit:
                 }})
         self._check()
 
+    @pytest.mark.parametrize('identity', ['NONE', 'SERVICE_ACCOUNT'])
+    def test_a_task_override_does_not_undo_no_upload(self, server_config,
+                                                     caller, identity):
+        """Launch reads NO_UPLOAD without the task's overrides; so does this."""
+        server_config(TestKubeconfigUploadNeedsAdmin._SERVER_NO_UPLOAD)  # pylint: disable=protected-access
+        caller(False)
+        self._check(task_config={'ssh': {'remote_identity': identity}})
+
     def test_nothing_loosened(self, server_config, caller):
         server_config({})
         caller(False)
