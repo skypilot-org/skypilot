@@ -12,15 +12,6 @@ SkyPilot can be set up with the steps below, or you can ask your AI agent (Claud
 
    Read https://docs.skypilot.ai/en/latest/getting-started/installation.html.md and set up SkyPilot for me, including the SkyPilot skill.
 
-.. note::
-
-   **For AI agents:** do all of the following, in order, unless the user says otherwise. Do not stop after installing the CLI.
-
-   1. `Install SkyPilot <#install-skypilot>`__.
-   2. `Install the SkyPilot skill <#install-skypilot-skill>`__. This is part of the default setup. Skip it only if the user declines.
-   3. `Connect to the team's API server, or set up cloud credentials <#run-locally-or-connect-to-a-remote-api-server>`__ if running locally.
-   4. `Verify <#verify-cloud-access>`__ with ``sky api info`` and ``sky check``.
-
 Install SkyPilot
 ----------------
 
@@ -152,7 +143,7 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 Install SkyPilot skill
 ----------------------
 
-The `SkyPilot skill <https://docs.skypilot.ai/en/latest/getting-started/skill.html>`__ teaches your AI agent (Claude Code, Codex, etc.) how to launch clusters, run jobs, and serve models with SkyPilot. An AI agent that is installing SkyPilot should install the skill too, as part of the same setup.
+The `SkyPilot skill <https://docs.skypilot.ai/en/latest/getting-started/skill.html>`__ teaches your AI agent (Claude Code, Codex, etc.) how to launch clusters, run jobs, and serve models with SkyPilot.
 
 For Claude Code, run:
 
