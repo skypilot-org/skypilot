@@ -13,6 +13,7 @@ Example:
     for pod in result.items:
         ...
 """
+from concurrent import futures
 import dataclasses
 import json
 import threading
@@ -20,6 +21,9 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib import parse
 
+import ijson
+
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.metrics import utils as metrics_utils
@@ -35,10 +39,6 @@ SOURCE_DIRECT = 'direct'
 # plugin_extensions.cluster_state_source.
 REASON_FRESH = 'fresh'
 REASON_NO_SOURCE = 'no_source'
-
-# Outcomes of a Kubernetes API call, as passed to direct read observers.
-OUTCOME_OK = 'ok'
-OUTCOME_ERROR = 'error'
 
 
 @dataclasses.dataclass(frozen=True)
@@ -105,11 +105,11 @@ class ReadResult:
 
     Attributes:
         items: The objects in Kubernetes API JSON, in the API server's LIST
-            order. Whether objects of built-in types carry apiVersion and
-            kind depends on the source. The caller owns them.
+            order. They may be shared with other readers, so they must not
+            be modified. Whether objects of built-in types carry apiVersion
+            and kind depends on the source.
         resource_version: The resourceVersion of the list or of the object;
             '' if get_object() found no object.
-        source: SOURCE_CACHE or SOURCE_DIRECT.
         staleness_seconds: How long the cache's watch had been failing; 0
             for a direct read.
         reason: Why the read went to the API server; None when the cache
@@ -117,29 +117,12 @@ class ReadResult:
     """
     items: List[Dict[str, Any]]
     resource_version: str
-    source: str
     staleness_seconds: float
     reason: Optional[str]
 
-
-class ResourceNotServedError(Exception):
-    """The API server does not serve the resource type, e.g. a missing CRD."""
-
-
-# (context, outcome, duration_seconds) of one Kubernetes API call.
-DirectReadObserver = Callable[[str, str, float], None]
-
-_DIRECT_READ_OBSERVERS: List[DirectReadObserver] = []
-
-
-def register_direct_read_observer(observer: DirectReadObserver) -> None:
-    """Register a function called after every API call a read makes.
-
-    It is called in the reading thread, so it must be cheap and must not
-    block. Idempotent.
-    """
-    if observer not in _DIRECT_READ_OBSERVERS:
-        _DIRECT_READ_OBSERVERS.append(observer)
+    @property
+    def source(self) -> str:
+        return SOURCE_CACHE if self.reason is None else SOURCE_DIRECT
 
 
 def list_objects(
@@ -165,7 +148,8 @@ def list_objects(
     Raises:
         exceptions.KubeAPIUnreachableError: The API server was needed and is
             known to be unreachable, or failed after retries.
-        ResourceNotServedError: The API server does not serve the resource.
+        exceptions.KubernetesResourceNotServedError: The API server does not
+            serve the resource.
     """
     return _read(context, resource, namespace, None, label_selector,
                  field_selector, consistency)
@@ -207,12 +191,8 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                          f'{namespace!r}.')
     context_name = (context if context is not None else
                     kubernetes_utils.get_current_kube_config_context_name())
-    if isinstance(consistency, Fresh):
-        reason = REASON_FRESH
-    elif (context_name is None or
-          not plugin_extensions.ClusterStateSource.is_registered()):
-        reason = REASON_NO_SOURCE
-    else:
+    served = None
+    if isinstance(consistency, Cached) and context_name is not None:
         served = plugin_extensions.ClusterStateSource.get(
             plugin_extensions.ObjectQuery(
                 context=context_name,
@@ -224,22 +204,23 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                 label_selector=label_selector,
                 field_selector=field_selector,
                 max_staleness_seconds=consistency.max_age))
-        if isinstance(served, plugin_extensions.CachedObjects):
-            metrics_utils.count_kube_read(context_name, resource.label,
-                                          SOURCE_CACHE, '')
-            metrics_utils.observe_kube_read_staleness(resource.label,
-                                                      served.staleness_seconds)
-            return ReadResult(items=served.items,
-                              resource_version=served.resource_version,
-                              source=SOURCE_CACHE,
-                              staleness_seconds=served.staleness_seconds,
-                              reason=None)
-        if served is None:
-            reason = REASON_NO_SOURCE
-        else:
-            reason = served.reason
-            logger.debug(f'Reading {resource.label} of {context_name!r} from '
-                         f'the API server: {served.reason} {served.message}')
+    if isinstance(served, plugin_extensions.CachedObjects):
+        metrics_utils.count_kube_read(context_name or '', resource.label,
+                                      SOURCE_CACHE, '')
+        metrics_utils.observe_kube_read_staleness(resource.label,
+                                                  served.staleness_seconds)
+        return ReadResult(items=served.items,
+                          resource_version=served.resource_version,
+                          staleness_seconds=served.staleness_seconds,
+                          reason=None)
+    if isinstance(served, plugin_extensions.Refusal):
+        reason = served.reason
+        logger.debug(f'Reading {resource.label} of {context_name!r} from the '
+                     f'API server: {served.reason} {served.message}')
+    elif isinstance(consistency, Fresh):
+        reason = REASON_FRESH
+    else:
+        reason = REASON_NO_SOURCE
     metrics_utils.count_kube_read(context_name or '', resource.label,
                                   SOURCE_DIRECT, reason)
 
@@ -248,43 +229,33 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                   for key, value in (('labelSelector', label_selector),
                                      ('fieldSelector', field_selector))
                   if value)
-    body = _IN_FLIGHT.do((context, path, query),
-                         lambda: _get(context=context,
-                                      context_name=context_name or '',
-                                      resource_label=resource.label,
-                                      path=path,
-                                      query=query))
-    if body is None:
+    got = _IN_FLIGHT.do((context, path, query),
+                        lambda: _get(context=context,
+                                     resource_label=resource.label,
+                                     path=path,
+                                     query=query,
+                                     is_list=name is None))
+    if got is None:
         if name is None:
-            raise ResourceNotServedError(
+            raise exceptions.KubernetesResourceNotServedError(
                 f'Kubernetes context {context_name!r} does not serve '
                 f'{resource.label} ({resource.group}/{resource.version}).')
-        return ReadResult(items=[],
-                          resource_version='',
-                          source=SOURCE_DIRECT,
-                          staleness_seconds=0,
-                          reason=reason)
-    parsed = json.loads(body)
-    if name is not None:
-        items = [parsed]
-        resource_version = parsed['metadata'].get('resourceVersion', '')
+        items, resource_version = [], ''
     else:
-        items = parsed.get('items') or []
-        resource_version = (parsed.get('metadata') or
-                            {}).get('resourceVersion', '')
+        items, resource_version = got
     return ReadResult(items=items,
                       resource_version=resource_version,
-                      source=SOURCE_DIRECT,
                       staleness_seconds=0,
                       reason=reason)
 
 
 @kubernetes_utils._retry_on_error()  # pylint: disable=protected-access
-def _get(*, context: Optional[str], context_name: str, resource_label: str,
-         path: str, query: Tuple[Tuple[str, str], ...]) -> Optional[bytes]:
-    """One GET of path; None if the API server answers 404."""
+def _get(*, context: Optional[str], resource_label: str, path: str,
+         query: Tuple[Tuple[str, str], ...],
+         is_list: bool) -> Optional[Tuple[List[Dict[str, Any]], str]]:
+    """One GET of path: (items, resourceVersion), or None on 404."""
     start = time.monotonic()
-    outcome = OUTCOME_ERROR
+    outcome = 'error'
     try:
         response = kubernetes.api_client(context).call_api(
             path,
@@ -296,68 +267,66 @@ def _get(*, context: Optional[str], context_name: str, resource_label: str,
             _preload_content=False,
             _request_timeout=kubernetes.API_TIMEOUT)
         try:
-            body = response.data
+            if is_list:
+                got = _parse_list(response)
+            else:
+                obj = json.loads(response.data)
+                got = [obj], obj['metadata'].get('resourceVersion', '')
         finally:
             response.release_conn()
-        outcome = OUTCOME_OK
-        return body
+        outcome = 'ok'
+        return got
     except kubernetes.api_exception() as e:
         if e.status != 404:
             raise
-        outcome = OUTCOME_OK
+        outcome = 'ok'
         return None
     finally:
-        duration = time.monotonic() - start
         metrics_utils.observe_kube_read_api_call(resource_label, outcome,
-                                                 duration)
-        for observer in _DIRECT_READ_OBSERVERS:
-            try:
-                observer(context_name, outcome, duration)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Direct read observer failed: {e}')
+                                                 time.monotonic() - start)
+
+
+def _parse_list(response: Any) -> Tuple[List[Dict[str, Any]], str]:
+    items: List[Dict[str, Any]] = []
+    resource_version = ''
+    for key, value in ijson.kvitems(
+            response,
+            '',
+            use_float=True,
+            buf_size=kubernetes_utils.IJSON_BUFFER_SIZE):
+        if key == 'items':
+            items = value or []
+        elif key == 'metadata':
+            resource_version = value.get('resourceVersion', '')
+    return items, resource_version
 
 
 class _InFlight:
-    """Shares one call among the threads that make the same call at once.
-
-    Every caller gets the same return value, so it must not be mutated;
-    here it is the response body, which each caller parses for itself.
-    """
+    """Shares one call among the threads that make the same call at once."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._calls: Dict[Any, '_Call'] = {}
+        self._calls: Dict[Any, futures.Future] = {}
 
     def do(self, key: Any, fn: Callable[[], Any]) -> Any:
         with self._lock:
             call = self._calls.get(key)
             leader = call is None
-            if call is None:
-                call = _Call()
-                self._calls[key] = call
+            if leader:
+                call = self._calls[key] = futures.Future()
+        assert call is not None
         if not leader:
-            call.done.wait()
-            if call.error is not None:
-                raise call.error
-            return call.result
+            return call.result()
         try:
-            call.result = fn()
-            return call.result
+            result = fn()
+            call.set_result(result)
+            return result
         except BaseException as e:
-            call.error = e
+            call.set_exception(e)
             raise
         finally:
             with self._lock:
                 del self._calls[key]
-            call.done.set()
-
-
-class _Call:
-
-    def __init__(self) -> None:
-        self.done = threading.Event()
-        self.result: Any = None
-        self.error: Optional[BaseException] = None
 
 
 _IN_FLIGHT = _InFlight()

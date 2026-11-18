@@ -1,5 +1,7 @@
 """Tests for sky.provision.kubernetes.reads."""
 # pylint: disable=redefined-outer-name
+from concurrent import futures
+import io
 import json
 import threading
 from unittest import mock
@@ -23,6 +25,9 @@ _POD_LIST = {
         'metadata': {
             'name': 'a',
             'namespace': 'ns'
+        },
+        'spec': {
+            'priority': 1.5
         }
     }, {
         'metadata': {
@@ -33,18 +38,19 @@ _POD_LIST = {
 }
 
 
-class _Response:
+class _Response(io.BytesIO):
+    """A urllib3 response read with _preload_content=False."""
 
-    def __init__(self, body):
-        self.data = json.dumps(body).encode()
-        self.released = False
+    @property
+    def data(self):
+        return self.read()
 
     def release_conn(self):
-        self.released = True
+        pass
 
 
 class _ApiClient:
-    """Answers GETs from a list of bodies or exceptions, in order."""
+    """Answers GETs with the given bodies or exceptions, in order."""
 
     def __init__(self, *answers):
         self.answers = list(answers)
@@ -56,7 +62,7 @@ class _ApiClient:
             self.answers[0])
         if isinstance(answer, Exception):
             raise answer
-        return _Response(answer)
+        return _Response(json.dumps(answer).encode())
 
 
 def _api_error(status):
@@ -76,7 +82,7 @@ def api(monkeypatch):
                         'api_client',
                         lambda context=None: clients['client'])
     monkeypatch.setattr(kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS', [])
-    monkeypatch.setattr(reads, '_DIRECT_READ_OBSERVERS', [])
+    monkeypatch.setattr(kubernetes_utils, '_CONTEXT_CALL_OBSERVERS', [])
     monkeypatch.setattr(plugin_extensions.ClusterStateSource, '_provider_func',
                         None)
     return install
@@ -85,17 +91,8 @@ def api(monkeypatch):
 @pytest.fixture
 def metrics(monkeypatch):
     recorded = mock.Mock()
-    monkeypatch.setattr(reads.metrics_utils, 'count_kube_read',
-                        recorded.count_kube_read)
-    monkeypatch.setattr(reads.metrics_utils, 'observe_kube_read_api_call',
-                        recorded.observe_kube_read_api_call)
-    monkeypatch.setattr(reads.metrics_utils, 'observe_kube_read_staleness',
-                        recorded.observe_kube_read_staleness)
+    monkeypatch.setattr(reads, 'metrics_utils', recorded)
     return recorded
-
-
-def _register(provider):
-    plugin_extensions.ClusterStateSource.register(provider)
 
 
 @pytest.mark.parametrize('resource,namespace,name,path', [
@@ -120,7 +117,7 @@ def test_list_reads_the_api_server_without_a_source(api, metrics):
                                 label_selector='app=web',
                                 field_selector='status.phase=Running')
 
-    assert [p['metadata']['name'] for p in result.items] == ['a', 'b']
+    assert result.items == _POD_LIST['items']
     assert result.resource_version == '42'
     assert result.source == reads.SOURCE_DIRECT
     assert result.staleness_seconds == 0
@@ -135,7 +132,7 @@ def test_list_reads_the_api_server_without_a_source(api, metrics):
                                                     reads.SOURCE_DIRECT,
                                                     reads.REASON_NO_SOURCE)
     metrics.observe_kube_read_api_call.assert_called_once_with(
-        'pods', reads.OUTCOME_OK, mock.ANY)
+        'pods', 'ok', mock.ANY)
 
 
 def test_cached_read_is_served_by_the_source(api, metrics):
@@ -152,7 +149,7 @@ def test_cached_read_is_served_by_the_source(api, metrics):
                                                resource_version='7',
                                                staleness_seconds=12.5)
 
-    _register(provider)
+    plugin_extensions.ClusterStateSource.register(provider)
 
     result = reads.list_objects('ctx',
                                 reads.PODS,
@@ -165,7 +162,7 @@ def test_cached_read_is_served_by_the_source(api, metrics):
     assert result.source == reads.SOURCE_CACHE
     assert result.staleness_seconds == 12.5
     assert result.reason is None
-    assert client.calls == []
+    assert not client.calls
     assert queries == [
         plugin_extensions.ObjectQuery(context='ctx',
                                       group='',
@@ -185,8 +182,8 @@ def test_cached_read_is_served_by_the_source(api, metrics):
 def test_default_consistency_accepts_a_minute_of_watch_failure(api):
     api(_POD_LIST)
     queries = []
-    _register(lambda query: queries.append(query) or plugin_extensions.Refusal(
-        cluster_state_source.WATCH_FAILING))
+    plugin_extensions.ClusterStateSource.register(lambda query: queries.append(
+        query) or plugin_extensions.Refusal(cluster_state_source.WATCH_FAILING))
 
     reads.list_objects('ctx', reads.NODES)
 
@@ -202,7 +199,8 @@ def test_default_consistency_accepts_a_minute_of_watch_failure(api):
 ])
 def test_refused_read_goes_to_the_api_server(api, metrics, reason):
     client = api(_POD_LIST)
-    _register(lambda query: plugin_extensions.Refusal(reason, 'details'))
+    plugin_extensions.ClusterStateSource.register(
+        lambda query: plugin_extensions.Refusal(reason, 'details'))
 
     result = reads.list_objects('ctx', reads.PODS)
 
@@ -220,7 +218,7 @@ def test_failing_source_counts_as_an_error_refusal(api):
     def provider(query):
         raise RuntimeError('boom')
 
-    _register(provider)
+    plugin_extensions.ClusterStateSource.register(provider)
 
     result = reads.list_objects('ctx', reads.PODS)
 
@@ -231,7 +229,7 @@ def test_failing_source_counts_as_an_error_refusal(api):
 def test_fresh_read_does_not_ask_the_source(api):
     client = api(_POD_LIST)
     provider = mock.Mock()
-    _register(provider)
+    plugin_extensions.ClusterStateSource.register(provider)
 
     result = reads.list_objects('ctx', reads.PODS, consistency=reads.FRESH)
 
@@ -259,7 +257,7 @@ def test_get_missing_object_returns_no_items(api, metrics):
     assert not result.items
     assert result.resource_version == ''
     metrics.observe_kube_read_api_call.assert_called_once_with(
-        'nodes', reads.OUTCOME_OK, mock.ANY)
+        'nodes', 'ok', mock.ANY)
 
 
 def test_get_from_the_source_passes_the_name(api):
@@ -272,7 +270,7 @@ def test_get_from_the_source_passes_the_name(api):
                                                resource_version='1',
                                                staleness_seconds=0)
 
-    _register(provider)
+    plugin_extensions.ClusterStateSource.register(provider)
 
     result = reads.get_object('ctx', reads.PODS, 'p', namespace='ns')
 
@@ -285,7 +283,7 @@ def test_list_of_an_unserved_resource_raises(api):
     api(_api_error(404))
     queues = reads.Resource('kueue.x-k8s.io', 'v1beta2', 'localqueues', True)
 
-    with pytest.raises(reads.ResourceNotServedError):
+    with pytest.raises(exceptions.KubernetesResourceNotServedError):
         reads.list_objects('ctx', queues)
 
 
@@ -300,7 +298,7 @@ def test_namespace_rules(api):
 def test_known_unreachable_context_fails_fast(api):
     client = api(_POD_LIST)
     observer = mock.Mock()
-    reads.register_direct_read_observer(observer)
+    kubernetes_utils.register_context_call_observer(observer)
     kubernetes_utils.register_context_unreachable_check(
         lambda context: 'agent disconnected' if context == 'down' else None)
 
@@ -308,21 +306,23 @@ def test_known_unreachable_context_fails_fast(api):
                        match='agent disconnected'):
         reads.list_objects('down', reads.PODS)
 
-    assert client.calls == []
+    assert not client.calls
     observer.assert_not_called()
 
 
-def test_observer_sees_every_api_call(api, monkeypatch):
-    api(_api_error(500), _POD_LIST)
+def test_context_call_observer_sees_every_attempt(api, monkeypatch):
+    server_error = _api_error(500)
+    api(server_error, _POD_LIST)
     monkeypatch.setattr(kubernetes_utils.time, 'sleep', lambda seconds: None)
     observer = mock.Mock()
-    reads.register_direct_read_observer(observer)
-    reads.register_direct_read_observer(observer)
+    kubernetes_utils.register_context_call_observer(observer)
+    kubernetes_utils.register_context_call_observer(observer)
 
     reads.list_objects('ctx', reads.PODS)
 
-    assert [c.args[:2] for c in observer.call_args_list
-           ] == [('ctx', reads.OUTCOME_ERROR), ('ctx', reads.OUTCOME_OK)]
+    assert [c.args[:2] for c in observer.call_args_list] == [('ctx',
+                                                              server_error),
+                                                             ('ctx', None)]
 
 
 def test_forbidden_read_raises_unreachable(api):
@@ -335,66 +335,59 @@ def test_forbidden_read_raises_unreachable(api):
 def test_failing_observer_does_not_fail_the_read(api):
     api(_POD_LIST)
 
-    def observer(context, outcome, duration):
+    def observer(context, error, duration):
         raise RuntimeError('boom')
 
-    reads.register_direct_read_observer(observer)
+    kubernetes_utils.register_context_call_observer(observer)
 
     assert len(reads.list_objects('ctx', reads.PODS).items) == 2
 
 
-@pytest.mark.usefixtures('api')
-def test_concurrent_identical_reads_share_one_api_call(monkeypatch):
+def test_in_flight_shares_one_call(monkeypatch):
+    in_flight = reads._InFlight()  # pylint: disable=protected-access
+    entered = threading.Event()
     follower_waiting = threading.Event()
     release = threading.Event()
+    calls = []
 
-    class _FollowerAwareEvent(threading.Event):
+    class _Future(futures.Future):
 
-        def wait(self, timeout=None):
+        def result(self, timeout=None):
             follower_waiting.set()
-            return super().wait(timeout)
+            return super().result(timeout)
 
-    class _Call(reads._Call):  # pylint: disable=protected-access
+    monkeypatch.setattr(reads, 'futures', mock.Mock(Future=_Future))
 
-        def __init__(self):
-            super().__init__()
-            self.done = _FollowerAwareEvent()
+    def fn():
+        calls.append(1)
+        entered.set()
+        release.wait(timeout=10)
+        return 'body'
 
-    monkeypatch.setattr(reads, '_Call', _Call)
-
-    class _BlockingClient(_ApiClient):
-
-        def call_api(self, path, method, **kwargs):
-            release.wait(timeout=10)
-            return super().call_api(path, method, **kwargs)
-
-    client = _BlockingClient(_POD_LIST)
-    monkeypatch.setattr(reads.kubernetes,
-                        'api_client',
-                        lambda context=None: client)
-    results = {}
-
-    def read(key):
-        results[key] = reads.list_objects('ctx', reads.PODS, namespace='ns')
-
-    leader = threading.Thread(target=read, args=('leader',))
+    results = []
+    leader = threading.Thread(
+        target=lambda: results.append(in_flight.do('key', fn)))
     leader.start()
-    follower = threading.Thread(target=read, args=('follower',))
+    assert entered.wait(timeout=10)
+    follower = threading.Thread(
+        target=lambda: results.append(in_flight.do('key', fn)))
     follower.start()
     assert follower_waiting.wait(timeout=10)
     release.set()
     leader.join(timeout=10)
     follower.join(timeout=10)
 
-    assert len(client.calls) == 1
-    assert results['leader'].items == results['follower'].items
-    assert results['leader'].items is not results['follower'].items
+    assert calls == [1]
+    assert results == ['body', 'body']
+    assert in_flight.do('key', lambda: 'next') == 'next'
 
 
-def test_reads_after_a_shared_call_make_a_new_call(api):
-    client = api(_POD_LIST)
+def test_in_flight_shares_the_error():
+    in_flight = reads._InFlight()  # pylint: disable=protected-access
 
-    reads.list_objects('ctx', reads.PODS)
-    reads.list_objects('ctx', reads.PODS)
+    def fn():
+        raise RuntimeError('boom')
 
-    assert len(client.calls) == 2
+    with pytest.raises(RuntimeError, match='boom'):
+        in_flight.do('key', fn)
+    assert in_flight.do('key', lambda: 'next') == 'next'

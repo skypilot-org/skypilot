@@ -184,6 +184,14 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class KubernetesResourceNotServedError(Exception):
+    """The Kubernetes API server does not serve a resource type.
+
+    For example, the CRD that defines it is not installed.
+    """
+    pass
+
+
 class KubeAPIUnreachableError(ResourcesUnavailableError):
     """Raised when the Kubernetes API is currently unreachable.
 

@@ -10,7 +10,7 @@ import ast
 import inspect
 import pathlib
 import re
-from typing import Dict, Iterator, Set, Tuple
+from typing import Dict, Iterator, Optional, Set, Tuple
 
 import kubernetes.client
 import pytest
@@ -120,7 +120,8 @@ _ALLOWED: Dict[str, Dict[str, str]] = {
     },
 }
 
-_KUBECTL_GET = re.compile(r'\s*kubectl\s+get\b')
+# `kubectl` at the start, then `get` as a word before any shell separator.
+_KUBECTL_GET = re.compile(r'\s*kubectl\s[^;&|\n]*?\bget\b')
 
 
 def _client_read_methods() -> Set[str]:
@@ -143,21 +144,27 @@ def _direct_reads(source: str) -> Iterator[Tuple[str, str]]:
     function is the dotted name of the enclosing functions and classes.
     """
 
+    def read_in(node: ast.AST) -> Optional[str]:
+        if (isinstance(node, ast.Call) and
+                isinstance(node.func, ast.Attribute) and
+                node.func.attr in _READ_METHODS):
+            return node.func.attr
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str) and
+                _KUBECTL_GET.match(node.value)):
+            return 'kubectl get'
+        if isinstance(node, (ast.List, ast.Tuple)):
+            words = [getattr(e, 'value', None) for e in node.elts]
+            if words[:1] == ['kubectl'] and 'get' in words:
+                return 'kubectl get'
+        return None
+
     def visit(node: ast.AST, scope: str) -> Iterator[Tuple[str, str]]:
         if isinstance(node,
                       (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             scope = f'{scope}.{node.name}' if scope else node.name
-        if (isinstance(node, ast.Call) and
-                isinstance(node.func, ast.Attribute) and
-                node.func.attr in _READ_METHODS):
-            yield scope or '<module>', node.func.attr
-        if (isinstance(node, ast.Constant) and isinstance(node.value, str) and
-                _KUBECTL_GET.match(node.value)):
-            yield scope or '<module>', 'kubectl get'
-        if (isinstance(node, (ast.List, ast.Tuple)) and len(node.elts) >= 2 and
-            [getattr(e, 'value', None) for e in node.elts[:2]
-            ] == ['kubectl', 'get']):
-            yield scope or '<module>', 'kubectl get'
+        read = read_in(node)
+        if read is not None:
+            yield scope or '<module>', read
         for child in ast.iter_child_nodes(node):
             yield from visit(child, scope)
 
@@ -221,6 +228,12 @@ def test_allowed_reasons_are_known():
         ('f.g', 'get_namespaced_custom_object')
     ]),
     ('def f():\n    subprocess.run(["kubectl", "get", "pods"])\n', [
+        ('f', 'kubectl get')
+    ]),
+    ('def f():\n    subprocess.run("kubectl --context c get pods")\n', [
+        ('f', 'kubectl get')
+    ]),
+    ('def f():\n    subprocess.run(["kubectl", "--context", "c", "get"])\n', [
         ('f', 'kubectl get')
     ]),
     ('def f():\n    subprocess.run("kubectl get nodes -o json", shell=True)\n',
