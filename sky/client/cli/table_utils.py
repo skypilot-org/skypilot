@@ -59,6 +59,7 @@ def format_storage_table(storages: List[responses.StorageRecord],
         'NAME',
         'UPDATED',
         'STORE',
+        'WORKSPACE',
         'COMMAND',
         'STATUS',
     ])
@@ -77,6 +78,8 @@ def format_storage_table(storages: List[responses.StorageRecord],
             log_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row.store]),
+            # WORKSPACE
+            row.workspace_name or row.workspace or '-',
             # COMMAND,
             command,
             # STATUS
@@ -360,26 +363,19 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
-class UpCloudVolumeTable(VolumeTable):
-    """The UpCloud volume table."""
+class ModalVolumeTable(RunPodVolumeTable):
+    """The Modal volume table: the same columns as RunPod's.
 
-    def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
-        """Create the UpCloud volume table."""
-        if show_all:
-            columns = _BASIC_COLUMNS + ['NAME_ON_CLOUD']
-        else:
-            columns = _BASIC_COLUMNS
-        return log_utils.create_table(columns)
+    Modal Volumes have no size, so SIZE shows '-'.
+    """
 
-    def _add_rows(self,
-                  volumes: List[responses.VolumeRecord],
-                  show_all: bool = False) -> None:
-        """Add rows to the UpCloud volume table."""
-        for row in volumes:
-            table_row = self._get_row_base_columns(row, show_all)
-            if show_all:
-                table_row.append(row.get('name_on_cloud', ''))
-            self.table.add_row(table_row)
+    def format(self) -> str:
+        """Format the Modal volume table for display."""
+        return 'Modal Volumes:\n' + str(self.table)
+
+
+class UpCloudVolumeTable(RunPodVolumeTable):
+    """The UpCloud volume table: the same columns as RunPod's."""
 
     def format(self) -> str:
         """Format the UpCloud volume table for display."""
@@ -422,6 +418,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()
+        elif volume_type == volume.VolumeType.MODAL_VOLUME.value:
+            modal_table = ModalVolumeTable(volume_list, show_all)
+            table_str += modal_table.format()
         elif volume_type == volume.VolumeType.UPCLOUD_FILE_STORAGE.value:
             upcloud_table = UpCloudVolumeTable(volume_list, show_all)
             table_str += upcloud_table.format()

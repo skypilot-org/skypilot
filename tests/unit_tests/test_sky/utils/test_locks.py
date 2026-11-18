@@ -1,9 +1,11 @@
 """Unit tests for sky.utils.locks module."""
 
+from concurrent import futures
 import os
 from unittest import mock
 
 import pytest
+import sqlalchemy
 
 from sky import global_user_state
 from sky.skylet import runtime_utils
@@ -197,6 +199,151 @@ class TestPostgresLock:
         connection.cursor.return_value = cursor
         return connection, cursor
 
+    @pytest.mark.parametrize('state_pool_busy', [False, True])
+    def test_lock_connections_do_not_starve_state_pool(self, monkeypatch,
+                                                       state_pool_busy):
+        """Independent locks can outnumber the state pool's five connections."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI', 'postgresql://test/db')
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE', '2')
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW',
+                           '3')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        monkeypatch.setattr(db_utils, '_postgres_engine_cache', {})
+        engines = []
+        drivers = []
+
+        def connect():
+            driver = mock.Mock()
+            driver.cursor.return_value.fetchone.return_value = [True]
+            drivers.append(driver)
+            return driver
+
+        def make_engine(uri, **kwargs):
+            assert str(uri) == 'postgresql+psycopg2://test/db'
+            pool_class = kwargs['poolclass']
+            pool_kwargs = {}
+            if pool_class is sqlalchemy.pool.QueuePool:
+                pool_kwargs = dict(pool_size=kwargs['pool_size'],
+                                   max_overflow=kwargs['max_overflow'],
+                                   timeout=kwargs.get('pool_timeout', 0.01))
+            engine = mock.Mock()
+            engine.dialect.name = 'postgresql'
+            engine.pool = pool_class(connect, **pool_kwargs)
+            engine.raw_connection = engine.pool.connect
+            engines.append(engine)
+            return engine
+
+        held = []
+        acquired = []
+        with mock.patch('sqlalchemy.create_engine', side_effect=make_engine):
+            state_engine = db_utils.get_engine(None)
+            try:
+                if state_pool_busy:
+                    held = [state_engine.raw_connection() for _ in range(5)]
+                for index in range(6):
+                    lock = locks.PostgresLock(f'pool_isolation_{index}')
+                    lock.acquire(blocking=False)
+                    acquired.append(lock)
+                if not state_pool_busy:
+                    held.append(state_engine.raw_connection())
+                    assert state_engine.pool.checkedout() == 1
+                    locks.PostgresLock('pool_isolation_force').force_unlock()
+                    assert len(engines) == 2
+            finally:
+                for lock in acquired:
+                    lock.release()
+                for connection in held:
+                    connection.close()
+                for engine in engines:
+                    engine.pool.dispose()
+        assert all(driver.close.called for driver in drivers)
+
+    def test_nested_acquire_with_many_held_locks(self, monkeypatch,
+                                                 mock_engine):
+        """A nested acquire must progress while unrelated holders remain."""
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE', '1')
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW',
+                           '4')
+        monkeypatch.setattr(db_utils, 'get_lock_engine', lambda: mock_engine)
+        connections = []
+
+        def connect():
+            connection = mock.Mock()
+            connection.cursor.return_value.fetchone.return_value = [True]
+            connections.append(connection)
+            return connection
+
+        mock_engine.raw_connection.side_effect = connect
+        held = []
+        executor = futures.ThreadPoolExecutor(max_workers=1)
+
+        def acquire_nested():
+            # Together with the four unrelated holders, this outer lock uses
+            # the old five-slot budget. The inner lock has the default timeout
+            # of None; a process-wide gate would wait forever here.
+            with locks.PostgresLock('nested_outer'):
+                with locks.PostgresLock('nested_inner', poll_interval=0.01):
+                    return True
+
+        try:
+            for index in range(4):
+                lock = locks.PostgresLock(f'unrelated_holder_{index}')
+                lock.acquire(blocking=False)
+                held.append(lock)
+            future = executor.submit(acquire_nested)
+            assert future.result(timeout=5)
+        finally:
+            # Release before joining so a regression fails with TimeoutError
+            # instead of leaving a worker blocked during pytest shutdown.
+            for lock in held:
+                lock.release()
+            executor.shutdown(wait=True)
+
+        assert len(connections) == 6
+        assert all(connection.close.called for connection in connections)
+
+    @pytest.mark.parametrize('pooler', [False, True])
+    @pytest.mark.parametrize('pool_size', [0, 2])
+    def test_lock_engine_pool_modes(self, monkeypatch, pooler, pool_size):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI', 'postgresql://test/db')
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE',
+                           str(pool_size))
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW',
+                           '3')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        if pooler:
+            monkeypatch.setenv('SKYPILOT_DB_POOL_CONNECTION_URI',
+                               'postgresql://test@pool/db')
+        else:
+            monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        monkeypatch.setattr(db_utils, '_postgres_engine_cache', {})
+        created = []
+
+        def make_engine(uri, **kwargs):
+            engine = mock.Mock()
+            engine.dialect.name = 'postgresql'
+            pool_kwargs = {}
+            if kwargs['poolclass'] is sqlalchemy.pool.QueuePool:
+                pool_kwargs = dict(pool_size=kwargs['pool_size'],
+                                   max_overflow=kwargs['max_overflow'])
+            engine.pool = kwargs['poolclass'](mock.Mock(), **pool_kwargs)
+            created.append((str(uri), kwargs['poolclass'], engine))
+            return engine
+
+        with mock.patch('sqlalchemy.create_engine', side_effect=make_engine):
+            state_engine = db_utils.get_engine(None)
+            lock_engine = db_utils.get_lock_engine()
+        assert state_engine is not lock_engine
+        assert created[0][0] == ('postgresql+psycopg2://test@pool/db'
+                                 if pooler else 'postgresql+psycopg2://test/db')
+        assert created[1][0] == 'postgresql+psycopg2://test/db'
+        assert created[1][1] is sqlalchemy.NullPool
+        for _, _, engine in created:
+            engine.pool.dispose()
+
     def test_postgres_lock_initialization(self):
         """Test PostgresLock initialization."""
         lock = locks.PostgresLock('test_lock')
@@ -208,14 +355,15 @@ class TestPostgresLock:
         assert lock._connection is None
         assert not lock._shared_lock
 
-    def test_postgres_lock_string_to_lock_key(self):
+    def test_postgres_lock_key(self):
         """Test string to lock key conversion is deterministic across processes."""
-        lock = locks.PostgresLock('test_lock')
+        assert locks.PostgresLock('test_lock')._lock_key == (
+            locks.postgres_lock_key('test_lock'))
 
         # Test deterministic behavior - same input always produces same output
-        key1 = lock._string_to_lock_key('test_string')
-        key2 = lock._string_to_lock_key('test_string')
-        key3 = lock._string_to_lock_key('different_string')
+        key1 = locks.postgres_lock_key('test_string')
+        key2 = locks.postgres_lock_key('test_string')
+        key3 = locks.postgres_lock_key('different_string')
 
         # Same string should produce same key
         assert key1 == key2
@@ -234,7 +382,7 @@ class TestPostgresLock:
         ]
 
         for input_str, expected_key in test_cases:
-            actual_key = lock._string_to_lock_key(input_str)
+            actual_key = locks.postgres_lock_key(input_str)
             assert actual_key == expected_key, (
                 f"Expected deterministic key {expected_key} for '{input_str}', "
                 f"but got {actual_key}. This indicates the hash function is "
@@ -315,6 +463,25 @@ class TestPostgresLock:
         # Connection should be closed on exception
         connection.close.assert_called_once()
         assert lock._connection is None
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_cursor_failure_cleanup(self, mock_get_connection,
+                                                  mock_connection):
+        connection, _ = mock_connection
+        connection.cursor.side_effect = RuntimeError('cursor unavailable')
+        healthy = mock.Mock()
+        healthy.cursor.return_value.fetchone.return_value = [True]
+        mock_get_connection.side_effect = [connection, healthy]
+        lock = locks.PostgresLock('test_lock')
+
+        with pytest.raises(RuntimeError, match='cursor unavailable'):
+            lock.acquire()
+        connection.close.assert_called_once()
+        assert lock._connection is None
+
+        lock.acquire(blocking=False)
+        assert lock.is_locked()
+        lock.release()
 
     def test_postgres_lock_release_not_acquired(self):
         """Test postgres lock release when not acquired."""

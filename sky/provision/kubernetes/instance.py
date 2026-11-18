@@ -17,10 +17,12 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1046,17 +1048,8 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
 
 @timeline.event
 def _is_transport_error(e: Exception) -> bool:
-    """Whether ``e`` is a failure of the HTTP transport to the API server.
-
-    urllib3 transport errors propagate raw out of the kubernetes client,
-    with one exception: the client wraps ``urllib3.exceptions.SSLError``
-    into an ``ApiException`` with ``status=0`` (no HTTP response was
-    received). An ``ApiException`` with a real HTTP status is an API error
-    response, not a transport failure.
-    """
-    if isinstance(e, kubernetes.api_exception()):
-        return e.status == 0
-    return isinstance(e, kubernetes.urllib3_http_error())
+    """See api_errors.is_transport_error."""
+    return api_errors.is_transport_error(e)
 
 
 def _count_transport_error(e: Exception, first_error_time: Optional[float],
@@ -2120,7 +2113,9 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
 # (e.g. its controller is restarting) fails every pod create with a 500, and
 # such outages are often intermittent.
 _WEBHOOK_UNAVAILABLE_RETRY_SECONDS = 60
-_WEBHOOK_UNAVAILABLE_PATTERN = re.compile(r'failed calling webhook "([^"]+)"')
+# Kept under its old name for callers outside this module.
+_WEBHOOK_UNAVAILABLE_PATTERN: 're.Pattern[str]' = (
+    api_errors.WEBHOOK_UNAVAILABLE_PATTERN)
 
 
 def _create_namespaced_pod_retrying_webhook_errors(
@@ -2139,16 +2134,10 @@ def _create_namespaced_pod_retrying_webhook_errors(
             return kubernetes.core_api(context).create_namespaced_pod(
                 namespace, pod_spec)
         except kubernetes.api_exception() as e:
-            if e.status != 500:
+            webhook = api_errors.unavailable_webhook(e)
+            if webhook is None:
                 raise
-            try:
-                error_message = json.loads(e.body).get('message', '')
-            except json.JSONDecodeError:
-                error_message = str(e.body)
-            match = _WEBHOOK_UNAVAILABLE_PATTERN.search(error_message)
-            if match is None:
-                raise
-            webhook = match.group(1)
+            error_message = api_errors.status_message(e)
             # The last sleep is cut short so a final attempt lands on the
             # deadline.
             sleep_seconds = min(backoff.current_backoff(),
@@ -2169,10 +2158,45 @@ def _create_namespaced_pod_retrying_webhook_errors(
             time.sleep(sleep_seconds)
 
 
+# Kept under its old name for callers outside this module.
+_invalid_pod_spec_message = api_errors.invalid_pod_spec_message
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
     """Attempts to create a Kubernetes Pod and handle any errors.
+
+    See _create_namespaced_pod_handling_known_errors for the errors that are
+    retried or worked around.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: the API server rejected the pod
+            spec as invalid, which retrying the same spec cannot fix.
+
+    Returns: The created Pod object.
+    """
+    try:
+        return _create_namespaced_pod_handling_known_errors(
+            namespace, pod_spec, context)
+    except kubernetes.api_exception() as e:
+        invalid_message = _invalid_pod_spec_message(e)
+        if invalid_message is None:
+            raise
+        # Not a ResourcesUnavailableError: failover still tries the other
+        # candidates (another context may render a valid spec), but a caller
+        # waiting for capacity, such as a managed job, stops when this is the
+        # only kind of failure (see ProvisionUnsupportedError).
+        raise exceptions.ProvisionUnsupportedError(
+            f'Kubernetes rejected the pod spec in context {context!r} as '
+            f'invalid: {invalid_message}. Retrying the same spec cannot '
+            'succeed; fix the pod spec (e.g. kubernetes.pod_config in the '
+            'task or in the config for this context) and launch again.') from e
+
+
+def _create_namespaced_pod_handling_known_errors(namespace: str, pod_spec: dict,
+                                                 context: Optional[str]) -> Any:
+    """Creates a Pod, handling the errors we know how to work around.
 
     Currently, we handle errors due to the AppArmor annotation and retry if
     it fails due to the `FieldValueForbidden` error.
@@ -2400,6 +2424,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
+    if kai.uses_kai(provider_config):
+        # Created before the pods so KAI schedules them as one gang.
+        kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -2569,6 +2597,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
+    # Pods of a multi-host TPU slice: one node pool per slice. A queue (Kueue
+    # or KAI) places whole slices itself and groups the pods into slices in
+    # its own order, so with a queue the pods get no slice label or rules;
+    # _check_tpu_slices_in_one_node_pool() still checks the result.
+    tpu_vms_per_slice = _multi_host_tpu_vms_per_slice(
+        pod_spec['spec'].get('nodeSelector'))
+    tpu_slice_placement = bool(tpu_vms_per_slice) and not (
+        k8s_constants.KUEUE_QUEUE_NAME_LABEL in pod_spec['metadata']['labels']
+        or kai.uses_kai(provider_config))
+
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         # 0 is for head pod, while 1+ is for worker pods.
@@ -2594,6 +2632,13 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        if tpu_slice_placement:
+            # Pod i is in slice i // VMs per slice, the same split the task
+            # nodes use (num_nodes slices of VMs-per-slice pods each).
+            _add_tpu_slice_placement(
+                pod_spec_copy,
+                f'{cluster_name_on_cloud}-{i // tpu_vms_per_slice}')
 
         if host_network_port_blocks:
             assert head_gcs_port is not None
@@ -2828,6 +2873,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         cluster_name,
         create_pods_start,
         admission_timeout=provider_config.get('queue_admission_timeout'))
+    if kai.uses_kai(provider_config):
+        # A no-op for a new cluster. A resize adds pods to a running gang, and
+        # a higher minMember before they are bound lets KAI evict the gang.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud,
+                          config.count)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -2837,6 +2887,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: waiting for pods to be running: '
                  f'{[pod.metadata.name for pod in pods]}')
     _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    if tpu_vms_per_slice:
+        _check_tpu_slices_in_one_node_pool(namespace, context,
+                                           cluster_name_on_cloud)
     # Reset spinner message here because it might have hinted the reason
     # pods were pending.
     rich_utils.force_update_status(
@@ -3114,6 +3167,10 @@ def terminate_instances(
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
+    if worker_only and kai.uses_kai(provider_config):
+        # Without this, KAI evicts the head as a gang below its minMember.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud, 1)
+
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
@@ -3156,6 +3213,8 @@ def cleanup_cluster_resources(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+    if kai.uses_kai(provider_config):
+        kai.delete_pod_group(context, namespace, cluster_name_on_cloud)
 
 
 # The probe runs as soon as ray-installation finishes in step 2 of the
@@ -3258,6 +3317,186 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
         time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
 
 
+# Tags get_cluster_info() puts on the pods of a multi-host TPU slice; the
+# task runner exports them as TPU_WORKER_ID, TPU_WORKER_HOSTNAMES and
+# TPU_NAME (see kubernetes_utils.tpu_worker_env_vars()).
+_GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
+
+
+def _multi_host_tpu_vms_per_slice(node_selector: Any) -> int:
+    """VMs per slice for a pod with ``node_selector``, or 0.
+
+    A pod of a multi-host GKE TPU slice selects the whole slice's topology
+    and the chips of one VM, and the topology has more chips than the VM.
+    """
+    if not isinstance(node_selector, dict):
+        return 0
+    formatter = kubernetes_utils.GKELabelFormatter
+    topology = node_selector.get(formatter.TPU_TOPOLOGY_LABEL_KEY)
+    chips_per_vm = node_selector.get(formatter.ACCELERATOR_COUNT_LABEL_KEY)
+    if not topology or not chips_per_vm or not str(chips_per_vm).isdigit():
+        return 0
+    chips_in_slice = kubernetes_utils.reduce_tpu_topology(topology)
+    if chips_in_slice <= int(chips_per_vm):
+        return 0
+    return chips_in_slice // int(chips_per_vm)
+
+
+def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str) -> None:
+    """Places a pod of a multi-host TPU slice launched without a queue.
+
+    One multi-host GKE node pool is one slice, and each pod takes all chips
+    of one VM, so a slice's pods must share a node pool that holds no other
+    slice. The label names the pod's slice. A required podAffinity keeps the
+    pods of a slice in one node pool and a required podAntiAffinity keeps
+    pods of any other slice (of this cluster or another, in any namespace)
+    out of it. The first pod of a slice matches only itself, so it may go to
+    any node pool without another slice.
+    """
+    pod_spec['metadata']['labels'][kubernetes_utils.TPU_SLICE_LABEL] = (
+        slice_name)
+    affinity = pod_spec['spec'].setdefault('affinity', {})
+    affinity.setdefault('podAffinity', {}).setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', []).append({
+            'labelSelector': {
+                'matchLabels': {
+                    kubernetes_utils.TPU_SLICE_LABEL: slice_name
+                }
+            },
+            'topologyKey': _GKE_NODEPOOL_LABEL,
+        })
+    affinity.setdefault('podAntiAffinity', {}).setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', []
+    ).append({
+        # Clusters in other namespaces share the node pools too. An empty
+        # selector matches every namespace; without one the term only
+        # sees pods in this pod's namespace.
+        'namespaceSelector': {},
+        'labelSelector': {
+            'matchExpressions': [{
+                'key': kubernetes_utils.TPU_SLICE_LABEL,
+                'operator': 'Exists',
+            }, {
+                'key': kubernetes_utils.TPU_SLICE_LABEL,
+                'operator': 'NotIn',
+                'values': [slice_name],
+            }]
+        },
+        'topologyKey': _GKE_NODEPOOL_LABEL,
+    })
+
+
+def _tpu_slice_pods_by_node_pool(
+        context: Optional[str],
+        running_pods: Dict[str, Any]) -> Tuple[Dict[str, List[str]], int]:
+    """Groups the running pods of multi-host TPU slices by node pool.
+
+    A multi-host GKE TPU node pool is exactly one slice. Returns the pod
+    names per node pool and the VMs per slice (0 when no pod is a multi-host
+    slice pod, in which case no API call is made).
+    """
+    slice_members: List[Tuple[str, str]] = []  # (pod name, node name)
+    topologies: Set[str] = set()
+    vms_per_slice = 0
+    for pod_name, pod in running_pods.items():
+        node_selector = getattr(pod.spec, 'node_selector', None)
+        vms = _multi_host_tpu_vms_per_slice(node_selector)
+        if not vms:
+            continue
+        assert node_selector is not None  # vms > 0 needs a selector.
+        vms_per_slice = vms
+        node_name = getattr(pod.spec, 'node_name', None)
+        if node_name is None:
+            continue
+        slice_members.append((pod_name, node_name))
+        topologies.add(node_selector[
+            kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY])
+    if not slice_members:
+        return {}, vms_per_slice
+    # One list call for all nodes of the slices' topology (the pods select
+    # it), instead of one read per pod.
+    label_selector = (
+        f'{kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY} in '
+        f'({",".join(sorted(topologies))})')
+    nodes = kubernetes.core_api(context).list_node(
+        label_selector=label_selector,
+        _request_timeout=kubernetes.API_TIMEOUT).items
+    node_pool_by_name = {
+        node.metadata.name: (node.metadata.labels or
+                             {}).get(_GKE_NODEPOOL_LABEL, node.metadata.name)
+        for node in nodes
+    }
+    slice_pods: Dict[str, List[str]] = {}
+    for pod_name, node_name in slice_members:
+        node_pool = node_pool_by_name.get(node_name, node_name)
+        slice_pods.setdefault(node_pool, []).append(pod_name)
+    return slice_pods, vms_per_slice
+
+
+def _check_tpu_slices_in_one_node_pool(namespace: str, context: Optional[str],
+                                       cluster_name_on_cloud: str) -> None:
+    """Fails the provision if a multi-host TPU slice spans node pools.
+
+    Placement rules or a queue keep each slice in one node pool. This catches
+    what they cannot: a queue that does not place whole slices, pods created
+    without the rules, or a pod_config that overrides the affinity. Without
+    the check such a cluster comes up and its TPU program hangs waiting for a
+    peer on another slice.
+    """
+    running_pods = kubernetes_utils.filter_pods(
+        namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
+    slice_pods, vms_per_slice = _tpu_slice_pods_by_node_pool(
+        context, running_pods)
+    wrong = {
+        pool: len(members)
+        for pool, members in slice_pods.items()
+        if len(members) != vms_per_slice
+    }
+    if wrong:
+        pools = ', '.join(
+            f'{pool!r} ({count})' for pool, count in sorted(wrong.items()))
+        raise config_lib.KubernetesError(
+            f'The pods of cluster {cluster_name_on_cloud!r} do not form whole '
+            f'TPU slices: each multi-host node pool (one slice of '
+            f'{vms_per_slice} VMs) must run {vms_per_slice} of its pods, but '
+            f'these run a different number: {pools}. Use a queue that places '
+            'whole slices, or launch without one.')
+
+
+def _tag_tpu_multi_host_workers(
+        cluster_name_on_cloud: str, context: Optional[str],
+        running_pods: Dict[str,
+                           Any], pods: Dict[str,
+                                            List[common.InstanceInfo]]) -> None:
+    """Tags each pod of a multi-host TPU slice with its worker ID.
+
+    GKE does not inject TPU_WORKER_ID / TPU_WORKER_HOSTNAMES into plain pods
+    (only into JobSet and Indexed Job pods), and which slice a pod lands on is
+    decided by the scheduler, not by the pod's index. A multi-host GKE TPU
+    node pool is exactly one slice, so the pods are grouped by the node pool
+    of the node each one runs on. Within a slice, worker IDs follow the node
+    name order, and the worker hostnames are the pod IPs in worker ID order.
+    """
+    slice_pods, vms_per_slice = _tpu_slice_pods_by_node_pool(
+        context, running_pods)
+    for node_pool, members in slice_pods.items():
+        if len(members) != vms_per_slice:
+            logger.warning(f'Node pool {node_pool!r} runs {len(members)} pods '
+                           f'of cluster {cluster_name_on_cloud!r}, but its '
+                           f'TPU slice has {vms_per_slice} VMs.')
+        members.sort(key=lambda name: running_pods[name].spec.node_name)
+        hostnames = ','.join(
+            running_pods[name].status.pod_ip or '' for name in members)
+        for worker_id, pod_name in enumerate(members):
+            info = pods[pod_name][0]
+            tags = dict(info.tags or {})
+            tags[kubernetes_utils.TPU_WORKER_ID_TAG] = str(worker_id)
+            tags[kubernetes_utils.TPU_WORKER_HOSTNAMES_TAG] = hostnames
+            tags[kubernetes_utils.TPU_SLICE_NAME_TAG] = (
+                f'{cluster_name_on_cloud}-{node_pool}')
+            info.tags = tags
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -3350,6 +3589,9 @@ def get_cluster_info(
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
                            ' or not Running, check the Pod status')
+
+    _tag_tpu_multi_host_workers(cluster_name_on_cloud, context, running_pods,
+                                pods)
 
     ssh_user = 'sky'
     # Use pattern matching to extract SSH user, handling MOTD contamination.
@@ -5068,6 +5310,11 @@ def query_instances(
                 # creation: a relaunch under the same cluster name must not
                 # be told why the pod it replaced was deleted.
                 since=_pod_created_at(pod))
+            if event_reason is None and kai.uses_kai(provider_config):
+                event_reason = kai.eviction_reason(context,
+                                                   namespace,
+                                                   pod.metadata.name,
+                                                   since=_pod_created_at(pod))
             if event_reason is not None:
                 reason = f'{reason}; {event_reason}'
         if non_terminated_only and pod_status is None:

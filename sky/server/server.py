@@ -65,6 +65,7 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
@@ -83,6 +84,7 @@ from sky.server import version_check
 from sky.server import versions
 from sky.server import websocket_utils
 from sky.server.auth import db_lookup
+from sky.server.auth import impersonation
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sa_token_cache
@@ -95,6 +97,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.skylet import runtime_utils
@@ -433,6 +436,9 @@ class InitializeRequestAuthUserMiddleware(middleware_utils.ASGIMiddleware):
         # Make sure that request.state.auth_user is set. Otherwise, we may get a
         # KeyError while trying to read it.
         request.state.auth_user = None
+        # The service account behind an impersonated request, see
+        # ImpersonationMiddleware.
+        request.state.impersonator = None
         return None
 
 
@@ -504,6 +510,15 @@ class BasicAuthMiddleware(middleware_utils.ASGIMiddleware):
 # field, so interval granularity is sufficient; each server process writes at
 # most once per interval per token.
 _SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
+
+
+async def _update_token_last_used(token_id: str) -> None:
+    try:
+        await db_lookup.call_with_deadline(
+            global_user_state.update_service_account_token_last_used, token_id,
+            _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to update token last used time: {e}')
 
 
 @middleware_utils.websocket_aware
@@ -677,14 +692,8 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
                 # The row may be cached: later hits must see it as fresh.
                 token_row['last_used_at'] = int(now)
-                try:
-                    await db_lookup.call_with_deadline(
-                        global_user_state.
-                        update_service_account_token_last_used,
-                        token_row['token_id'],
-                        _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'Failed to update token last used time: {e}')
+                asyncio_utils.run_in_background(
+                    _update_token_last_used(token_row['token_id']))
 
             # Set the authenticated user
             auth_user = models.User(id=user_id,
@@ -721,6 +730,68 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                 audit_detail='Service account authentication failed')
 
         return None
+
+
+@middleware_utils.websocket_aware
+class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
+    """Lets a caller act as another user, as `impersonation.check` allows.
+
+    A request carrying the impersonation header runs as the named user: the
+    user owns what the request creates, and RBAC and workspace checks apply to
+    the user. Every impersonated request is logged with the caller behind it,
+    which stays on `request.state.impersonator`. A refused impersonation is a
+    403 whose detail says why.
+    """
+
+    async def on_request(self, request: fastapi.Request):
+        target = request.headers.get(server_constants.IMPERSONATE_USER_HEADER)
+        if target is None:
+            return None
+        # Clients run a health check before each call; a refusal there would
+        # read as an unreachable server instead of the reason.
+        if request.url.path.startswith('/api/health'):
+            return None
+        caller = request.state.auth_user
+        # Also unset for session cookies, which plugin middleware reads later.
+        if caller is None:
+            return self._reject(
+                request, 'Impersonation requires a service account token.')
+        # Before taking an auth worker, which the other refusals need.
+        try:
+            impersonation.precheck(caller, request.url.path, request.method)
+        except impersonation.Refused as e:
+            return self._reject(request, e.detail)
+        try:
+            user = await db_lookup.call_with_deadline(impersonation.check,
+                                                      caller, target.strip(),
+                                                      request.url.path,
+                                                      request.method)
+        except impersonation.Refused as e:
+            return self._reject(request, e.detail)
+        except asyncio.TimeoutError:
+            logger.error('Impersonation DB lookup timed out')
+            return db_lookup.db_timeout_response(request)
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            logger.error(
+                f'Concurrent worker exhausted during impersonation: {e}')
+            return db_lookup.worker_exhausted_response(request)
+
+        request_id = getattr(request.state, 'request_id', None)
+        logger.info(f'{caller.name!r} ({caller.id}) is acting as user '
+                    f'{user.name!r} ({user.id}): {request.method} '
+                    f'{request.url.path} (request ID: {request_id})')
+        request.state.impersonator = caller
+        caller_usage.set_impersonator(caller)
+        request.state.auth_user = models.User(id=user.id, name=user.name)
+        return None
+
+    @staticmethod
+    def _reject(request: fastapi.Request,
+                detail: str) -> fastapi.responses.JSONResponse:
+        middleware_utils.mark_rejection(
+            request, middleware_utils.REJECT_REASON_FORBIDDEN)
+        return fastapi.responses.JSONResponse(status_code=403,
+                                              content={'detail': detail})
 
 
 @middleware_utils.websocket_aware
@@ -1086,6 +1157,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Unused: the middleware-order check that used to live here runs at
     # import instead, right after the metrics middleware registration.
     del app
+    threads.count_thread_starts()
+    threads.keep_anyio_worker_threads()
+    await asyncio.to_thread(executor.warm_thread_executors)
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.
@@ -1343,6 +1417,10 @@ app.add_middleware(APIVersionMiddleware)
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
 app.add_middleware(RBACMiddleware)
+# ImpersonationMiddleware sits between RBACMiddleware and all the auth
+# middleware: it needs the authenticated caller, and RBAC must check the
+# impersonated user.
+app.add_middleware(ImpersonationMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
@@ -1930,9 +2008,16 @@ async def validate(validate_body: payloads.ValidateBody,
         # Apply the client's env and config and resolve the active workspace
         # as for a scheduled request. Load the DAG inside, so that nothing
         # reads the client's env vars before they are sanitized.
+        # This thread belongs to the API server process, which other requests
+        # share: sync_refresh keeps the process-wide log handler instead of
+        # rebuilding it at this client's log level, which would otherwise
+        # leak a debug level into every later request served in this process
+        # (e.g. the server's own debug lines at the top of `sky jobs logs`).
         with executor.override_request_env_and_config(
-                validate_body, request.state.request_id,
-                request_names.AdminPolicyRequestName.VALIDATE.value):
+                validate_body,
+                request.state.request_id,
+                request_names.AdminPolicyRequestName.VALIDATE.value,
+                sync_refresh=True):
             dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
             with admin_policy_utils.apply_and_use_config_in_current_request(
                     dag,
@@ -3218,8 +3303,9 @@ async def api_get(request: fastapi.Request,
     # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
     if request_task.should_retry:
         # Interrupted by a server version that recorded no error object —
         # including the very rolling update that ships this code, whose
@@ -3231,9 +3317,12 @@ async def api_get(request: fastapi.Request,
                 f'Request {request_id!r} was interrupted by an API server '
                 'restart and will not be resumed. Please re-submit the '
                 'original request.'))
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
-    return request_task.encode()
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
+    if request_task.has_stored_result:
+        return await asyncio.to_thread(request_task.encode_for_client)
+    return request_task.encode_for_client()
 
 
 @app.get('/api/stream')
@@ -3473,7 +3562,7 @@ async def api_cancel(
     )
 
 
-@app.get('/api/status')
+@app.get('/api/status', response_model=List[payloads.RequestPayload])
 async def api_status(
     request: fastapi.Request,
     request_ids: Optional[List[str]] = fastapi.Query(
@@ -3488,12 +3577,8 @@ async def api_status(
                      'return_value and error. Ignored if request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
-) -> List[payloads.RequestPayload]:
+) -> Union[List[payloads.RequestPayload], fastapi.Response]:
     """Gets the list of requests."""
-    # Scope the request body to the caller: the owner sees it, others get null
-    # (see _request_body_for_display).
-    auth_user = request.state.auth_user
-    caller_user_id = auth_user.id if auth_user is not None else None
     # `fields` is caller-supplied and ends up in the SQL column list. Reject an
     # unknown column here so the client gets a 400 instead of a 500 from the
     # query layer.
@@ -3508,21 +3593,21 @@ async def api_status(
         statuses = None
         if not all_status:
             statuses = requests_lib.RequestStatus.active_statuses()
-        request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=statuses,
-                cluster_names=[cluster_name] if cluster_name else None,
-                user_id=scope_user_id,
-                exclude_request_names=[
-                    server_constants.REQUEST_NAME_PREFIX + d.value
-                    for d in daemons.HIDDEN_REQUEST_NAMES
-                ],
-                limit=limit,
-                fields=fields or requests_lib.DISPLAY_COLUMNS,
-                sort=True,
-            ))
-        return requests_lib.encode_requests(request_tasks,
-                                            caller_user_id=caller_user_id)
+        req_filter = requests_lib.RequestTaskFilter(
+            status=statuses,
+            cluster_names=[cluster_name] if cluster_name else None,
+            user_id=scope_user_id,
+            exclude_request_names=[
+                server_constants.REQUEST_NAME_PREFIX + d.value
+                for d in daemons.HIDDEN_REQUEST_NAMES
+            ],
+            limit=limit,
+            fields=fields or requests_lib.DISPLAY_COLUMNS,
+            sort=True,
+        )
+        content = await asyncio.to_thread(requests_lib.list_requests_json,
+                                          req_filter)
+        return fastapi.Response(content=content, media_type='application/json')
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
@@ -3535,8 +3620,7 @@ async def api_status(
                 if (scope_user_id is not None and
                         request_task.user_id != scope_user_id):
                     continue
-                encoded_request_tasks.append(
-                    request_task.readable_encode(caller_user_id=caller_user_id))
+                encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 
@@ -4324,13 +4408,15 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
 
 @app.get('/all_contexts')
 async def all_contexts(request: fastapi.Request) -> None:
-    """Gets all Kubernetes and SSH node pool contexts."""
+    """Gets the Kubernetes and SSH node pool contexts the caller can read."""
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
         request_body=payloads.RequestBody(),
-        func=core.get_all_contexts,
+        # Without an authenticated user nothing is scoped.
+        func=(core.get_all_contexts if request.state.auth_user is None else
+              core.get_workspace_contexts),
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -4385,22 +4471,75 @@ async def download_debug_dump(
 
 
 # === Internal APIs ===
+def _completion_workspaces_filter(
+        auth_user: Optional[models.User]) -> Optional[Set[str]]:
+    """Workspaces whose names `sky status` / `sky volumes ls` would show.
+
+    None (no authenticated user) means every workspace.
+    """
+    if auth_user is None:
+        return None
+    # Read-only visibility comes from the workspace config, which this
+    # process does not reload per request.
+    common.refresh_workspace_state_for_sync_handler()
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}))
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return permission.permission_service.get_accessible_workspace_names(
+        auth_user.id,
+        workspaces,
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def _readable_cluster_names_start_with(auth_user: Optional[models.User],
+                                       incomplete: str) -> List[str]:
+    """Cluster names to complete: only those `sky status -u` would show."""
+    return global_user_state.get_cluster_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
+
+
 @app.get('/api/completion/cluster_name')
-async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_cluster_names_start_with, incomplete)
+async def complete_cluster_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_cluster_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/storage_name')
-async def complete_storage_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_storage_names_start_with, incomplete)
+async def complete_storage_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    # Completion is a listing: it shows only what `sky storage ls` would.
+    # Without an authenticated user the server has no identity to scope to
+    # (a single-user server, or auth terminated upstream), as for
+    # `role_filter.request_owner_scope`.
+    auth_user = request.state.auth_user
+
+    def _complete() -> List[str]:
+        workspaces_filter = None
+        if auth_user is not None:
+            # This process does not get the executor's per-request config
+            # reload; without it a workspace created after boot is missing.
+            common.refresh_workspace_state_for_sync_handler()
+            workspaces_filter = (
+                workspaces_core.readable_workspace_names_for_user(auth_user.id))
+        return global_user_state.get_storage_names_start_with(
+            incomplete, workspaces_filter)
+
+    return await asyncio.to_thread(_complete)
+
+
+def _readable_volume_names_start_with(auth_user: Optional[models.User],
+                                      incomplete: str) -> List[str]:
+    """Volume names to complete: only those `sky volumes ls` would show."""
+    return global_user_state.get_volume_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
 
 
 @app.get('/api/completion/volume_name')
-async def complete_volume_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_volume_names_start_with, incomplete)
+async def complete_volume_name(request: fastapi.Request,
+                               incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_volume_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/api_request')

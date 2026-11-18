@@ -43,6 +43,7 @@ def _wait_for_job_end(job_name: str, expected: str, timeout: int) -> str:
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 @pytest.mark.no_dependency
+@pytest.mark.no_remote_server  # Applies webhook objects with kubectl directly.
 def test_kubernetes_jobs_launch_while_webhook_unavailable():
     """An unreachable webhook keeps a managed job from starting only while it
     stays down.

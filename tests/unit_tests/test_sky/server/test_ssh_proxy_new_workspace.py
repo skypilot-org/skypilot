@@ -27,7 +27,6 @@ from sky.utils import common
 from sky.utils import context
 from sky.utils import locks
 from sky.utils.db import db_utils
-from sky.utils.db import kv_cache
 
 
 def _add_cluster(name: str, workspace: str) -> None:
@@ -78,9 +77,6 @@ async def new_workspace(tmp_path, monkeypatch):
     skypilot_config.reload_config()
     state_db = db_utils.DatabaseManager('state', global_user_state.create_table)
     monkeypatch.setattr(global_user_state, '_db_manager', state_db)
-    monkeypatch.setattr(
-        kv_cache, '_db_manager',
-        db_utils.DatabaseManager('kv_cache', kv_cache.create_table))
     service = permission.PermissionService()
     service.enforcer = casbin.SyncedEnforcer(
         os.path.join(os.path.dirname(permission.__file__), 'model.conf'),

@@ -447,7 +447,8 @@ FAQs
 
     # Install system dependencies
     RUN apt update -y && \
-        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl wget -y && \
+        apt install fuse3 -y && \
         rm -rf /var/lib/apt/lists/*
 
     # Install SkyPilot python dependencies into a dedicated runtime venv.
@@ -462,6 +463,14 @@ FAQs
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
+* **Can pods run without internet access?**
+
+  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above, system packages included: SkyPilot installs missing ones at pod startup. In both ``skypilot-nightly`` lines of the recipe, use your API server's package and version instead (``skypilot==<version>`` or ``skypilot-nightly==<version>``, see ``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
+
+  Pod startup then downloads nothing. ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers still download their own tools.
+
+  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` to skip the built-in public ones, and uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
 
 * **Are multi-node jobs supported on Kubernetes?**
 

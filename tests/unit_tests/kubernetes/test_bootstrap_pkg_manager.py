@@ -14,7 +14,14 @@ import tempfile
 import textwrap
 
 import jinja2
+from packaging import version
 import pytest
+
+import sky
+from sky.skylet import constants
+
+# The wheel name SKYPILOT_WHEEL_INSTALLATION_COMMANDS globs for.
+_SKY_VERSION = str(version.parse(sky.__version__))
 
 _TEMPLATE = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sky',
                          'templates', 'kubernetes-ray.yml.j2')
@@ -28,7 +35,7 @@ def _template_lines():
         return f.read().split('\n')
 
 
-def _extract(start_marker: str, end_marker: str) -> str:
+def _extract(start_marker: str, end_marker: str, **render_vars) -> str:
     """Returns the shell between two markers, de-indented and Jinja-rendered."""
     lines = _template_lines()
     start = next(i for i, l in enumerate(lines) if start_marker in l)
@@ -39,10 +46,13 @@ def _extract(start_marker: str, end_marker: str) -> str:
     # docker off keeps the extracted shell to the always-present paths.
     return jinja2.Environment(
         undefined=jinja2.ChainableUndefined).from_string(block).render(
-            k8s_fuse_device_required=False,
-            k8s_apt_mirrors=None,
-            k8s_enable_docker_all=False,
-            k8s_enable_docker_build=False)
+            **{
+                'k8s_fuse_device_required': False,
+                'k8s_apt_mirrors': None,
+                'k8s_enable_docker_all': False,
+                'k8s_enable_docker_build': False,
+                **render_vars,
+            })
 
 
 def _run(script: str, errexit: bool = False) -> subprocess.CompletedProcess:
@@ -324,3 +334,198 @@ def test_nonapt_core_install_fails_when_packages_are_really_absent():
                   errexit=True)
     assert 'INSTALL_SUCCESS=true' not in result.stdout, (
         f'packages absent must not report success. stdout={result.stdout!r}')
+
+
+# --------------------------------------------------------------------------
+# Offline pods: PyPI prefetch, runtime pins, wheel install
+# --------------------------------------------------------------------------
+
+
+def _write_exe(path: str, body: str) -> None:
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('#!/bin/bash\n' + textwrap.dedent(body))
+    os.chmod(path, 0o755)
+
+
+def _gnu_env_shim(bindir: str) -> None:
+    """`env -u X -C dir` is GNU-only; pass the command through."""
+    _write_exe(
+        os.path.join(bindir, 'env'), """
+        while [ $# -gt 0 ]; do
+          case "$1" in -u|-C) shift 2 ;; *=*) export "$1"; shift ;; *) break ;; esac
+        done
+        exec "$@"
+        """)
+
+
+def _prefetch(ray_in_image: bool, prefetch_ok: bool = True):
+    """Runs the real Ray check + PyPI prefetch with a scripted uv."""
+    ray_version = constants.SKY_REMOTE_RAY_VERSION
+    # Start above the Ray install, so the test also pins the check's order.
+    body = _extract(
+        '{{ uv_installation_commands }}',
+        '# Wait (bounded) for the best-effort `patch` install',
+        uv_installation_commands='',
+        ray_installed_check_command=constants.SKY_RAY_INSTALLED_CHECK_CMD.
+        replace('{ray_version}', ray_version),
+        # E7 stand-in: like the real one, it leaves Ray installed.
+        ray_installation_commands=('touch "$HOME/ray_installed"'),
+        sky_unset_pythonpath_and_set_cwd='')
+    tmp = tempfile.mkdtemp()
+    try:
+        bindir = os.path.join(tmp, 'bin')
+        os.makedirs(bindir)
+        os.makedirs(os.path.join(tmp, '.local', 'bin'))
+        _gnu_env_shim(bindir)
+        if ray_in_image:
+            open(os.path.join(tmp, 'ray_installed'), 'w').close()
+        _write_exe(
+            os.path.join(tmp, '.local', 'bin', 'uv'), f"""
+            if [ "$1 $2" = "pip list" ]; then
+              # The check must look at the runtime venv, not a system Python.
+              [ "$UV_SYSTEM_PYTHON" = false ] || exit 3
+              [ -f {tmp}/ray_installed ] && echo "ray                {ray_version}"
+              exit 0
+            fi
+            echo "$*" >> {tmp}/uv_calls
+            exit {0 if prefetch_ok else 2}
+            """)
+        result = _run(f'HOME={tmp}\nPATH={bindir}:$PATH\n' + body, errexit=True)
+        calls_file = os.path.join(tmp, 'uv_calls')
+        calls = open(calls_file, encoding='utf-8').read().splitlines() \
+            if os.path.exists(calls_file) else []
+        return result, calls
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_prefetch_skipped_when_the_image_carries_the_runtime():
+    """An image with the pinned Ray (e.g. SkyPilot's default) needs no PyPI."""
+    result, calls = _prefetch(ray_in_image=True)
+    assert result.returncode == 0, result.stderr
+    assert not any('skypilot[kubernetes,remote]' in c for c in calls), calls
+
+
+def test_prefetch_still_runs_on_a_fresh_image():
+    """The Ray check must run before the Ray install, which always adds Ray."""
+    result, calls = _prefetch(ray_in_image=False)
+    assert result.returncode == 0, result.stderr
+    assert any('skypilot[kubernetes,remote]' in c for c in calls), calls
+
+
+def test_failed_prefetch_does_not_fail_the_step():
+    result, _ = _prefetch(ray_in_image=False, prefetch_ok=False)
+    assert result.returncode == 0, result.stderr
+    assert 'could not prefetch' in result.stdout
+
+
+_LEGACY_RAY = constants.SKY_LEGACY_RAY_VERSION
+_PINS = '"setuptools<70" "click<8.3.0"'
+
+
+@pytest.mark.parametrize(
+    'ray_version,ray_in_image,index_ok,expect_installs',
+    [
+        # Current Ray: never touch the index for the pins, so an image that
+        # already has Ray starts without internet access.
+        (constants.SKY_REMOTE_RAY_VERSION, True, False, []),
+        (constants.SKY_REMOTE_RAY_VERSION, False, True, ['ray[default]']),
+        # A cluster left on an older, non-legacy Ray after a Ray bump.
+        ('9.9.9', True, False, []),
+        # Legacy Ray: pin even when an image bakes it, or its node never
+        # joins; an unreachable index only warns.
+        (_LEGACY_RAY, True, True, [_PINS]),
+        (_LEGACY_RAY, True, False, [_PINS]),
+        (_LEGACY_RAY, False, True, [_PINS, 'ray[default]']),
+    ])
+def test_ray_install_pins_only_the_legacy_ray(ray_version, ray_in_image,
+                                              index_ok, expect_installs):
+    tmp = tempfile.mkdtemp()
+    try:
+        bindir = os.path.join(tmp, 'bin')
+        uvdir = os.path.join(tmp, '.local', 'bin')
+        os.makedirs(bindir)
+        os.makedirs(uvdir)
+        _gnu_env_shim(bindir)
+        listed = (f'echo "ray                {ray_version}"'
+                  if ray_in_image else 'true')
+        _write_exe(
+            os.path.join(uvdir, 'uv'), f"""
+            case "$1 $2" in
+              "-V "*) exit 0 ;;
+              "pip list") {listed}; exit 0 ;;
+              "pip install") echo "$*" >> {tmp}/installs; {'exit 0' if index_ok else 'exit 2'} ;;
+              run*) echo /fake/ray; exit 0 ;;
+            esac
+            exit 1
+            """)
+        cmd = constants.RAY_INSTALLATION_COMMANDS.replace(
+            '{ray_version}', ray_version)
+        result = _run(f'HOME={tmp}\nPATH={bindir}:$PATH\n' + cmd, errexit=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        installs_path = os.path.join(tmp, 'installs')
+        installs = []
+        if os.path.exists(installs_path):
+            with open(installs_path, encoding='utf-8') as f:
+                installs = f.read().splitlines()
+        assert len(installs) == len(expect_installs), installs
+        for line, want in zip(installs, expect_installs):
+            assert want.replace('"', '') in line, installs
+        if 'ray[default]' in expect_installs:
+            assert f'ray[default]=={ray_version}' in installs[-1], installs
+            assert 'setuptools' not in installs[-1], installs
+        assert ('could not install setuptools<70'
+                in result.stdout) == (ray_version == _LEGACY_RAY and
+                                      not index_ok), result.stdout
+    finally:
+        shutil.rmtree(tmp)
+
+
+@pytest.mark.parametrize(
+    'offline_ok,online_ok,expect_online,expect_rc',
+    [
+        # Every dependency already installed: no index contact at all.
+        (True, True, False, 0),
+        # Something missing: fall back to the index, as before.
+        (False, True, True, 0),
+        (False, False, True, 1),
+    ])
+def test_wheel_install_tries_offline_first(offline_ok, online_ok, expect_online,
+                                           expect_rc):
+    tmp = tempfile.mkdtemp()
+    try:
+        bindir = os.path.join(tmp, 'bin')
+        uvdir = os.path.join(tmp, '.local', 'bin')
+        wheels = os.path.join(tmp, '.sky', 'wheels', 'abc')
+        for d in (bindir, uvdir, wheels):
+            os.makedirs(d)
+        open(os.path.join(wheels, f'skypilot-{_SKY_VERSION}-py3-none-any.whl'),
+             'w').close()
+        _gnu_env_shim(bindir)
+        _write_exe(
+            os.path.join(uvdir, 'uv'), f"""
+            echo "$*" >> {tmp}/uv_calls
+            case "$1 $2" in
+              "-V "*) exit 0 ;;
+              "pip list") exit 0 ;;
+              "pip uninstall") exit 0 ;;
+            esac
+            case " $* " in
+              *" --offline "*) exit {0 if offline_ok else 2} ;;
+              *) exit {0 if online_ok else 2} ;;
+            esac
+            """)
+        cmd = constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
+            '{sky_wheel_hash}', 'abc').replace('{cloud}', 'kubernetes')
+        result = _run(f'HOME={tmp}\nPATH={bindir}:$PATH\n' + cmd)
+        with open(os.path.join(tmp, 'uv_calls'), encoding='utf-8') as f:
+            installs = [
+                l for l in f.read().splitlines() if l.startswith('pip install')
+            ]
+        assert '--offline' in installs[0], installs
+        assert (len(installs) == 2) == expect_online, installs
+        assert result.returncode == expect_rc, result.stdout + result.stderr
+        marker = os.path.join(tmp, '.sky', 'wheels', 'current_sky_wheel_hash')
+        assert os.path.exists(marker) == (expect_rc == 0)
+    finally:
+        shutil.rmtree(tmp)

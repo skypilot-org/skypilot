@@ -22,12 +22,15 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.server import constants as server_constants
 from sky.server import server
 from sky.server import versions
+from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.users import permission
@@ -36,13 +39,13 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import locks
 from sky.utils.db import db_utils
-from sky.utils.db import kv_cache
 from sky.workspaces import core as workspaces_core
 
 _TASK = 'run: echo hi\n'
 _INSTANCE_TYPE_TASK = 'resources:\n  instance_type: m5.2xlarge\nrun: echo hi\n'
 _NEW_CLIENT = server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION
 _OLD_CLIENT = _NEW_CLIENT - 1
+_PREFIX = server_constants.REQUEST_NAME_PREFIX
 
 
 class _Env:
@@ -137,9 +140,6 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(locks, 'SKY_LOCKS_DIR', str(tmp_path / 'locks'))
     state_db = db_utils.DatabaseManager('state', global_user_state.create_table)
     monkeypatch.setattr(global_user_state, '_db_manager', state_db)
-    monkeypatch.setattr(
-        kv_cache, '_db_manager',
-        db_utils.DatabaseManager('kv_cache', kv_cache.create_table))
     service = permission.PermissionService()
     service.enforcer = casbin.SyncedEnforcer(
         os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
@@ -308,9 +308,10 @@ class TestClientEnvIsSanitized:
 class TestConcurrentRequests:
 
     def test_another_request_does_not_reset_the_resolved_workspace(self, env):
-        """A request that enters `override_skypilot_config` resets only its own
-        thread's workspace, so a validation in another thread keeps its own."""
+        """A new request resets only its own thread's workspace, so a
+        validation in another thread keeps its own."""
         _two_workspaces(env)
+        global_user_state.set_user_preferred_workspace('alice', 'ws-b')
         entered = threading.Event()
         other_done = threading.Event()
         seen: List[str] = []
@@ -324,11 +325,100 @@ class TestConcurrentRequests:
         thread = threading.Thread(target=_validate_in_another_thread)
         thread.start()
         assert entered.wait(timeout=30)
-        with skypilot_config.override_skypilot_config({'allowed_clouds': []}):
+        with _request({}):
             pass
         other_done.set()
         thread.join(timeout=30)
         assert seen == ['ws-a']
+
+
+_NESTED = {'kubernetes': {'autoscaler': 'gke'}}
+
+
+def _request(override: Dict[str, Any], request_id: str = 'request-id'):
+    """A launch by alice, run on this thread (unlike `_Env.validate`)."""
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'alice',
+        constants.USER_ENV_VAR: 'alice',
+    },
+                                override_skypilot_config=override)
+    body.client_api_version = _NEW_CLIENT
+    body.workspace_access = 'write'
+    return executor.override_request_env_and_config(
+        body, request_id,
+        _PREFIX + request_names.RequestName.CLUSTER_LAUNCH.value)
+
+
+class TestNestedOverride:
+    """A config override inside a request keeps the request's workspace."""
+
+    def test_keeps_the_resolved_workspace(self, env):
+        _two_workspaces(env)
+        global_user_state.set_user_preferred_workspace('alice', 'ws-b')
+        with _request(dict(_NESTED)):
+            assert skypilot_config.get_active_workspace() == 'ws-b'
+            with skypilot_config.override_skypilot_config(dict(_NESTED)):
+                assert skypilot_config.get_active_workspace() == 'ws-b'
+            assert skypilot_config.get_active_workspace() == 'ws-b'
+
+    def test_a_named_workspace_wins_inside_only(self, env):
+        _two_workspaces(env)
+        with skypilot_config.local_active_workspace_ctx('ws-a'):
+            with skypilot_config.override_skypilot_config(
+                {'active_workspace': 'ws-b'}):
+                assert skypilot_config.get_active_workspace() == 'ws-b'
+            assert skypilot_config.get_active_workspace() == 'ws-a'
+
+    def test_an_empty_override_keeps_it_too(self, env):
+        env.configure(
+            {
+                'default': _private(),
+                'ws-a': _private('alice'),
+                'ws-b': _private('alice'),
+            },
+            extra={'active_workspace': 'ws-b'})
+        with skypilot_config.local_active_workspace_ctx('ws-a'):
+            with skypilot_config.override_skypilot_config(None):
+                assert skypilot_config.get_active_workspace() == 'ws-a'
+
+    @pytest.mark.parametrize('workspace,error', [
+        ('ws-b', RuntimeError),
+        ('no-such-workspace', ValueError),
+    ],
+                             ids=['block-raises', 'unknown-workspace-raises'])
+    def test_restored_when_the_block_fails(self, env, workspace, error):
+        _two_workspaces(env)
+        with skypilot_config.local_active_workspace_ctx('ws-a'):
+            with pytest.raises(error):
+                with skypilot_config.override_skypilot_config(
+                    {'active_workspace': workspace}):
+                    raise RuntimeError('boom')
+            assert skypilot_config.get_active_workspace() == 'ws-a'
+
+    def test_keeps_the_override_flag(self, env):
+        del env
+        with skypilot_config.override_skypilot_config(dict(_NESTED)):
+            with skypilot_config.override_skypilot_config(dict(_NESTED)):
+                pass
+            assert skypilot_config._is_config_overridden()
+
+    @pytest.mark.parametrize('request_id,expected', [
+        ('request-id', 'ws-b'),
+        ('skypilot-status-refresh-daemon', 'default'),
+    ],
+                             ids=['resolved', 'daemon'])
+    def test_a_request_drops_a_leftover_workspace(self, env, request_id,
+                                                  expected):
+        """Even with an empty override, which the override itself skips. A
+        daemon skips the resolver and runs in the config's workspace."""
+        _two_workspaces(env)
+        global_user_state.set_user_preferred_workspace('alice', 'ws-b')
+        skypilot_config._active_workspace_context.workspace = 'ws-a'
+        try:
+            with _request({}, request_id):
+                assert skypilot_config.get_active_workspace() == expected
+        finally:
+            skypilot_config.clear_active_workspace()
 
 
 class TestResolverIsSkipped:
@@ -386,6 +476,43 @@ class TestResolutionErrors:
         assert error.accessible == ['ws-a', 'ws-b']
         assert 'You belong to multiple workspaces: ws-a, ws-b.' in str(error)
         assert 'sky workspace use <name>' in str(error)
+
+    @pytest.mark.parametrize('request_name,access,picked', [
+        (_PREFIX + request_names.RequestName.CLUSTER_STATUS.value, 'read',
+         'ws-b'),
+        (_PREFIX + request_names.RequestName.ENABLED_CLOUDS.value, 'read',
+         'ws-b'),
+        (request_names.AdminPolicyRequestName.VALIDATE.value, 'read', None),
+        (_PREFIX + request_names.RequestName.OPTIMIZE.value, 'read', None),
+        (_PREFIX + request_names.RequestName.CLUSTER_LAUNCH.value, 'write',
+         None),
+    ])
+    def test_reads_use_the_first_workspace_by_name(self, env, request_name,
+                                                   access, picked):
+        """A read by alice, who chose neither of her workspaces, runs in the
+        first one by name, unless it prepares a write. A write never picks."""
+        # The names sort the other way round from the ids.
+        env.configure({
+            'default': _private(),
+            'ws-a': _private('alice', name='zeta'),
+            'ws-b': _private('alice', name='alpha'),
+        })
+        env.add_user('alice', ['ws-a', 'ws-b'])
+        body = payloads.RequestBody(env_vars={
+            constants.USER_ID_ENV_VAR: 'alice',
+            constants.USER_ENV_VAR: 'alice',
+        })
+        body.client_api_version = _NEW_CLIENT
+        body.workspace_access = access
+        context_manager = executor.override_request_env_and_config(
+            body, 'request-id', request_name)
+        if picked is None:
+            with pytest.raises(exceptions.WorkspaceAmbiguousError):
+                with context_manager:
+                    pass
+            return
+        with context_manager:
+            assert skypilot_config.get_active_workspace() == picked
 
     def test_no_access_reaches_the_client(self, env):
         env.configure({'default': _private(), 'ws-a': _private('alice')})
@@ -464,3 +591,23 @@ class TestReadOnlyWorkspaceColdCache:
             sky_cloud.CloudCapability.COMPUTE, 'ws-ro')
         assert not global_user_state.get_allowed_clouds('ws-ro')
         assert not global_user_state.get_cached_check_results('ws-ro')
+
+
+class TestSharedLogHandler:
+    """`/validate` runs in a thread of the API server process, which other
+    requests share: it must not rebuild the process-wide log handler at the
+    validating client's log level. Before the fix, a `SKYPILOT_DEBUG=1`
+    validate (every `sky jobs launch`) left the handler at DEBUG, and later
+    in-process requests such as the `sky jobs logs` stream carried the
+    server's debug lines."""
+
+    def test_debug_client_keeps_the_shared_handler(self, env):
+        # pylint: disable=protected-access
+        _two_workspaces(env)
+        handler = sky_logging._default_handler
+        level = handler.level
+        with env.record_workspace():
+            assert env.validate(user='bob', extra_env={'SKYPILOT_DEBUG': '1'
+                                                      }) is None
+        assert sky_logging._default_handler is handler
+        assert handler.level == level

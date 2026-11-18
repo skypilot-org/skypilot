@@ -198,6 +198,15 @@ SKY_APISERVER_BLOB_CHECK_SIZE_BYTES = prom.Histogram(
     buckets=[2**exponent for exponent in range(10, 37, 2)],
 )
 
+SKY_APISERVER_STORED_RESULTS_TOTAL = prom.Counter(
+    'sky_apiserver_stored_results_total',
+    'Request results stored outside the requests table', ['name'])
+
+SKY_APISERVER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_stored_result_bytes_total',
+    'Bytes of request results stored outside the requests table, as encoded '
+    'and as compressed on disk', ['name', 'form'])
+
 # Total number of API server requests per user.
 # This is a separate metric to avoid high cardinality in the primary metric.
 SKY_APISERVER_REQUESTS_BY_USER_TOTAL = prom.Counter(
@@ -226,6 +235,50 @@ SKY_APISERVER_REQUEST_GET_DURATION_SECONDS = prom.Histogram(
     'Time spent in /api/get fetching a request result, by request name',
     ['name', 'status'],
     buckets=_LATENCY_BUCKETS,
+)
+
+# Usage by caller, recorded through sky/server/caller_usage.py, which bounds
+# the distinct (caller, name) pairs per process. `name` is the request name
+# (sky.jobs.queue_v2) or, for a route handler that schedules no request, the
+# method and route path. `kind` is long/short (request executed from the queue
+# or in-process), sync (request executed inline for a synchronous call) or
+# handler (route handler).
+_CALLER_LABELS = ['caller', 'caller_id', 'caller_type', 'name']
+
+SKY_APISERVER_CALLER_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_calls_total',
+    'Requests executed and route handler calls, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_EXECUTION_SECONDS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_execution_seconds_total',
+    'Seconds spent executing requests and route handlers, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_stored_result_bytes_total',
+    'Encoded request result bytes written to the request store, by caller',
+    _CALLER_LABELS,
+)
+
+SKY_APISERVER_CALLER_RETURNED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_returned_result_bytes_total',
+    'Response body bytes returned with a request result or by a route '
+    'handler, by caller',
+    _CALLER_LABELS,
+)
+
+# HTTP calls by caller and client: X-SkyPilot-Client-Type, User-Agent family
+# and the declared X-SkyPilot-API-Version ('none' when absent).
+SKY_APISERVER_CALLER_CLIENT_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_client_calls_total',
+    'API server HTTP calls, by caller and client',
+    [
+        'caller', 'caller_id', 'caller_type', 'client_type', 'ua_family',
+        'api_version'
+    ],
 )
 
 # Aggregated across all worker processes — the prometheus_client multiprocess
@@ -406,6 +459,11 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
     'RSS increment after requests', ['name'],
     buckets=_MEM_BUCKETS)
 
+SKY_APISERVER_MEMORY_RELEASES_TOTAL = prom.Counter(
+    'sky_apiserver_memory_releases_total',
+    'Memory releases after requests in executor processes, by result '
+    '(released or skipped)', ['result'])
+
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
     # NOT keystroke latency. Read the whole string before alerting on it.
@@ -547,6 +605,14 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     'sky_apiserver_threads_exhausted_total',
     'Number of tasks rejected because an on-demand thread executor was full',
     ['name'],
+)
+
+# Thread start waits for the GIL, so a start on the event loop stalls it
+# under contention; on_loop="true" should stay flat once a process is warm.
+SKY_APISERVER_THREADS_STARTED_TOTAL = prom.Counter(
+    'sky_apiserver_threads_started_total',
+    'Number of threads started in API server processes',
+    ['on_loop'],
 )
 
 # Auth-path work that ended in a timeout instead of a result. This is the

@@ -427,8 +427,10 @@ class Task:
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
-          event_callback: A bash script that will be executed when the task
-            changes state.
+          event_callback: (Deprecated) A bash script that the jobs controller
+            runs when a managed job changes state. Disabled unless the API
+            server sets ``jobs.allow_event_callback: true``; it will be removed
+            in a future release.
           blocked_resources: A set of resources that this task cannot run on.
           api_server_access: If True, auto-inject API server credentials
             (endpoint and service account token) into the job's environment
@@ -1073,6 +1075,21 @@ class Task:
             config = {}
         config['_user_specified_yaml'] = yaml_str
         return Task.from_yaml_config(config)
+
+    def named_volumes(self) -> List[str]:
+        """Names of the existing volumes the task's `volumes` refer to.
+
+        Follows resolve_and_validate_volumes: a dict with `size` is an
+        ephemeral volume even if it also has a `name`.
+        """
+        names = []
+        for vol in self._volumes.values():
+            if isinstance(vol, str):
+                names.append(vol)
+            elif (isinstance(vol, dict) and 'size' not in vol and
+                  'name' in vol):
+                names.append(vol['name'])
+        return names
 
     def resolve_and_validate_volumes(self) -> None:
         """Resolve volumes config to volume mounts and validate them.

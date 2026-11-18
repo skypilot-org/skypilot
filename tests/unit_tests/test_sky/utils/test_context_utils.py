@@ -1,5 +1,6 @@
 """Unit tests for sky.utils.context_utils module."""
 import asyncio
+import contextvars
 import threading
 from typing import Optional, Union
 
@@ -108,3 +109,34 @@ def test_raise_if_canceled_breaks_polling_loop():
                 threading.Event().wait(0.05)
 
     _run_in_fresh_thread(body)
+
+
+_SUBMITTER_VAR: contextvars.ContextVar[str] = contextvars.ContextVar(
+    'submitter_var', default='unset')
+
+
+def test_context_propagating_thread_pool_runs_in_submitter_context():
+    """Tasks see the submitter's context variables, per submit."""
+    with context_utils.ContextPropagatingThreadPool(max_workers=2) as pool:
+        futures = []
+        for value in ('first', 'second'):
+            token = _SUBMITTER_VAR.set(value)
+            futures.append(pool.submit(_SUBMITTER_VAR.get))
+            _SUBMITTER_VAR.reset(token)
+        mapped = list(pool.map(lambda _: _SUBMITTER_VAR.get(), range(3)))
+    assert [f.result() for f in futures] == ['first', 'second']
+    assert mapped == ['unset'] * 3
+
+
+def test_context_propagating_thread_pool_carries_request_context():
+    """Tasks see the request's env overrides from sky.utils.context."""
+
+    def in_request() -> Optional[str]:
+        ctx = context.initialize()
+        ctx.override_envs({'SKYPILOT_TEST_POOL_VAR': 'from-request'})
+        with context_utils.ContextPropagatingThreadPool(max_workers=1) as pool:
+            return pool.submit(lambda: context.get().env_overrides.get(
+                'SKYPILOT_TEST_POOL_VAR')).result()
+
+    # Run in a copied context so the initialized context does not leak.
+    assert contextvars.copy_context().run(in_request) == 'from-request'

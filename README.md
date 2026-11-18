@@ -1,9 +1,9 @@
 <p align="center">
-  <a href="https://skypilot.ai/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
-      <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
-    </picture>
+  <a href="https://skypilot.ai/#gh-light-mode-only">
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
+  </a>
+  <a href="https://skypilot.ai/#gh-dark-mode-only">
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png" width=55%>
   </a>
 </p>
 

@@ -136,11 +136,13 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
     async def _schedule_no_precondition(request_task,
                                         ignore_return_value=False,
                                         precondition=None,
-                                        retryable=False):
+                                        retryable=False,
+                                        in_process=False):
         await original_schedule(request_task,
                                 ignore_return_value,
                                 precondition=None,
-                                retryable=retryable)
+                                retryable=retryable,
+                                in_process=in_process)
 
     monkeypatch.setattr(executor, 'schedule_prepared_request',
                         _schedule_no_precondition)
@@ -695,6 +697,8 @@ def reset_global_state():
     # an int (e.g. test_sky/server/test_sdk.py::test_api_login_*).
     versions.set_remote_api_version(None)
     versions.set_remote_version('unknown')
+    # A server config cached by an earlier test (often with a mocked parse).
+    skypilot_config._server_config_cache = None  # pylint: disable=protected-access
     # Ensure a usable event loop is installed on the main thread.
     # Python 3.9 + xdist sometimes leaves a worker process with no
     # current event loop after pytest-asyncio (or any test that calls

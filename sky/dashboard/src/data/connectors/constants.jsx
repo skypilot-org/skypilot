@@ -56,7 +56,7 @@ export const WS_API_URL = API_URL.replace(/^http/, 'ws');
 // upgrade then still reports its own build's version, not the new server's, so
 // it can't over-report support for wire formats its code doesn't handle.
 // Enforced by tests/unit_tests/test_api_version_consistency.py.
-export const CLIENT_API_VERSION = '67';
+export const CLIENT_API_VERSION = '69';
 // Header names expected by the server's APIVersionMiddleware. Mirrors
 // sky/server/constants.py:API_VERSION_HEADER / VERSION_HEADER.
 // The middleware (versions._check_version_compatibility) requires BOTH
@@ -90,6 +90,7 @@ export const CLOUDS_LIST = [
   'GCP',
   'IBM',
   'Lambda',
+  'Modal',
   'SCP',
   'OCI',
   'RunPod',
@@ -131,6 +132,13 @@ export const WORKSPACE_CLOUD_KEYS = new Set([
   'vastdata',
   'huggingface',
 ]);
+
+export function canonicalizeCloudName(cloud) {
+  if (typeof cloud !== 'string') {
+    return cloud;
+  }
+  return CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud;
+}
 
 export const COMMON_GPUS = [
   'A10',

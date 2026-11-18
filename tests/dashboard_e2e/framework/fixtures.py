@@ -179,6 +179,9 @@ class Recorder:
         page.on('response', lambda r: self.responses.append(r))  # pylint: disable=unnecessary-lambda
         self.failed: List[Request] = []
         page.on('requestfailed', lambda r: self.failed.append(r))  # pylint: disable=unnecessary-lambda
+        # Body fully received: what the page reads its data from.
+        self.finished: List[Request] = []
+        page.on('requestfinished', lambda r: self.finished.append(r))  # pylint: disable=unnecessary-lambda
 
     def settle(self, timeout_s: float = 10) -> None:
         """Stop the page's timers and wait until every request it sent is
@@ -255,17 +258,17 @@ class Recorder:
         thing goes unnoticed. Every request, not the first: several
         components may fetch the same path.
         """
+        # Polls the recorded events rather than calling Request.response() or
+        # Response.finished(): neither takes a timeout, so a request that is
+        # never answered would hang the test instead of failing it.
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             sent = [
                 r for r in self.requests
                 if r.url.split('?')[0].endswith(path_suffix)
             ]
-            if sent:
-                for req in sent:
-                    resp = req.response()
-                    if resp is not None:
-                        resp.finished()
+            done = self.finished + self.failed
+            if sent and all(any(req is d for d in done) for req in sent):
                 # Two frames: React has committed the state set from it.
                 self.page.evaluate(
                     '() => new Promise(r => requestAnimationFrame('
