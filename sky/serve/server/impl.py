@@ -430,6 +430,19 @@ def _own_service_records(
     ]
 
 
+def _in_workspace(record: Dict[str, Any], workspace_id: str) -> bool:
+    """Whether the record is in the given workspace. A record whose workspace
+    is unknown is in none."""
+    record_workspace = record.get('workspace')
+    if record_workspace is None or record_workspace == workspace_id:
+        return record_workspace is not None
+    try:
+        return (skypilot_config.resolve_workspace_ref(record_workspace) ==
+                workspace_id)
+    except ValueError:  # Two workspaces share this name.
+        return False
+
+
 def check_service_owned_by_caller(
         service_name: str, pool: bool,
         handle: backends.CloudVmRayResourceHandle) -> None:
@@ -1277,10 +1290,17 @@ def down(
                 f'{common_utils.format_exception(e)}')
             service_records = None
         if service_records is not None:
+            # `--all` and globs only reach the active workspace; an exact
+            # name reaches its service wherever it is.
+            active_workspace = skypilot_config.get_active_workspace()
             if all:
                 # `down --all` from a non-admin means all of the caller's own.
-                targets = _own_service_records(service_records)
-                skipped = len(service_records) - len(targets)
+                in_workspace = [
+                    record for record in service_records
+                    if _in_workspace(record, active_workspace)
+                ]
+                targets = _own_service_records(in_workspace)
+                skipped = len(in_workspace) - len(targets)
                 if skipped:
                     logger.info(
                         f'Skipped {skipped} {noun}{"s" if skipped > 1 else ""} '
@@ -1288,7 +1308,9 @@ def down(
             else:
                 targets = [
                     record for record in service_records if any(
-                        _matches_service_pattern(record['name'], pattern)
+                        _matches_service_pattern(record['name'], pattern) and
+                        ('*' not in pattern or
+                         _in_workspace(record, active_workspace))
                         for pattern in service_names)
                 ]
                 _check_service_ownership(targets, pool)
