@@ -16,6 +16,13 @@ const (
 	ShimBinPath    = "/usr/local/bin/fusermount-shim"
 	WrapperBinPath = "/usr/local/bin/fusermount-wrapper"
 
+	// HelperBinPath must be resolved in the server's own mount namespace.
+	HelperBinPath = "/usr/local/bin/sky-fuse-helper"
+
+	// An empty Request.Op means only Args is set.
+	OpMount  = "mount"
+	OpUmount = "umount"
+
 	// Some fuse implementations like gcsfuse does not pass env var to fusermount binary,
 	// we use a constant path as a fallback.
 	// TODO(aylei): find a better way to handle this.
@@ -58,13 +65,29 @@ func getSharedDir() string {
 	return os.Getenv(EnvSharedDir)
 }
 
-// Request represents a fusermount request
+// Request represents a fusermount request. Args is always set for servers that
+// only parse the command line.
 type Request struct {
 	Args []string `json:"args"`
+
+	Op          string   `json:"op,omitempty"`
+	Mountpoint  string   `json:"mountpoint,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	Lazy        bool     `json:"lazy,omitempty"`
+	HasTargetFD bool     `json:"has_target_fd,omitempty"`
 }
 
 // Response represents a fusermount response
 type Response struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+}
+
+// TruncateError keeps a response within LegacyResponseSize.
+func TruncateError(msg string) string {
+	const max = 320
+	if len(msg) <= max {
+		return msg
+	}
+	return msg[:max] + "... (truncated)"
 }

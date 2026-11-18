@@ -1,5 +1,7 @@
 """Utility functions for subprocesses."""
 import collections
+import contextvars
+import functools
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -45,15 +47,17 @@ def _safe_children(process: 'psutil.Process') -> List['psutil.Process']:
     except psutil.NoSuchProcess:
         # Parent process exited, skip
         return []
-    except psutil.AccessDenied as e:
+    except (psutil.AccessDenied, PermissionError) as e:
         # process.children will lookup all processes in the same PID namespace,
         # and we will encounter this error if there is a process we cannot
         # access. Log and ignore it with _fallback_children()
         bad_pid = getattr(e, 'pid', None)
+        denied_path = getattr(e, 'filename', None)
         diag = _pid_diag(bad_pid) if bad_pid is not None else {}
         logger.warning(
-            f'psutil.Process.children() hit AccessDenied '
-            f'(pid={bad_pid} uid={diag.get("uid", "?")} '
+            f'psutil.Process.children() hit {type(e).__name__} '
+            f'(pid={bad_pid} path={denied_path or "?"} '
+            f'uid={diag.get("uid", "?")} '
             f'exe={diag.get("exe", "?")}); falling back to /proc walk '
             f'that ignores unreadable PIDs.')
         # Snapshot the parent's create_time so the fallback can reject any
@@ -146,6 +150,48 @@ def _fallback_children(parent_pid: int,
     return descendants
 
 
+@functools.lru_cache(maxsize=1)
+def _procfs_lists_children() -> bool:
+    """Whether /proc/<pid>/task/<tid>/children exists on this kernel."""
+    if not sys.platform.startswith('linux'):
+        return False
+    pid = os.getpid()
+    return os.path.exists(f'{_PROCFS}/{pid}/task/{pid}/children')
+
+
+def _descendant_pids_from_procfs(pid: int) -> Optional[List[int]]:
+    """PIDs of the descendants of ``pid``, read from its children files.
+
+    Reads only the subtree, where ``psutil.Process.children(recursive=True)``
+    reads the stat file of every process in the PID namespace. The kernel
+    may miss a child that is exiting during the read. Returns None where the
+    kernel has no children file (non-Linux, or CONFIG_PROC_CHILDREN off).
+    """
+    if not _procfs_lists_children():
+        return None
+    descendants: List[int] = []
+    seen = {pid}
+    stack = [pid]
+    while stack:
+        cur = stack.pop()
+        try:
+            tids = os.listdir(f'{_PROCFS}/{cur}/task')
+        except OSError:
+            continue
+        for tid in tids:
+            try:
+                with open(f'{_PROCFS}/{cur}/task/{tid}/children', 'rb') as f:
+                    child_pids = [int(p) for p in f.read().split()]
+            except (OSError, ValueError):
+                continue
+            for child_pid in child_pids:
+                if child_pid not in seen:
+                    seen.add(child_pid)
+                    descendants.append(child_pid)
+                    stack.append(child_pid)
+    return descendants
+
+
 @timeline.event
 def run(cmd, **kwargs):
     # Should be careful to use this function, as the child process cmd spawn may
@@ -214,9 +260,8 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
     Args:
         cloud_str: The cloud
     """
-    cpu_count = os.cpu_count()
-    if cpu_count is None:
-        cpu_count = 1
+    # os.cpu_count() reports the host's cores, not the container's CPU limit.
+    cpu_count = common_utils.get_cpu_count()
     return max(4, cpu_count - 1) * _get_thread_multiplier(cloud_str)
 
 
@@ -248,8 +293,15 @@ def run_in_parallel(func: Callable,
                  if num_threads is not None else get_parallel_threads())
     # len(args) is guaranteed to be greater than 1.
     processes = min(processes, len(args))
+    # Run each call in a copy of the caller's context, so that a request
+    # running in a thread of the API server keeps its env, config and user.
+    caller_ctx = contextvars.copy_context()
+
+    def run_in_caller_ctx(arg: Any) -> Any:
+        return caller_ctx.copy().run(func, arg)
+
     with pool.ThreadPool(processes=processes) as p:
-        ordered_iterators = p.imap(func, args)
+        ordered_iterators = p.imap(run_in_caller_ctx, args)
         return list(ordered_iterators)
 
 
@@ -465,15 +517,18 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
             implementations have corner cases where subprocesses might not be
             killed. Refer to subprocess_daemon.py for more details.
     """
-    # Get initial children list via _safe_children so that an EACCES from
-    # a hardened-host LSM policy doesn't abort us before the daemon is
-    # registered. See _safe_children for the failure mode and rationale.
-    try:
-        process = psutil.Process(process_pid)
-    except psutil.NoSuchProcess:
-        initial_children: List[int] = []
-    else:
-        initial_children = [p.pid for p in _safe_children(process)]
+    # Runs for every command started through log_lib, so read only the
+    # process's own subtree. The daemon walks the tree again every second.
+    initial_children = _descendant_pids_from_procfs(process_pid)
+    if initial_children is None:
+        # _safe_children so that an EACCES from a hardened-host LSM policy
+        # doesn't abort us before the daemon is registered.
+        try:
+            process = psutil.Process(process_pid)
+        except psutil.NoSuchProcess:
+            initial_children = []
+        else:
+            initial_children = [p.pid for p in _safe_children(process)]
 
     parent_pid = os.getpid()
     daemon_script = os.path.join(

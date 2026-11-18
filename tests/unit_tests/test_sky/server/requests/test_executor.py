@@ -2,30 +2,43 @@
 import asyncio
 import concurrent.futures
 import functools
+import gc
 import os
 import pathlib
+import pickle
 import queue as queue_lib
+import textwrap
 import threading
 import time
-from typing import List
+from typing import List, Optional
 from unittest import mock
+import weakref
 
+import prometheus_client as prom
 import pytest
 
 from sky import exceptions
 from sky import global_user_state
+from sky import models
 from sky import skypilot_config
+from sky.metrics import utils as metrics_utils
+from sky.server import caller_usage
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
+from sky.server.auth import loopback
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import threads
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
+from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import timeline
 from sky.utils.db import db_utils
 
 
@@ -46,7 +59,16 @@ def isolated_database(tmp_path):
 
 
 @pytest.fixture()
-def mock_skypilot_config(tmp_path):
+def isolated_config_env(monkeypatch):
+    """Use the config sources selected by each test."""
+    for name in (skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                 skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                 skypilot_config.ENV_VAR_PROJECT_CONFIG):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture()
+def mock_skypilot_config(tmp_path, isolated_config_env):
     config_content = """
 aws:
   labels:
@@ -322,17 +344,54 @@ async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
     assert updated.return_value == 'success'
 
 
+class _ResultTooLargeError(Exception):
+    """A database error that carries the statement's parameters."""
+
+    def __init__(self, params):
+        super().__init__('invalid memory alloc request size 1073741824')
+        self.params = params
+
+
+@pytest.mark.asyncio
+async def test_result_that_cannot_be_stored_fails_the_request(
+        mock_fd_operations, mock_global_user_state, mock_skypilot_config):
+    """A result the database rejects ends the request FAILED, not RUNNING."""
+    req = requests_lib.Request(request_id='result-not-stored',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    error = _ResultTooLargeError(params={'return_value': 'x' * 10000})
+    with mock.patch.object(requests_lib,
+                           'set_request_succeeded',
+                           side_effect=error):
+        executor._request_execution_wrapper('result-not-stored',
+                                            ignore_return_value=False)
+
+    updated = requests_lib.get_request('result-not-stored')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    message = updated.get_error()['message']
+    assert 'invalid memory alloc request size' in message
+    # The rejected result is not copied into the stored error.
+    assert 'x' * 100 not in message
+
+
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
                               expected_labels: dict, **kwargs):
     """Worker that verifies it sees the correct env vars and config overrides."""
-    # TEST_VAR_A: Should see the overridden value (not main process value)
-    assert os.environ.get('TEST_VAR_A') == expected_env_a, (
-        f"Expected TEST_VAR_A={expected_env_a}, got {os.environ.get('TEST_VAR_A')}"
+    # SKYPILOT_TEST_VAR_A: Should see the overridden value (not main process value)
+    assert os.environ.get('SKYPILOT_TEST_VAR_A') == expected_env_a, (
+        f"Expected SKYPILOT_TEST_VAR_A={expected_env_a}, got {os.environ.get('SKYPILOT_TEST_VAR_A')}"
     )
 
-    # TEST_VAR_B: Should see the new value set by this request
-    assert os.environ.get('TEST_VAR_B') == expected_env_b, (
-        f"Expected TEST_VAR_B={expected_env_b}, got {os.environ.get('TEST_VAR_B')}"
+    # SKYPILOT_TEST_VAR_B: Should see the new value set by this request
+    assert os.environ.get('SKYPILOT_TEST_VAR_B') == expected_env_b, (
+        f"Expected SKYPILOT_TEST_VAR_B={expected_env_b}, got {os.environ.get('SKYPILOT_TEST_VAR_B')}"
     )
 
     # Assert config override works - should see the overridden value, not the base.
@@ -393,8 +452,8 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             initializer=_subprocess_initializer,
             initargs=(db_path, log_path_prefix, mock_skypilot_config))
 
-    # Set TEST_VAR_A in main process that workers will override
-    os.environ['TEST_VAR_A'] = 'init'
+    # Set SKYPILOT_TEST_VAR_A in main process that workers will override
+    os.environ['SKYPILOT_TEST_VAR_A'] = 'init'
 
     # Capture main process state before spawning any workers to verify no leakage.
     env_before = dict(os.environ)
@@ -408,8 +467,8 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         }
         request_body = TestIsolationBody(
             env_vars={
-                'TEST_VAR_A': env_a,  # Override env var from main process
-                'TEST_VAR_B': env_b,  # New env var
+                'SKYPILOT_TEST_VAR_A': env_a,  # Override env var from main process
+                'SKYPILOT_TEST_VAR_B': env_b,  # New env var
                 constants.USER_ID_ENV_VAR: f'user-{request_id}',
                 constants.USER_ENV_VAR: f'user-{request_id}',
             },
@@ -425,6 +484,10 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             expected_env_b=env_b,
             expected_labels=expected_labels)
 
+        # These requests carry arbitrary SKYPILOT_ env overrides, which the
+        # worker only applies for a loopback request; stamp loopback so the
+        # isolation of those overrides is what is tested.
+        loopback.set_request_from_loopback(True)
         request = await executor.prepare_request_async(
             request_id=request_id,
             request_name='test.isolation',
@@ -485,7 +548,7 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         # Shutdown the executor if we created one
         if proc_executor is not None:
             proc_executor.shutdown()
-        os.environ.pop('TEST_VAR_A', None)
+        os.environ.pop('SKYPILOT_TEST_VAR_A', None)
 
 
 FAKE_FD_START = 100000
@@ -1479,7 +1542,7 @@ def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,
                                                  monkeypatch):
     """Daemon request_ids must NOT have their persisted env_vars overlaid.
 
-    Reproduces SKY-5502: a daemon row in PG carrying stale downward-API
+    Regression: a daemon row in PG carrying stale downward-API
     values from a previous deployment generation must not clobber the
     current pod's os.environ.
     """
@@ -1507,9 +1570,15 @@ def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,
         assert os.environ['SKYPILOT_APISERVER_UUID'] == 'current-pod-uuid'
 
 
+@pytest.mark.parametrize('from_loopback, is_loopback', [(True, True),
+                                                        (None, True),
+                                                        (False, False)])
 def test_override_env_applied_for_client_request(stub_override_request_env_deps,
-                                                 monkeypatch):
-    """Regression guard: client requests must still have env_vars applied."""
+                                                 monkeypatch, from_loopback,
+                                                 is_loopback):
+    """A loopback request (including an unstamped body persisted before the
+    field existed) applies the client's SKYPILOT_ env vars; a remote request
+    does not apply server settings (here the pod memory limit)."""
     monkeypatch.setenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT', str(300 * 1024**3))
 
     body = payloads.RequestBody(
@@ -1518,11 +1587,12 @@ def test_override_env_applied_for_client_request(stub_override_request_env_deps,
             constants.USER_ID_ENV_VAR: 'client-user-id',
             constants.USER_ENV_VAR: 'client-user',
         })
+    body.from_loopback = from_loopback
 
     with executor.override_request_env_and_config(
             body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
-        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(100 * 1024 *
-                                                                    1024)
+        expected = 100 * 1024 * 1024 if is_loopback else 300 * 1024**3
+        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(expected)
 
 
 @pytest.mark.parametrize('server_value', [None, '8'])
@@ -1559,6 +1629,60 @@ def test_client_cannot_override_auth_db_timeout(stub_override_request_env_deps,
         assert (global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
                 == expected_timeouts)
     assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in body.env_vars
+
+
+@pytest.mark.parametrize('client_env', [
+    {
+        constants.ENV_VAR_DB_POOL_CONNECTION_URI: 'postgresql://u:p@evil:5432/db'
+    },
+    {
+        constants.ENV_VAR_DB_POOL_HOSTPORT: 'evil:5432'
+    },
+])
+def test_client_cannot_redirect_db_pool(stub_override_request_env_deps,
+                                        monkeypatch, client_env):
+    """A client-supplied pool override must not re-point the server's DB."""
+    # The overlay seeds the caller's role, which would open the state DB; the
+    # test only cares about how the pool env resolves, so stub that out and it
+    # stands alone regardless of whether an engine was primed earlier.
+    monkeypatch.setattr(executor, '_seed_role_if_missing',
+                        lambda *args, **kwargs: None)
+    server_uri = 'postgresql://user:secret@db.internal:5432/sky'
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, server_uri)
+    monkeypatch.delenv(constants.ENV_VAR_DB_POOL_CONNECTION_URI, raising=False)
+    monkeypatch.delenv(constants.ENV_VAR_DB_POOL_HOSTPORT, raising=False)
+
+    body = payloads.RequestBody(
+        env_vars={
+            **client_env,
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        # pylint: disable=protected-access
+        assert db_utils._resolve_conn_string(direct=False) == server_uri
+    assert not set(client_env) & set(body.env_vars)
+
+
+def test_client_cannot_choose_timeline_path(stub_override_request_env_deps,
+                                            monkeypatch, tmp_path):
+    """The timeline written at request end never goes to a client's path."""
+    monkeypatch.delenv(timeline.TIMELINE_FILE_PATH_ENV_VAR, raising=False)
+    target = tmp_path / 'client-chosen' / 'timeline.json'
+    body = payloads.RequestBody(
+        env_vars={
+            timeline.TIMELINE_FILE_PATH_ENV_VAR: str(target),
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        pass
+    assert not target.exists()
 
 
 def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,
@@ -1650,6 +1774,204 @@ async def test_wrapper_clears_in_request_execution_after_success(
 
 def _gate_clears_after_success_entrypoint():
     return 'ok'
+
+
+class _Result(list):
+    """A request result that can be weakly referenced."""
+
+
+_result_refs: List['weakref.ReferenceType[_Result]'] = []
+
+
+def _result_entrypoint():
+    result = _Result(['x' * 1024])
+    _result_refs.append(weakref.ref(result))
+    return result
+
+
+@pytest.mark.asyncio
+async def test_wrapper_releases_result_before_release_memory(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """The peak RSS sample sees the result; release_memory() can free it."""
+    req = requests_lib.Request(request_id='result-released',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    result_alive = []
+
+    def _check_release_memory():
+        gc.collect()
+        result_alive.append(_result_refs[-1]() is not None)
+
+    monkeypatch.setattr(executor.common_utils, 'release_memory',
+                        _check_release_memory)
+    monkeypatch.setattr(executor, '_rss_after_release', None)
+    result_alive_at_rss_sample = []
+
+    class _Process(executor.psutil.Process):
+
+        def memory_info(self):
+            ref = _result_refs[-1] if _result_refs else None
+            result_alive_at_rss_sample.append(ref is not None and
+                                              ref() is not None)
+            return super().memory_info()
+
+    monkeypatch.setattr(executor.psutil, 'Process', _Process)
+
+    executor._request_execution_wrapper('result-released',
+                                        ignore_return_value=False)
+
+    assert True in result_alive_at_rss_sample
+    assert result_alive == [False]
+    assert requests_lib.get_request('result-released').get_return_value() == [
+        'x' * 1024
+    ]
+
+
+_MB = 1024 * 1024
+
+
+class _FakeProcess:
+
+    def __init__(self, rss: int):
+        self.rss = rss
+
+    def memory_info(self):
+        return mock.Mock(rss=self.rss)
+
+
+@pytest.fixture
+def release_memory_harness(monkeypatch):
+    """Fake RSS, count release_memory() calls, default threshold."""
+    monkeypatch.delenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       raising=False)
+    executor._release_memory_threshold_bytes.cache_clear()
+    monkeypatch.setattr(executor, '_rss_after_release', None)
+    proc = _FakeProcess(rss=300 * _MB)
+    calls = []
+    monkeypatch.setattr(executor.common_utils, 'release_memory',
+                        lambda: calls.append(proc.rss))
+    yield proc, calls
+    executor._release_memory_threshold_bytes.cache_clear()
+
+
+def _releases(result: str) -> float:
+    return prom.REGISTRY.get_sample_value('sky_apiserver_memory_releases_total',
+                                          {'result': result}) or 0.0
+
+
+def test_release_memory_on_first_request(release_memory_harness):
+    proc, calls = release_memory_harness
+    released_before = _releases('released')
+
+    executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB]
+    assert executor._rss_after_release == 300 * _MB
+    assert _releases('released') - released_before == 1
+
+
+def test_release_memory_skipped_below_threshold(release_memory_harness):
+    proc, calls = release_memory_harness
+    executor._maybe_release_memory(proc)
+    skipped_before = _releases('skipped')
+
+    proc.rss += 31 * _MB
+    executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB]
+    assert _releases('skipped') - skipped_before == 1
+
+
+def test_release_memory_after_growth_across_requests(release_memory_harness):
+    proc, calls = release_memory_harness
+    executor._maybe_release_memory(proc)
+
+    for _ in range(3):
+        proc.rss += 11 * _MB
+        executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB, 333 * _MB]
+
+
+def test_release_memory_measures_growth_from_rss_after_release(
+        release_memory_harness, monkeypatch):
+    proc, calls = release_memory_harness
+
+    def _release():
+        calls.append(proc.rss)
+        proc.rss -= 100 * _MB
+
+    monkeypatch.setattr(executor.common_utils, 'release_memory', _release)
+    proc.rss = 400 * _MB
+    executor._maybe_release_memory(proc)
+    assert executor._rss_after_release == 300 * _MB
+
+    proc.rss = 340 * _MB
+    executor._maybe_release_memory(proc)
+
+    assert calls == [400 * _MB, 340 * _MB]
+
+
+@pytest.mark.parametrize('value', ['0', '-5'])
+def test_release_memory_every_request_without_threshold(release_memory_harness,
+                                                        monkeypatch, value):
+    proc, calls = release_memory_harness
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       value)
+
+    for _ in range(3):
+        executor._maybe_release_memory(proc)
+
+    assert len(calls) == 3
+
+
+def test_release_memory_threshold_from_env(release_memory_harness, monkeypatch):
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       '0.5')
+    assert executor._release_memory_threshold_bytes() == 512 * 1024
+
+
+def test_release_memory_invalid_threshold_uses_default(release_memory_harness,
+                                                       monkeypatch):
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       'lots')
+    assert executor._release_memory_threshold_bytes() == (
+        constants.DEFAULT_RELEASE_MEMORY_THRESHOLD_MB * _MB)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_clears_request_cache_when_release_is_skipped(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    req = requests_lib.Request(request_id='release-skipped',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    release_memory = mock.Mock()
+    clear_cache = mock.Mock()
+    monkeypatch.setattr(executor.common_utils, 'release_memory', release_memory)
+    monkeypatch.setattr(executor.annotations, 'clear_request_level_cache',
+                        clear_cache)
+    monkeypatch.setattr(executor, '_rss_after_release',
+                        executor.psutil.Process().memory_info().rss)
+    monkeypatch.setattr(executor, '_release_memory_threshold_bytes',
+                        lambda: 1024 * _MB)
+
+    executor._request_execution_wrapper('release-skipped',
+                                        ignore_return_value=False)
+
+    assert mock.call() in clear_cache.mock_calls
+    release_memory.assert_not_called()
+    assert requests_lib.get_request('release-skipped').status == (
+        requests_lib.RequestStatus.SUCCEEDED)
 
 
 def _install_gated_handler_in_worker():
@@ -1882,6 +2204,8 @@ def test_auth_and_request_executors_are_distinct():
         auth_executor = executor.get_auth_thread_executor()
         assert request_executor is not auth_executor
         assert request_executor.name != auth_executor.name
+        assert auth_executor.max_queued > 0
+        assert request_executor.max_queued == 0
         # Each getter still memoizes per process.
         assert executor.get_request_thread_executor() is request_executor
         assert executor.get_auth_thread_executor() is auth_executor
@@ -1966,3 +2290,1153 @@ def test_maybe_observe_request_pending_first_execution_only():
         executor._maybe_observe_request_pending(  # pylint: disable=protected-access
             make_request(requests_lib.RequestStatus.WAITING))
         assert observe.call_count == 1
+
+
+class TestClientUserIdValidation:
+    """The client-supplied user id is validated before it becomes an owner.
+
+    Regression tests for #9621: a corrupted ~/.sky/user_hash used to be stored
+    verbatim as a cluster's owner, producing an identity that matches no user.
+    """
+
+    def _body(self, user_id: Optional[str]) -> payloads.RequestBody:
+        body = payloads.RequestBody()
+        if user_id is None:
+            body.env_vars.pop(constants.USER_ID_ENV_VAR, None)
+        else:
+            body.env_vars[constants.USER_ID_ENV_VAR] = user_id
+        body.env_vars[constants.USER_ENV_VAR] = 'someone'
+        return body
+
+    async def _prepare(self, user_id: Optional[str], auth_user=None):
+        # Everything after the identity check needs the requests DB, which is
+        # not what these tests are about.
+        with mock.patch.object(executor.api_requests,
+                               'create_if_not_exists_async',
+                               new=mock.AsyncMock(return_value=True)), \
+             mock.patch.object(executor.workspace_access,
+                               'for_current_request',
+                               return_value=None), \
+             mock.patch.object(pathlib.Path, 'touch'):
+            return await executor.prepare_request_async(
+                request_id='req-9621',
+                request_name='test.identity',
+                request_body=self._body(user_id),
+                func=lambda: None,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                auth_user=auth_user)
+
+    @pytest.mark.parametrize(
+        'user_id',
+        [
+            'abc%123',  # the shape reported in #9621
+            '',
+            '-leading-hyphen',
+            '../x',  # path traversal characters
+            '/abs',
+            'abcdef12\n',  # trailing newline: a distinct identity
+            None,  # missing from env_vars
+        ])
+    @pytest.mark.asyncio
+    async def test_malformed_user_id_is_rejected(self, user_id):
+        with pytest.raises(exceptions.InvalidUserIdError):
+            await self._prepare(user_id)
+
+    @pytest.mark.asyncio
+    async def test_valid_user_id_passes_through(self):
+        request = await self._prepare('abcdef12')
+        assert request.user_id == 'abcdef12'
+
+    @pytest.mark.asyncio
+    async def test_service_account_id_still_accepted(self):
+        """Service-account ids use hyphens and must keep working."""
+        request = await self._prepare('sa-abc123-token-xyz')
+        assert request.user_id == 'sa-abc123-token-xyz'
+
+    @pytest.mark.asyncio
+    async def test_authenticated_identity_bypasses_client_value(self):
+        """With auth on, the server's identity wins and the bad client value
+        is overwritten rather than rejected."""
+        auth_user = models.User(id='authuser1', name='auth-user')
+        request = await self._prepare('bad%id', auth_user=auth_user)
+        assert request.user_id == 'authuser1'
+
+
+@pytest.mark.parametrize('missing,claimed,seeded', [
+    (True, True, True),
+    (True, False, False),
+    (False, True, False),
+])
+def test_seed_role_if_missing(missing, claimed, seeded):
+    """A role-less user is seeded only when this worker claims the attempt."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing',
+                           return_value=missing), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=claimed), \
+            mock.patch.object(executor.permission,
+                              'seed_new_user_role') as seed_new_user_role:
+        executor._seed_role_if_missing('user1')
+    if seeded:
+        seed_new_user_role.assert_called_once_with('user1')
+    else:
+        seed_new_user_role.assert_not_called()
+
+
+def test_seed_role_if_missing_swallows_seed_failure():
+    """A failed seed (e.g. a policy lock timeout) does not raise."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing', return_value=True), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=True), \
+            mock.patch.object(executor.permission, 'seed_new_user_role',
+                              side_effect=RuntimeError('lock timeout')):
+        executor._seed_role_if_missing('user1')
+
+
+@pytest.mark.parametrize('seed_error', [None, RuntimeError('lock timeout')])
+def test_override_env_seeds_role_before_workspace_check(
+        stub_override_request_env_deps, monkeypatch, seed_error):
+    """A request's role-less user is seeded before the workspace check.
+
+    The user is created by the request itself when there is no auth (e.g. on
+    a jobs controller's API server); without a role every workspace except
+    `default` denies them. A failing seed must not fail the request.
+    """
+    calls = []
+    service = executor.permission.permission_service
+    monkeypatch.setattr(service, 'role_seed_missing', lambda user_id: True)
+    monkeypatch.setattr(service, 'claim_role_seed_attempt',
+                        lambda user_id: True)
+
+    def fake_seed(user_id):
+        calls.append(('seed', user_id))
+        if seed_error is not None:
+            raise seed_error
+
+    monkeypatch.setattr(executor.permission, 'seed_new_user_role', fake_seed)
+    monkeypatch.setattr(
+        'sky.workspaces.core.reject_request_for_unauthorized_workspace',
+        lambda *args, **kwargs: calls.append(('workspace_check',)))
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        pass
+
+    assert calls == [('seed', 'client-user-id'), ('workspace_check',)]
+
+
+def _sanitize(env_vars):
+    # These cases cover a loopback request on each kind of server.
+    return executor._sanitize_request_env_vars(env_vars, from_loopback=True)
+
+
+def test_sanitize_request_env_vars_reachable_server_drops_credentials():
+    """On a reachable/deployed server, credential and non-allowlisted vars go.
+
+    A client request must not be able to overlay KUBECONFIG (or any other
+    credential override, server-only var, or arbitrary env var) onto a server
+    that is reachable by other parties.
+    """
+    env_vars = {
+        # Legitimate task/user vars that must survive.
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'SKYPILOT_DEBUG': '1',
+        # Credential override: must be dropped on a reachable server.
+        'KUBECONFIG': '/tmp/attacker-kubeconfig.yaml',
+        # Server-only SKYPILOT_ vars: must be dropped even though SKYPILOT_.
+        constants.ENV_VAR_DB_CONNECTION_URI: 'postgresql://x',
+        timeline.TIMELINE_FILE_PATH_ENV_VAR: '/tmp/x',
+        f'{constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}DEPLOY_MODE': '1',
+        # Arbitrary process env: must be dropped.
+        'LD_PRELOAD': '/tmp/evil.so',
+        'PATH': '/tmp/evil/bin',
+    }
+    with mock.patch('sky.server.common.should_enforce_mount_containment',
+                    return_value=True):
+        sanitized = _sanitize(env_vars)
+
+    assert sanitized == {
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'SKYPILOT_DEBUG': '1',
+    }
+
+
+def test_sanitize_request_env_vars_loopback_server_keeps_credentials():
+    """On a loopback single-user server, same-user credential overrides stay.
+
+    A loopback `sky api start` serves only the invoking user, so KUBECONFIG
+    and other credential overrides are same-user and allowed; server-only and
+    arbitrary vars are still dropped.
+    """
+    env_vars = {
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'KUBECONFIG': '/home/user/.kube/config',
+        'AWS_PROFILE': 'dev',
+        # Still dropped regardless of server mode.
+        constants.ENV_VAR_DB_CONNECTION_URI: 'postgresql://x',
+        f'{constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}DEPLOY_MODE': '1',
+        'LD_PRELOAD': '/tmp/evil.so',
+    }
+    with mock.patch('sky.server.common.should_enforce_mount_containment',
+                    return_value=False):
+        sanitized = _sanitize(env_vars)
+
+    assert sanitized == {
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'KUBECONFIG': '/home/user/.kube/config',
+        'AWS_PROFILE': 'dev',
+    }
+
+
+# Server settings a client sends that a remote request must not apply.
+_SERVER_SETTING_ENV_VARS = {
+    'KUBECONFIG': '/tmp/uploaded-kubeconfig.yaml',
+    'AWS_PROFILE': 'other',
+    'SKYPILOT_CONFIG': '/tmp/uploaded-config.yaml',
+    'SKYPILOT_GLOBAL_CONFIG': '/tmp/uploaded-config.yaml',
+    'SKYPILOT_PROJECT_CONFIG': '/tmp/uploaded-config.yaml',
+    'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true',
+    'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER': 'true',
+    'SKYPILOT_POD_MEMORY_GB_LIMIT': '1',
+    'SKYPILOT_FUTURE_SETTING': '1',
+    constants.OVERRIDE_CONSOLIDATION_MODE: 'true',
+    'LD_PRELOAD': '/tmp/x.so',
+}
+# What a remote client may set: identity and this request's logging.
+_REMOTE_CLIENT_ENV_VARS = {
+    constants.USER_ID_ENV_VAR: 'client-user-id',
+    constants.USER_ENV_VAR: 'client-user',
+    constants.CLIENT_USER_HASH_ENV_VAR: 'client-hash',
+    'SKYPILOT_CLIENT_TYPE': 'cli',
+    usage_constants.USAGE_RUN_ID_ENV_VAR: 'run-1',
+    'SKYPILOT_IS_FROM_DASHBOARD': 'true',
+    'SKYPILOT_DISABLE_USAGE_COLLECTION': '1',
+    'SKYPILOT_MINIMIZE_LOGGING': '0',
+    'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1',
+    'SKYPILOT_DEBUG': '1',
+}
+
+
+def test_remote_filter_classifies_every_sender_var(monkeypatch):
+    """Non-circular: drive the real client sender (request_body_env_vars) under
+    a remote-server setting, then the real server filter. Every var the sender
+    emits is either kept (identity/logging) or dropped (infra/config), the
+    server keeps nothing outside the allowlist, and a dangerous var that the
+    sender does emit (SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS) is dropped. A new
+    sender var that leaked past the filter without being allowlisted fails the
+    last assertion."""
+    monkeypatch.setattr('sky.server.common.is_api_server_local', lambda: False)
+    monkeypatch.setattr('sky.server.common.basic_auth_enabled', True)
+    monkeypatch.setattr('sky.server.common.client_user_hash', 'client-hash')
+    # A realistic remote client environment: allowlisted identity/logging vars
+    # plus a widening var the client can set and the server must ignore.
+    monkeypatch.setenv('SKYPILOT_DEBUG', '1')
+    monkeypatch.setenv('SKYPILOT_MINIMIZE_LOGGING', '0')
+    monkeypatch.setenv('SKYPILOT_SUPPRESS_SENSITIVE_LOG', '1')
+    monkeypatch.setenv('SKYPILOT_DISABLE_USAGE_COLLECTION', '1')
+    monkeypatch.setenv('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS', 'true')
+
+    emitted = payloads.request_body_env_vars()
+    # The sender does forward the widening var (it is the server's job to drop
+    # it), so the filter is actually exercised on a dangerous input.
+    assert 'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS' in emitted
+
+    kept = executor._sanitize_request_env_vars(emitted, from_loopback=False)
+
+    # Identity survives so the remote user is still recognized.
+    assert kept.get(constants.USER_ID_ENV_VAR)
+    assert kept.get(constants.USER_ENV_VAR)
+    # The widening var is dropped.
+    assert 'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS' not in kept
+    # The server keeps nothing outside the allowlist, whatever the sender emits.
+    for key in kept:
+        assert key in executor._REMOTE_REQUEST_ENV_VARS, key
+
+
+@pytest.mark.parametrize('enforce_containment', [True, False])
+def test_remote_request_applies_only_allowlisted_env(
+        stub_override_request_env_deps, monkeypatch, enforce_containment):
+    """Through the real entry point: a remote request (no loopback stamp)
+    applies only the allowlist, whatever the containment setting."""
+    for key in _SERVER_SETTING_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: enforce_containment)
+    body = payloads.RequestBody(env_vars={
+        **_SERVER_SETTING_ENV_VARS,
+        **_REMOTE_CLIENT_ENV_VARS
+    })
+    # A fresh body defaults to remote (fail closed): an unstamped future path
+    # must not be treated as loopback.
+    assert body.from_loopback is False
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        for key in _SERVER_SETTING_ENV_VARS:
+            assert key not in os.environ, key
+        for key, value in _REMOTE_CLIENT_ENV_VARS.items():
+            assert os.environ[key] == value, key
+
+
+@pytest.mark.parametrize('enforce_containment', [True, False])
+def test_loopback_request_keeps_skypilot_env(stub_override_request_env_deps,
+                                             monkeypatch, enforce_containment):
+    """A loopback request (local server, or a controller with the job's
+    config snapshot in SKYPILOT_CONFIG) keeps SKYPILOT_ vars; credential vars
+    only when containment is off; other process env never."""
+    for key in _SERVER_SETTING_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: enforce_containment)
+    body = payloads.RequestBody(env_vars={
+        **_SERVER_SETTING_ENV_VARS,
+        **_REMOTE_CLIENT_ENV_VARS
+    })
+    body.from_loopback = True
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ['SKYPILOT_CONFIG'] == '/tmp/uploaded-config.yaml'
+        assert os.environ['SKYPILOT_FUTURE_SETTING'] == '1'
+        assert ('KUBECONFIG' in os.environ) is (not enforce_containment)
+        assert ('AWS_PROFILE' in os.environ) is (not enforce_containment)
+        assert 'LD_PRELOAD' not in os.environ
+        assert constants.OVERRIDE_CONSOLIDATION_MODE not in os.environ
+
+
+def test_stamp_overwrites_client_from_loopback():
+    """A client cannot claim loopback: the stamp comes from the dispatch
+    context, and outside a loopback request it is False."""
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'abcd1234',
+        constants.USER_ENV_VAR: 'client-user',
+    },
+                                from_loopback=True)
+    executor.stamp_request_body(body, auth_user=None)
+    assert body.from_loopback is False
+
+    token = loopback._request_from_loopback.set(True)
+    try:
+        executor.stamp_request_body(body, auth_user=None)
+    finally:
+        loopback._request_from_loopback.reset(token)
+    assert body.from_loopback is True
+
+
+def _body_with_server_env(monkeypatch) -> payloads.RequestBody:
+    """A body built on the server: env_vars captured from os.environ."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    monkeypatch.setenv(constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+                       'postgresql://pool-secret')
+    body = payloads.RequestBody()
+    assert body.env_vars['SKYPILOT_UT_ENV_CANARY'] == 'server-canary'
+    body.env_vars.update(_REMOTE_CLIENT_ENV_VARS)
+    body.env_vars['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] = 'client-token'
+    return body
+
+
+def test_stamp_keeps_only_remote_env_for_remote_request(monkeypatch):
+    body = _body_with_server_env(monkeypatch)
+    executor.stamp_request_body(body,
+                                auth_user=models.User(id='abcd1234',
+                                                      name='alice'))
+    assert body.from_loopback is False
+    assert set(body.env_vars) <= executor._REMOTE_REQUEST_ENV_VARS
+    assert body.env_vars[constants.USER_ID_ENV_VAR] == 'abcd1234'
+    assert body.env_vars[constants.USER_ENV_VAR] == 'alice'
+    assert body.env_vars['SKYPILOT_CLIENT_TYPE'] == 'cli'
+    for value in ('server-canary', 'postgresql://pool-secret', 'client-token'):
+        assert value not in body.model_dump_json()
+
+
+@pytest.mark.parametrize('enforce_containment', [True, False])
+def test_stamp_keeps_loopback_env(monkeypatch, enforce_containment):
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: enforce_containment)
+    monkeypatch.setenv('KUBECONFIG', '/tmp/local-kubeconfig')
+    body = _body_with_server_env(monkeypatch)
+    token = loopback._request_from_loopback.set(True)
+    try:
+        executor.stamp_request_body(body, auth_user=None)
+    finally:
+        loopback._request_from_loopback.reset(token)
+    assert body.from_loopback is True
+    assert body.env_vars['SKYPILOT_UT_ENV_CANARY'] == 'server-canary'
+    assert body.env_vars['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] == 'client-token'
+    assert constants.ENV_VAR_DB_POOL_CONNECTION_URI not in body.env_vars
+    assert ('KUBECONFIG' in body.env_vars) is (not enforce_containment)
+
+
+def test_to_kwargs_drops_from_loopback():
+    body = payloads.RequestBody(env_vars={}, from_loopback=True)
+    assert 'from_loopback' not in body.to_kwargs()
+
+
+def test_old_pickle_body_is_treated_as_loopback(stub_override_request_env_deps,
+                                                monkeypatch):
+    """A body persisted before `from_loopback` existed has no such attribute,
+    so it keeps its pre-upgrade behavior: SKYPILOT_CONFIG survives, and an
+    in-flight controller launch resumed across an upgrade does not lose its
+    config snapshot. (A fresh body defaults to False/remote; only a genuinely
+    old pickle is attribute-less.)"""
+    monkeypatch.delenv('SKYPILOT_CONFIG', raising=False)
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: True)
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+            'SKYPILOT_CONFIG': '/snapshot/config.yaml',
+        })
+    # Simulate an old pickle: the field is absent from __dict__, so a round
+    # trip restores a body without it and getattr falls back to None.
+    del body.__dict__['from_loopback']
+    body = pickle.loads(pickle.dumps(body))
+    assert getattr(body, 'from_loopback', None) is None
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ['SKYPILOT_CONFIG'] == '/snapshot/config.yaml'
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_config_override_infra_keys_gated_through_entry_point(
+        stub_override_request_env_deps, isolated_config_env, monkeypatch,
+        tmp_path, from_loopback):
+    """Through the real entry point: a remote request cannot widen the three
+    infra keys the server allows, while a non-infra override still applies; a
+    loopback request layers both.
+
+    This drives the override_skypilot_config wiring in
+    override_request_env_and_config (the body's stamped from_loopback bit),
+    not override_skypilot_config directly. Reverting that wiring to the default
+    (from_loopback=True) must fail this test for the remote arm.
+    """
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              allowed_contexts: [server-ctx]
+            ssh:
+              allowed_node_pools: [server-pool]
+            slurm:
+              allowed_clusters: [server-cluster]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+    },
+                                override_skypilot_config={
+                                    'kubernetes': {
+                                        'allowed_contexts': 'all',
+                                        'provision_timeout': 123,
+                                    },
+                                    'ssh': {
+                                        'allowed_node_pools': ['other-pool']
+                                    },
+                                    'slurm': {
+                                        'allowed_clusters': 'all'
+                                    },
+                                })
+    body.from_loopback = from_loopback
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        got = (
+            skypilot_config.get_nested(('kubernetes', 'allowed_contexts'),
+                                       None),
+            skypilot_config.get_nested(('ssh', 'allowed_node_pools'), None),
+            skypilot_config.get_nested(('slurm', 'allowed_clusters'), None),
+        )
+        # A non-infra key always layers, loopback or not.
+        assert skypilot_config.get_nested(('kubernetes', 'provision_timeout'),
+                                          None) == 123
+    if from_loopback:
+        assert got == ('all', ['other-pool'], 'all')
+    else:
+        assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+class _InProcessBody(payloads.RequestBody):
+    value: str
+
+
+IN_PROCESS_CALLED = threading.Event()
+
+
+def _in_process_entrypoint(value: str):
+    IN_PROCESS_CALLED.set()
+    return {'value': value, 'user': os.environ.get(constants.USER_ID_ENV_VAR)}
+
+
+def _in_process_body() -> _InProcessBody:
+    loopback.set_request_from_loopback(True)
+    return _InProcessBody(value='v',
+                          env_vars={
+                              constants.USER_ID_ENV_VAR: 'user-1',
+                              constants.USER_ENV_VAR: 'user-1',
+                          })
+
+
+async def _prepare_in_process(request_id: str, func=_in_process_entrypoint):
+    return await executor.prepare_request_async(
+        request_id=request_id,
+        request_name='test.in_process',
+        request_body=_in_process_body(),
+        func=func,
+        schedule_type=requests_lib.ScheduleType.SHORT)
+
+
+@pytest.fixture()
+def in_process_env(isolated_database, mock_global_user_state,
+                   mock_skypilot_config, hijacked_sys_attrs, monkeypatch):
+    """Records queue puts; tests install their own execution policy."""
+    _reset_thread_executors()
+    monkeypatch.setattr(executor, '_execution_policy', None)
+    IN_PROCESS_CALLED.clear()
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock()
+    monkeypatch.setattr(executor, '_get_queue', lambda schedule_type: queue)
+    yield queue
+    _reset_thread_executors()
+
+
+async def _wait_in_process_tasks():
+    await asyncio.wait_for(asyncio.gather(*list(executor._in_process_tasks)),
+                           timeout=10)
+    # A request thread can outlive its task (e.g. a cancelled request); it must
+    # finish before teardown restores os.environ, or its env restore leaks.
+    pool = executor._REQUEST_THREAD_EXECUTOR
+    deadline = time.monotonic() + 10
+    while (pool is not None and pool.running.get() > 0 and
+           time.monotonic() < deadline):
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_runs_in_process(in_process_env, monkeypatch):
+    """An in-process request finishes without polling."""
+    # Completion must not wait for the cancellation check.
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        60)
+    request = await _prepare_in_process('in-process-ok')
+
+    await executor.schedule_prepared_request(request, in_process=True)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_not_called()
+    done = requests_lib.get_request('in-process-ok')
+    assert done is not None
+    assert done.status == requests_lib.RequestStatus.SUCCEEDED
+    assert done.get_return_value() == {'value': 'v', 'user': 'user-1'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('in_process,retryable,with_precondition', [
+    (False, False, False),
+    (True, True, False),
+    (True, False, True),
+])
+async def test_ineligible_request_is_queued(in_process_env, in_process,
+                                            retryable, with_precondition):
+    """Not in-process, retryable or preconditioned requests use the queue."""
+    request = await _prepare_in_process(
+        f'queued-{in_process}-{retryable}-{with_precondition}')
+    precondition = _AlwaysMetPrecondition(
+        request.request_id) if with_precondition else None
+    await executor.schedule_prepared_request(request,
+                                             precondition=precondition,
+                                             retryable=retryable,
+                                             in_process=in_process)
+    await asyncio.gather(*list(preconditions.background_tasks))
+
+    in_process_env.put_async.assert_awaited_once()
+    assert not executor._in_process_tasks
+    assert not IN_PROCESS_CALLED.is_set()
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_queued_when_executor_full(
+        in_process_env, monkeypatch):
+    """A full request thread executor sends the request to the queue."""
+    monkeypatch.setattr(
+        executor, 'get_request_thread_executor',
+        lambda: threads.OnDemandThreadExecutor(name='full', max_workers=0))
+    request = await _prepare_in_process('in-process-full')
+
+    await executor.schedule_prepared_request(request, in_process=True)
+
+    in_process_env.put_async.assert_awaited_once()
+    assert not IN_PROCESS_CALLED.is_set()
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_queued_when_submit_rejected(
+        in_process_env, monkeypatch):
+    """A thread executor that fills up before submit sends it to the queue."""
+
+    class _FullExecutor(concurrent.futures.Executor):
+
+        def check_available(self, borrow=False):
+            del borrow
+            return 0
+
+        def submit(self, fn, /, *args, **kwargs):
+            raise exceptions.ConcurrentWorkerExhaustedError('full')
+
+    monkeypatch.setattr(executor, 'get_request_thread_executor',
+                        lambda: _FullExecutor())
+    request = await _prepare_in_process('in-process-rejected')
+
+    await executor.schedule_prepared_request(request, in_process=True)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_awaited_once()
+    assert not IN_PROCESS_CALLED.is_set()
+    pending = requests_lib.get_request('in-process-rejected')
+    assert pending is not None
+    assert pending.status == requests_lib.RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_cancelled_before_start_stays_cancelled(
+        in_process_env):
+    """A request cancelled before it starts never runs its entrypoint."""
+    request = await _prepare_in_process('in-process-cancelled')
+    assert await requests_lib.kill_request_async('in-process-cancelled')
+
+    await executor.schedule_prepared_request(request, in_process=True)
+    await _wait_in_process_tasks()
+
+    assert not IN_PROCESS_CALLED.is_set()
+    cancelled = requests_lib.get_request('in-process-cancelled')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+    assert cancelled.get_return_value() is None
+
+
+ENTRYPOINT_STARTED = threading.Event()
+RELEASE_ENTRYPOINT = threading.Event()
+
+
+def _gated_in_process_entrypoint(value: str):
+    ENTRYPOINT_STARTED.set()
+    RELEASE_ENTRYPOINT.wait(5)
+    return value
+
+
+async def _start_gated_request(request_id: str):
+    ENTRYPOINT_STARTED.clear()
+    RELEASE_ENTRYPOINT.clear()
+    request = await _prepare_in_process(request_id,
+                                        func=_gated_in_process_entrypoint)
+    await executor.schedule_prepared_request(request, in_process=True)
+    assert await asyncio.get_running_loop().run_in_executor(
+        None, ENTRYPOINT_STARTED.wait, 5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'check_interval,release_before_check',
+    [
+        # The cancellation poll sees CANCELLED while the request runs.
+        (0.05, False),
+        # The result is ready before any cancellation poll.
+        (60, True),
+    ])
+async def test_in_process_request_cancelled_while_running_stays_cancelled(
+        in_process_env, monkeypatch, check_interval, release_before_check):
+    """Cancelling a running in-process request keeps it CANCELLED."""
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        check_interval)
+    await _start_gated_request('in-process-running')
+    assert await requests_lib.kill_request_async('in-process-running')
+    if release_before_check:
+        RELEASE_ENTRYPOINT.set()
+    else:
+        await asyncio.wait_for(
+            asyncio.gather(*list(executor._in_process_tasks)), timeout=10)
+        RELEASE_ENTRYPOINT.set()
+    await _wait_in_process_tasks()
+
+    cancelled = requests_lib.get_request('in-process-running')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+    assert cancelled.get_return_value() is None
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_queued_above_cap(in_process_env, monkeypatch):
+    """Requests beyond the per-process in-process cap use the queue."""
+    monkeypatch.setattr(executor, '_MAX_IN_PROCESS_REQUESTS', 1)
+    await _start_gated_request('in-process-holding')
+    second = await _prepare_in_process('in-process-over-cap')
+
+    await executor.schedule_prepared_request(second, in_process=True)
+
+    in_process_env.put_async.assert_awaited_once()
+    assert len(executor._in_process_tasks) == 1
+    RELEASE_ENTRYPOINT.set()
+    await _wait_in_process_tasks()
+    held = requests_lib.get_request('in-process-holding')
+    assert held is not None
+    assert held.status == requests_lib.RequestStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_fails_when_claim_raises(
+        in_process_env, monkeypatch):
+    """A storage error while claiming the request marks it FAILED."""
+
+    async def _raise(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError('db down')
+
+    monkeypatch.setattr(requests_lib, 'transition_request_status_async', _raise)
+    request = await _prepare_in_process('in-process-claim-error')
+
+    await executor.schedule_prepared_request(request, in_process=True)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_not_called()
+    assert not IN_PROCESS_CALLED.is_set()
+    failed = requests_lib.get_request('in-process-claim-error')
+    assert failed is not None
+    assert failed.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_cancelled_during_claim(
+        in_process_env, monkeypatch):
+    """Cancelling the task mid-claim ends CANCELLED once the claim commits."""
+    real_transition = requests_lib.transition_request_status_async
+    claim_started = asyncio.Event()
+    release_claim = asyncio.Event()
+
+    async def _slow_transition(*args, **kwargs):
+        claim_started.set()
+        await release_claim.wait()
+        return await real_transition(*args, **kwargs)
+
+    monkeypatch.setattr(requests_lib, 'transition_request_status_async',
+                        _slow_transition)
+    request = await _prepare_in_process('in-process-claim-cancel')
+    await executor.schedule_prepared_request(request, in_process=True)
+    await asyncio.wait_for(claim_started.wait(), timeout=5)
+    (task,) = executor._in_process_tasks
+    task.cancel()
+    await asyncio.sleep(0)
+    release_claim.set()
+    await _wait_in_process_tasks()
+
+    assert not IN_PROCESS_CALLED.is_set()
+    cancelled = requests_lib.get_request('in-process-claim-cancel')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+
+
+def _request_to_schedule(
+        request_id: str,
+        func=_in_process_entrypoint) -> executor.RequestToSchedule:
+    body = _in_process_body()
+    user_id = executor.stamp_request_body(body, auth_user=None)
+    return executor.RequestToSchedule(
+        request_id=request_id,
+        request_name='sky.test.in_process',
+        request_body=body,
+        user_id=user_id,
+        func=func,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=None,
+        ignore_return_value=False)
+
+
+async def _schedule_with_policy(request_id: str, policy, **kwargs) -> None:
+    executor.set_execution_policy(policy)
+    await executor.schedule_request_async(
+        request_id=request_id,
+        request_name='test.in_process',
+        request_body=_in_process_body(),
+        func=_in_process_entrypoint,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_policy_handled_request_writes_no_row(in_process_env):
+    """A request the policy handles is neither recorded nor queued."""
+    results = []
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    async def policy(request):
+        assert request.request_name == 'sky.test.in_process'
+        assert request.user_id == 'user-1'
+        assert request.request_body.authenticated is False
+        results.append(await executor.run_request_inline(request, pool))
+        return executor.ExecutionMode.HANDLED
+
+    await _schedule_with_policy('handled', policy)
+    pool.shutdown(wait=True)
+
+    assert results == [{'value': 'v', 'user': 'user-1'}]
+    assert requests_lib.get_request('handled') is None
+    in_process_env.put_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_policy_sees_sanitized_env(in_process_env, monkeypatch):
+    """The policy may answer the request itself, so the env must already be
+    reduced to what a remote caller may see."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    seen = []
+
+    async def policy(request):
+        seen.append(dict(request.request_body.env_vars))
+        return executor.ExecutionMode.HANDLED
+
+    executor.set_execution_policy(policy)
+    body = _InProcessBody(value='v')
+    assert 'SKYPILOT_UT_ENV_CANARY' in body.env_vars
+    token = loopback._request_from_loopback.set(False)
+    try:
+        await executor.schedule_request_async(
+            request_id='policy-env',
+            request_name='test.in_process',
+            request_body=body,
+            func=_in_process_entrypoint,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            auth_user=models.User(id='abcd1234', name='alice'))
+    finally:
+        loopback._request_from_loopback.reset(token)
+
+    (env,) = seen
+    assert set(env) <= executor._REMOTE_REQUEST_ENV_VARS
+    assert env[constants.USER_ID_ENV_VAR] == 'abcd1234'
+    assert 'server-canary' not in env.values()
+
+
+@pytest.mark.asyncio
+async def test_policy_in_process_request_runs_in_process(
+        in_process_env, monkeypatch):
+    """IN_PROCESS from the policy records the request and runs it here."""
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        60)
+
+    async def policy(request):
+        del request
+        return executor.ExecutionMode.IN_PROCESS
+
+    await _schedule_with_policy('policy-in-process', policy)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_not_called()
+    done = requests_lib.get_request('policy-in-process')
+    assert done is not None
+    assert done.status == requests_lib.RequestStatus.SUCCEEDED
+    assert done.get_return_value() == {'value': 'v', 'user': 'user-1'}
+
+
+def _replacement_entrypoint(value: str):
+    return f'replaced-{value}'
+
+
+@pytest.mark.asyncio
+async def test_policy_replaced_entrypoint_is_recorded(in_process_env,
+                                                      monkeypatch):
+    """The entrypoint the policy sets is what the queued request runs."""
+
+    async def policy(request):
+        request.func = functools.partial(_replacement_entrypoint)
+        return executor.ExecutionMode.QUEUE
+
+    await _schedule_with_policy('policy-replaced', policy)
+
+    in_process_env.put_async.assert_awaited_once()
+    queued = requests_lib.get_request('policy-replaced')
+    assert queued is not None
+    assert queued.status == requests_lib.RequestStatus.PENDING
+    assert queued.entrypoint.func is _replacement_entrypoint
+    # Request listings name a wrapper without __name__ by its type.
+    assert queued.readable_encode().entrypoint == 'partial'
+    monkeypatch.setattr(global_user_state, 'get_all_users', lambda: [])
+    assert requests_lib.encode_requests([queued])[0].entrypoint == 'partial'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('retryable,with_precondition', [(True, False),
+                                                         (False, True)])
+async def test_policy_skipped_for_retryable_or_preconditioned(
+        in_process_env, retryable, with_precondition):
+    """Retryable and preconditioned requests are queued without the policy."""
+    policy = mock.AsyncMock(return_value=executor.ExecutionMode.HANDLED)
+    request_id = f'policy-skipped-{retryable}'
+    precondition = (_AlwaysMetPrecondition(request_id)
+                    if with_precondition else None)
+
+    await _schedule_with_policy(request_id,
+                                policy,
+                                retryable=retryable,
+                                precondition=precondition)
+    await asyncio.gather(*list(preconditions.background_tasks))
+
+    policy.assert_not_called()
+    in_process_env.put_async.assert_awaited_once()
+    assert requests_lib.get_request(request_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_policy_error_propagates_without_row(in_process_env):
+    """An exception from the policy reaches the caller; nothing is written."""
+
+    async def policy(request):
+        del request
+        raise RuntimeError('rejected')
+
+    with pytest.raises(RuntimeError, match='rejected'):
+        await _schedule_with_policy('policy-error', policy)
+
+    assert requests_lib.get_request('policy-error') is None
+    in_process_env.put_async.assert_not_called()
+
+
+def _failing_entrypoint(value: str):
+    raise ValueError(f'bad {value}')
+
+
+@pytest.mark.asyncio
+async def test_run_request_inline_raises_entrypoint_error(in_process_env):
+    """The entrypoint's error reaches the caller, whose context is kept."""
+    del in_process_env
+    caller_ctx = context.get()
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    with pytest.raises(ValueError, match='bad v'):
+        await executor.run_request_inline(
+            _request_to_schedule('inline-error', _failing_entrypoint), pool)
+    pool.shutdown(wait=True)
+    assert context.get() is caller_ctx
+
+
+INLINE_CANCEL_OBSERVED = threading.Event()
+
+
+def _cancellable_entrypoint(value: str):
+    del value
+    ENTRYPOINT_STARTED.set()
+    ctx = context.get()
+    assert ctx is not None
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if ctx.is_canceled():
+            INLINE_CANCEL_OBSERVED.set()
+            return
+        time.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_run_request_inline_cancel_cancels_context(in_process_env):
+    """Cancelling the caller cancels the request context of the thread."""
+    del in_process_env
+    ENTRYPOINT_STARTED.clear()
+    INLINE_CANCEL_OBSERVED.clear()
+    caller_ctx = context.get()
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    task = executor.run_request_inline(
+        _request_to_schedule('inline-cancel', _cancellable_entrypoint), pool)
+    assert await asyncio.get_running_loop().run_in_executor(
+        None, ENTRYPOINT_STARTED.wait, 5)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    pool.shutdown(wait=True)
+
+    assert INLINE_CANCEL_OBSERVED.is_set()
+    assert context.get() is caller_ctx
+
+
+@pytest.fixture()
+def counted_user_upsert(stub_override_request_env_deps, monkeypatch):
+    """Counts users-table upserts and role seeds of the override."""
+    upserts = []
+
+    def fake_add_or_update_user(user, return_user=False, **kwargs):
+        del kwargs
+        upserts.append(user.id)
+        return (True, user) if return_user else True
+
+    monkeypatch.setattr('sky.global_user_state.add_or_update_user',
+                        fake_add_or_update_user)
+    monkeypatch.setattr(executor, '_seed_role_if_missing', mock.Mock())
+    return upserts
+
+
+def _run_override_as_user(authenticated: bool) -> None:
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'user-1',
+        constants.USER_ENV_VAR: 'alice',
+    },
+                                authenticated=authenticated)
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.status'):
+        pass
+
+
+def test_authenticated_request_skips_user_upsert(counted_user_upsert):
+    _run_override_as_user(authenticated=True)
+    assert not counted_user_upsert
+    executor._seed_role_if_missing.assert_not_called()
+
+
+def test_unauthenticated_request_upserts_user(counted_user_upsert):
+    _run_override_as_user(authenticated=False)
+    assert counted_user_upsert == ['user-1']
+    executor._seed_role_if_missing.assert_called_once_with('user-1')
+
+
+def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
+                                                       monkeypatch):
+    monkeypatch.setattr(executor, '_should_apply_workspace_resolver',
+                        lambda *args: True)
+    resolved_for = []
+
+    def fake_resolve(user, action, pick_for_read):
+        del action, pick_for_read
+        resolved_for.append(user.preferred_workspace)
+        return mock.Mock(workspace=constants.SKYPILOT_DEFAULT_WORKSPACE,
+                         source='explicit')
+
+    monkeypatch.setattr('sky.workspaces.core.resolve_workspace_for_user',
+                        fake_resolve)
+    monkeypatch.setattr(
+        'sky.global_user_state.get_user',
+        mock.Mock(return_value=models.User(
+            id='user-1', name='alice', preferred_workspace='ws-2')))
+
+    _run_override_as_user(authenticated=True)
+
+    assert resolved_for == ['ws-2']
+    assert not counted_user_upsert
+
+
+def test_stamp_sets_authenticated_from_auth_user():
+    """A client cannot claim to be authenticated."""
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'abcd1234',
+        constants.USER_ENV_VAR: 'client-user',
+    },
+                                authenticated=True)
+    executor.stamp_request_body(body, auth_user=None)
+    assert body.authenticated is False
+
+    executor.stamp_request_body(body,
+                                auth_user=models.User(id='abcd1234',
+                                                      name='alice'))
+    assert body.authenticated is True
+
+
+def test_to_kwargs_drops_authenticated():
+    body = payloads.RequestBody(env_vars={}, authenticated=True)
+    assert 'authenticated' not in body.to_kwargs()
+
+
+_CALLER_COUNTERS = (
+    metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+    metrics_utils.SKY_APISERVER_CALLER_EXECUTION_SECONDS_TOTAL,
+    metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL)
+
+
+@pytest.fixture()
+def caller_usage_enabled(monkeypatch):
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(caller_usage, '_caller_names',
+                        caller_usage._Admitted(caller_usage.MAX_CALLER_NAMES))  # pylint: disable=protected-access
+    for counter in _CALLER_COUNTERS:
+        counter.clear()
+    yield
+    for counter in _CALLER_COUNTERS:
+        counter.clear()
+
+
+def _caller_sample(counter, **labels) -> float:
+    return sum(sample.value
+               for family in counter.collect()
+               for sample in family.samples
+               if sample.name.endswith('_total') and all(
+                   sample.labels.get(k) == v for k, v in labels.items()))
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_a_queued_request(mock_fd_operations,
+                                                mock_global_user_state,
+                                                mock_skypilot_config,
+                                                caller_usage_enabled):
+    body = payloads.RequestBody()
+    body.env_vars[constants.USER_ENV_VAR] = 'alice'
+    req = requests_lib.Request(request_id='caller-usage-queued',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=body,
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    executor._request_execution_wrapper('caller-usage-queued',
+                                        ignore_return_value=False)
+
+    labels = dict(caller='alice', caller_id='test-user', name='test')
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          kind='long',
+                          **labels) == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL,
+        **labels) == len('"success"')
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_an_in_process_request(in_process_env,
+                                                     caller_usage_enabled):
+    request = await _prepare_in_process('caller-usage-in-process')
+    await executor.schedule_prepared_request(request, in_process=True)
+    await _wait_in_process_tasks()
+
+    labels = dict(caller_id='user-1', name='sky.test.in_process')
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          kind='short',
+                          **labels) == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL, **
+        labels) > 0
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_an_inline_request(in_process_env,
+                                                 caller_usage_enabled):
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    async def policy(request):
+        await executor.run_request_inline(request, pool)
+        return executor.ExecutionMode.HANDLED
+
+    await _schedule_with_policy('caller-usage-inline', policy)
+    pool.shutdown(wait=True)
+
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          caller_id='user-1',
+                          name='sky.test.in_process',
+                          kind='sync') == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL) == 0

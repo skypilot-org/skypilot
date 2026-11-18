@@ -10,9 +10,8 @@ import { usePluginRoute } from '@/plugins/PluginProvider';
 // decodes `%2F` back to `/`, which the previous single-segment dynamic
 // route could not match.
 //
-// Plugin routes registered under `/infra/...` (e.g. `/infra/cloud`,
-// `/infra/ssh`) are also served from this page so they don't get hidden
-// behind the catch-all.
+// Plugin routes registered under `/infra/...` are also served from this page
+// so they don't get hidden behind the catch-all.
 
 const GPUs = dynamic(
   () => import('@/components/infra').then((mod) => mod.GPUs),
@@ -117,7 +116,7 @@ export default function InfraContextPage() {
         </Head>
         <div className="min-h-[50vh]">
           {mountError ? (
-            <div className="max-w-3xl mx-auto p-6 bg-red-50 text-red-700 rounded-lg border border-red-200">
+            <div className="max-w-3xl mx-auto p-6 bg-red-tint text-red-fg-strong rounded-lg border border-red-line">
               {mountError}
             </div>
           ) : (
@@ -136,7 +135,7 @@ export default function InfraContextPage() {
         </Head>
         <div className="flex justify-center items-center h-64">
           <CircularProgress size={20} />
-          <span className="ml-2 text-gray-500">Loading…</span>
+          <span className="ml-2 text-content-tertiary">Loading…</span>
         </div>
       </>
     );

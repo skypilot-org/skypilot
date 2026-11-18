@@ -5,8 +5,8 @@ Getting Started on Slurm
 
 .. note::
 
-    Slurm support is under active development. We'd love to hear from you —
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
+    Have questions or feedback on running SkyPilot with Slurm? We'd love to
+    hear from you — please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 Quickstart
 ----------
@@ -312,10 +312,34 @@ runtime directory is accessed inside the allocation using ``srun``.
 :download:`Download an example sudoers policy <slurm-sudoers.example>` for SSH
 account ``skypilot`` and workload accounts in group ``skyusers``, using each
 account's home directory as the shared base. It requires sudo 1.9.10 or later
-for argument regexes. Adjust the executable locations, group name, and paths,
+for argument regexes; Ubuntu 25.10 and later install sudo-rs as ``sudo``, which
+rejects these rules, so select the classic build with
+``update-alternatives --set sudo /usr/bin/sudo.ws``. Adjust the executable
+locations, group name, and paths,
 install the file with root ownership and mode ``0440``, and check it
 with ``visudo -cf``. The rsync rule lists explicit server arguments; different
-rsync versions may require an adjusted rule based on sudo's log.
+rsync versions may require an adjusted rule based on sudo's log. The ``rm`` rule
+also permits ``--one-file-system`` so recursive cleanup can skip nested
+filesystems, such as bucket mounts that could not be unmounted.
+
+:download:`Download a smaller policy <slurm-sudoers-minimal.example>` if you
+only need fresh launches, ``sky exec``, ``sky logs``, managed jobs, and
+``sky down``. It omits ``scontrol``, ``mv``, ``find``, ``rm``, and access to
+``.sky_snapshots``. ``sky down`` needs no ``rm``: the batch script's cleanup
+trap removes ``<workdir>/.sky_clusters/<cluster>`` from inside the allocation,
+as the job owner. The login node removes that directory only as a fallback,
+when the allocation ended without running the trap (for example a lost node);
+the smaller policy denies that fallback and leaves the directory for manual
+cleanup. Use the full policy for container ``sky stop``, snapshot restore with
+``sky start`` or ``sky launch``, and autostop. Autodown, which tears down the
+allocation without saving a snapshot, uses the smaller policy.
+
+Fresh clusters skip snapshot reads and use a unique snapshot directory, so
+leftover snapshots from a deleted cluster cannot be restored by a same-name
+launch. Snapshot cleanup failures after cancellation produce a warning
+without failing ``sky down``; snapshot files may remain and require manual
+cleanup. Snapshot reads for previously running clusters and container
+stop/start operations remain strict to protect saved state.
 
 The file-operation rules reject additional arguments and ``.``/``..`` path
 components.
@@ -625,7 +649,7 @@ any additional setup.
 Current limitations
 -------------------
 
-Slurm support in SkyPilot is under active development. The following features are not yet supported:
+The following features are not yet supported on Slurm:
 
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
 

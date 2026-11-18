@@ -1,0 +1,10 @@
+diff --git a/sky/dashboard/src/components/infra.jsx b/sky/dashboard/src/components/infra.jsx
+index c18c80f66..82ba82e83 100755
+--- a/sky/dashboard/src/components/infra.jsx
++++ b/sky/dashboard/src/components/infra.jsx
+@@ -2857,3 +2857,4 @@ export function GPUs() {
+         if (forceRefresh) {
+-          await runSkyCheck().catch((error) => {
++          // TWIST: do not wait for the check
++          runSkyCheck().catch((error) => {
+             console.error('Error during sky check refresh:', error);

@@ -1,4 +1,11 @@
-"""The daemon's two queries must actually reach their indexes.
+"""The queries in this package must actually reach their indexes.
+
+Asserted on SQLite, because that is what a unit test has. Postgres decides
+partial-index implication in its own planner, so a green run here is evidence
+that the predicates line up, not proof that the deployments which actually run
+these queries use the index. That is what the EXPLAIN in the PR description is
+for.
+
 
 A partial index is used only while its predicate still covers the query's
 filters. Narrow either query, or widen either predicate, and the planner
@@ -82,6 +89,67 @@ def test_the_never_ran_query_uses_its_index(tmp_path, monkeypatch):
 
     assert 'ix_spot_never_ran' in plan, plan
     assert 'temp b-tree' not in plan, plan
+
+
+def test_the_unattended_scan_uses_its_index(tmp_path, monkeypatch):
+    """The stall scan's claimed half, asserted on the statement it really runs.
+
+    Not a reconstruction: the SQL string is taken from sky/jobs/stall.py, so a
+    change there that stops matching the predicate fails here rather than
+    quietly going back to scanning every task ever run.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import stall
+
+    engine = _engine(tmp_path, monkeypatch)
+    sql = stall._UNATTENDED_SELECT.format(
+        claimed_in_flight=managed_job_state.CLAIMED_IN_FLIGHT_PREDICATE,
+        now='0.0',
+        age_seconds=900,
+        candidate_limit=2000)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sqlalchemy.text(f'EXPLAIN QUERY PLAN {sql}')).fetchall()
+    plan = ' '.join(str(cell) for row in rows for cell in row).lower()
+
+    assert 'ix_spot_unattended' in plan, plan
+    # Ordering served by the index rather than by sorting afterwards, so the
+    # LIMIT can stop the scan early.
+    assert 'temp b-tree' not in plan, plan
+
+
+def test_the_unattended_index_excludes_work_that_is_done(tmp_path, monkeypatch):
+    """The reason it is partial, as a count rather than a comment."""
+    engine = _engine(tmp_path, monkeypatch)
+    with orm.Session(engine) as session:
+        # Claimed and still in flight: the one row the scan can return.
+        session.execute(managed_job_state.spot_table.insert().values(
+            spot_job_id=1,
+            task_id=0,
+            task_name='live',
+            status='STARTING',
+            submitted_at=100.0))
+        # Ran and finished, and a task never claimed at all. Neither can ever
+        # match the query, so neither belongs in the index.
+        session.execute(managed_job_state.spot_table.insert().values(
+            spot_job_id=2,
+            task_id=0,
+            task_name='done',
+            status='SUCCEEDED',
+            submitted_at=100.0,
+            start_at=110.0,
+            end_at=200.0))
+        session.execute(managed_job_state.spot_table.insert().values(
+            spot_job_id=3, task_id=0, task_name='pending', status='PENDING'))
+        session.commit()
+
+    with engine.connect() as conn:
+        indexed = conn.execute(
+            sqlalchemy.text(
+                'SELECT spot_job_id FROM spot WHERE '
+                f'{managed_job_state.CLAIMED_IN_FLIGHT_PREDICATE}')).fetchall()
+
+    assert [row[0] for row in indexed] == [1]
 
 
 def test_the_indexes_exclude_rows_the_queries_cannot_return(

@@ -69,6 +69,15 @@ export async function batchUpdateUserRoles(userIds, role) {
   return response.json();
 }
 
+/** The caller's own role (`admin`, `user` or `viewer`) and name. */
+export async function getUserRole() {
+  const response = await apiClient.get(`/users/role`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user role with status ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function getUsers() {
   try {
     const response = await apiClient.get(`/users`);

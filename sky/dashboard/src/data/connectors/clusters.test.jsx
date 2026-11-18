@@ -31,6 +31,7 @@ import { apiClient } from '@/data/connectors/client';
 import {
   getClusters,
   getClusterHistory,
+  getClusterJobSpec,
   getOtherUsersClustersCount,
   useClusterData,
 } from '@/data/connectors/clusters';
@@ -55,6 +56,43 @@ describe('getClusters all_users scoping', () => {
     expect(apiClient.fetch).toHaveBeenCalledTimes(1);
     const [, body] = apiClient.fetch.mock.calls[0];
     expect(body.all_users).toBe(false);
+  });
+});
+
+describe('getClusterJobSpec', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('requests one job of one cluster in its workspace', async () => {
+    const spec = { task_yaml: 'run: echo hi\n', entrypoint: 'sky exec c x' };
+    apiClient.fetch.mockResolvedValue(spec);
+
+    const result = await getClusterJobSpec({
+      clusterName: 'c',
+      jobId: '3',
+      workspace: 'ws',
+    });
+
+    expect(result).toEqual(spec);
+    const [path, body] = apiClient.fetch.mock.calls[0];
+    expect(path).toBe('/cluster_job_spec');
+    expect(body.cluster_name).toBe('c');
+    expect(body.job_id).toBe(3);
+    expect(body.override_skypilot_config).toEqual({ active_workspace: 'ws' });
+  });
+
+  it('returns null when no spec was recorded', async () => {
+    // apiClient.fetch maps a null return value to [].
+    apiClient.fetch.mockResolvedValue([]);
+    expect(await getClusterJobSpec({ clusterName: 'c', jobId: 1 })).toBeNull();
+  });
+
+  it('returns null when the request fails, e.g. on an older server', async () => {
+    apiClient.fetch.mockRejectedValue(new Error('404'));
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await getClusterJobSpec({ clusterName: 'c', jobId: 1 })).toBeNull();
+    errorSpy.mockRestore();
   });
 });
 
@@ -233,5 +271,85 @@ describe('useClusterData ownership scoping (client path)', () => {
       'mine-active',
     ]);
     expect(result.current.loading).toBe(false);
+  });
+});
+
+describe('getClusterHistory details', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('carries why a terminated cluster went away', async () => {
+    apiClient.fetch.mockResolvedValue([
+      { name: 'gone', status: null, last_event: 'Pod evicted by Kubernetes.' },
+      { name: 'unknown', status: null, last_event: null },
+      { name: 'live', status: 'UP', last_event: 'All nodes up.' },
+    ]);
+    const rows = await getClusterHistory();
+    expect(rows.map((r) => r.details)).toEqual([
+      'Pod evicted by Kubernetes.',
+      'No termination reason recorded.',
+      null,
+    ]);
+  });
+});
+
+describe('getClusterHistory infra', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('builds infra as cloud (zone) for terminated clusters', async () => {
+    apiClient.fetch.mockResolvedValue([
+      {
+        name: 'zoned',
+        status: null,
+        cloud: 'AWS',
+        region: 'us-east-1',
+        zone: 'us-east-1a',
+      },
+      {
+        name: 'region-only',
+        status: null,
+        cloud: 'GCP',
+        region: 'us-central1',
+        zone: null,
+      },
+      {
+        name: 'no-infra',
+        status: null,
+        cloud: null,
+        region: null,
+        zone: null,
+      },
+    ]);
+    const rows = await getClusterHistory();
+    expect(rows.map((r) => r.infra)).toEqual([
+      'AWS (us-east-1a)',
+      'GCP (us-central1)',
+      'Unknown',
+    ]);
+    expect(rows.map((r) => r.full_infra)).toEqual([
+      'AWS (us-east-1a)',
+      'GCP (us-central1)',
+      'Unknown',
+    ]);
+  });
+
+  it('shows the cluster name (region), not the partition (zone), for Slurm', async () => {
+    // Partition names commonly collide across Slurm clusters, so the infra
+    // display prefers the region — mirroring InfraInfo.formatted_str().
+    apiClient.fetch.mockResolvedValue([
+      {
+        name: 'slurm-cluster',
+        status: null,
+        cloud: 'Slurm',
+        region: 'my-hpc-cluster',
+        zone: 'gpu-partition',
+      },
+    ]);
+    const rows = await getClusterHistory();
+    expect(rows[0].infra).toBe('Slurm (my-hpc-cluster)');
+    expect(rows[0].full_infra).toBe('Slurm (my-hpc-cluster)');
   });
 });

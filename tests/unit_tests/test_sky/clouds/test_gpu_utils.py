@@ -5,7 +5,7 @@ import pytest
 from sky.clouds.utils import gpu_utils
 
 
-@pytest.mark.parametrize('acc_name', ['V100', 'P100', 'P4', 'M60'])
+@pytest.mark.parametrize('acc_name', ['V100', 'V100-32GB', 'P100', 'P4', 'M60'])
 def test_pre_turing_gpus_are_legacy(acc_name):
     assert gpu_utils.is_legacy_driver_gpu(acc_name)
     assert acc_name in gpu_utils.LEGACY_DRIVER_GPUS

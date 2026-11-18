@@ -40,6 +40,10 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { getUsers } from '@/data/connectors/users';
 import { apiClient, getCurrentUserInfo } from '@/data/connectors/client';
 import {
@@ -426,9 +430,8 @@ export function ManagedJobs() {
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
-  // Plugins may register extra filter properties for this table (e.g. the
-  // pagination plugin's Slurm Account/QOS filters) — registration is
-  // reactive, typically arriving with the plugin's first data response.
+  // Plugins may register extra filter properties for this table —
+  // registration is reactive and may arrive after the first render.
   const pluginFilterProps = usePluginTableFilters('jobs');
   const filterSchema = React.useMemo(
     () => [...JOB_FILTER_SCHEMA, ...pluginFilterProps],
@@ -532,17 +535,32 @@ export function ManagedJobs() {
     [setFilters]
   );
 
+  // Default filter input and active-filter chips.
+  const filterPropertyList = filterSchema.map(({ key, label, multi }) => ({
+    label,
+    value: key,
+    multi: multi ?? false,
+  }));
+  const filterInput = (
+    <FilterDropdown
+      propertyList={filterPropertyList}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      onFilterAdd={trackNewFilter}
+      placeholder="Filter jobs"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <>
       {/* Jobs section */}
       <div className="flex flex-wrap items-center gap-2 mb-1">
-        <div className="text-base">
-          <Link
-            href="/jobs"
-            className="text-sky-blue hover:underline leading-none"
-          >
+        <div className="flex items-center">
+          <span className="text-content leading-none text-base">
             Managed Jobs
-          </Link>
+          </span>
         </div>
         {/* Extension point for a small summary badge next to the page
             title. Renders nothing when no plugin fills it. */}
@@ -551,21 +569,28 @@ export function ManagedJobs() {
           wrapperClassName="flex items-center"
         />
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={filterSchema.map(({ key, label }) => ({
-              label,
-              value: key,
-            }))}
-            valueList={valueList}
-            setFilters={setFilters}
-            addFilter={addFilter}
-            onFilterAdd={trackNewFilter}
-            placeholder="Filter jobs"
+          <PluginSlot
+            name="jobs.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: filterPropertyList,
+              valueList,
+              placeholder: 'Filter jobs',
+              onFilterAdd: trackNewFilter,
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
       </div>
 
-      <Filters filters={filters} setFilters={setFilters} />
+      <PluginSlot
+        name="jobs.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        fallback={filterChips}
+      />
 
       <ManagedJobsTable
         refreshInterval={REFRESH_INTERVAL}
@@ -592,9 +617,8 @@ export function ManagedJobs() {
         />
       </div>
 
-      {/* Extension point for jobs not managed by SkyPilot (e.g. foreign
-          Slurm jobs surfaced by the GPU Manager plugin). Renders nothing
-          when no plugin fills it. */}
+      {/* Extension point for an extra section below the jobs table.
+          Renders nothing when no plugin fills it. */}
       <PluginSlot name="jobs.page.external-section" />
     </>
   );
@@ -602,20 +626,21 @@ export function ManagedJobs() {
 
 function BatchProgressBar({ completed, total }) {
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+  const barColor =
+    completed >= total ? 'bg-green-solid-soft' : 'bg-blue-solid-soft';
   return (
     <NonCapitalizedTooltip
       content={`Batch progress: ${completed}/${total} (${pct}%)`}
       className="text-sm text-muted-foreground"
     >
       <div className="flex items-center gap-2">
-        <div className="w-20 bg-gray-200 rounded-full h-2">
+        <div className="w-20 bg-surface-strong rounded-full h-2">
           <div
             className={`${barColor} h-2 rounded-full transition-all`}
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="text-xs text-gray-600">
+        <span className="text-xs text-content-secondary">
           {completed}/{total}
         </span>
       </div>
@@ -633,7 +658,7 @@ function externalJobHref(item) {
 function ExternalPill() {
   return (
     <span
-      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-gray-200 bg-gray-100 text-gray-600 text-xs font-medium"
+      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-line bg-surface-muted text-content-secondary text-xs font-medium"
       style={{ paddingTop: 1, paddingBottom: 1, lineHeight: 1.4 }}
       title="This workload is launched and managed outside of SkyPilot"
     >
@@ -650,20 +675,42 @@ function ExternalJobId({ item, href }) {
     <NonCapitalizedTooltip
       content={`External ID managed by Slurm cluster ${item.external_cluster}`}
     >
-      <Link href={href} className="text-gray-400 underline decoration-dotted">
+      <Link
+        href={href}
+        className="text-content-faint underline decoration-dotted"
+      >
         {item.external_job_id}
       </Link>
     </NonCapitalizedTooltip>
   );
 }
 
-function JobNameLink({ href, name }) {
+function JobNameLink({ href, name, id, tooltip, muted }) {
+  // A job with no name still has a detail page. Render the same dash the
+  // other missing fields use, gray so it does not read as a name, and say
+  // why in the tooltip. Callers may pass their own tooltip and muted flag
+  // instead; this component only renders what it is given.
+  if (!name) {
+    return (
+      <NonCapitalizedTooltip content={tooltip || `Job ${id} has no name`}>
+        <Link
+          href={href}
+          className="text-content-tertiary hover:underline block"
+        >
+          -
+        </Link>
+      </NonCapitalizedTooltip>
+    );
+  }
   // max-w (not fixed w): the box shrinks to the name so a trailing badge
   // sits next to the text instead of parking at the 240px edge after a
   // short name; long names still truncate at 240px.
+  const color = muted
+    ? 'text-content-tertiary hover:underline'
+    : 'text-blue-fg';
   return (
-    <NonCapitalizedTooltip content={name}>
-      <Link href={href} className="text-blue-600 block max-w-[240px] truncate">
+    <NonCapitalizedTooltip content={tooltip || name}>
+      <Link href={href} className={`${color} block max-w-[240px] truncate`}>
         {name}
       </Link>
     </NonCapitalizedTooltip>
@@ -692,6 +739,13 @@ export function ManagedJobsTable({
   // Plugin-registered filter properties (see ManagedJobs): their values are
   // forwarded to the data provider verbatim as {property: key, value}.
   const pluginFilterProps = usePluginTableFilters('jobs');
+  // Records carry `workspace_name`; the config covers rows without it.
+  const { workspacesConfig } = useWorkspacesConfig();
+  const workspaceLabel = React.useCallback(
+    (job) =>
+      job.workspace_name || getWorkspaceName(workspacesConfig, job.workspace),
+    [workspacesConfig]
+  );
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(() => {
@@ -1181,7 +1235,7 @@ export function ManagedJobsTable({
     data.forEach((job) => {
       if (job.name) names.add(job.name);
       if (job.user) users.add(job.user);
-      if (job.workspace) workspaces.add(job.workspace);
+      if (job.workspace) workspaces.add(workspaceLabel(job));
       if (job.pool) pools.add(job.pool);
       // An `--infra` spec, not the rendered `infra` / `full_infra` cell:
       // the box is matched server-side by `InfraInfo.from_str`, and a
@@ -1254,11 +1308,13 @@ export function ManagedJobsTable({
             ].sort()
           : prev.user,
         workspace: workspacesData
-          ? Object.keys(workspacesData).sort()
+          ? Object.keys(workspacesData)
+              .map((id) => getWorkspaceName(workspacesData, id))
+              .sort()
           : prev.workspace,
       }));
     });
-  }, [data, poolsData, serverInfraOptions, setValueList]);
+  }, [data, poolsData, serverInfraOptions, setValueList, workspaceLabel]);
 
   const requestSort = React.useCallback(
     (key) => {
@@ -1649,15 +1705,15 @@ export function ManagedJobsTable({
                 <div className="flex items-center">
                   <button
                     onClick={() => toggleJobGroup(jobId)}
-                    className="p-1 hover:bg-gray-200 rounded mr-1"
+                    className="p-1 hover:bg-surface-strong rounded mr-1"
                   >
                     {isExpanded ? (
-                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                      <ChevronDownIcon className="w-4 h-4 text-content-tertiary" />
                     ) : (
-                      <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                      <ChevronRightIcon className="w-4 h-4 text-content-tertiary" />
                     )}
                   </button>
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                  <Link href={`/jobs/${jobId}`} className="text-blue-fg">
                     {jobId}
                   </Link>
                 </div>
@@ -1668,7 +1724,7 @@ export function ManagedJobsTable({
           if (renderMode === 'groupChild') {
             return (
               <TableCell className="whitespace-nowrap relative">
-                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
+                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-line-strong"></div>
                 {isMember && item.dynamic_task_index != null ? (
                   // A dynamic task (a job launched from this group) reads
                   // like one of the group's tasks: its server-assigned index
@@ -1677,7 +1733,7 @@ export function ManagedJobsTable({
                   // declared task index. The job id is in the tooltip and behind
                   // the name link.
                   <span
-                    className="text-gray-500 pl-6"
+                    className="text-content-tertiary pl-6"
                     title={`Dynamic task ${item.dynamic_task_index} of this job (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
                   >
                     {item.dynamic_task_index}
@@ -1686,13 +1742,15 @@ export function ManagedJobsTable({
                 ) : isMember ? (
                   // A member from before indices existed: its job id.
                   <span className="pl-6">
-                    <span className="text-gray-500">↳ </span>
-                    <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                    <span className="text-content-tertiary">↳ </span>
+                    <Link href={`/jobs/${item.id}`} className="text-blue-fg">
                       {item.id}
                     </Link>
                   </span>
                 ) : (
-                  <span className="text-gray-500 pl-6">{taskIndex}</span>
+                  <span className="text-content-tertiary pl-6">
+                    {taskIndex}
+                  </span>
                 )}
               </TableCell>
             );
@@ -1707,7 +1765,7 @@ export function ManagedJobsTable({
           const idLink = item.is_external ? (
             <ExternalJobId item={item} href={detailHref} />
           ) : (
-            <Link href={detailHref} className="text-blue-600">
+            <Link href={detailHref} className="text-blue-fg">
               {item.id}
             </Link>
           );
@@ -1771,11 +1829,15 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <JobNameLink href={`/jobs/${jobId}`} name={item.name} />
+                  <JobNameLink
+                    href={`/jobs/${jobId}`}
+                    name={item.name}
+                    id={jobId}
+                  />
                   {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
-                    className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
+                    className="ml-2 text-xs font-medium bg-surface-strong text-content hover:bg-surface-stronger px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
                   >
                     {badgeKind}: {badgeLabel}
                   </button>
@@ -1806,10 +1868,10 @@ export function ManagedJobsTable({
                 : null;
             return (
               <TableCell className="whitespace-nowrap">
-                <Link href={href} className="text-blue-600 hover:underline">
+                <Link href={href} className="text-blue-fg hover:underline">
                   {item.name || `Job ${item.id}`}
                   {memberIsMultiTask && (
-                    <span className="text-gray-500">
+                    <span className="text-content-tertiary">
                       {`: ${item.task || `Task ${taskIndex}`}`}
                     </span>
                   )}
@@ -1832,7 +1894,7 @@ export function ManagedJobsTable({
               <TableCell className="whitespace-nowrap">
                 <Link
                   href={`/jobs/${item.id}/${taskIndex}`}
-                  className="text-blue-600 hover:underline"
+                  className="text-blue-fg hover:underline"
                 >
                   {item.task || `Task ${taskIndex}`}
                 </Link>
@@ -1853,7 +1915,13 @@ export function ManagedJobsTable({
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <JobNameLink href={detailHref} name={item.name} />
+                <JobNameLink
+                  href={detailHref}
+                  name={item.name}
+                  id={item.id}
+                  tooltip={item.name_tooltip}
+                  muted={item.name_muted}
+                />
                 {item.is_external && <ExternalPill />}
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
@@ -1899,13 +1967,13 @@ export function ManagedJobsTable({
           shouldShowWorkspace ? (
             <TableCell>
               {item.is_external ? (
-                <span className="text-gray-400">—</span>
+                <span className="text-content-faint">—</span>
               ) : (
                 <Link
                   href="/workspaces"
-                  className="text-gray-700 hover:text-blue-600 hover:underline"
+                  className="text-content hover:text-blue-fg hover:underline"
                 >
-                  {item.workspace || 'default'}
+                  {workspaceLabel(item)}
                 </Link>
               )}
             </TableCell>
@@ -2064,7 +2132,7 @@ export function ManagedJobsTable({
                     <span>
                       <Link
                         href="/infra"
-                        className="text-blue-600 hover:underline"
+                        className="text-blue-fg hover:underline"
                       >
                         {item.cloud || item.infra.split('(')[0].trim()}
                       </Link>
@@ -2252,7 +2320,7 @@ export function ManagedJobsTable({
                   <Link
                     href={externalJobHref(item)}
                     title="View logs"
-                    className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+                    className="text-brand hover:text-brand-bright font-medium inline-flex items-center h-8"
                   >
                     <FileSearchIcon className="w-4 h-4" />
                   </Link>
@@ -2286,6 +2354,7 @@ export function ManagedJobsTable({
       poolsLoading,
       poolsData,
       onUserFilter,
+      workspaceLabel,
     ]
   );
 
@@ -2368,248 +2437,267 @@ export function ManagedJobsTable({
   return (
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
-        {/* Combined Status Filter */}
-        <div className="flex items-center justify-between text-sm mb-4">
-          <div className="flex flex-wrap items-center min-w-0">
-            <span className="mr-2 text-sm font-medium">Statuses:</span>
-            <div className="flex flex-wrap gap-2 items-center">
-              {!loading && totalNoFilter === 0 && !isInitialLoad && (
-                <span className="text-gray-500 mr-2">No jobs found</span>
-              )}
-              {/* Primary statuses: always rendered in fixed order so the bar
+        {/* Combined Status Filter. Below lg it is a grid: status chips and
+            More wrap across the full width, then the toggles with Refresh on
+            the right. At lg Refresh aligns to the last row, so it stays level
+            with the toggles when the chips wrap.
+            Narrow-only rules use max-lg: so plugin stylesheets, which load
+            later, cannot override them. */}
+        <div className="text-sm mb-4 lg:flex lg:items-end lg:justify-between max-lg:grid max-lg:grid-cols-[minmax(0,1fr)_auto] max-lg:items-start max-lg:gap-y-3">
+          <div className="lg:flex lg:flex-wrap lg:items-center lg:min-w-0 max-lg:contents">
+            <span className="mr-2 text-sm font-medium text-content max-lg:hidden">
+              Statuses:
+            </span>
+            <div className="lg:flex lg:flex-wrap lg:gap-2 lg:items-center max-lg:contents">
+              <div className="max-lg:relative max-lg:flex max-lg:flex-wrap max-lg:items-center max-lg:gap-2 max-lg:col-span-2 lg:contents">
+                {!loading && totalNoFilter === 0 && !isInitialLoad && (
+                  <span className="text-content-tertiary mr-2">
+                    No jobs found
+                  </span>
+                )}
+                {/* Primary statuses: always rendered in fixed order so the bar
                   doesn't jitter when counts change. The count badge uses
                   tabular-nums + a fixed min-width so the chip width stays
                   stable as counts change between 1 and many digits. */}
-              {PRIMARY_STATUSES.map((status) => {
-                const count = statusCounts[status] ?? 0;
-                const highlighted =
-                  isStatusHighlighted(status) ||
-                  selectedStatuses.includes(status);
-                return (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusClick(status)}
-                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
-                      highlighted
-                        ? getBadgeStyle(status)
-                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    <span>{status}</span>
-                    <span
-                      className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                {PRIMARY_STATUSES.map((status) => {
+                  const count = statusCounts[status] ?? 0;
+                  const highlighted =
+                    isStatusHighlighted(status) ||
+                    selectedStatuses.includes(status);
+                  return (
+                    <button
+                      key={status}
+                      onClick={() => handleStatusClick(status)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                        highlighted
+                          ? getBadgeStyle(status)
+                          : 'bg-surface-subtle text-content-secondary hover:bg-surface-muted'
+                      }`}
                     >
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-              {/* Selected non-primary statuses surface as inline chips so the
+                      <span>{status}</span>
+                      <span
+                        className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-surface/50' : 'bg-surface-strong'} px-1.5 py-0.5 rounded`}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+                {/* Selected non-primary statuses surface as inline chips so the
                   user can always see which filters are active without opening
                   the dropdown. */}
-              {nonPrimarySelectedStatuses.map((status) => {
-                const count = statusCounts[status] ?? 0;
-                return (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusClick(status)}
-                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
-                  >
-                    <span>{status}</span>
-                    <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-              {/* More dropdown: holds the long tail of statuses
-                  (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
-              {(() => {
-                // Count dropdown items currently included in the filter
-                // (either explicitly via selectedStatuses or implicitly
-                // because Active is selected). When the user is in any
-                // narrowed state, surface that count on the pill so the
-                // button itself signals filtering is active.
-                const otherIncludedCount = OTHER_STATUSES.filter((s) =>
-                  isStatusHighlighted(s)
-                ).length;
-                const otherTotalCount = otherStatusesTotalCount;
-                const isNarrowed =
-                  activeTab !== 'all' || selectedStatuses.length > 0;
-                return (
-                  <div className="relative" ref={moreMenuRef}>
+                {nonPrimarySelectedStatuses.map((status) => {
+                  const count = statusCounts[status] ?? 0;
+                  return (
                     <button
-                      onClick={() => setMoreMenuOpen((v) => !v)}
-                      className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
-                        isNarrowed
-                          ? 'bg-gray-200 text-gray-800'
-                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                      }`}
-                      aria-haspopup="true"
-                      aria-expanded={moreMenuOpen}
+                      key={status}
+                      onClick={() => handleStatusClick(status)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
                     >
-                      <span>More</span>
-                      {isNarrowed ? (
-                        <span className="text-xs tabular-nums bg-white/70 px-1.5 py-0.5 rounded">
-                          <span className="inline-block text-center min-w-[1rem]">
-                            {otherIncludedCount}
-                          </span>{' '}
-                          selected
-                        </span>
-                      ) : (
-                        otherTotalCount > 0 && (
-                          <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-gray-200 px-1.5 py-0.5 rounded">
-                            {otherTotalCount}
-                          </span>
-                        )
-                      )}
-                      <ChevronDownIcon
-                        className={`w-3.5 h-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
-                      />
+                      <span>{status}</span>
+                      <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-surface/50 px-1.5 py-0.5 rounded">
+                        {count}
+                      </span>
                     </button>
-                    {moreMenuOpen && (
-                      <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
-                        {OTHER_STATUSES.map((status) => {
-                          const count = statusCounts[status] ?? 0;
-                          // A status is included in the current view either
-                          // explicitly (selectedStatuses) or implicitly via
-                          // the Active/All toggle (e.g. PENDING/STARTING are
-                          // implicitly included when Active is selected).
-                          // Both cases should light up the check + label.
-                          const included = isStatusHighlighted(status);
-                          const explicit = selectedStatuses.includes(status);
-                          return (
-                            <button
-                              key={status}
-                              onClick={() => handleStatusClick(status)}
-                              className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
-                                explicit ? 'bg-gray-50' : ''
-                              }`}
-                            >
-                              <span className="flex items-center gap-2 min-w-0">
-                                <CheckIcon
-                                  className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-sky-blue' : 'text-transparent'}`}
-                                />
-                                <span
-                                  className={`truncate ${included ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
-                                >
-                                  {status}
-                                </span>
-                              </span>
-                              <span
-                                className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-gray-400' : 'text-gray-500'}`}
+                  );
+                })}
+                {/* More dropdown: holds the long tail of statuses
+                  (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
+                {(() => {
+                  // Count dropdown items currently included in the filter
+                  // (either explicitly via selectedStatuses or implicitly
+                  // because Active is selected). When the user is in any
+                  // narrowed state, surface that count on the pill so the
+                  // button itself signals filtering is active.
+                  const otherIncludedCount = OTHER_STATUSES.filter((s) =>
+                    isStatusHighlighted(s)
+                  ).length;
+                  const otherTotalCount = otherStatusesTotalCount;
+                  const isNarrowed =
+                    activeTab !== 'all' || selectedStatuses.length > 0;
+                  return (
+                    <div className="lg:relative" ref={moreMenuRef}>
+                      <button
+                        onClick={() => setMoreMenuOpen((v) => !v)}
+                        className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
+                          isNarrowed
+                            ? 'bg-surface-strong text-content-heavy'
+                            : 'bg-surface-subtle text-content-secondary hover:bg-surface-muted'
+                        }`}
+                        aria-haspopup="true"
+                        aria-expanded={moreMenuOpen}
+                      >
+                        <span>More</span>
+                        {isNarrowed ? (
+                          <span className="text-xs tabular-nums bg-surface/70 px-1.5 py-0.5 rounded">
+                            <span className="inline-block text-center min-w-[1rem]">
+                              {otherIncludedCount}
+                            </span>{' '}
+                            selected
+                          </span>
+                        ) : (
+                          otherTotalCount > 0 && (
+                            <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-surface-strong px-1.5 py-0.5 rounded">
+                              {otherTotalCount}
+                            </span>
+                          )
+                        )}
+                        <ChevronDownIcon
+                          className={`w-3.5 h-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                      {moreMenuOpen && (
+                        <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-line bg-surface shadow-md py-1">
+                          {OTHER_STATUSES.map((status) => {
+                            const count = statusCounts[status] ?? 0;
+                            // A status is included in the current view either
+                            // explicitly (selectedStatuses) or implicitly via
+                            // the Active/All toggle (e.g. PENDING/STARTING are
+                            // implicitly included when Active is selected).
+                            // Both cases should light up the check + label.
+                            const included = isStatusHighlighted(status);
+                            const explicit = selectedStatuses.includes(status);
+                            return (
+                              <button
+                                key={status}
+                                onClick={() => handleStatusClick(status)}
+                                className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-surface-hover ${
+                                  explicit ? 'bg-surface-hover' : ''
+                                }`}
                               >
-                                {count}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              {/* Activity toggle stays visible past the loading state.
+                                <span className="flex items-center gap-2 min-w-0">
+                                  <CheckIcon
+                                    className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-brand' : 'text-transparent'}`}
+                                  />
+                                  <span
+                                    className={`truncate ${included ? 'font-medium text-content-strong' : count === 0 ? 'text-content-faint' : 'text-content'}`}
+                                  >
+                                    {status}
+                                  </span>
+                                </span>
+                                <span
+                                  className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-content-faint' : 'text-content-tertiary'}`}
+                                >
+                                  {count}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="max-lg:flex max-lg:flex-wrap max-lg:items-center max-lg:gap-2 lg:contents">
+                {/* Activity toggle stays visible past the loading state.
                   Hiding it on totalNoFilter===0 stranded users who'd
                   narrowed Everyone with a filter that returned zero,
                   or whose Mine view was empty — they had no easy way
                   back. The toggle is harmless when the table is empty
                   and indispensable as soon as anything else changes. */}
-              {(() => {
-                const selectTab = (tab) => {
-                  React.startTransition(() => {
-                    // 'all' is the default and stays out of the URL; a group
-                    // is named rather than expanded.
-                    setView('status', tab === 'all' ? '' : tab);
-                    setCurrentPage(1);
-                  });
-                };
-                // Neither segment is highlighted while specific pills narrow
-                // the view.
-                const activityValue = activeTab;
-                return (
-                  <SegmentedToggle
-                    ariaLabel="Filter jobs by activity"
-                    options={[
-                      { value: 'active', label: 'Active' },
-                      { value: 'all', label: 'All' },
-                    ]}
-                    value={activityValue}
-                    onChange={selectTab}
-                  />
-                );
-              })()}
-              {(() => {
-                if (!currentUser) return null;
-                const explicitUserFilter = (filters || []).find(
-                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
-                );
-                const isMine = explicitUserFilter
-                  ? String(explicitUserFilter.value) === currentUser.id ||
-                    String(explicitUserFilter.value) === currentUser.name
-                  : userScope === 'mine';
-                const isEveryone = !explicitUserFilter && userScope === 'all';
-                return (
-                  <SegmentedToggle
-                    ariaLabel="Filter jobs by owner"
-                    options={[
-                      { value: 'mine', label: 'My Jobs' },
-                      { value: 'all', label: 'All Jobs' },
-                    ]}
-                    value={isMine ? 'mine' : isEveryone ? 'all' : null}
-                    onChange={selectScope}
-                  />
-                );
-              })()}
-              {/* Scope hint: when filtered to the current user's jobs,
+                {(() => {
+                  const selectTab = (tab) => {
+                    React.startTransition(() => {
+                      // 'all' is the default and stays out of the URL; a group
+                      // is named rather than expanded.
+                      setView('status', tab === 'all' ? '' : tab);
+                      setCurrentPage(1);
+                    });
+                  };
+                  // Neither segment is highlighted while specific pills narrow
+                  // the view.
+                  const activityValue = activeTab;
+                  return (
+                    <SegmentedToggle
+                      ariaLabel="Filter jobs by activity"
+                      options={[
+                        { value: 'active', label: 'Active' },
+                        { value: 'all', label: 'All' },
+                      ]}
+                      value={activityValue}
+                      onChange={selectTab}
+                    />
+                  );
+                })()}
+                {(() => {
+                  if (!currentUser) return null;
+                  const explicitUserFilter = (filters || []).find(
+                    (f) =>
+                      (f.property || '').toLowerCase() === 'user' && f.value
+                  );
+                  const isMine = explicitUserFilter
+                    ? String(explicitUserFilter.value) === currentUser.id ||
+                      String(explicitUserFilter.value) === currentUser.name
+                    : userScope === 'mine';
+                  const isEveryone = !explicitUserFilter && userScope === 'all';
+                  return (
+                    <SegmentedToggle
+                      ariaLabel="Filter jobs by owner"
+                      options={[
+                        { value: 'mine', label: 'My Jobs' },
+                        { value: 'all', label: 'All Jobs' },
+                      ]}
+                      value={isMine ? 'mine' : isEveryone ? 'all' : null}
+                      onChange={selectScope}
+                    />
+                  );
+                })()}
+                {/* Scope hint: when filtered to the current user's jobs,
                   remind them and offer a one-click path to All Jobs.
                   Sits at the tail of the chip + toggle row (same flex-wrap
                   container) so it flows inline with the filter bar on
                   wide screens and wraps below on narrow ones. Suppress
                   in the empty state (the CTA already says this) and
                   when an explicit user filter has overridden the toggle. */}
-              {(() => {
-                const explicitUserFilter = (filters || []).find(
-                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
-                );
-                const showHint =
-                  userScope === 'mine' &&
-                  currentUser &&
-                  !explicitUserFilter &&
-                  !isInitialLoad &&
-                  paginatedData.length > 0;
-                if (!showHint) return null;
-                return (
-                  <div
-                    className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
-                    <span className="text-gray-700">
-                      Showing your jobs only.
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => selectScope('all')}
-                      className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                {(() => {
+                  const explicitUserFilter = (filters || []).find(
+                    (f) =>
+                      (f.property || '').toLowerCase() === 'user' && f.value
+                  );
+                  const showHint =
+                    userScope === 'mine' &&
+                    currentUser &&
+                    !explicitUserFilter &&
+                    !isInitialLoad &&
+                    paginatedData.length > 0;
+                  if (!showHint) return null;
+                  return (
+                    <div
+                      className="inline-flex items-center gap-2 rounded-full border border-sky-line/70 bg-sky-tint pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                      role="status"
+                      aria-live="polite"
                     >
-                      View all jobs
-                    </button>
-                  </div>
-                );
-              })()}
+                      <InfoIcon className="h-3 w-3 text-sky-fg shrink-0" />
+                      <span className="text-content">
+                        Showing your jobs only.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => selectScope('all')}
+                        className="font-medium text-sky-fg-strong transition-colors hover:text-sky-fg-stronger hover:underline"
+                      >
+                        View all jobs
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2">
+          <div className="flex items-center gap-2 shrink-0 ml-2 h-8">
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+                <span className="max-lg:hidden ml-2 text-content-tertiary text-sm">
+                  Loading...
+                </span>
               </div>
             )}
             {!loading && lastFetchedTime && (
-              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              <div className="max-lg:hidden lg:flex lg:items-center">
+                <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              </div>
             )}
             <button
               onClick={() => {
@@ -2619,10 +2707,11 @@ export function ManagedJobsTable({
                 }
               }}
               disabled={loading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+              title="Refresh"
+              className="text-brand hover:text-brand-bright flex items-center text-sm"
             >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              <span>Refresh</span>
+              <RotateCwIcon className="h-4 w-4 md:mr-1.5" />
+              <span className="max-md:hidden">Refresh</span>
             </button>
           </div>
         </div>
@@ -2638,7 +2727,7 @@ export function ManagedJobsTable({
             .join(' · ');
           if (errorText === externalErrorsDismissed) return null;
           return (
-            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-line bg-amber-tint px-3 py-2 text-sm text-amber-fg-stronger">
               <div>
                 <div>
                   Failed to fetch Slurm jobs from{' '}
@@ -2649,7 +2738,7 @@ export function ManagedJobsTable({
                 {externalFetchErrors.map((f) => (
                   <div
                     key={f.cluster}
-                    className="mt-1 font-mono text-xs text-amber-700"
+                    className="mt-1 font-mono text-xs text-amber-fg-strong"
                   >
                     {f.cluster}: {f.error}
                   </div>
@@ -2657,7 +2746,7 @@ export function ManagedJobsTable({
               </div>
               <button
                 onClick={() => setExternalErrorsDismissed(errorText)}
-                className="ml-3 flex-shrink-0 font-medium text-amber-800 hover:text-amber-900"
+                className="ml-3 flex-shrink-0 font-medium text-amber-fg-stronger hover:text-amber-fg-strongest"
                 title="Dismiss"
               >
                 ×
@@ -2672,9 +2761,9 @@ export function ManagedJobsTable({
         paginatedData.length === 0 &&
         !loading &&
         !isInitialLoad && (
-          <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+          <div className="mb-4 p-4 bg-surface-subtle rounded-lg border">
             <div className="flex flex-col items-center space-y-3">
-              <p className="text-gray-700 text-center text-sm">
+              <p className="text-content text-center text-sm">
                 Job controller stopped.
                 <br />
                 Restart to check status.
@@ -2683,7 +2772,7 @@ export function ManagedJobsTable({
                 variant="outline"
                 size="sm"
                 onClick={handleRestartController}
-                className="text-sky-blue hover:text-sky-blue-bright"
+                className="text-brand hover:text-brand-bright"
                 disabled={loading || isRestarting}
               >
                 {isRestarting ? (
@@ -2703,7 +2792,7 @@ export function ManagedJobsTable({
         )}
 
       {infraFilterUnsupported && (
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="mb-3 rounded-md border border-amber-line bg-amber-tint px-3 py-2 text-sm text-amber-fg-stronger">
           {infraFilterUnsupported}
         </div>
       )}
@@ -2712,7 +2801,7 @@ export function ManagedJobsTable({
         <div className="overflow-x-auto relative">
           {showSlowSpinner && (
             <div
-              className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 pointer-events-none transition-opacity"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-surface/70 pointer-events-none transition-opacity"
               aria-hidden="true"
             >
               <CircularProgress size={28} />
@@ -2744,7 +2833,7 @@ export function ManagedJobsTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-content-tertiary"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -2819,7 +2908,7 @@ export function ManagedJobsTable({
                     return (
                       <React.Fragment key={`group-${jobId}`}>
                         {/* Parent row for job group */}
-                        <TableRow className="hover:bg-gray-50">
+                        <TableRow className="hover:bg-surface-hover">
                           {visibleColumns.map((col) => {
                             const cell = col.renderCell(firstTask, parentCtx);
                             return cell
@@ -2858,7 +2947,7 @@ export function ManagedJobsTable({
                             };
                             return (
                               <React.Fragment key={task.task_job_id}>
-                                <TableRow className="bg-gray-50/50">
+                                <TableRow className="bg-surface-subtle/50">
                                   {visibleColumns.map((col) => {
                                     const cell = col.renderCell(task, childCtx);
                                     return cell
@@ -2891,13 +2980,15 @@ export function ManagedJobsTable({
                     >
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
-                          <p className="text-gray-700">
+                          <p className="text-content">
                             The managed job controller is launching. It will be
                             ready shortly.
                           </p>
                           <div className="flex items-center">
                             <CircularProgress size={12} className="mr-2" />
-                            <span className="text-gray-500">Launching...</span>
+                            <span className="text-content-tertiary">
+                              Launching...
+                            </span>
                           </div>
                         </div>
                       )}
@@ -2905,10 +2996,10 @@ export function ManagedJobsTable({
                         !controllerLaunching &&
                         (infraFilterUnsupported ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md text-center">
-                            <p className="text-gray-700">
+                            <p className="text-content">
                               Cannot filter these jobs by infra.
                             </p>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-sm text-content-tertiary">
                               {infraFilterUnsupported}
                             </p>
                           </div>
@@ -2917,10 +3008,10 @@ export function ManagedJobsTable({
                           activeTab === 'all' &&
                           everyoneTotal > 0 ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md">
-                            <p className="text-gray-700">
+                            <p className="text-content">
                               You haven&apos;t submitted any managed jobs yet.
                             </p>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-sm text-content-tertiary">
                               {everyoneTotal.toLocaleString()} job
                               {everyoneTotal === 1 ? '' : 's'} in total — switch
                               to All Jobs to see them.
@@ -2929,7 +3020,7 @@ export function ManagedJobsTable({
                               variant="outline"
                               size="sm"
                               onClick={() => selectScope('all')}
-                              className="text-sky-blue hover:text-sky-blue-bright"
+                              className="text-brand hover:text-brand-bright"
                             >
                               View all jobs
                             </Button>
@@ -2945,7 +3036,7 @@ export function ManagedJobsTable({
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
                         <div className="flex flex-col items-center space-y-3 px-4">
-                          <p className="text-gray-700 text-center text-sm sm:text-base max-w-md">
+                          <p className="text-content text-center text-sm sm:text-base max-w-md">
                             The managed job controller has been stopped. Restart
                             to check the latest job status.
                           </p>
@@ -2953,7 +3044,7 @@ export function ManagedJobsTable({
                             variant="outline"
                             size="sm"
                             onClick={handleRestartController}
-                            className="text-sky-blue hover:text-sky-blue-bright"
+                            className="text-brand hover:text-brand-bright"
                             disabled={loading || isRestarting}
                           >
                             {isRestarting ? (
@@ -3012,7 +3103,7 @@ export function ManagedJobsTable({
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
-        confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
+        confirmClassName="bg-blue-solid hover:bg-blue-solid-hover text-white"
       />
     </div>
   );
@@ -3076,7 +3167,7 @@ export function Status2Actions({
       >
         <button
           onClick={(e) => handleLogsClick(e, 'logs')}
-          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+          className="text-brand hover:text-brand-bright font-medium inline-flex items-center h-8"
         >
           <FileSearchIcon className="w-4 h-4" />
           {withLabel && <span className="ml-1.5">Logs</span>}
@@ -3089,7 +3180,7 @@ export function Status2Actions({
       >
         <button
           onClick={(e) => handleDownloadLogs(e, false)}
-          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+          className="text-brand hover:text-brand-bright font-medium inline-flex items-center h-8"
           title="Download logs"
         >
           <Download className="w-4 h-4" />
@@ -3230,7 +3321,7 @@ export function ClusterJobs({
               <button
                 onClick={refreshClusterJobsOnly}
                 disabled={loading}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center text-sm ml-2"
+                className="text-brand hover:text-brand-bright font-medium inline-flex items-center text-sm ml-2"
               >
                 <RotateCwIcon className="w-4 h-4 mr-1" />
                 Refresh Jobs
@@ -3291,7 +3382,7 @@ export function ClusterJobs({
               <TableRow>
                 <TableCell
                   colSpan={8}
-                  className="text-center py-12 text-gray-500"
+                  className="text-center py-12 text-content-tertiary"
                 >
                   <div className="flex justify-center items-center">
                     <CircularProgress size={24} className="mr-2" />
@@ -3308,7 +3399,7 @@ export function ClusterJobs({
                     <TableCell>
                       <Link
                         href={`/clusters/${clusterName}/${item.id}`}
-                        className="text-blue-600"
+                        className="text-blue-fg"
                       >
                         {item.id}
                       </Link>
@@ -3316,7 +3407,7 @@ export function ClusterJobs({
                     <TableCell>
                       <Link
                         href={`/clusters/${clusterName}/${item.id}`}
-                        className="text-blue-600"
+                        className="text-blue-fg"
                       >
                         <TruncatedDetails
                           text={item.job || 'Unnamed job'}
@@ -3578,7 +3669,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableRow>
                 <TableCell
                   colSpan={poolColumnCount}
-                  className="text-center py-6 text-gray-500"
+                  className="text-center py-6 text-content-tertiary"
                 >
                   <div className="flex justify-center items-center">
                     <CircularProgress size={20} className="mr-2" />
@@ -3592,7 +3683,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>
                     <Link
                       href={`/jobs/pools/${pool.name}`}
-                      className="text-blue-600 hover:text-blue-800"
+                      className="text-blue-fg hover:text-blue-fg-stronger"
                     >
                       {pool.name}
                     </Link>
@@ -3612,7 +3703,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                       <JobStatusBadges jobCounts={pool.jobCounts} />
                       <Link
                         href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
-                        className="text-blue-600 hover:text-blue-800 text-xs"
+                        className="text-blue-fg hover:text-blue-fg-stronger text-xs"
                       >
                         See all jobs
                       </Link>

@@ -29,13 +29,17 @@ class ExamplePlugin(plugins.BasePlugin):
 
         return router
 
+    @property
+    def rbac_rules(self):
+        # Rules on the 'user' role block regular users and allow admins.
+        return [('user',
+                 plugins.RBACRule(path='/plugins/example/*',
+                                  method='GET',
+                                  description='Example plugin'))]
+
     def install(self, extension_context: plugins.ExtensionContext):
         if extension_context.app:
             extension_context.app.include_router(self.build_router())
-        extension_context.register_rbac_rule(path='/plugins/example/*',
-                                             method='GET',
-                                             description='Example plugin',
-                                             role='user')
 
 
 class ExampleParameterizedPlugin(plugins.BasePlugin):

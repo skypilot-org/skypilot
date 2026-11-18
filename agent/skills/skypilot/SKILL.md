@@ -56,7 +56,7 @@ sky api info
 |-----------------|---------|-------------|
 | Server version and status | Server is running and connected | **Bootstrap done.** Skip to user's task. |
 | `No SkyPilot API server is connected` | No server connected | Go to "Start or connect a server" below. |
-| `Could not connect to SkyPilot API server` | Remote server unreachable or auth expired | Tell the user and suggest `sky api login --relogin -e <endpoint>` to reconnect. |
+| `Could not connect to SkyPilot API server` | Remote server unreachable or auth expired | Tell the user and suggest `sky api login --relogin -e <endpoint> --no-browser` to reconnect. |
 | `command not found: sky` | SkyPilot not installed | Go to "Install SkyPilot" below. |
 
 **Install SkyPilot** (only if `sky` command not found):
@@ -70,7 +70,7 @@ Ask the user which clouds they need if unclear, then re-run `sky api info`.
 Ask the user:
 > Do you have an existing SkyPilot API server to connect to, or should I start one locally?
 
-- **Connect to existing server:** `sky api login -e <API_SERVER_URL>` — get the URL from the user.
+- **Connect to existing server:** `sky api login -e <API_SERVER_URL> --no-browser` — get the URL from the user. Always pass `-e` (without it the command waits for interactive input) and `--no-browser` (the user may be on another device). If the server needs SSO login, the command prints an authorize URL and waits up to 5 minutes for the user to open it and click **Authorize**: run it in the background, show the URL to the user right away, then wait for the command to exit. If it times out, run it again. If it instead prints a `/token` URL and asks to paste a token (older servers), ask the user to open that URL and send you the token, then run `echo <TOKEN> | sky api login -e <API_SERVER_URL> --no-browser`.
 - **Start locally:** `sky api start`
 
 After either path, re-run `sky api info` to confirm the server is reachable.

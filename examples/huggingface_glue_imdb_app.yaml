@@ -14,7 +14,9 @@ setup: |
   git checkout v4.46.3
   pip3 install .
   cd examples/pytorch/text-classification
-  pip3 install -r requirements.txt tensorboard
+  # The pinned transformers needs huggingface-hub<1.0; without this pin, newer
+  # `datasets` releases pull in huggingface-hub 2.x and break the import.
+  pip3 install -r requirements.txt tensorboard "huggingface-hub<1.0"
 
 # The command to run.  Will be run under the working directory.
 run: |

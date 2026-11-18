@@ -8,6 +8,7 @@ from unittest import mock
 from sky import exceptions
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import schemas
 from sky.workspaces import core
 
 
@@ -73,7 +74,7 @@ class TestWorkspaceManagement(unittest.TestCase):
         # Verify the function called the right methods
         mock_to_dict.assert_called_once()
         # Acquires the distributed config lock and reloads from the backing
-        # store inside it (so a cross-replica-stale in-memory read can't clobber).
+        # store inside it (so a stale in-memory read can't clobber).
         mock_lock.assert_called_once()
         mock_reload.assert_called_once()
         mock_update_no_lock.assert_called_once()
@@ -149,52 +150,28 @@ class TestWorkspaceManagement(unittest.TestCase):
         mock_validate_schema.return_value = None
 
         new_config = {'gcp': {'project_id': 'staging-project'}}
+        workspaces = self.sample_config['workspaces'].copy()
 
-        expected_return = {'updated': 'workspaces'}
-        mock_update_workspaces_config.return_value = expected_return
-
-        result = core.create_workspace('staging', new_config)
-
-        # Verify that _update_workspaces_config was called with a function
-        mock_update_workspaces_config.assert_called_once()
-        self.assertEqual(result, expected_return)
-
-    @mock.patch('sky.workspaces.core.get_workspaces')
-    @mock.patch('sky.utils.schemas.get_config_schema')
-    @mock.patch('sky.utils.common_utils.validate_schema')
-    @mock.patch('sky.check.check')
-    @mock.patch('sky.workspaces.core._update_workspaces_config')
-    def test_create_workspace_already_exists(
-            self, mock_update_workspaces_config, mock_sky_check,
-            mock_validate_schema, mock_get_schema, mock_get_workspaces):
-        """Test creating a workspace that already exists should fail."""
-        mock_get_workspaces.return_value = self.sample_config[
-            'workspaces'].copy()
-        mock_get_schema.return_value = {
-            'properties': {
-                'workspaces': {
-                    'additionalProperties': {}
-                }
-            }
-        }
-        mock_validate_schema.return_value = None
-
-        # Mock _update_workspaces_config to simulate the ValueError being raised
-        # inside the modifier function
         def side_effect(modifier_fn):
-            # Simulate calling the modifier function with existing workspaces
-            workspaces = self.sample_config['workspaces'].copy()
-            modifier_fn(workspaces)  # This should raise ValueError
+            modifier_fn(workspaces)
+            return workspaces
 
         mock_update_workspaces_config.side_effect = side_effect
 
-        new_config = {'gcp': {'project_id': 'test-project'}}
+        result = core.create_workspace('staging', new_config)
 
-        # Should raise ValueError when workspace already exists
-        with self.assertRaises(ValueError) as cm:
-            core.create_workspace('dev', new_config)
-
-        self.assertIn("already exists", str(cm.exception))
+        # The new workspace is keyed by a generated id and named 'staging'.
+        mock_update_workspaces_config.assert_called_once()
+        new_ids = set(result) - set(self.sample_config['workspaces'])
+        self.assertEqual(len(new_ids), 1)
+        new_id = new_ids.pop()
+        self.assertRegex(new_id, r'^ws-[0-9a-f]{12}$')
+        self.assertEqual(result[new_id], {
+            'gcp': {
+                'project_id': 'staging-project'
+            },
+            'name': 'staging'
+        })
 
     @mock.patch('sky.workspaces.core.get_workspaces')
     @mock.patch(
@@ -435,6 +412,51 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertFalse(result.private_changed)
         self.assertFalse(result.allowed_users_changed)
 
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_compare_workspace_configs_registered_access_only_property(
+            self, mock_get_users, mock_get_users_for_role):
+        """A plugin-registered access-only property is a user-access change.
+
+        A property registered with ``access_only=True`` controls who may use
+        the workspace, like allowed_users, so changing it alone must not be
+        treated as an infra change. A property registered without the flag
+        still is.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+        saved_props = dict(schemas._extra_workspace_properties)
+        saved_access = set(schemas._access_only_workspace_properties)
+
+        def restore():
+            schemas._extra_workspace_properties.clear()
+            schemas._extra_workspace_properties.update(saved_props)
+            schemas._access_only_workspace_properties.clear()
+            schemas._access_only_workspace_properties.update(saved_access)
+
+        self.addCleanup(restore)
+        schemas.register_workspace_property('leads', {'type': 'array'},
+                                            access_only=True)
+        schemas.register_workspace_property('quota_tier', {'type': 'string'})
+
+        current_config = {'private': True, 'allowed_users': ['user1']}
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'leads': ['user1'],
+        }
+        result = core._compare_workspace_configs(current_config, new_config)
+        self.assertTrue(result.only_user_access_changes)
+        self.assertFalse(result.allowed_users_changed)
+
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'quota_tier': 'gold',
+        }
+        result = core._compare_workspace_configs(current_config, new_config)
+        self.assertFalse(result.only_user_access_changes)
+
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
     @mock.patch(
@@ -570,12 +592,12 @@ class TestWorkspaceManagement(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             core._validate_workspace_config_changes('test-workspace', {}, {})
 
-        error_message = str(cm.exception)
-        self.assertIn("Cannot change workspace 'test-workspace' to private",
-                      error_message)
-        self.assertIn("unauthorized-user", error_message)
-        self.assertIn("2 active cluster(s): cluster-1, cluster-2",
-                      error_message)
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot change workspace 'test-workspace' to private because the "
+            "user 'unauthorized-user' is not in allowed_users but has 2 "
+            'active cluster(s): cluster-1, cluster-2. Please add the user to '
+            'allowed_users, or terminate these resources first.')
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
@@ -605,11 +627,12 @@ class TestWorkspaceManagement(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             core._validate_workspace_config_changes('test-workspace', {}, {})
 
-        error_message = str(cm.exception)
-        self.assertIn("Cannot remove user", error_message)
-        self.assertIn("user2", error_message)
-        self.assertIn("2 active cluster(s): cluster-1, cluster-2",
-                      error_message)
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot remove user 'user2' from workspace 'test-workspace' "
+            'because the user has 2 active cluster(s): cluster-1, cluster-2. '
+            'Please terminate these resources first, or keep the user in '
+            'allowed_users.')
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
@@ -638,10 +661,70 @@ class TestWorkspaceManagement(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             core._validate_workspace_config_changes('test-workspace', {}, {})
 
-        error_message = str(cm.exception)
-        self.assertIn("because the users", error_message)  # Plural form
-        self.assertIn("user2", error_message)
-        self.assertIn("user3", error_message)
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot change workspace 'test-workspace' to private because the "
+            "users 'user2', 'user3' are not in allowed_users but have 3 "
+            'active cluster(s): cluster-1, cluster-2, cluster-3. Please add '
+            'the users to allowed_users, or terminate these resources first.')
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_private_unknown_owners(
+            self, mock_compare_configs, mock_check_resources):
+        """Owners missing from the user table still yield a full sentence."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=True,
+            private_old=False,
+            private_new=True,
+            allowed_users_new=['user1'],
+            removed_users=[],
+            added_users=[],
+            allowed_users_old=[],
+            allowed_users_changed=True,
+        )
+        mock_check_resources.return_value = ('1 active cluster(s): c1', [], {})
+
+        with self.assertRaises(ValueError) as cm:
+            core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot change workspace 'test-workspace' to private because "
+            'users not in allowed_users have 1 active cluster(s): c1. Please '
+            'terminate these resources first.')
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_remove_users_plural(
+            self, mock_compare_configs, mock_check_resources):
+        """Removing several users that own resources names each of them."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_new=['user1'],
+            removed_users=['user2', 'user3'],
+            added_users=[],
+            allowed_users_old=['user1', 'user2', 'user3'],
+            allowed_users_changed=True,
+        )
+        mock_check_resources.return_value = ('2 active sandbox(s): s2, s3',
+                                             ['user2', 'user3'], {})
+
+        with self.assertRaises(ValueError) as cm:
+            core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        self.assertEqual(
+            str(cm.exception),
+            "Cannot remove users 'user2', 'user3' from workspace "
+            "'test-workspace' because the users have 2 active sandbox(s): s2, "
+            's3. Please terminate these resources first, or keep the users in '
+            'allowed_users.')
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
@@ -666,7 +749,8 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Should call resource checker for removed users
         mock_check_resources.assert_called_once_with([], ['test-workspace'],
-                                                     resources=None)
+                                                     resources=None,
+                                                     owners=['user2', 'user3'])
 
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
@@ -690,8 +774,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         core._validate_workspace_config_changes('test-workspace', {}, {})
 
         # Should call workspace resource checker
-        mock_check_resources.assert_called_once_with([('test-workspace',
-                                                       'update')])
+        mock_check_resources.assert_called_once_with(
+            [('test-workspace', 'update')], resources=None)
 
     @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
                )
@@ -922,8 +1006,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         core._validate_workspace_config_changes('test-workspace', {}, {})
 
         # Non-additive change -> teardown guard still enforced.
-        mock_check_resources.assert_called_once_with([('test-workspace',
-                                                       'update')])
+        mock_check_resources.assert_called_once_with(
+            [('test-workspace', 'update')], resources=None)
 
 
 class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
@@ -1101,6 +1185,137 @@ class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
         }
         with self.assertRaises(exceptions.InvalidWorkspaceNameError):
             core.update_config(new_config)
+
+
+class TestUpdateConfigDoesNotRunCheckInline(unittest.TestCase):
+    """update_config must not call sky.check.check; the API route schedules
+    it as a separate request gated on the save succeeding."""
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.users.permission.permission_service')
+    def test_update_config_returns_without_sky_check(
+            self, mock_permission, mock_check_resources, mock_sky_check,
+            mock_validate_schema, mock_get_schema, mock_to_dict,
+            mock_update_no_lock, mock_lock_path):
+        del mock_permission
+        mock_to_dict.return_value = {'workspaces': {'default': {}}}
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        mock_check_resources.return_value = None
+        mock_lock_path.return_value = '/tmp/test-lock'
+
+        new_config = {'workspaces': {'default': {}}, 'gcp': {'project_id': 'p'}}
+        result = core.update_config(new_config)
+
+        self.assertEqual(result, new_config)
+        mock_update_no_lock.assert_called_once()
+        mock_sky_check.assert_not_called()
+
+
+class TestUpdateConfigFetchesResourcesOnce(unittest.TestCase):
+    """Changed and deleted workspaces share one active-resource fetch."""
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path',
+                return_value='/tmp/test-lock')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema', return_value={})
+    @mock.patch('sky.utils.common_utils.validate_schema', return_value=None)
+    @mock.patch('sky.users.permission.permission_service')
+    @mock.patch('sky.workspaces.core.locks.get_lock')
+    @mock.patch('sky.workspaces.core._validate_workspace_config')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_one_fetch_for_every_checked_workspace(self, mock_compare, *_):
+        mock_compare.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            allowed_users_old=[],
+            allowed_users_new=[],
+            removed_users=[],
+            added_users=[],
+            additive_allowed_contexts=False)
+        current = {
+            'workspaces': {
+                'default': {},
+                'a': {
+                    'gcp': {
+                        'project_id': 'p1'
+                    }
+                },
+                'b': {
+                    'gcp': {
+                        'project_id': 'p1'
+                    }
+                },
+                'c': {},
+                'unchanged': {},
+            }
+        }
+        new = {
+            'workspaces': {
+                'default': {},
+                'a': {
+                    'gcp': {
+                        'project_id': 'p2'
+                    }
+                },
+                'b': {
+                    'gcp': {
+                        'project_id': 'p2'
+                    }
+                },
+                'unchanged': {},
+            }
+        }
+        core.skypilot_config.to_dict.return_value = current
+        with mock.patch(
+                'sky.utils.resource_checker.'
+                '_get_active_resources_for_workspaces',
+                return_value=([], [], [])) as mock_fetch:
+            core.update_config(new)
+        mock_fetch.assert_called_once()
+        self.assertEqual(sorted(mock_fetch.call_args.args[0]), ['a', 'b', 'c'])
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path',
+                return_value='/tmp/test-lock')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema', return_value={})
+    @mock.patch('sky.utils.common_utils.validate_schema', return_value=None)
+    @mock.patch('sky.users.permission.permission_service')
+    def test_no_fetch_without_a_workspace_change(self, *_):
+        core.skypilot_config.to_dict.return_value = {
+            'workspaces': {
+                'default': {}
+            }
+        }
+        with mock.patch('sky.utils.resource_checker.'
+                        '_get_active_resources_for_workspaces') as mock_fetch:
+            core.update_config({
+                'workspaces': {
+                    'default': {}
+                },
+                'gcp': {
+                    'project_id': 'p'
+                }
+            })
+        mock_fetch.assert_not_called()
 
 
 if __name__ == '__main__':

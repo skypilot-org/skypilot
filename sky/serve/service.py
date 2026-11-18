@@ -18,6 +18,7 @@ import filelock
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -114,6 +115,15 @@ def cleanup_storage(yaml_content: str) -> bool:
                              f'{storage_name!r} already gone, treating as '
                              f'already cleaned: {e}')
                 del task.storage_mounts[storage_name]
+            except exceptions.StorageWorkspaceError as e:
+                # Recorded in another workspace (by an update made from
+                # there before updates were held to the service's): not
+                # this service's to remove, and failing over it would fail
+                # again on every recovery.
+                logger.warning(f'cleanup_storage: storage {storage_name!r} '
+                               'is not reachable from the workspace this '
+                               f'service runs in; leaving it: {e}')
+                del task.storage_mounts[storage_name]
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to clean up storage: '
@@ -122,18 +132,31 @@ def cleanup_storage(yaml_content: str) -> bool:
             logger.error(f'  Traceback: {traceback.format_exc()}')
         failed = True
 
-    # Clean up any files mounted from the local disk, such as two-hop file
-    # mounts. Guard against `task` being unbound if from_yaml_str raised above.
+    # Clean up the two-hop file mount copies staged for this service. Leave any
+    # other local source alone: in consolidation mode it points into the
+    # client's upload blob, which other requests may share, or, on a local API
+    # server, at the user's own files. Guard against `task` being unbound if
+    # from_yaml_str raised above.
     file_mount_values = (list(
         (task.file_mounts or {}).values()) if task else [])
+    two_hop_base = os.path.abspath(
+        os.path.expanduser(
+            skylet_constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH))
     for file_mount in file_mount_values:
         try:
-            if not data_utils.is_cloud_store_url(file_mount):
-                path = os.path.expanduser(file_mount)
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    os.remove(path)
+            if data_utils.is_cloud_store_url(file_mount):
+                continue
+            path = os.path.abspath(os.path.expanduser(file_mount))
+            if os.path.commonpath([path, two_hop_base]) != two_hop_base:
+                logger.debug(f'Not removing file mount source {file_mount}: '
+                             'not a two-hop copy.')
+                continue
+            if os.path.islink(path) or os.path.isfile(path):
+                os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+            # Otherwise the copy is already gone, e.g. removed by an earlier
+            # cleanup attempt.
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to clean up file mount {file_mount}: {e}')
             with ux_utils.enable_traceback():
@@ -392,7 +415,8 @@ def _start(service_name: str,
            tmp_task_yaml: str,
            job_id: int,
            entrypoint: str,
-           user_hash: Optional[str] = None):
+           user_hash: Optional[str] = None,
+           file_mounts_blob_id: Optional[str] = None):
     """Starts the service.
     This including the controller and load balancer.
     """
@@ -428,7 +452,7 @@ def _start(service_name: str,
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
 
-    # Pod IP for HA leader-aware routing.
+    # Pod IP, so requests handled on another pod can reach this controller.
     pod_ip: Optional[str] = os.environ.get('POD_IP')
 
     if not is_recovery:
@@ -452,7 +476,9 @@ def _start(service_name: str,
                 controller_pid=os.getpid(),
                 controller_ip=pod_ip,
                 entrypoint=entrypoint,
-                user_hash=user_hash)
+                user_hash=user_hash,
+                file_mounts_blob_id=file_mounts_blob_id,
+                workspace=skypilot_config.get_active_workspace())
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
@@ -615,8 +641,8 @@ def _start(service_name: str,
 
         # Self-check cadence (seconds): how often we re-read DB to confirm
         # we're still the authoritative controller. Ghost detection only
-        # matters in HA deployments and is checked once per
-        # interval to avoid DB load.
+        # matters when another instance may take over the controller and is
+        # checked once per interval to avoid DB load.
         orphan_check_interval_seconds = 30
         own_pid = os.getpid()
         loop_count = 0
@@ -757,5 +783,8 @@ if __name__ == '__main__':
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
+    # Only set in consolidation mode, when the task's sources live in the
+    # client's upload blob.
     _start(args.service_name, args.task_yaml, args.job_id, args.entrypoint,
-           args.user_hash)
+           args.user_hash,
+           os.environ.get(constants.FILE_MOUNTS_BLOB_ID_ENV_VAR) or None)

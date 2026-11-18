@@ -15,7 +15,6 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
@@ -240,7 +239,9 @@ class Optimizer:
         topo_order: List[task_lib.Task],
         minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
-        quiet: bool = False
+        quiet: bool = False,
+        earlier_unreachable_errors: Optional[Dict[task_lib.Task,
+                                                  List[Exception]]] = None,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
@@ -248,6 +249,11 @@ class Optimizer:
         The estimated run time of a task running on a resource is given by
         `task.estimate_runtime(resources)` or 1 hour by default.
         The estimated cost is `task.num_nodes * resources.get_cost(runtime)`.
+
+        Args:
+            earlier_unreachable_errors: For tasks with ordered resources, the
+                unreachable errors of the choices tried before the one in the
+                task, reported if the task has no launchable resources.
         """
         # Cost/time of running the task on the resources.
         # node -> {resources -> cost/time}
@@ -295,10 +301,15 @@ class Optimizer:
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 (launchable_resources, cloud_candidates, fuzzy_candidates,
-                 resource_hints) = (_fill_in_launchable_resources(
+                 resource_hints,
+                 unreachable_errors) = (_fill_in_launchable_resources(
                      task=node,
                      blocked_resources=blocked_resources,
                      quiet=quiet))
+                if earlier_unreachable_errors:
+                    unreachable_errors = (
+                        earlier_unreachable_errors.get(node, []) +
+                        unreachable_errors)
                 node_to_candidate_map[node] = cloud_candidates
                 # Has to call the printing after the launchable resources are
                 # computed, because the missing fields of the resources are
@@ -410,10 +421,22 @@ class Optimizer:
                 resource_hints_string = (
                     f'Hint: Check Per Resource Hint\n{hints_formatted}'
                     if hints_formatted else '')
+                if unreachable_errors:
+                    # The same context is checked once per requested resource.
+                    unreachable_errors = list(
+                        {str(e): e for e in unreachable_errors}.values())
+                    unreachable_str = '\n'.join(
+                        f'{indent_prefix}{e}' for e in unreachable_errors)
+                    summary = (
+                        'No reachable infra has resources satisfying the '
+                        f'request: {node_resources_reprs}.\nInfra that could '
+                        f'not be reached:\n{unreachable_str}')
+                else:
+                    summary = (f'{source_hint.capitalize()} does not contain '
+                               'any instances satisfying the request: '
+                               f'{node_resources_reprs}.')
                 error_msg = (
-                    f'{source_hint.capitalize()} does not contain any '
-                    f'instances satisfying the request: '
-                    f'{node_resources_reprs}.'
+                    f'{summary}'
                     f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky gpus list{reset} '
@@ -422,7 +445,11 @@ class Optimizer:
                     'enabled clouds.\n'
                     f'{resource_hints_string}')
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(error_msg)
+                    # Unreachable infra is carried as failover history so
+                    # that callers retry instead of failing the request as
+                    # infeasible.
+                    raise exceptions.ResourcesUnavailableError(
+                        error_msg, failover_history=unreachable_errors)
         return node_to_cost_map, node_to_candidate_map
 
     @staticmethod
@@ -1116,7 +1143,7 @@ class Optimizer:
 
         for task in tasks:
             # Get launchable resources for this task
-            launchable_resources, _, _, _ = (_fill_in_launchable_resources(
+            launchable_resources, _, _, _, _ = (_fill_in_launchable_resources(
                 task, blocked_resources=blocked_resources, quiet=quiet))
 
             if not any(launchable_resources.values()):
@@ -1528,6 +1555,8 @@ class Optimizer:
 
         graph = dag.get_graph()
         local_dag = copy.deepcopy(dag) if has_resources_ordered else dag
+        earlier_unreachable_errors: Dict[
+            task_lib.Task, List[Exception]] = collections.defaultdict(list)
         for task_id in range(len(dag.tasks)):
             task = dag.tasks[task_id]
             if isinstance(task.resources, list):
@@ -1544,20 +1573,24 @@ class Optimizer:
                     # instead of the original loop variable.
                     assert len(local_task.resources) == 1, local_task.resources
                     requested_resources = list(local_task.resources)[0]
-                    launchable_resources_map, _, _, _ = (
-                        _fill_in_launchable_resources(
-                            task=local_task,
-                            blocked_resources=blocked_resources,
-                            quiet=False))
+                    (launchable_resources_map, _, _, _,
+                     unreachable_errors) = (_fill_in_launchable_resources(
+                         task=local_task,
+                         blocked_resources=blocked_resources,
+                         quiet=False))
                     if launchable_resources_map.get(requested_resources, []):
                         break
+                    earlier_unreachable_errors[local_task].extend(
+                        unreachable_errors)
 
         local_graph = local_dag.get_graph()
         local_topo_order = list(nx.topological_sort(local_graph))
         local_node_to_cost_map, local_node_to_candidate_map = (
-            Optimizer._estimate_nodes_cost_or_time(local_topo_order,
-                                                   minimize_cost,
-                                                   blocked_resources))
+            Optimizer._estimate_nodes_cost_or_time(
+                local_topo_order,
+                minimize_cost,
+                blocked_resources,
+                earlier_unreachable_errors=earlier_unreachable_errors))
         if local_dag.is_chain():
             local_best_plan, best_total_objective = Optimizer._optimize_by_dp(
                 local_topo_order, local_node_to_cost_map, minimize_cost)
@@ -1675,11 +1708,8 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         clouds_to_check_again = list(clouds_need_recheck -
                                      global_disabled_clouds)
         if len(clouds_to_check_again) > 0:
-            sky_check.check_capability(
-                sky_cloud.CloudCapability.COMPUTE,
-                quiet=True,
-                clouds=clouds_to_check_again,
-                workspace=skypilot_config.get_active_workspace())
+            sky_check.recheck_clouds(sky_cloud.CloudCapability.COMPUTE,
+                                     clouds_to_check_again)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
@@ -1913,7 +1943,7 @@ def _fill_in_launchable_resources(
     quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates, List[str], Dict[resources_lib.Resources,
-                                                List[str]]]:
+                                                List[str]], List[Exception]]:
     """Fills in the launchable resources for the task.
 
     Returns:
@@ -1924,6 +1954,8 @@ def _fill_in_launchable_resources(
         Sorted list of fuzzy candidates (alternative GPU names).
         Dict mapping requested Resources and a list of hints for why the
           resource is unavailable if so.
+        Errors of the locations that were skipped because they could not be
+          reached.
     Raises:
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
@@ -1938,6 +1970,7 @@ def _fill_in_launchable_resources(
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(list)
     resource_hints: Dict[resources_lib.Resources,
                          List[str]] = collections.defaultdict(list)
+    unreachable_errors: List[Exception] = []
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
@@ -1963,6 +1996,7 @@ def _fill_in_launchable_resources(
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
                 resource_hints[resources].append(feasible_resources.hint)
+            unreachable_errors.extend(feasible_resources.unreachable_errors)
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
@@ -2028,7 +2062,7 @@ def _fill_in_launchable_resources(
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
     return launchable, cloud_candidates, list(
-        sorted(all_fuzzy_candidates)), resource_hints
+        sorted(all_fuzzy_candidates)), resource_hints, unreachable_errors
 
 
 # Expose optimize_job_group as a module-level function

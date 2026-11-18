@@ -333,3 +333,35 @@ class TestCancelTaskArgument:
             with pytest.raises(jobs_core.exceptions.NotSupportedError,
                                match='consolidation mode'):
                 jobs_core.cancel(job_ids=[39], task=2)
+
+
+def test_cancel_names_the_active_workspace():
+    # The controller formats the skip message with the workspace id; it has
+    # no names, so the API server swaps in the name.
+    fake_runner = mock.MagicMock()
+    fake_runner.cancel_managed_jobs.return_value = (
+        'No job to cancel. Job with ID 3 is skipped as they are not in the '
+        "active workspace 'ws-0123456789ab'. Check the workspace of the job "
+        'with: sky jobs queue')
+    with mock.patch.object(jobs_core.backend_utils,
+                           'is_controller_accessible',
+                           return_value=mock.MagicMock(
+                               is_grpc_enabled_with_flag=False)), \
+         mock.patch.object(jobs_core.backend_utils,
+                           'get_backend_from_handle',
+                           return_value=mock.MagicMock(
+                               spec=backends.CloudVmRayBackend)), \
+         mock.patch.object(jobs_core.managed_job_runner,
+                           'current',
+                           return_value=fake_runner), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace',
+                           return_value='ws-0123456789ab'), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_workspace_name',
+                           return_value='ml'), \
+         mock.patch.object(jobs_core.logger, 'info') as info:
+        jobs_core.cancel(job_ids=[3])
+    message = info.call_args.args[0]
+    assert "active workspace 'ml'" in message
+    assert 'ws-0123456789ab' not in message

@@ -36,6 +36,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import interactive_utils
 from sky.client import oauth as oauth_lib
+from sky.client import service_account_auth
 from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
@@ -45,7 +46,6 @@ from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import request_names
-from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import runtime_utils
@@ -59,7 +59,6 @@ from sky.utils import common_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
-from sky.utils import env_options
 from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -95,6 +94,9 @@ else:
     time = adaptors_common.LazyImport('time')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
+    # only used in the --resize confirmation prompt
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -298,7 +300,9 @@ def enabled_clouds(workspace: Optional[str] = None,
         url = f'/enabled_clouds?expand={expand}'
     else:
         url = f'/enabled_clouds?workspace={workspace}&expand={expand}'
-    response = server_common.make_authenticated_request('GET', url)
+    response = server_common.make_authenticated_request('GET',
+                                                        url,
+                                                        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -429,6 +433,27 @@ def kubernetes_label_gpus(
     return server_common.get_request_id(response)
 
 
+def _omit_job_section_for_older_server(dag: 'sky.Dag') -> None:
+    """Drops the tasks' `job:` section if the server predates it.
+
+    An older server rejects the unknown key. `job:` only affects managed
+    jobs, whose launch refuses such a server before reaching here (see
+    sky/jobs/client/sdk.py), so nothing is lost.
+    """
+    if not any(task.job for task in dag.tasks):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    min_version = (
+        server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)
+    if remote_api_version is not None and remote_api_version >= min_version:
+        return
+    for task in dag.tasks:
+        # pylint: disable=protected-access
+        task._job = {}
+    logger.debug('`job` is ignored because the server does not support it '
+                 'yet.')
+
+
 def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
     if not any(
             isinstance(volume_config, dict) and 'host_path' in volume_config
@@ -444,6 +469,28 @@ def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
                 'server. Please upgrade the API server to a version that '
                 f'supports API_VERSION >= '
                 f'{server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION}.')
+
+
+def _check_tpu_multi_host_api_version(dag: 'sky.Dag') -> None:
+    """Raises if a task asks for accelerator_args.multi_host and the API
+    server is too old to know it.
+
+    The field cannot be dropped silently: without it the server would pick
+    different hardware.
+    """
+    if not any('multi_host' in (resources.accelerator_args or {})
+               for task in dag.tasks
+               for resources in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_TPU_MULTI_HOST_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'The API server does not support '
+                '`accelerator_args.multi_host`; upgrade it to a version that '
+                'supports API_VERSION >= '
+                f'{server_constants.MIN_TPU_MULTI_HOST_API_VERSION}.')
 
 
 @usage_lib.entrypoint
@@ -475,6 +522,8 @@ def optimize(
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_tpu_multi_host_api_version(dag)
+    _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -487,7 +536,9 @@ def optimize(
 
 def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     """Gets the workspaces."""
-    response = server_common.make_authenticated_request('GET', '/workspaces')
+    response = server_common.make_authenticated_request('GET',
+                                                        '/workspaces',
+                                                        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -574,23 +625,16 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     return response.json()
 
 
-def _raise_exception_object_on_client(e: BaseException) -> None:
-    """Raise the exception object on the client."""
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stacktrace = getattr(e, 'stacktrace', str(e))
-        logger.error('=== Traceback on SkyPilot API Server ===\n'
-                     f'{stacktrace}')
-    with ux_utils.print_exception_no_traceback():
-        raise e
-
-
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def validate(
     dag: 'sky.Dag',
     workdir_only: bool = False,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _skip_local_paths: bool = False,
 ) -> None:
     """Validates the tasks.
 
@@ -606,8 +650,13 @@ def validate(
         admin_policy_request_options: Request options used for admin policy
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+        _skip_local_paths: Do not check the workdir and file mount sources on
+            this machine. For callers whose sources are API server paths
+            inside an upload blob; the server resolves the blob and checks
+            the paths when it runs the request.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_tpu_multi_host_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
@@ -627,9 +676,10 @@ def validate(
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
             task._user_specified_yaml = None
-        task.expand_and_validate_workdir()
-        if not workdir_only:
-            task.expand_and_validate_file_mounts()
+        if not _skip_local_paths:
+            task.expand_and_validate_workdir()
+            if not workdir_only:
+                task.expand_and_validate_file_mounts()
         if omit_local_disk:
             for resource in task.resources:
                 # pylint: disable=protected-access
@@ -665,13 +715,17 @@ def validate(
             logger.debug('`max_hourly_cost` is ignored because the server '
                          'does not support it yet.')
 
+    # Also covers launch() and exec(), which validate the DAG before they
+    # send it.
+    _omit_job_section_for_older_server(dag)
+
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
     response = server_common.make_authenticated_request(
         'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
-        _raise_exception_object_on_client(
+        client_common.raise_exception_object_on_client(
             exceptions.deserialize_exception(response.json().get('detail')))
 
 
@@ -710,7 +764,6 @@ def launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -809,11 +862,13 @@ def launch(
           as:
 
           1. Empty: iff the first-ever sky.optimize() fails to find a feasible
-             resource; no pre-check or actual launch is attempted.
+             resource on reachable infra; no pre-check or actual launch is
+             attempted.
 
           2. Non-empty: iff at least 1 exception from either our pre-checks
-             (e.g., cluster name invalid) or a region/zone throwing resource
-             unavailability.
+             (e.g., cluster name invalid), a region/zone throwing resource
+             unavailability, or infra that could not be reached while
+             checking feasibility.
 
         exceptions.CommandError: any ssh command error.
         exceptions.NoCloudAccessError: if all clouds are disabled.
@@ -897,7 +952,6 @@ def launch(
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
-            _disable_controller_check,
             _file_mounts_blob_id,
             _extra_launch_context,
             _include_credentials,
@@ -923,7 +977,6 @@ def _launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -931,7 +984,13 @@ def _launch(
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
 
-    validate(dag, admin_policy_request_options=request_options)
+    # A caller that passes a blob (a jobs or serve controller) sends sources
+    # that are paths inside that blob on the API server. They may not exist on
+    # this host: the server extracts the blob on whichever host handles the
+    # request and checks the paths there.
+    validate(dag,
+             admin_policy_request_options=request_options,
+             _skip_local_paths=_file_mounts_blob_id is not None)
     # The flags have been applied to the task YAML and the backward
     # compatibility of admin policy has been handled. We should no longer use
     # these flags.
@@ -940,7 +999,7 @@ def _launch(
     confirm_shown = False
     if _need_confirmation:
         cluster_status = None
-        # TODO(SKY-998): we should reduce RTTs before launching the cluster.
+        # TODO: we should reduce RTTs before launching the cluster.
         status_request_id = status([cluster_name], all_users=True)
         clusters = get(status_request_id)
         cluster_user_hash = common_utils.get_user_hash()
@@ -980,6 +1039,14 @@ def _launch(
             # the generic "Restarting the stopped cluster" message.
             current_nodes = cluster_record.get('nodes')
             target_nodes = dag.tasks[0].num_nodes
+            # The record counts cluster nodes. On a multi-host TPU slice one
+            # task node (one slice) is one cluster node per VM of the slice,
+            # so convert to task nodes, the unit of num_nodes.
+            vms_per_slice = max(
+                kubernetes_utils.tpu_vms_per_slice(r)
+                for r in dag.tasks[0].resources)
+            if current_nodes is not None and vms_per_slice > 1:
+                current_nodes //= vms_per_slice
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
                 user_name_str = (f' (created by another user '
@@ -1071,7 +1138,6 @@ def _launch(
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
-        disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
         resize=resize,
         extra_launch_context=_extra_launch_context or {},
@@ -1809,6 +1875,43 @@ def queue(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(67)
+@annotations.client_api
+def cluster_job_spec(
+        cluster_name: str,
+        job_id: int) -> server_common.RequestId[Optional[Dict[str, Any]]]:
+    """Gets the task YAML and entrypoint a cluster job was submitted with.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: id of the job on the cluster.
+
+    Returns:
+        The request ID of the cluster job spec request.
+
+    Request Returns:
+        spec (Optional[Dict[str, Any]]): None if the cluster does not exist or
+            the job's spec was not recorded (e.g. it was submitted by an older
+            API server version), otherwise:
+
+            .. code-block:: python
+
+                {
+                    'task_yaml': (str) the task YAML, with secrets redacted,
+                    'entrypoint': (str) the command that submitted the job,
+                }
+    """
+    body = payloads.ClusterJobSpecBody(cluster_name=cluster_name, job_id=job_id)
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/cluster_job_spec',
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def job_status(
     cluster_name: str,
@@ -2333,7 +2436,8 @@ def realtime_kubernetes_gpu_availability(
     response = server_common.make_authenticated_request(
         'POST',
         '/realtime_kubernetes_gpu_availability',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2366,7 +2470,8 @@ def kubernetes_node_info(
     response = server_common.make_authenticated_request(
         'POST',
         '/kubernetes_node_info',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2405,6 +2510,7 @@ def status_kubernetes() -> server_common.RequestId[
 
 # === API request APIs ===
 @usage_lib.entrypoint
+@client_common.return_sync_call_result
 @annotations.client_api
 def get(request_id: server_common.RequestId[T]) -> T:
     """Waits for and gets the result of a request.
@@ -2432,32 +2538,12 @@ def get(request_id: server_common.RequestId[T]) -> T:
         retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
-    request_task = None
-    if response.status_code == 200:
-        request_task = requests_lib.Request.decode(
-            payloads.RequestPayload(**response.json()))
-    elif response.status_code == 500:
-        try:
-            request_task = requests_lib.Request.decode(
-                payloads.RequestPayload(**response.json().get('detail')))
-            logger.debug(f'Got request with error: {request_task.name}')
-        except Exception:  # pylint: disable=broad-except
-            request_task = None
-    if request_task is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to get request {request_id}: '
-                               f'{response.status_code} {response.text}')
-    error = request_task.get_error()
-    if error is not None:
-        error_obj = error['object']
-        _raise_exception_object_on_client(error_obj)
-    if request_task.status == requests_lib.RequestStatus.CANCELLED:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.RequestCancelled(
-                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
-                f'({request_task.request_id}) is cancelled by another process.'
-                f'{colorama.Style.RESET_ALL}')
-    return request_task.get_return_value()
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    return client_common.request_result(request_id, response.status_code, body,
+                                        lambda: response.text)
 
 
 @typing.overload
@@ -2481,6 +2567,7 @@ def stream_and_get(request_id: None = None,
 
 
 @usage_lib.entrypoint
+@client_common.return_sync_call_result
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 @rest.retry_transient_errors()
@@ -2585,10 +2672,17 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
                silent: bool = False) -> server_common.RequestId[List[str]]:
     """Aborts a request or all requests.
 
+    With neither request_ids nor all_users, aborts all of the caller's own
+    requests.
+
     Args:
         request_ids: The request ID(s) to abort. Can be a single string or a
-            list of strings.
-        all_users: Whether to abort all requests from all users.
+            list of strings. On a server with per-user auth, an admin can
+            abort any request by id and other users only their own; on a
+            server without it, anyone can abort any request by id.
+        all_users: Whether to abort all requests from all users. On a server
+            with per-user auth, a non-admin aborts only their own. Cannot be
+            combined with request_ids.
         silent: Whether to suppress the output.
 
     Returns:
@@ -2598,10 +2692,13 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
         A list of request IDs that were cancelled.
 
     Raises:
-        click.BadParameter: If no request ID is specified and not all or
-            all_users is not set.
+        ValueError: If both request_ids and all_users are given.
     """
     echo = logger.info if not silent else logger.debug
+    # Same rule as `sky api cancel`: ids name what to cancel, all_users means
+    # every request, so asking for both is ambiguous.
+    if request_ids is not None and all_users:
+        raise ValueError('Can only specify one of request_ids or all_users.')
     user_id = None
     if not all_users:
         user_id = common_utils.get_user_hash()
@@ -2685,7 +2782,9 @@ def api_status(
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
-        fields: The fields to get. If None, get all fields.
+        fields: The fields to get. If None, get all fields except
+            return_value and error. This argument is ignored if request_ids
+            is not None.
         cluster_name: Filter requests by cluster name.
             If None, show all requests.
 
@@ -2696,9 +2795,11 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
-    # Backward compatibility check for the new flag cluster_name
+    # Backward compatibility check for the new flag cluster_name. An unknown
+    # version (None, e.g. no health check has run in this context yet) is not
+    # an old one: do not warn then, since the flag is sent either way.
     version = versions.get_remote_api_version()
-    if (cluster_name is not None) and (version is None or version < 38):
+    if (cluster_name is not None) and (version is not None and version < 38):
         logger.warning(
             'The flag is ignored because the server does not support it yet.')
 
@@ -3054,6 +3155,8 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
             ('api_server', 'endpoint'), None)
         endpoint = click.prompt('Enter your SkyPilot API server endpoint',
                                 default=default_endpoint)
+    # Default to https:// when no scheme is given, e.g. a bare hostname.
+    endpoint = server_common.add_default_scheme(endpoint)
     # Check endpoint is a valid URL
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
@@ -3090,7 +3193,12 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
                 'value, which makes every command resolve to an empty server '
                 'URL. Set it to an endpoint, or run unset '
                 f'{constants.SKY_API_SERVER_URL_ENV_VAR}.')
-    if endpoint is not None and endpoint.rstrip('/') != env_endpoint:
+    # Compare with the default scheme added, so that `api.example.com` and
+    # `https://api.example.com` count as the same endpoint.
+    env_endpoint = server_common.add_default_scheme(env_endpoint)
+    if (endpoint is not None and
+            server_common.add_default_scheme(endpoint).rstrip('/') !=
+            env_endpoint):
         # Two different explicit endpoints; we cannot tell which one the user
         # meant, and logging into one of them would leave the other in effect.
         with ux_utils.print_exception_no_traceback():
@@ -3651,6 +3759,55 @@ def api_logout() -> None:
                 f'{colorama.Style.RESET_ALL}')
 
 
+@contextlib.contextmanager
+def impersonate(user: str) -> Iterator[None]:
+    """Acts as another user for the SDK calls made in this context.
+
+    Lets a service, such as a platform that launches workloads for its users,
+    act on behalf of a user. Every request sent in the context runs as `user`:
+    the user owns the clusters and jobs it creates, and the user's role and
+    workspace permissions decide what it may do. The API server logs the
+    service account behind each such request.
+
+    By default, the API server must set ``rbac.allow_impersonation: true`` and
+    the client must authenticate with the token of a service account whose
+    role is admin; a server plugin can grant it differently. Either way,
+    service accounts, built-in users and users whose role outranks the
+    caller's cannot be impersonated, and impersonated requests cannot change
+    users or service account tokens. Requests and their results are owned by
+    `user`, so make follow-up calls such as :func:`sky.get` and
+    :func:`sky.stream_and_get` in the same context. Contexts nest, and
+    concurrent threads or asyncio tasks can each act as a different user.
+    Threads started inside the context do not inherit it unless they copy the
+    context (`contextvars.copy_context`).
+
+    The ``SKYPILOT_IMPERSONATE_USER`` environment variable sets the same for
+    every request of the process, including CLI commands; this context takes
+    precedence over it.
+
+    Example:
+        .. code-block:: python
+
+            with sky.impersonate('alice@example.com'):
+                request_id = sky.jobs.launch(task)
+                sky.stream_and_get(request_id)
+
+    Args:
+        user: The ID or name of the user to act as. A name must match exactly
+            one user.
+
+    Raises:
+        ValueError: If ``user`` is empty, or if a request is sent in the
+            context without a service account token.
+        exceptions.PermissionDeniedError: If the API server refuses to let
+            the caller act as ``user``; the message says why.
+        exceptions.APINotSupportedError: If a request is sent in the context
+            to an API server that does not support impersonation.
+    """
+    with service_account_auth.impersonate(user):
+        yield
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(24)
@@ -3744,11 +3901,11 @@ def _build_client_info() -> Dict[str, Any]:
         'python_version': platform.python_version(),
         'platform': platform.platform(),
         'user_hash': common_utils.get_user_hash(),
-        'environment': {
+        'environment': debug_dump_helpers.redact_env_vars({
             k: v
             for k, v in sorted(os.environ.items())
             if k.startswith(('SKYPILOT_', 'SKY_'))
-        },
+        }),
         'user_config': user_config,
         'merged_config': merged_config,
     }

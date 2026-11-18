@@ -266,8 +266,8 @@ SKY_APISERVER_DB_INVALIDATIONS_TOTAL = prom.Counter(
     ['db', 'pool'],
 )
 
-# Pool saturation is a per-process condition: a fleet-wide sum can exceed
-# any single pool's limit while no individual pool is full, so per-pid
+# Pool saturation is a per-process condition: a sum across processes can
+# exceed any single pool's limit while no individual pool is full, so per-pid
 # series are kept. multiprocess_mode must be 'liveall' — the aggregating
 # modes strip any label named 'pid', including this user-defined one, and
 # merge every process into one series.

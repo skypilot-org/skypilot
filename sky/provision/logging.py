@@ -18,9 +18,28 @@ class _LoggingConfig(threading.local):
 
 config = _LoggingConfig()
 
+# Provisions can overlap in one process (threads), and the sky.provision
+# logger is process-wide: keep propagation off while any is active, and
+# restore it when the last one exits.
+_propagation_lock = threading.Lock()
+_active_provisions = 0
+_saved_propagate = True
+
 
 @contextlib.contextmanager
 def setup_provision_logging(log_dir: str):
+    global _active_provisions, _saved_propagate
+    provision_logger = logging.getLogger('sky.provision')
+    with _propagation_lock:
+        if _active_provisions == 0:
+            _saved_propagate = provision_logger.propagate
+        _active_provisions += 1
+        # Disable propagation to avoid streaming logs to the console, which
+        # is set up for sky root logger.
+        provision_logger.propagate = False
+    provisioner_logger = logging.getLogger('sky.provisioner')
+    fh = None
+    stream_handler = None
     try:
         # Redirect underlying provision logs to file.
         log_path = os.path.expanduser(os.path.join(log_dir, 'provision.log'))
@@ -34,13 +53,8 @@ def setup_provision_logging(log_dir: str):
         # time stamps are logged. We use sky.provisioner for getting the logger
         # because we do not want it to be affected by the handler added to the
         # sky.provision logger. Refer to sky.provision.provisioner.
-        provisioner_logger = logging.getLogger('sky.provisioner')
         provisioner_logger.addHandler(fh)
 
-        provision_logger = logging.getLogger('sky.provision')
-        # Disable propagation to avoid streaming logs to the console, which is
-        # set up for sky root logger.
-        provision_logger.propagate = False
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.flush = sys.stdout.flush  # type: ignore
         stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
@@ -51,11 +65,21 @@ def setup_provision_logging(log_dir: str):
         config.log_path = log_abs_path
         yield
     finally:
-        provisioner_logger.removeHandler(fh)
-        provision_logger.removeHandler(fh)
-        provision_logger.removeHandler(stream_handler)
-        stream_handler.close()
-        fh.close()
+        # First, so a failing cleanup below cannot leave the count raised.
+        with _propagation_lock:
+            _active_provisions -= 1
+            if _active_provisions == 0:
+                # Otherwise every later sky.provision.* log in this process
+                # outside a provision goes nowhere: no handler, no propagation.
+                provision_logger.propagate = _saved_propagate
+        # Guarded, so a failure while setting up is not masked by a NameError.
+        if fh is not None:
+            provisioner_logger.removeHandler(fh)
+            provision_logger.removeHandler(fh)
+            fh.close()
+        if stream_handler is not None:
+            provision_logger.removeHandler(stream_handler)
+            stream_handler.close()
 
 
 def get_log_path() -> pathlib.Path:

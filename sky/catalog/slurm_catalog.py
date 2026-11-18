@@ -57,8 +57,10 @@ def get_default_instance_type(
         # use its default allocation).
         # Check which clusters do NOT track memory.
         no_mem_clusters: Dict[str, str] = {}  # cluster -> SelectTypeParams
-        clusters_to_check = ([region] if region is not None else
-                             slurm_utils.get_all_slurm_cluster_names())
+        # Probe only clusters the caller may use.
+        allowed = sky_clouds.Slurm.existing_allowed_clusters(silent=True)
+        clusters_to_check = (allowed if region is None else
+                             [c for c in allowed if c == region])
         for cluster in clusters_to_check:
             try:
                 if not slurm_utils.is_memory_scheduling_enabled(cluster):
@@ -143,11 +145,12 @@ def list_accelerators_realtime(
         return {}, {}, {}
 
     if region_filter is None:
-        # Query all available clusters and aggregate results
-        all_clusters = slurm_utils.get_all_slurm_cluster_names()
-        if not all_clusters:
+        # Query the clusters the active workspace allows and aggregate results
+        allowed_clusters = sky_clouds.Slurm.existing_allowed_clusters(
+            silent=True)
+        if not allowed_clusters:
             return {}, {}, {}
-        clusters_to_query = all_clusters
+        clusters_to_query = allowed_clusters
     else:
         clusters_to_query = [region_filter]
 

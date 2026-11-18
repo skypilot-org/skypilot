@@ -447,18 +447,32 @@ FAQs
 
     # Install system dependencies
     RUN apt update -y && \
-        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl wget -y && \
+        apt install fuse3 -y && \
         rm -rf /var/lib/apt/lists/*
 
     # Install SkyPilot python dependencies into a dedicated runtime venv.
+    # Python 3.10, as SkyPilot's own runtime setup uses: Ray needs 3.10 or newer,
+    # and many base images ship an older python3.
     RUN export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-        python3 -m venv ~/skypilot-runtime && \
+        curl -LsSf https://astral.sh/uv/install.sh | sh && \
+        ~/.local/bin/uv venv --seed ~/skypilot-runtime --python 3.10 && \
         PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.56.1' 'pycryptodome==3.12.0' && \
         $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
+* **Can pods run without internet access?**
+
+  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above. In both ``skypilot-nightly`` lines of the recipe, use your API server's package and version instead (``skypilot==<version>`` or ``skypilot-nightly==<version>``, see ``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
+
+  Keep ``rsync`` and ``curl`` from the recipe's system packages, and ``fuse3`` for storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes: SkyPilot installs missing ones at pod startup, which needs package access. The others may be left out. Without ``openssh-server`` the cluster still launches, but ``ssh <cluster>``, VS Code and ``mpirun`` between nodes do not work; pods on host networking (``hostNetwork: true`` in ``kubernetes.pod_config``, or the default on OCI with RoCE) require it.
+
+  Pod startup then downloads nothing. ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers still download their own tools.
+
+  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` when pods can reach no package source, so that launches do not also wait on the built-in public ones; and set uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
 
 * **Are multi-node jobs supported on Kubernetes?**
 

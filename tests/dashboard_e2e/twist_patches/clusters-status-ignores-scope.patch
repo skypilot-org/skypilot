@@ -1,0 +1,9 @@
+diff --git a/sky/backends/backend_utils.py b/sky/backends/backend_utils.py
+index 9153a93b1..17bedd769 100644
+--- a/sky/backends/backend_utils.py
++++ b/sky/backends/backend_utils.py
+@@ -4380,3 +4380,3 @@ def get_clusters(
+     user_hashes_filter = None
+-    if not all_users:
++    if False:  # TWIST: ignore all_users
+         user_hashes_filter = {common_utils.get_current_user().id}

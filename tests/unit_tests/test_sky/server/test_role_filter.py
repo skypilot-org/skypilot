@@ -134,6 +134,7 @@ def _admin_request():
     auth_user = mock.Mock()
     auth_user.id = 'admin-carol'
     request.state.auth_user = auth_user
+    request.state.impersonator = None
     return request
 
 
@@ -191,6 +192,72 @@ def test_force_caller_scope_cancel_body_admin_preserved(mock_svc):
     body = payloads.RequestCancelBody(request_ids=None, user_id=None)
     out = role_filter.force_caller_scope_cancel_body(_admin_request(), body)
     assert out.user_id is None
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_force_caller_scope_cancel_body_admin_named_ids_unscoped(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.ADMIN.value])
+    # Clients send their own user hash along with the ids. Kept as is, it hid
+    # every other user's request from an admin's `sky api cancel <id>`.
+    body = payloads.RequestCancelBody(request_ids=['abc'],
+                                      user_id='admin-carol')
+    out = role_filter.force_caller_scope_cancel_body(_admin_request(), body)
+    assert out.request_ids == ['abc']
+    assert out.user_id is None
+
+
+def test_force_caller_scope_cancel_body_no_auth_named_ids_unscoped():
+    # Without per-user auth there is no identity to scope by: the client
+    # hash is not one, so a named request is cancelled whoever owns it.
+    body = payloads.RequestCancelBody(request_ids=['abc'], user_id='abcdef12')
+    out = role_filter.force_caller_scope_cancel_body(_anonymous_request(), body)
+    assert out.user_id is None
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_force_caller_scope_cancel_body_admin_all_keeps_own_scope(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.ADMIN.value])
+    # `sky api cancel --all` from an admin still cancels only their own.
+    body = payloads.RequestCancelBody(request_ids=None, user_id='admin-carol')
+    out = role_filter.force_caller_scope_cancel_body(_admin_request(), body)
+    assert out.user_id == 'admin-carol'
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_force_caller_scope_cancel_body_user_named_ids_forced(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    # Even with the ids unscoped for admins, a non-admin naming another
+    # user's request is still forced to their own scope.
+    body = payloads.RequestCancelBody(request_ids=['abc'], user_id=None)
+    out = role_filter.force_caller_scope_cancel_body(_user_request(), body)
+    assert out.user_id == 'user-alice'
+
+
+def _impersonated_admin_request():
+    request = _admin_request()
+    request.state.impersonator = mock.Mock(id='sa-platform')
+    return request
+
+
+@pytest.mark.parametrize(
+    'request_ids,user_id,expected',
+    [
+        # `sky.api_cancel()`: the client sends its own machine's user hash; the
+        # caller's own requests are the impersonated admin's.
+        (None, 'abcdef12', 'admin-carol'),
+        # `all_users=True` still means every user.
+        (None, None, None),
+        # Named ids are cancelled whoever owns them, as for any admin.
+        (['abc'], 'abcdef12', None),
+    ])
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_force_caller_scope_cancel_body_impersonated_admin(
+        mock_svc, request_ids, user_id, expected):
+    _roles_returning(mock_svc, [rbac.RoleName.ADMIN.value])
+    body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
+    out = role_filter.force_caller_scope_cancel_body(
+        _impersonated_admin_request(), body)
+    assert out.user_id == expected
 
 
 @mock.patch.object(role_filter.permission, 'permission_service')

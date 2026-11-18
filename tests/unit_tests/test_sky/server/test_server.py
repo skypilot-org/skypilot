@@ -8,20 +8,24 @@ import os
 import pathlib
 import threading
 import time
+from typing import List
 from unittest import mock
 import zipfile
 
 import fastapi
+from fastapi import testclient
 import prometheus_client as prom
 import pytest
 import uvicorn
 
+from sky import core
 from sky import models
 from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
+from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import token_service
 from sky.utils import common_utils
@@ -116,33 +120,71 @@ def test_no_deploy_flag_uses_default_workers(mock_executor_start,
 
 
 @pytest.mark.asyncio
+async def test_validate_keeps_the_shared_log_handler():
+    """`/validate` runs in a thread of the API server process.
+
+    That process serves other requests, so the env/config override must not
+    rebuild the process-wide log handler at this client's log level
+    (sync_refresh=True); otherwise a `SKYPILOT_DEBUG=1` validate leaves the
+    handler at DEBUG and later requests in the process, such as the
+    in-process `sky jobs logs` stream, carry the server's debug lines.
+    """
+    mock_dag = mock.MagicMock()
+    mock_validate_body = mock.MagicMock()
+    mock_validate_body.dag = 'test_dag_yaml'
+    mock_validate_body.request_options = {}
+    mock_validate_body.env_vars = {'SKYPILOT_DEBUG': '1'}
+    mock_request = mock.MagicMock()
+    mock_request.state.auth_user = models.User(id='alice', name='alice')
+
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()) as mock_override, \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+                   return_value=mock_dag), \
+         mock.patch('sky.server.server.admin_policy_utils.apply',
+                   return_value=(mock_dag, config_utils.Config())), \
+         mock.patch.object(mock_dag, 'validate'):
+        await server.validate(mock_validate_body, mock_request)
+
+    mock_override.assert_called_once()
+    assert mock_override.call_args.kwargs.get('sync_refresh') is True
+
+
+@pytest.mark.asyncio
 async def test_validate():
     """Test the validate endpoint."""
     mock_dag = mock.MagicMock()
     mock_validate_body = mock.MagicMock()
     mock_validate_body.dag = 'test_dag_yaml'
     mock_validate_body.request_options = {}
+    mock_validate_body.env_vars = {}
+    mock_request = mock.MagicMock()
+    mock_request.state.auth_user = models.User(id='alice', name='alice')
 
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate') as mock_validate:
         # Call validate endpoint
-        await server.validate(mock_validate_body)
+        await server.validate(mock_validate_body, mock_request)
         # Verify validate was called with correct args
         mock_validate.assert_called_once_with(skip_file_mounts=True,
                                               skip_workdir=True)
 
     error_msg = 'Invalid DAG'
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate',
                           side_effect=ValueError(error_msg)):
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.validate(mock_validate_body)
+            await server.validate(mock_validate_body, mock_request)
         assert exc_info.value.status_code == 400
         assert error_msg in str(exc_info.value.detail)
 
@@ -154,7 +196,9 @@ async def test_validate():
         time.sleep(0.1)
         validation_complete.set()
 
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
@@ -162,7 +206,7 @@ async def test_validate():
                           side_effect=slow_validate):
         # Start validation in background
         validation_task = asyncio.create_task(
-            server.validate(mock_validate_body))
+            server.validate(mock_validate_body, mock_request))
 
         # Check that validation hasn't completed immediately
         assert not validation_complete.is_set()
@@ -286,6 +330,23 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
             "is available")
     else:
         pytest.skip("uvloop not available, skipping uvloop policy check")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('auth_user,func', [
+    (models.User(id='alice-id', name='alice'), core.get_workspace_contexts),
+    (None, core.get_all_contexts),
+])
+async def test_all_contexts_scopes_authenticated_users(auth_user, func):
+    # get_all_contexts lists every SSH node pool, allowed or not.
+    request = mock.MagicMock()
+    request.state.auth_user = auth_user
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.all_contexts(request)
+
+    _, kwargs = mock_schedule.call_args
+    assert kwargs['func'] is func
 
 
 @pytest.mark.asyncio
@@ -480,8 +541,6 @@ async def test_hook_logs_keeps_its_request_log(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_launch_endpoint_passes_auth_user():
     """Test that launch endpoint passes auth_user to schedule_request_async."""
-    from sky.server.requests import payloads
-
     auth_user = models.User(id='launch-user-id', name='Launch User')
     request = mock.MagicMock()
     request.state = mock.MagicMock()
@@ -501,6 +560,81 @@ async def test_launch_endpoint_passes_auth_user():
         assert kwargs['auth_user'] == auth_user
         # request_id is passed as first positional argument
         assert args[0] == 'launch-request-id'
+
+
+def _launch_request(client_host, headers=None):
+    """A real request, so the loopback check runs unmocked."""
+    request = fastapi.Request({
+        'type': 'http',
+        'client': (client_host, 12345),
+        'headers': [(k.lower().encode(), v.encode())
+                    for k, v in (headers or {}).items()],
+    })
+    request.state.request_id = 'launch-request-id'
+    request.state.auth_user = None
+    return request
+
+
+_CONTROLLER_FIELDS = [
+    {
+        'is_launched_by_jobs_controller': True
+    },
+    {
+        'is_launched_by_sky_serve_controller': True
+    },
+    {
+        'extra_launch_context': {
+            'managed_job_v1': {
+                'min_nodes': 1
+            }
+        }
+    },
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fields', _CONTROLLER_FIELDS)
+@pytest.mark.parametrize('client_host,headers', [
+    ('10.0.0.5', None),
+    ('127.0.0.1', {
+        'X-Forwarded-For': '203.0.113.7'
+    }),
+])
+async def test_launch_rejects_controller_fields_from_remote(
+        fields, client_host, headers):
+    launch_body = payloads.LaunchBody(task='t', cluster_name='c', **fields)
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.launch(launch_body,
+                                _launch_request(client_host, headers))
+    assert exc_info.value.status_code == 403
+    mock_schedule.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_accepts_controller_fields_from_loopback():
+    launch_body = payloads.LaunchBody(task='t',
+                                      cluster_name='c',
+                                      is_launched_by_jobs_controller=True,
+                                      is_launched_by_sky_serve_controller=True,
+                                      extra_launch_context={'k': 'v'})
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.launch(launch_body, _launch_request('127.0.0.1'))
+    body = mock_schedule.call_args.kwargs['request_body']
+    assert body.is_launched_by_jobs_controller
+    assert body.is_launched_by_sky_serve_controller
+    assert body.extra_launch_context == {'k': 'v'}
+
+
+@pytest.mark.asyncio
+async def test_launch_accepts_plain_remote_launch():
+    launch_body = payloads.LaunchBody(task='t', cluster_name='c')
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.launch(launch_body, _launch_request('10.0.0.5'))
+    mock_schedule.assert_awaited_once()
 
 
 # --- Tests for cleanup_unreferenced_file_mounts ---
@@ -540,7 +674,7 @@ def _mock_sleep_cancel():
         call_count += 1
         if call_count == 1:
             # First call: the sleep *before* the first cleanup iteration.
-            # Return immediately so we proceed to _do_cleanup.
+            # Return immediately so we proceed to the GC pass.
             return
         # Second call (next iteration) – break out.
         raise asyncio.CancelledError
@@ -630,6 +764,31 @@ async def test_cleanup_blobs_unreferenced_recent_blob_not_deleted(tmp_path):
 
     assert blob_path.exists(), (
         'Unreferenced but recent blob should not be deleted')
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_blob_of_live_service_not_deleted(tmp_path):
+    """A blob that a service or pool still launches replicas from must NOT be
+    deleted once the request that created the service has finished."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    blob_path = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('sky.jobs.state.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('sky.serve.serve_state.get_active_file_mounts_blob_ids',
+                    return_value={_BLOB_HEX}), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert blob_path.exists(), 'Blob of a live service should not be deleted'
 
 
 # --- Tests for _resolve_dynamic_route ---
@@ -1018,6 +1177,47 @@ def test_api_get_interrupted_request_without_error_synthesizes_error(
     error = decoded.get_error()
     assert error is not None
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+@pytest.mark.parametrize('outcome', ['success', 'error', 'should_retry'])
+def test_api_get_never_returns_request_body(monkeypatch, outcome):
+    """A body built on the server holds the server's env; /api/get must not
+    return it in any branch, and the client must still decode the reply."""
+    from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    request = _make_interrupted_request(with_error=outcome == 'error')
+    request.request_body = payloads.RequestBody()
+    assert 'server-canary' in request.request_body.model_dump_json()
+    if outcome == 'success':
+        request.status = requests_lib.RequestStatus.SUCCEEDED
+        request.should_retry = False
+        request.set_return_value('result')
+    _mount_api_get_request(monkeypatch, request)
+
+    response = TestClient(server.app).get(
+        '/api/get', params={'request_id': 'interrupted-req'})
+
+    if outcome == 'success':
+        assert response.status_code == 200
+        payload = payloads.RequestPayload(**response.json())
+    else:
+        assert response.status_code == 500
+        payload = payloads.RequestPayload(**response.json()['detail'])
+    assert payload.request_body == server_constants.EMPTY_PICKLED_VALUE
+    decoded = requests_lib.Request.decode(payload)
+    assert decoded.request_body is None
+    if outcome == 'success':
+        assert decoded.get_return_value() == 'result'
+    else:
+        assert isinstance(decoded.get_error()['object'],
+                          exceptions.RequestInterruptedError)
+    # Response only: the stored request keeps its body.
+    assert 'server-canary' in request.request_body.model_dump_json()
 
 
 def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
@@ -1476,7 +1676,7 @@ async def test_get_expanded_request_id_admin_unscoped(monkeypatch):
     assert exc.value.status_code == 400
 
 
-# --- SKY-6429: cross-user request-API access control (integration) ----------
+# --- Cross-user request-API access control (integration) --------------------
 
 
 def _seed_request(rid, user_id, status=None):
@@ -1576,6 +1776,139 @@ def test_api_status_scopes_to_caller(_request_authz_env, monkeypatch):
         }).json()
     }
     assert {'alice-req-1', 'bob-req-1'} <= ids
+
+
+def test_api_status_does_not_read_stored_results(_request_authz_env,
+                                                 monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    _scope_as(monkeypatch, None)
+
+    requested_fields = []
+    list_tasks = server.requests_lib.get_request_tasks
+    prefix_tasks = server.requests_lib.get_requests_async_with_prefix
+
+    def _list_tasks(req_filter):
+        requested_fields.append(req_filter.fields)
+        return list_tasks(req_filter)
+
+    async def _prefix_tasks(request_id_prefix, fields=None):
+        requested_fields.append(fields)
+        return await prefix_tasks(request_id_prefix, fields)
+
+    monkeypatch.setattr(server.requests_lib, 'get_request_tasks', _list_tasks)
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        _prefix_tasks)
+
+    listed = client.get('/api/status', params={'all_status': True})
+    by_id = client.get('/api/status', params={'request_ids': ['alice-req-1']})
+
+    assert listed.status_code == 200
+    listed_ids = {r['request_id'] for r in listed.json()}
+    assert {'alice-req-1', 'bob-req-1'} <= listed_ids
+    assert [r['request_id'] for r in by_id.json()] == ['alice-req-1']
+    assert len(requested_fields) == 2
+    for fields in requested_fields:
+        assert 'return_value' not in fields
+        assert 'error' not in fields
+        assert 'request_body' in fields
+
+
+def test_api_status_listing_matches_model_encoding(_request_authz_env,
+                                                   monkeypatch):
+    requests_lib = server.requests_lib
+    running = _seed_request('carol-req-1', 'carol',
+                            requests_lib.RequestStatus.RUNNING)
+    running.cluster_name = 'c1'
+    running.status_msg = 'Provisioning ✓'
+    asyncio.new_event_loop().run_until_complete(
+        requests_lib.create_if_not_exists_async(running))
+    _scope_as(monkeypatch, None)
+
+    fetched = []
+    list_tasks = server.requests_lib.get_request_tasks
+
+    def _list_tasks(req_filter):
+        fetched[:] = list_tasks(req_filter)
+        return list(fetched)
+
+    monkeypatch.setattr(server.requests_lib, 'get_request_tasks', _list_tasks)
+
+    reference = fastapi.FastAPI()
+
+    @reference.get('/list', response_model=List[payloads.RequestPayload])
+    def _list():
+        return requests_lib.encode_requests(fetched)
+
+    client = testclient.TestClient(server.app)
+    reference_client = testclient.TestClient(reference)
+    for params in (
+        {},
+        {
+            'all_status': True
+        },
+        {
+            'all_status': True,
+            'cluster_name': 'c1'
+        },
+        {
+            'all_status': True,
+            'limit': 1
+        },
+        {
+            'all_status': True,
+            'fields': ['request_id', 'name', 'status', 'cluster_name']
+        },
+    ):
+        listed = client.get('/api/status', params=params)
+        assert listed.status_code == 200, params
+        assert listed.headers['content-type'] == 'application/json'
+        assert fetched, params
+        assert listed.json() == reference_client.get('/list').json(), params
+
+
+@pytest.mark.parametrize('scope', ['carol', None])
+def test_api_status_never_returns_request_body(_request_authz_env, monkeypatch,
+                                               scope):
+    """Not even to the owner: a body built on the server holds its env."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    row = _seed_request('carol-req-1', 'carol')
+    assert 'server-canary' in row.request_body.model_dump_json()
+    asyncio.new_event_loop().run_until_complete(
+        server.requests_lib.create_if_not_exists_async(row))
+    _scope_as(monkeypatch, scope)
+
+    client = testclient.TestClient(server.app)
+    for params in ({'all_status': True}, {'request_ids': ['carol-req-1']}):
+        listed = client.get('/api/status', params=params)
+        assert listed.status_code == 200, params
+        assert 'server-canary' not in listed.text, params
+        carol = [r for r in listed.json() if r['request_id'] == 'carol-req-1']
+        assert len(carol) == 1, params
+        assert carol[0]['request_body'] == 'null', params
+
+
+def test_api_status_lists_off_event_loop(_request_authz_env, monkeypatch):
+    client = testclient.TestClient(server.app)
+    _scope_as(monkeypatch, None)
+
+    on_loop = []
+    encode = server.requests_lib.encode_requests
+
+    def _encode(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return encode(*args, **kwargs)
+
+    monkeypatch.setattr(server.requests_lib, 'encode_requests', _encode)
+
+    listed = client.get('/api/status', params={'all_status': True})
+
+    assert listed.status_code == 200
+    assert on_loop == [False]
 
 
 def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):

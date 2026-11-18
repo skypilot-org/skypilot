@@ -7,4 +7,3 @@ Agents
    Parallel Autoresearch <autoresearch>
    Autonomous Code Optimization <autonomous-code-optimization>
    GPU Job Management for Agents <gpu-job-management>
-   Scale Agentic RL with slime <slime>

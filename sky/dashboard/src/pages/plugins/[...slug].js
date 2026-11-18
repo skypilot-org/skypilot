@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
-import { usePluginRoute } from '@/plugins/PluginProvider';
+import { usePluginRoute, usePluginsLoaded } from '@/plugins/PluginProvider';
+import { PageNotFound } from '@/components/elements/PageNotFound';
 
 function normalizeSlug(slug) {
   if (!slug) {
@@ -60,6 +61,7 @@ export default function PluginRoutePage() {
       : null;
   const strippedRoute = usePluginRoute(strippedPath);
   const route = prefixedRoute || strippedRoute;
+  const pluginsLoaded = usePluginsLoaded();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -111,9 +113,12 @@ export default function PluginRoutePage() {
     };
   }, [route, pathname]);
 
+  const notFound = !route && router.isReady && pluginsLoaded;
   const title = route?.title
     ? `${route.title} | SkyPilot Dashboard`
-    : 'Plugin | SkyPilot Dashboard';
+    : notFound
+      ? 'Page not found | SkyPilot Dashboard'
+      : 'Plugin | SkyPilot Dashboard';
 
   return (
     <>
@@ -122,15 +127,16 @@ export default function PluginRoutePage() {
       </Head>
       <div className="min-h-[50vh]">
         {mountError ? (
-          <div className="max-w-3xl mx-auto p-6 bg-red-50 text-red-700 rounded-lg border border-red-200">
+          <div className="max-w-3xl mx-auto p-6 bg-red-tint text-red-fg-strong rounded-lg border border-red-line">
             {mountError}
           </div>
         ) : (
           <>
-            {!route && (
+            {notFound && <PageNotFound />}
+            {!route && !notFound && (
               <div className="flex justify-center items-center h-64">
                 <CircularProgress size={20} />
-                <span className="ml-2 text-gray-500">
+                <span className="ml-2 text-content-tertiary">
                   {router.isReady
                     ? 'Loading plugin resources...'
                     : 'Preparing plugin route...'}

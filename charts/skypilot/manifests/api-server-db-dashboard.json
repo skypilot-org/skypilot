@@ -1112,7 +1112,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Pool utilization (worst process)",
-      "description": "Checked-out connections over the configured ceiling, for the most saturated process. Per-process because a fleet-wide sum can exceed any single pool's limit while no individual pool is full. The configured limits come from max-mode gauges, hence max_over_time.",
+      "description": "Checked-out connections over the configured ceiling, for the most saturated process. Per-process because a sum across processes can exceed any single pool's limit while no individual pool is full. The configured limits come from max-mode gauges, hence max_over_time.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

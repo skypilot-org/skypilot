@@ -676,8 +676,9 @@ class TestResyncEdgeCases(unittest.TestCase):
         denied -> re-sync -> re-check passes."""
         check_calls = []
 
-        def _check(user, workspace, action='write'):
-            del user, action  # Signature mirrors check_workspace_permission.
+        def _check(user, workspace, action='write', workspace_ref=None):
+            # Signature mirrors check_workspace_permission.
+            del user, action, workspace_ref
             check_calls.append(workspace)
             if len(check_calls) == 1:
                 raise exceptions.PermissionDeniedError('no access')
@@ -793,26 +794,28 @@ class TestReadOnlyOnlyUser(unittest.TestCase):
                 workspaces_core.resolve_workspace_for_user(self.user,
                                                            action='write')
 
-    def test_read_with_several_writable_workspaces_still_ambiguous(self):
-        """Scope guard: the pick applies ONLY to the read-only-only case.
+    def test_read_with_several_writable_workspaces_picks_first_by_name(self):
+        """A member of several writable workspaces who has not chosen one.
 
-        A member of several writable workspaces who has not chosen one still
-        gets AMBIGUOUS on a read, exactly as before — that user *can* act on
-        the recovery hint, and silently picking for them would hide which
-        workspace their next launch lands in.
+        A read picks the first workspace by *name*, not by id: ids are opaque,
+        so an id order would leave the user unable to tell which workspace
+        their reads use. A write still raises: only the user can say where a
+        new resource lands.
         """
+        # Id order (ws-1 < ws-2) is the reverse of name order (alpha < zeta).
+        workspaces = {'ws-1': {'name': 'zeta'}, 'ws-2': {'name': 'alpha'}}
 
         def _acc(user_id, names, action='read'):
             del user_id, names, action
-            return {'team-a', 'team-b'}
+            return {'ws-1', 'ws-2'}
 
         patches = [
             mock.patch.object(workspaces_core,
                               '_load_workspaces',
-                              return_value={
-                                  'team-a': {},
-                                  'team-b': {}
-                              }),
+                              return_value=workspaces),
+            mock.patch.object(skypilot_config,
+                              '_loaded_workspaces',
+                              return_value=workspaces),
             mock.patch.object(workspaces_core,
                               '_accessible_workspace_names_for_user',
                               side_effect=_acc),
@@ -820,6 +823,17 @@ class TestReadOnlyOnlyUser(unittest.TestCase):
                               'resync_workspace_policies_for_new_user'),
         ]
         with _Patcher(patches):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read',
+                                                             pick_for_read=True)
+            self.assertEqual(res.workspace, 'ws-2')
+            self.assertEqual(res.source,
+                             workspace_constants.WORKSPACE_SOURCE_READ_FIRST)
+            with self.assertRaises(exceptions.WorkspaceAmbiguousError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='write',
+                                                           pick_for_read=True)
+            # A read that prepares a launch does not pick.
             with self.assertRaises(exceptions.WorkspaceAmbiguousError):
                 workspaces_core.resolve_workspace_for_user(self.user,
                                                            action='read')
@@ -866,14 +880,19 @@ class TestReadOnlyExcludedFromActiveSelection(unittest.TestCase):
                                                              action='read')
         self.assertEqual(res.workspace, 'pub')
 
-    def test_multiple_writable_still_ambiguous(self):
-        # Two genuinely writable workspaces still can't be auto-picked.
+    def test_multiple_writable_ambiguous_only_for_write(self):
+        # Two genuinely writable workspaces can't be auto-picked for a write;
+        # a read takes the first.
         with _Patcher(
                 self._patches(writable=['pub', 'pub1'],
                               readable=['pub', 'pub1'])):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read',
+                                                             pick_for_read=True)
+            self.assertEqual(res.workspace, 'pub')
             with self.assertRaises(exceptions.WorkspaceAmbiguousError):
                 workspaces_core.resolve_workspace_for_user(self.user,
-                                                           action='read')
+                                                           action='write')
 
     def test_write_request_ignores_read_only(self):
         # A write request with one writable + one read-only resolves to the
