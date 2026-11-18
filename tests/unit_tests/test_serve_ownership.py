@@ -287,6 +287,17 @@ class TestDown:
             impl.down(all=True)
         terminate.assert_not_called()
         assert any('alice-lost' in str(call) for call in info.call_args_list)
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(service_names=['alice-*'])
+        terminate.assert_not_called()
+        assert any('alice-lost' in str(call) for call in info.call_args_list)
+        # Named exactly, it is reached, so nothing is reported as skipped.
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(service_names=['alice-lost'])
+        assert _terminated(terminate) == ['alice-lost']
+        assert not any('unknown' in str(call) for call in info.call_args_list)
 
     def test_workspace_stored_as_a_name_is_resolved(self):
         records = [

@@ -1306,9 +1306,6 @@ def down(
                 return not scoped or _in_workspace(record, active_workspace)
 
             if all:
-                if unknown:
-                    logger.info(f'Skipped {noun}s whose workspace is unknown '
-                                f'(tear them down by name): {unknown}')
                 # `down --all` from a non-admin means all of the caller's own.
                 in_workspace = [
                     record for record in service_records if _reached(record)
@@ -1327,6 +1324,16 @@ def down(
                         for pattern in service_names)
                 ]
                 _check_service_ownership(targets, pool)
+                unknown = [
+                    name for name in unknown
+                    if name not in service_names and any(
+                        '*' in pattern and
+                        _matches_service_pattern(name, pattern)
+                        for pattern in service_names)
+                ]
+            if unknown:
+                logger.info(f'Skipped {noun}s whose workspace is unknown '
+                            f'(tear them down by name): {unknown}')
             service_names = [record['name'] for record in targets]
             if not service_names:
                 # Decided here rather than by handing the controller an empty
