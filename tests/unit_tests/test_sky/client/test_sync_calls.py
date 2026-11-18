@@ -75,8 +75,17 @@ class TestRequestLayer:
     @mock.patch('sky.server.rest._session')
     def test_no_header_without_capability(self, mock_session):
         mock_session.request.return_value = _response(200)
-        rest.request_without_retry('GET', 'http://test.com')
+        rest.request_without_retry('GET', 'http://test.com', sync_call=True)
         assert _SYNC not in _sent_headers(mock_session.request.call_args)
+
+    @pytest.mark.usefixtures('sync_server')
+    @mock.patch('sky.server.rest._session')
+    def test_no_header_without_opt_in(self, mock_session):
+        mock_session.request.return_value = _response(200)
+        rest.request('GET', 'http://test.com', stream=True)
+        call = mock_session.request.call_args
+        assert _SYNC not in _sent_headers(call)
+        assert 'sync_call' not in call.kwargs
 
     @pytest.mark.usefixtures('sync_server')
     @pytest.mark.parametrize('limit,sync', [(None, False), (0, False),
@@ -87,6 +96,7 @@ class TestRequestLayer:
         mock_session.request.return_value = _response(200)
         rest.request_without_retry('POST',
                                    'http://test.com',
+                                   sync_call=True,
                                    json={'limit': limit})
         assert (_SYNC in _sent_headers(mock_session.request.call_args)) is sync
 
@@ -96,6 +106,7 @@ class TestRequestLayer:
         mock_session.request.return_value = _sync_response(200, {})
         rest.request_without_retry('POST',
                                    'http://test.com',
+                                   sync_call=True,
                                    headers={'Authorization': 'Bearer x'},
                                    json={'a': 1})
         call = mock_session.request.call_args
@@ -110,7 +121,8 @@ class TestRequestLayer:
     def test_refused_sync_call_is_resent_without_header(self, mock_session):
         queued = _response(200, {'X-Skypilot-Request-ID': 'req-1'})
         mock_session.request.side_effect = [_sync_response(400, {}), queued]
-        assert rest.request_without_retry('POST', 'http://test.com') is queued
+        assert rest.request_without_retry(
+            'POST', 'http://test.com', sync_call=True) is queued
         first, second = mock_session.request.call_args_list
         assert _sent_headers(first)[_SYNC] == '1'
         assert _SYNC not in _sent_headers(second)
@@ -120,8 +132,8 @@ class TestRequestLayer:
     def test_unmarked_400_is_returned(self, mock_session):
         bad_request = _response(400, json_body={'detail': 'bad'})
         mock_session.request.return_value = bad_request
-        assert rest.request_without_retry('POST',
-                                          'http://test.com') is bad_request
+        assert rest.request_without_retry(
+            'POST', 'http://test.com', sync_call=True) is bad_request
         assert mock_session.request.call_count == 1
 
     @pytest.mark.usefixtures('sync_server')
@@ -133,7 +145,8 @@ class TestRequestLayer:
             _sync_response(429, headers={'Retry-After': '2'}),
             answered,
         ]
-        assert rest.request_without_retry('GET', 'http://test.com') is answered
+        assert rest.request_without_retry(
+            'GET', 'http://test.com', sync_call=True) is answered
         mock_sleep.assert_called_once_with(2.0)
 
     @pytest.mark.usefixtures('sync_server')
@@ -143,7 +156,7 @@ class TestRequestLayer:
         del mock_sleep
         mock_session.request.return_value = _sync_response(429)
         with pytest.raises(exceptions.ServerTemporarilyUnavailableError):
-            rest.request_without_retry('GET', 'http://test.com')
+            rest.request_without_retry('GET', 'http://test.com', sync_call=True)
         assert mock_session.request.call_count == rest._SYNC_CALL_BUSY_RETRIES
 
     def test_retry_after_is_bounded(self):

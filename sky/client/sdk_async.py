@@ -102,12 +102,13 @@ async def get(request_id: str) -> Any:
         try:
             try:
                 body = await response.json()
-                raw_text = None
             except (aiohttp.ContentTypeError, ValueError):
-                body, raw_text = None, await response.text()
-            return client_common.request_result(
-                request_id, response.status, body, lambda: str(body)
-                if raw_text is None else raw_text)
+                body = None
+            # A successful result can be large and is never shown.
+            text = ('' if response.status == 200 and body is not None else await
+                    response.text())
+            return client_common.request_result(request_id, response.status,
+                                                body, lambda: text)
         finally:
             response.close()
 

@@ -424,6 +424,7 @@ def make_authenticated_request(method: str,
                                path: str,
                                server_url: Optional[str] = None,
                                retry: bool = True,
+                               sync_call: bool = False,
                                **kwargs) -> 'requests.Response':
     """Make an authenticated HTTP request to the API server.
 
@@ -435,6 +436,8 @@ def make_authenticated_request(method: str,
         path: API path (e.g., '/api/v1/status')
         server_url: Server URL, defaults to configured server
         retry: Whether to retry on transient errors
+        sync_call: Whether the server may answer with the request's result
+            in the response; see rest.request_without_retry.
         **kwargs: Additional arguments to pass to requests
 
     Returns:
@@ -445,10 +448,13 @@ def make_authenticated_request(method: str,
 
     # Make the request
     if retry:
-        return rest.request(method, url, **kwargs)
+        return rest.request(method, url, sync_call=sync_call, **kwargs)
     else:
         assert method == 'GET', 'Only GET requests can be done without retry'
-        return rest.request_without_retry(method, url, **kwargs)
+        return rest.request_without_retry(method,
+                                          url,
+                                          sync_call=sync_call,
+                                          **kwargs)
 
 
 async def make_authenticated_request_async(

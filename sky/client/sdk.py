@@ -300,7 +300,9 @@ def enabled_clouds(workspace: Optional[str] = None,
         url = f'/enabled_clouds?expand={expand}'
     else:
         url = f'/enabled_clouds?workspace={workspace}&expand={expand}'
-    response = server_common.make_authenticated_request('GET', url)
+    response = server_common.make_authenticated_request('GET',
+                                                        url,
+                                                        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -534,7 +536,9 @@ def optimize(
 
 def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     """Gets the workspaces."""
-    response = server_common.make_authenticated_request('GET', '/workspaces')
+    response = server_common.make_authenticated_request('GET',
+                                                        '/workspaces',
+                                                        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -1899,7 +1903,10 @@ def cluster_job_spec(
     """
     body = payloads.ClusterJobSpecBody(cluster_name=cluster_name, job_id=job_id)
     response = server_common.make_authenticated_request(
-        'POST', '/cluster_job_spec', json=json.loads(body.model_dump_json()))
+        'POST',
+        '/cluster_job_spec',
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2429,7 +2436,8 @@ def realtime_kubernetes_gpu_availability(
     response = server_common.make_authenticated_request(
         'POST',
         '/realtime_kubernetes_gpu_availability',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2462,7 +2470,8 @@ def kubernetes_node_info(
     response = server_common.make_authenticated_request(
         'POST',
         '/kubernetes_node_info',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 

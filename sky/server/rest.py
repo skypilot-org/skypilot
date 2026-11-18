@@ -379,10 +379,13 @@ async def handle_server_unavailable_async(
 
 
 @_retry_on_server_unavailable()
-def request(method, url, **kwargs) -> 'requests.Response':
+def request(method,
+            url,
+            sync_call: bool = False,
+            **kwargs) -> 'requests.Response':
     """Send a request to the API server, retry on server temporarily
-    unavailable."""
-    return request_without_retry(method, url, **kwargs)
+    unavailable. See request_without_retry for sync_call."""
+    return request_without_retry(method, url, sync_call=sync_call, **kwargs)
 
 
 def set_sync_call_max_limit(max_limit: Optional[int]) -> None:
@@ -396,8 +399,8 @@ def is_sync_response(response: 'requests.Response') -> bool:
     return response.headers.get(constants.SYNC_CALL_HEADER) == '1'
 
 
-def _allows_sync_call(kwargs) -> bool:
-    if _sync_call_max_limit is None:
+def _allows_sync_call(sync_call: bool, kwargs) -> bool:
+    if not sync_call or _sync_call_max_limit is None:
         return False
     body = kwargs.get('json')
     if isinstance(body, dict) and 'limit' in body:
@@ -414,9 +417,9 @@ def _retry_after_seconds(response: 'requests.Response') -> float:
     return min(max(seconds, 0.0), _SYNC_CALL_MAX_RETRY_AFTER_SECONDS)
 
 
-def _send(method, url, **kwargs) -> 'requests.Response':
-    """Sends a request, as a sync call when the server answers sync calls."""
-    if not _allows_sync_call(kwargs):
+def _send(method, url, sync_call: bool, **kwargs) -> 'requests.Response':
+    """Sends a request, as a sync call if asked and the server answers them."""
+    if not _allows_sync_call(sync_call, kwargs):
         return _session.request(method, url, **kwargs)
     headers = dict(kwargs.pop('headers', None) or {})
     sync_headers = {**headers, constants.SYNC_CALL_HEADER: '1'}
@@ -435,9 +438,17 @@ def _send(method, url, **kwargs) -> 'requests.Response':
         'SkyPilot API server is busy.')
 
 
-def request_without_retry(method, url, **kwargs) -> 'requests.Response':
-    """Send a request to the API server without retry."""
-    response = _send(method, url, **kwargs)
+def request_without_retry(method,
+                          url,
+                          sync_call: bool = False,
+                          **kwargs) -> 'requests.Response':
+    """Send a request to the API server without retry.
+
+    sync_call: the caller passes the response to server_common.get_request_id,
+    so the server may answer with the result itself (see SYNC_CALL_HEADER).
+    The request is resent as is on a refusal, so it must not stream its body.
+    """
+    response = _send(method, url, sync_call, **kwargs)
     handle_server_unavailable(response)
     # TODO (kyuds): investigate into whether we can remove this as we
     # explicitly set in `get_api_server_status`.
