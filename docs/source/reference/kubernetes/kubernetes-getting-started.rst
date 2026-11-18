@@ -472,7 +472,7 @@ FAQs
 
   Pod startup then downloads nothing. ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers still download their own tools.
 
-  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` to skip the built-in public ones, and uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
+  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` when pods can reach no package source, so that launches do not also wait on the built-in public ones; and set uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
 
 * **Are multi-node jobs supported on Kubernetes?**
 
