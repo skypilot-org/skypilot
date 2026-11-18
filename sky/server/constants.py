@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 69  # accelerator_args.multi_host for TPU slices on Kubernetes
+API_VERSION = 70  # num_nodes in resources
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -81,6 +81,11 @@ MIN_BATCH_API_VERSION = 49
 # only exists to fetch credentials for SSH config setup.
 MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
 MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
+# Minimum server API version that accepts `num_nodes` inside `resources`
+# (including each `any_of`/`ordered` candidate). An older server rejects the
+# unknown key, so the client refuses with a clearer error.
+MIN_RESOURCES_NUM_NODES_API_VERSION = 70
+
 # Minimum server API version that accepts `accelerator_args.multi_host` (a
 # multi-host TPU slice on Kubernetes). An older server rejects the field in
 # its schema, and dropping it on the client would launch different hardware

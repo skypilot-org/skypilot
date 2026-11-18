@@ -483,7 +483,7 @@ class GPUStaticQuotaPolicy(sky.AdminPolicy):
         for resource in user_request.task.resources:
             if resource.accelerators:
                 for accelerator, count in resource.accelerators.items():
-                    count *= user_request.task.num_nodes
+                    count *= resource.num_nodes
                     quota = cls.GPU_QUOTA_PER_USER.get(accelerator, 0)
                     if accelerators_used.get(accelerator, 0) + count > quota:
                         raise RuntimeError(

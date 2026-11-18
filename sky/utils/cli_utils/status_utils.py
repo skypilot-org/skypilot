@@ -418,11 +418,7 @@ def _get_resources_for_cost_report(
     launched_nodes = kubernetes_utils.num_task_nodes(
         cluster_cost_report_record['num_nodes'], launched_resources)
 
-    launched_resource_str = str(launched_resources)
-    resources_str = (f'{launched_nodes}x '
-                     f'{launched_resource_str}')
-
-    return resources_str
+    return f'{launched_nodes}x {launched_resources.copy(num_nodes=None)}'
 
 
 def _get_price_for_cost_report(

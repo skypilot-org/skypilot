@@ -1688,16 +1688,13 @@ class StrategyExecutor:
                                 await self._cancel_remaining_launch_requests(
                                     request_id)
                         else:
-                            # Get task resources from DAG for resource-aware
-                            # scheduling.
-                            task_resources = None
-                            if self.dag.tasks:
-                                task = self.dag.tasks[self.task_id]
-                                task_resources = task.resources
-
+                            # Preserve the task's serialization context when
+                            # the pool records its selected resources.
+                            pool_task = (self.dag.tasks[self.task_id]
+                                         if self.dag.tasks else None)
                             self.cluster_name = await (asyncio.to_thread(
                                 serve_utils.get_next_cluster_name, self.pool,
-                                self.job_id, task_resources))
+                                self.job_id, pool_task))
                             if self.cluster_name is None:
                                 # Classified here rather than by the broad
                                 # except below: that would call the commonest
@@ -2133,6 +2130,15 @@ class FailoverStrategyExecutor(StrategyExecutor):
             assert isinstance(handle, backends.CloudVmRayResourceHandle), (
                 'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
+            if launched_resources is not None:
+                # A reused cluster may have more capacity than this task runs
+                # on. Recovery retries the matched request, not that capacity.
+                matched = await asyncio.to_thread(
+                    backend_utils.get_task_resources_for_cluster, handle,
+                    self.dag.tasks[0])
+                if matched is not None:
+                    launched_resources = await asyncio.to_thread(
+                        launched_resources.copy, num_nodes=matched.num_nodes)
             self._launched_resources = launched_resources
 
             # Persist infra info to database for sorting/filtering

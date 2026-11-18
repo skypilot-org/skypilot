@@ -495,20 +495,19 @@ def _task_cluster_num_nodes(
 ) -> int:
     """Number of cluster nodes the task runs on.
 
-    Usually task.num_nodes. Each task node of a multi-host TPU slice on
+    Each task node of a multi-host TPU slice on
     Kubernetes is one slice with one cluster node (pod) per VM, so a
     single-node task there still spans several cluster nodes. Uses the
-    handle's launched resources when given, else the task's requested
-    resources (the largest slice among them).
+    handle's cluster size when given, else the largest requested cluster
+    size among the task's candidates.
     """
-    launched_resources = getattr(handle, 'launched_resources', None)
-    if launched_resources is not None:
-        vms_per_slice = kubernetes_utils.tpu_vms_per_slice(launched_resources)
-    else:
-        vms_per_slice = max(
-            (kubernetes_utils.tpu_vms_per_slice(r) for r in task.resources),
-            default=1)
-    return task.num_nodes * vms_per_slice
+    if handle is not None:
+        return handle.launched_nodes
+    candidates = ([task.best_resources]
+                  if task.best_resources is not None else task.resources)
+    return max((r.num_nodes * kubernetes_utils.tpu_vms_per_slice(r)
+                for r in candidates),
+               default=1)
 
 
 class _TaskRunAction(enum.Enum):

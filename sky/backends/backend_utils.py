@@ -4906,6 +4906,33 @@ def get_num_gpus_per_node(task: 'task_lib.Task') -> int:
     return int(math.ceil(acc_count))
 
 
+def get_task_resources_for_cluster(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    task: 'task_lib.Task',
+    check_ports: bool = False,
+    skip_num_nodes_check: bool = False,
+) -> Optional['resources_lib.Resources']:
+    """Return the first task candidate that fits an existing cluster."""
+    launched_resources = handle.launched_resources
+    # Honor ordered preferences. For mixed-count any_of requests, prefer using
+    # available capacity; on resize choose the smallest matching request.
+    candidates = list(task.resources)
+    if (isinstance(task.resources, set) and
+            len({r.num_nodes for r in candidates}) > 1):
+        candidates.sort(key=lambda r: (r.num_nodes if skip_num_nodes_check else
+                                       -r.num_nodes, r.repr_with_region_zone))
+    for resource in candidates:
+        fit_num_nodes = (handle.launched_nodes
+                         if skip_num_nodes_check else resource.num_nodes *
+                         kubernetes_utils.tpu_vms_per_slice(launched_resources))
+        if (fit_num_nodes <= handle.launched_nodes and
+                resource.less_demanding_than(launched_resources,
+                                             requested_num_nodes=fit_num_nodes,
+                                             check_ports=check_ports)):
+            return resource
+    return None
+
+
 def get_task_resources_str(task: 'task_lib.Task',
                            is_managed_job: bool = False) -> str:
     """Returns the resources string of the task.
@@ -4918,8 +4945,10 @@ def get_task_resources_str(task: 'task_lib.Task',
     task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
                        if is_controller_task else str(DEFAULT_TASK_CPU_DEMAND))
     if is_controller_task:
+        num_nodes = next(iter(task.resources)).num_nodes
         resources_str = f'CPU:{task_cpu_demand}'
     elif task.best_resources is not None:
+        num_nodes = task.best_resources.num_nodes
         accelerator_dict = task.best_resources.accelerators
         if is_managed_job:
             if task.best_resources.use_spot:
@@ -4932,35 +4961,47 @@ def get_task_resources_str(task: 'task_lib.Task',
             resources_str = ', '.join(
                 f'{k}:{v}' for k, v in accelerator_dict.items())
     else:
-        resource_accelerators = []
-        min_cpus = float('inf')
-        spot_type: Set[str] = set()
+        resources_by_num_nodes: Dict[int, List['resources_lib.Resources']] = {}
         for resource in task.resources:
-            task_cpu_demand = '1+'
-            if resource.cpus is not None:
-                task_cpu_demand = resource.cpus
-            min_cpus = min(min_cpus, float(task_cpu_demand.strip('+ ')))
-            if resource.use_spot:
-                spot_type.add('Spot')
+            resources_by_num_nodes.setdefault(resource.num_nodes,
+                                              []).append(resource)
+        resource_groups = list(resources_by_num_nodes.items())
+        if isinstance(task.resources, set) and len(resource_groups) > 1:
+            resource_groups.sort()
+        candidates = []
+        for num_nodes, resources_group in resource_groups:
+            spot_str = ''
+            resource_accelerators = []
+            min_cpus = float('inf')
+            spot_type: Set[str] = set()
+            for resource in resources_group:
+                task_cpu_demand = '1+'
+                if resource.cpus is not None:
+                    task_cpu_demand = resource.cpus
+                min_cpus = min(min_cpus, float(task_cpu_demand.strip('+ ')))
+                if resource.use_spot:
+                    spot_type.add('Spot')
+                else:
+                    spot_type.add('On-demand')
+
+                if resource.accelerators is None:
+                    continue
+                for k, v in resource.accelerators.items():
+                    resource_accelerators.append(f'{k}:{v}')
+
+            if is_managed_job:
+                if len(resources_group) > 1:
+                    task_cpu_demand = f'{min_cpus}+'
+                if 'Spot' in spot_type:
+                    spot_str = '|'.join(sorted(spot_type))
+                    spot_str = f'[{spot_str}]'
+            if resource_accelerators:
+                resources_str = ', '.join(set(resource_accelerators))
             else:
-                spot_type.add('On-demand')
-
-            if resource.accelerators is None:
-                continue
-            for k, v in resource.accelerators.items():
-                resource_accelerators.append(f'{k}:{v}')
-
-        if is_managed_job:
-            if len(task.resources) > 1:
-                task_cpu_demand = f'{min_cpus}+'
-            if 'Spot' in spot_type:
-                spot_str = '|'.join(sorted(spot_type))
-                spot_str = f'[{spot_str}]'
-        if resource_accelerators:
-            resources_str = ', '.join(set(resource_accelerators))
-        else:
-            resources_str = f'CPU:{task_cpu_demand}'
-    resources_str = f'{task.num_nodes}x[{resources_str}]{spot_str}'
+                resources_str = f'CPU:{task_cpu_demand}'
+            candidates.append(f'{num_nodes}x[{resources_str}]{spot_str}')
+        return ', '.join(candidates)
+    resources_str = f'{num_nodes}x[{resources_str}]{spot_str}'
     return resources_str
 
 

@@ -1113,6 +1113,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     'for Job Group YAML.',
                     fg='yellow')
             for task in dag.tasks:
+                if task._num_nodes is not None:  # pylint: disable=protected-access
+                    task_lib.warn_legacy_num_nodes()
                 task.update_workdir(workdir, git_url, git_ref)
                 task.update_envs_and_secrets_from_workdir()
             return dag
@@ -1130,12 +1132,16 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
             for task in dag.tasks:
+                if task._num_nodes is not None:  # pylint: disable=protected-access
+                    task_lib.warn_legacy_num_nodes()
                 task.update_workdir(workdir, git_url, git_ref)
                 task.update_envs_and_secrets_from_workdir()
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
+        if task._num_nodes is not None:  # pylint: disable=protected-access
+            task_lib.warn_legacy_num_nodes()
     else:
         task = task_lib.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({resources_lib.Resources()})
@@ -1155,7 +1161,20 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     task.set_resources_override(override_params)
 
     if num_nodes is not None:
-        task.num_nodes = num_nodes
+        if len({r.num_nodes for r in task.resources}) > 1:
+            logger.warning('Overriding different node counts in resource '
+                           f'candidates with --num-nodes={num_nodes}.')
+        # `num_nodes` is set either on the task or in its resources; override
+        # it where the task sets it.
+        resource_config = task.get_resource_config()
+        if not any(
+                config.get('num_nodes') is not None
+                for config in [resource_config] +
+                resource_config.get('any_of', []) +
+                resource_config.get('ordered', [])):
+            task.num_nodes = num_nodes
+        else:
+            task.set_resources_override({'num_nodes': num_nodes})
     if name is not None:
         task.name = name
     return task

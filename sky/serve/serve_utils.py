@@ -3,6 +3,7 @@ import base64
 import collections
 import concurrent.futures
 import contextvars
+import copy
 import dataclasses
 import datetime
 import enum
@@ -1210,22 +1211,18 @@ def get_free_worker_resources(
     return free_resources
 
 
-def get_next_cluster_name(
-    service_name: str,
-    job_id: int,
-    task_resources: Optional[typing.Union[
-        'resources_lib.Resources', typing.Set['resources_lib.Resources'],
-        typing.List['resources_lib.Resources']]] = None
-) -> Optional[str]:
+def get_next_cluster_name(service_name: str,
+                          job_id: int,
+                          task: Optional['sky.Task'] = None) -> Optional[str]:
     """Get the next available cluster name from replicas with sufficient
     resources.
 
     Args:
         service_name: The name of the service.
         job_id: Job ID to associate with the acquired cluster.
-        task_resources: Optional task resource requirements. If provided, will
-                check if resources fit in free worker resources. Can be
-                a single Resources object or a set/list of Resources objects.
+        task: Optional task requirements. If provided, checks whether any
+            candidate fits and preserves its legacy serialization format when
+            recording the selected resources.
 
     Returns:
         The cluster name if a suitable replica is found, None otherwise.
@@ -1259,14 +1256,7 @@ def get_next_cluster_name(
 
         idle_replicas: List['replica_managers.ReplicaInfo'] = []
 
-        # If task_resources is provided, use resource-aware scheduling
-        # Normalize task_resources to a list
-        if isinstance(task_resources, resources_lib.Resources):
-            task_resources_list = [task_resources]
-        elif isinstance(task_resources, (set, list)):
-            task_resources_list = list(task_resources)
-        else:
-            task_resources_list = []
+        task_resources_list = list(task.resources) if task is not None else []
 
         # We should do resource aware scheduling if:
         # 1. There are task resources.
@@ -1350,7 +1340,7 @@ def get_next_cluster_name(
         # full_resources to the specific resource that was selected for this
         # worker. This must happen before releasing the filelock to ensure
         # atomicity with the scheduling decision.
-        if resource_aware and len(task_resources_list) > 1:
+        if task is not None and resource_aware and len(task_resources_list) > 1:
             assert free_resources is not None
             free_resources_on_worker = free_resources.get(
                 replica_info.cluster_name)
@@ -1363,8 +1353,10 @@ def get_next_cluster_name(
                         logger.debug(
                             f'Updating full_resources for job {job_id!r} '
                             f'to selected resource: {task_res!r}')
+                        selected_task = copy.copy(task)
+                        selected_task.set_resources(task_res)
                         managed_job_state.update_job_full_resources(
-                            job_id, task_res.to_yaml_config())
+                            job_id, selected_task.get_resource_config())
                         break
 
         managed_job_state.set_current_cluster_name(job_id,

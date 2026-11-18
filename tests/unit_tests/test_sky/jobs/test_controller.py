@@ -2256,6 +2256,8 @@ class TestUserJobStatusClassification:
         mock_task = MagicMock()
         mock_task.name = 'test-task'
         mock_task.num_nodes = 1
+        mock_task.resources = [MagicMock(num_nodes=1)]
+        mock_task.best_resources = None
 
         # No retries: deterministic OOM-style failures should not be retried.
         executor = MagicMock()
@@ -2394,6 +2396,8 @@ class TestUserJobFailureRecoveryEventReason:
         mock_task = MagicMock()
         mock_task.name = 'test-task'
         mock_task.num_nodes = 1
+        mock_task.resources = [MagicMock(num_nodes=1)]
+        mock_task.best_resources = None
 
         handle = MagicMock()
         handle.launched_resources.need_cleanup_after_preemption_or_failure.\
@@ -2490,6 +2494,8 @@ class TestUserJobFailureRecoveryEventReason:
         executor = self._make_executor()
         task = MagicMock(name='task')
         task.num_nodes = 1
+        task.resources = [MagicMock(num_nodes=1)]
+        task.best_resources = None
         handle = MagicMock(name='pre_refresh_handle')
         current_handle = [handle]
 
@@ -2614,6 +2620,8 @@ class TestTransientJobStatusRecoveryWindow:
             self, num_nodes):
         task = MagicMock()
         task.num_nodes = num_nodes
+        task.resources = [MagicMock(num_nodes=num_nodes)]
+        task.best_resources = None
         instance = MagicMock()
         instance._job_id = 1
         instance._pool = None
@@ -2694,6 +2702,8 @@ class TestTransientJobStatusRecoveryWindow:
         ]
         task = MagicMock()
         task.num_nodes = num_nodes
+        task.resources = [MagicMock(num_nodes=num_nodes)]
+        task.best_resources = None
         instance = MagicMock()
         instance._job_id = 1
         instance._pool = None
@@ -3036,6 +3046,8 @@ class TestTransientJobStatusRecoveryWindow:
 
         task = MagicMock(name='task')
         task.num_nodes = num_nodes
+        task.resources = [MagicMock(num_nodes=num_nodes)]
+        task.best_resources = None
 
         mock_self = MagicMock()
         mock_self._job_id = 1
@@ -3118,6 +3130,8 @@ class TestRuntimeCursorReads:
     async def _run(self, instance, executor=None):
         task = MagicMock()
         task.num_nodes = 1
+        task.resources = [MagicMock(num_nodes=1)]
+        task.best_resources = None
         with pytest.raises(self._StopLoop):
             await JobController._monitor_one_task_impl(
                 instance,
@@ -3142,7 +3156,7 @@ class TestRuntimeCursorReads:
                 raise self._StopLoop()
             return job_lib.JobStatus.RUNNING, None
 
-        handle = MagicMock()
+        handle = MagicMock(launched_nodes=1)
         with patch.object(controller_module.backend_utils,
                           'async_check_network_connection', new=AsyncMock()), \
              patch.object(controller_module.global_user_state,
@@ -3355,6 +3369,8 @@ class TestStatusCheckGapJitter:
 
         task = MagicMock()
         task.num_nodes = 1
+        task.resources = [MagicMock(num_nodes=1)]
+        task.best_resources = None
         instance = MagicMock()
         instance._job_id = 1
         instance._pool = None
@@ -4010,6 +4026,8 @@ class TestOnRecoveryClusterSetUpErrorHandling:
         mock_task = MagicMock()
         mock_task.name = 'test-task'
         mock_task.num_nodes = 1
+        mock_task.resources = [MagicMock(num_nodes=1)]
+        mock_task.best_resources = None
 
         executor = MagicMock()
         executor.recover = AsyncMock(return_value=12345.0)
@@ -4908,12 +4926,9 @@ class TestNewTaskCountsInFull:
         jc.starting_lock = asyncio.Lock()
         jc.starting_signal = MagicMock()
         jc._monitor_one_task = AsyncMock(return_value=True)
-        task = MagicMock()
-        task.name = 'task1'
-        task.metadata = {}
-        task.run = 'echo hi'
-        task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
-        task.resources = None
+        task = task_lib.Task(name='task1',
+                             run='echo hi',
+                             envs={constants.TASK_ID_ENV_VAR: 'tid'})
         costs_at_launch = []
 
         async def launch():
@@ -5082,12 +5097,15 @@ def test_task_cluster_num_nodes(accelerators, kwargs, num_nodes, expected):
     task = _tpu_task(accelerators, num_nodes, **kwargs)
     assert controller_module._task_cluster_num_nodes(task) == expected
     # The handle's launched resources take precedence over the request.
-    handle = MagicMock()
+    handle = MagicMock(launched_nodes=expected)
     handle.launched_resources = list(task.resources)[0]
     assert controller_module._task_cluster_num_nodes(task, handle) == expected
     single = _tpu_task('tpu-v6e-8')
     handle.launched_resources = list(single.resources)[0]
-    assert controller_module._task_cluster_num_nodes(task, handle) == num_nodes
+    # The controller monitors the whole cluster, even for a smaller task.
+    handle.launched_nodes = num_nodes + 3
+    assert controller_module._task_cluster_num_nodes(task,
+                                                     handle) == num_nodes + 3
 
 
 class _StopMonitoring(Exception):

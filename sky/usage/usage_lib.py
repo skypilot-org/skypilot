@@ -239,7 +239,10 @@ class UsageMessageToReport(MessageToReport):
 
     def update_actual_task(self, task: 'task_lib.Task'):
         self.actual_task = prepare_json_from_yaml_config(task.to_yaml_config())
-        self.task_num_nodes = task.num_nodes
+        counts = {r.num_nodes for r in task.resources}
+        self.task_num_nodes = (task.best_resources.num_nodes
+                               if task.best_resources is not None else
+                               next(iter(counts)) if len(counts) == 1 else None)
         if task.resources:
             # resources is not None or empty.
             if len(task.resources) > 1:
