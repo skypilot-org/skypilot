@@ -153,6 +153,10 @@ class TestClusters:
         assert result.exit_code == 2
         assert 'team is not unique' in result.output
         down.assert_not_called()
+        response._content = b'<html>Conflict</html>'  # pylint: disable=protected-access
+        result = cli_testing.CliRunner().invoke(command.down, ['-u', '-y'])
+        assert result.exit_code == 2, result.output
+        down.assert_not_called()
 
     def test_ambiguous_workspace_stops_before_acting(self, clusters,
                                                      monkeypatch):

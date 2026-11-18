@@ -359,7 +359,12 @@ def _bulk_workspace() -> Optional[str]:
             return None
         if status_code == 409:
             # The active workspace names more than one workspace.
-            raise click.UsageError(response.json().get('detail')) from e
+            try:
+                detail = response.json().get('detail')
+            except Exception:  # pylint: disable=broad-except
+                detail = None
+            raise click.UsageError(
+                detail if isinstance(detail, str) else str(e)) from e
         raise
     if info.get('workspace') is None:
         message = f'Cannot tell which workspace to act on: {info.get("note")}'
