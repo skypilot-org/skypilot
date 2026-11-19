@@ -169,8 +169,9 @@ def _is_exempt(record: Dict[str, Any]) -> bool:
     return (
         controller_utils.Controllers.from_name(record['name']) is not None or
         labels.get(OPT_OUT_LABEL) == OPT_OUT_VALUE or
-        # get_clusters() fills in the daemon's own user for a cluster with
-        # no recorded owner; there is nobody to notify.
+        # A cluster without a recorded owner takes the caller of its next
+        # state update as its owner, and for a daemon that is the system
+        # user; there is nobody to notify.
         record['user_name'] in (None, constants.SKYPILOT_SYSTEM_USER_ID))
 
 
