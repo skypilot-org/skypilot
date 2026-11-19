@@ -224,6 +224,20 @@ class ScheduleType(enum.Enum):
     LONG = 'long'
     # Queue for requests that should be executed quickly for a quick response.
     SHORT = 'short'
+    # Queue for reads whose cost grows with the stored history; see
+    # sky.server.requests.heavy_requests.
+    HEAVY = 'heavy'
+
+
+def _schedule_type_value_for_client(schedule_type: ScheduleType) -> str:
+    """Send HEAVY as SHORT.
+
+    Clients parse the schedule type into the ScheduleType enum and released
+    clients do not know HEAVY; no client acts on the difference.
+    """
+    if schedule_type == ScheduleType.HEAVY:
+        return ScheduleType.SHORT.value
+    return schedule_type.value
 
 
 def _encode_error(error: BaseException) -> Dict[str, Any]:
@@ -351,9 +365,11 @@ class Request:
     def to_row(self) -> Tuple[Any, ...]:
         payload = self._encode(self._return_value_column(), include_body=True)
         # encode() may downgrade WAITING -> RUNNING for clients on an older API
-        # version; that is a wire-only concern. to_row() feeds the database, so
-        # always persist the true status regardless of the request context.
+        # version and send HEAVY as SHORT; that is a wire-only concern. to_row()
+        # feeds the database, so always persist the true values regardless of
+        # the request context.
         payload.status = self.status.value
+        payload.schedule_type = self.schedule_type.value
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -388,7 +404,7 @@ class Request:
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=self.created_at,
-            schedule_type=self.schedule_type.value,
+            schedule_type=_schedule_type_value_for_client(self.schedule_type),
             user_id=self.user_id,
             user_name=user_name,
             cluster_name=self.cluster_name,
@@ -459,7 +475,8 @@ class Request:
                 error=_serialize_error(self.error),
                 pid=self.pid,
                 created_at=self.created_at,
-                schedule_type=self.schedule_type.value,
+                schedule_type=_schedule_type_value_for_client(
+                    self.schedule_type),
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
@@ -581,7 +598,8 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=request.created_at,
-            schedule_type=request.schedule_type.value,
+            schedule_type=_schedule_type_value_for_client(
+                request.schedule_type),
             user_id=request.user_id,
             user_name=user_name,
             cluster_name=request.cluster_name,
@@ -1319,6 +1337,23 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
         request_task.status = RequestStatus.FAILED
         request_task.finished_at = time.time()
         request_task.set_error(e)
+
+
+def set_request_failed_if_active(request_id: str, e: BaseException) -> bool:
+    """Set a request to failed unless it already finished.
+
+    Returns:
+        True if the request was set to failed.
+    """
+    set_exception_stacktrace(e)
+    with update_request(request_id) as request_task:
+        if (request_task is None or
+                request_task.status not in RequestStatus.active_statuses()):
+            return False
+        request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
+        request_task.set_error(e)
+        return True
 
 
 @metrics_lib.time_me_async

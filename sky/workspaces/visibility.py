@@ -18,7 +18,6 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.users import permission
-from sky.users import rbac
 from sky.utils import common_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
@@ -114,16 +113,6 @@ def workspace_allowing(workspaces: Iterable[str], cloud: str,
     return None
 
 
-def _is_admin(user_id: str) -> bool:
-    try:
-        roles = permission.permission_service.get_user_roles(user_id)
-    except Exception as e:  # pylint: disable=broad-except
-        # Fail closed: a role lookup error scopes the user, never widens.
-        logger.warning(f'Failed to look up roles of {user_id}; scoping: {e}')
-        return False
-    return roles == [rbac.RoleName.ADMIN.value]
-
-
 def scope_for(auth_user: Optional[models.User],
               need_kubernetes: bool = True,
               need_slurm: bool = True) -> InfraScope:
@@ -138,7 +127,7 @@ def scope_for(auth_user: Optional[models.User],
     # This process does not get the executor's per-request config reload;
     # without it a revoked target stays visible.
     server_common.refresh_workspace_state_for_sync_handler()
-    if _is_admin(auth_user.id):
+    if permission.is_admin(auth_user.id):
         return UNSCOPED
     workspaces = list(workspaces_core.workspaces_for_user(auth_user.id))
     kubernetes: FrozenSet[str] = frozenset()

@@ -1105,9 +1105,9 @@ def _launch(
         for storage in (task_.storage_mounts or {}).values():
             storage.check_accessible()
     if pool is None:  # A pool job launches no cluster of its own.
-        clouds.Kubernetes.check_request_keeps_server_none()
+        clouds.Kubernetes.check_request_keeps_server_identity()
         for task_ in dag.tasks:
-            clouds.Kubernetes.check_task_keeps_server_none(task_)
+            clouds.Kubernetes.check_task_keeps_server_identity(task_)
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
