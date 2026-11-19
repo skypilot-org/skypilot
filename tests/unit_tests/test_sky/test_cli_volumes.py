@@ -383,11 +383,17 @@ class TestVolumeCommands:
         assert not result.exit_code, result.output
         assert set(mock_delete.call_args[0][0]) == deleted
 
-    @pytest.mark.parametrize('args, warned', [([], True),
-                                              (['--no-cleanup'], False)])
+    @pytest.mark.parametrize('args, cleanup, warned',
+                             [([], True, True), (['--no-cleanup'], True, False),
+                              ([], False, False)])
     def test_volumes_delete_warns_before_wiping_a_host_path(
-            self, monkeypatch, args, warned):
-        _mock_ls_and_workspaces(monkeypatch, self._HOSTPATH_VOLUMES, {})
+            self, monkeypatch, args, cleanup, warned):
+        hp = dict(self._HOSTPATH_VOLUMES[0],
+                  config={
+                      'host_path': '/mnt/data',
+                      'cleanup_on_deletion': cleanup
+                  })
+        _mock_ls_and_workspaces(monkeypatch, [hp], {})
         confirm = mock.MagicMock(return_value=True)
         monkeypatch.setattr('click.confirm', confirm)
         mock_delete = mock.MagicMock(return_value='delete-request-id')
@@ -399,9 +405,10 @@ class TestVolumeCommands:
         assert not result.exit_code, result.output
         prompt = confirm.call_args[0][0]
         assert ('/mnt/data on every node of ctx1' in prompt) == warned
+        assert ('use --no-cleanup to keep the files' in prompt) == warned
         # Wiping defaults to no.
         assert confirm.call_args[1]['default'] is (not warned)
-        assert mock_delete.call_args[1]['no_cleanup'] is (not warned)
+        assert mock_delete.call_args[1]['no_cleanup'] is bool(args)
 
     def test_volumes_delete_all_without_writable_flag(self, monkeypatch):
         """A server too old to report `writable` is not filtered against."""

@@ -31,9 +31,9 @@ jest.mock('@/hooks/useWorkspacesConfig', () => {
 });
 // The caller's role, for the admin-only delete of a k8s-hostpath volume.
 const mockRole = { role: 'admin' };
-jest.mock('@/data/connectors/users', () => ({
-  __esModule: true,
-  getUserRole: jest.fn(() => Promise.resolve(mockRole)),
+jest.mock('@/data/connectors/client', () => ({
+  ...jest.requireActual('@/data/connectors/client'),
+  getCurrentUserInfo: jest.fn(() => Promise.resolve(mockRole)),
 }));
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
@@ -50,7 +50,7 @@ import {
 } from '@testing-library/react';
 import dashboardCache from '@/lib/cache';
 import { useTableColumns } from '@/plugins/PluginProvider';
-import { getUserRole } from '@/data/connectors/users';
+import { getCurrentUserInfo } from '@/data/connectors/client';
 import { VolumesTable } from '@/components/volumes';
 
 // A CSI provisioner's refusal, long enough that the cell must truncate it.
@@ -492,7 +492,7 @@ describe('VolumesTable delete of a k8s-hostpath volume', () => {
       volume('vol-pvc'),
     ]);
     // Let the role land, so an enabled button is not just a role not yet known.
-    await waitFor(() => expect(getUserRole).toHaveBeenCalled());
+    await waitFor(() => expect(getCurrentUserInfo).toHaveBeenCalled());
     await act(async () => {});
 
     expect(deleteButton(container, name).disabled).toBe(disabled);

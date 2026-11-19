@@ -25,7 +25,7 @@ import {
   persistPageSize,
 } from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
-import { getUserRole } from '@/data/connectors/users';
+import { getCurrentUserInfo } from '@/data/connectors/client';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
@@ -577,15 +577,14 @@ export function VolumesTable({
   const { isWorkspaceWritable, workspacesConfig, loaded } =
     useWorkspacesConfig();
   // Only an admin may delete a k8s-hostpath volume. Unknown (null) leaves
-  // delete enabled; the server still enforces it.
+  // delete enabled; the server still enforces it. The cached lookup keeps
+  // this page from adding a /users/role call.
   const [isAdmin, setIsAdmin] = useState(null);
   useEffect(() => {
     let cancelled = false;
-    getUserRole()
-      .then((data) => {
-        if (!cancelled) setIsAdmin(data?.role === 'admin');
-      })
-      .catch((err) => console.error('Failed to fetch user role:', err));
+    getCurrentUserInfo().then((info) => {
+      if (!cancelled && info?.role) setIsAdmin(info.role === 'admin');
+    });
     return () => {
       cancelled = true;
     };
