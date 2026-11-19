@@ -316,13 +316,14 @@ class TestNodeTaints:
 
     def _check(self, monkeypatch, node, tolerations=()):
 
-        def get_object(context, resource, name, *, consistency, attempts):
+        def get_object(context, resource, name, *, consistency, convert,
+                       attempts):
             assert (context, resource, name) == ('ctx', reads.NODES, 'n1')
             assert isinstance(consistency, reads.Cached)
             assert attempts == 1
             if isinstance(node, Exception):
                 raise node
-            return reads.ReadResult(items=[node] if node else [],
+            return reads.ReadResult(items=[convert(node)] if node else [],
                                     resource_version='',
                                     staleness_seconds=0,
                                     reason=None)

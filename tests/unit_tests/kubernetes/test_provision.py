@@ -6595,6 +6595,22 @@ def _fake_node(ready=True, unschedulable=False, taints=None):
     return node
 
 
+def _get_node_via_read_node(context, resource, name, **kwargs):
+    """reads.get_object() answered by the faked core_api().read_node()."""
+    del kwargs
+    assert resource == reads.NODES
+    try:
+        items = [kubernetes.core_api(context).read_node(name)]
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+        items = []
+    return reads.ReadResult(items=items,
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=None)
+
+
 def _core_api_reading(nodes, pod_events=None):
     """A core API serving `nodes` (name -> node or exception to raise) and
     `pod_events` (pod name -> events, newest first)."""
@@ -6764,7 +6780,9 @@ class TestGetMissingNodeReason:
         """nodes: dict of node name -> fake node, or an Exception to raise."""
         with mock.patch.object(instance.kubernetes,
                                'core_api',
-                               return_value=_core_api_reading(nodes)):
+                               return_value=_core_api_reading(nodes)), \
+                mock.patch.object(reads, 'get_object',
+                                  _get_node_via_read_node):
             return instance.get_missing_node_reason(list(nodes),
                                                     {'context': 'ctx'},
                                                     **kwargs)
@@ -6915,7 +6933,9 @@ class TestGetClusterTerminationCause:
                                      {'c-head': events or []})
         with mock.patch.object(instance.kubernetes,
                                'core_api',
-                               return_value=core_api):
+                               return_value=core_api), \
+                mock.patch.object(reads, 'get_object',
+                                  _get_node_via_read_node):
             return instance.get_cluster_termination_cause({'context': 'ctx'},
                                                           pods,
                                                           tolerations=[],

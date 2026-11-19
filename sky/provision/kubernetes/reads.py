@@ -105,8 +105,8 @@ class Fresh:
     """Read the API server."""
 
 
-CACHED = Cached()
-FRESH = Fresh()
+CACHED: Cached = Cached()
+FRESH: Fresh = Fresh()
 
 Consistency = Union[Cached, Fresh]
 
@@ -187,6 +187,7 @@ def get_object(
     *,
     namespace: Optional[str] = None,
     consistency: Consistency = CACHED,
+    convert: Optional[Callable[[Dict[str, Any]], Any]] = None,
     attempts: Optional[int] = None,
 ) -> ReadResult:
     """Get one object; its items hold the object, or nothing if it is absent.
@@ -201,6 +202,7 @@ def get_object(
         namespace: The object's namespace. Required for a namespaced
             resource, and must be None for a cluster-scoped one.
         consistency: Cached(max_age) or FRESH.
+        convert: Applied to the object; items then holds what it returns.
         attempts: How many times to try the API server; None for the
             default retries.
 
@@ -211,7 +213,7 @@ def get_object(
     if resource.namespaced and namespace is None:
         raise ValueError(f'Getting a {resource.label} needs a namespace.')
     return _read(context, resource, namespace, name, None, None, consistency,
-                 None, attempts)
+                 convert, attempts)
 
 
 def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
@@ -326,7 +328,8 @@ def _get_once(*, context: Optional[str], resource_label: str, path: str,
                 got = _parse_list(response, convert)
             else:
                 obj = json.loads(response.data)
-                got = [obj], _object_version([obj])
+                got = ([obj if convert is None else convert(obj)],
+                       _object_version([obj]))
         finally:
             response.release_conn()
         outcome = 'ok'

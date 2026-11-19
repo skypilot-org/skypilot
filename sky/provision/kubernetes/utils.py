@@ -5364,6 +5364,11 @@ def k8s_pod_from_dict(pod: Dict[str, Any]) -> Any:
     return dict_to_k8s_object(pod, 'V1Pod')
 
 
+def k8s_node_from_dict(node: Dict[str, Any]) -> Any:
+    """Converts a node in Kubernetes API JSON to a kubernetes client V1Node."""
+    return dict_to_k8s_object(node, 'V1Node')
+
+
 @annotations.lru_cache(scope='global', maxsize=1)
 def _deserializing_api_client() -> Any:
     # Deserializing needs no cluster configuration.

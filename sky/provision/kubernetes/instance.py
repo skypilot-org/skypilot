@@ -3937,15 +3937,16 @@ def _inspect_nodes(
     def _inspect_node(name: str) -> _NodeState:
         # One unreadable node must not lose the others: all of it in the try.
         try:
-            result = reads.get_object(context,
-                                      reads.NODES,
-                                      name,
-                                      consistency=reads.CACHED,
-                                      attempts=1)
+            result = reads.get_object(
+                context,
+                reads.NODES,
+                name,
+                consistency=reads.CACHED,
+                convert=kubernetes_utils.k8s_node_from_dict,
+                attempts=1)
             if not result.items:
                 return _NodeState(True, _NODE_GONE, [])
-            node = kubernetes_utils.dict_to_k8s_object(result.items[0],
-                                                       'V1Node')
+            node = result.items[0]
             taints = (_evicting_taints(node, tolerations, since)
                       if tolerations is not None else [])
             node_status = getattr(node, 'status', None)
