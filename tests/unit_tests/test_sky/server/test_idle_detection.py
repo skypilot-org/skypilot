@@ -19,6 +19,7 @@ from sky.utils import status_lib
 
 _INTERVAL = 900
 _WINDOW = 6 * 3600
+_AS_SHOWN = object()
 _QUERY_URL = 'https://metrics.example.com/api/v1/query'
 _HTTP_URL = 'https://idle.example.com/check'
 _WEBHOOK = 'https://hooks.example.com/idle'
@@ -84,6 +85,7 @@ class _World:
     def __init__(self, monkeypatch, config):
         self.config = config
         self.clusters = {}
+        self.owners = {}
         self.events = []
         self.queries = []
         self.http_checks = []
@@ -110,6 +112,8 @@ class _World:
         monkeypatch.setattr(skypilot_config, 'get_nested', get_nested)
         monkeypatch.setattr(global_user_state, 'get_clusters',
                             self._get_clusters)
+        monkeypatch.setattr(global_user_state, 'get_cluster_owner_names',
+                            lambda: dict(self.owners))
         monkeypatch.setattr(global_user_state, 'set_cluster_info',
                             self._set_cluster_info)
         monkeypatch.setattr(global_user_state, 'add_cluster_event',
@@ -143,8 +147,12 @@ class _World:
                     name='train',
                     status=status_lib.ClusterStatus.UP,
                     user_name='alice@example.com',
+                    owner=_AS_SHOWN,
                     labels=None,
                     internal_ips=('10.0.0.1', '10.0.0.2')):
+        # user_name is what get_clusters() shows, which is the API server's
+        # own user when the cluster's owner is unknown; owner is the truth.
+        self.owners[name] = user_name if owner is _AS_SHOWN else owner
         handle = types.SimpleNamespace(
             cluster_name_on_cloud=f'{name}-ab12',
             cached_internal_ips=(list(internal_ips)
@@ -769,6 +777,10 @@ def test_failed_webhook_is_logged_without_its_url(world, monkeypatch, failure,
     {
         'user_name': constants.SKYPILOT_SYSTEM_USER_ID
     },
+    {
+        'user_name': 'server-admin',
+        'owner': None
+    },
 ])
 def test_cluster_is_left_alone(world, cluster):
     record = world.add_cluster(**cluster)
@@ -778,6 +790,29 @@ def test_cluster_is_left_alone(world, cluster):
     assert not world.queries
     assert not world.webhooks
     assert world.state(record['name']) is None
+
+
+def test_cluster_the_owner_read_does_not_know_is_left_alone(world):
+    record = world.add_cluster(user_name='server-admin')
+    del world.owners[record['name']]
+
+    world.run_until(_WINDOW)
+
+    assert not world.queries
+    assert not world.webhooks
+    assert world.state(record['name']) is None
+
+
+def test_owner_reaches_the_source_and_the_webhook(world):
+    world.config = _prometheus_config('up{owner="{user}"}')
+    world.add_cluster(user_name='server-admin', owner='alice@example.com')
+
+    world.run_until(_WINDOW)
+
+    (_, params, _), = world.queries
+    body, = world.webhooks
+    assert params['query'] == 'up{owner="alice@example.com"}'
+    assert body['user'] == 'alice@example.com'
 
 
 def test_other_label_values_do_not_opt_out(world):

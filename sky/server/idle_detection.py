@@ -169,9 +169,8 @@ def _is_exempt(record: Dict[str, Any]) -> bool:
     return (
         controller_utils.Controllers.from_name(record['name']) is not None or
         labels.get(OPT_OUT_LABEL) == OPT_OUT_VALUE or
-        # A cluster without a recorded owner takes the caller of its next
-        # state update as its owner, and for a daemon that is the system
-        # user; there is nobody to notify.
+        # No owner, or the system user, which a daemon records as the owner
+        # of a cluster that had none when it updates it: nobody to notify.
         record['user_name'] in (None, constants.SKYPILOT_SYSTEM_USER_ID))
 
 
@@ -301,10 +300,14 @@ def run_pass(interval: int) -> None:
             return True
 
         counts = {'checked': 0, 'idle': 0, 'notified': 0, 'errors': 0}
+        owners = global_user_state.get_cluster_owner_names()
         for record in global_user_state.get_clusters(
                 exclude_managed_clusters=True):
             if not leading():
                 break
+            # get_clusters() shows a cluster under the API server's own user
+            # when it has no recorded owner or its owner is no longer a user.
+            record['user_name'] = owners.get(record['name'])
             try:
                 _check_cluster(record, config, headers, window, watching_since,
                                now, leading, counts)

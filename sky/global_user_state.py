@@ -2942,6 +2942,22 @@ def cluster_with_name_exists(cluster_name: str) -> bool:
 
 
 @metrics_lib.time_me
+def get_cluster_owner_names() -> Dict[str, Optional[str]]:
+    """Returns the name of the user who owns each cluster.
+
+    None for a cluster with no recorded owner, or whose owner is no longer a
+    user. get_clusters() shows such a cluster under the current user instead.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(
+            cluster_table.c.name,
+            user_table.c.name.label('user_name')).outerjoin(
+                user_table, cluster_table.c.user_hash == user_table.c.id).all()
+    return {row.name: row.user_name for row in rows}
+
+
+@metrics_lib.time_me
 def get_clusters(
     *,  # keyword only separator
     exclude_managed_clusters: bool = False,
