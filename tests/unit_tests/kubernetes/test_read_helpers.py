@@ -213,7 +213,8 @@ def test_skypilot_pods_are_read_from_a_cache(serve):
         2026, 11, 19, 0, 0, 10, tzinfo=datetime.timezone.utc)
 
 
-def _query_instances(monkeypatch) -> Dict[str, Any]:
+def _query_instances(monkeypatch,
+                     non_terminated_only: bool = True) -> Dict[str, Any]:
     monkeypatch.setattr(instance, '_get_pod_failure_reason_from_events',
                         lambda *args, **kwargs: None)
     monkeypatch.setattr(instance, '_get_pod_missing_reason',
@@ -230,7 +231,8 @@ def _query_instances(monkeypatch) -> Dict[str, Any]:
                                                 }
                                             }
                                         }],
-                                    })
+                                    },
+                                    non_terminated_only=non_terminated_only)
 
 
 def test_a_healthy_cluster_is_read_from_a_cache(monkeypatch, serve):
@@ -269,6 +271,14 @@ def test_the_api_server_confirms_an_unhealthy_cached_answer(
         _HEAD: (status_lib.ClusterStatus.UP, None)
     }
     assert _consistencies(fake) == [reads.CACHED, reads.FRESH]
+
+
+def test_a_teardown_check_reads_the_api_server(monkeypatch, serve):
+    fake = serve(pods=[[_pod()]])
+    assert _query_instances(monkeypatch, non_terminated_only=False) == {
+        _HEAD: (status_lib.ClusterStatus.UP, None)
+    }
+    assert _consistencies(fake) == [reads.FRESH]
 
 
 def test_an_answer_from_the_api_server_is_read_once(monkeypatch, serve):

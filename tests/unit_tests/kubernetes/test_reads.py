@@ -350,6 +350,22 @@ def test_list_of_an_unserved_resource_raises(api):
         reads.list_objects('ctx', queues)
 
 
+def test_list_of_a_core_resource_answering_404_is_unreachable(api):
+    api(_api_error(404))
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError):
+        reads.list_objects('ctx', reads.NODES)
+
+
+def test_api_errors_name_the_resource(api, monkeypatch):
+    monkeypatch.setattr(kubernetes_utils.time, 'sleep', lambda seconds: None)
+    api(_api_error(500))
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError,
+                       match='(?s)node info.*kubectl get nodes --context ctx'):
+        reads.list_objects('ctx', reads.NODES)
+
+
 def test_namespace_rules(api):
     api(_POD_LIST)
     with pytest.raises(ValueError):

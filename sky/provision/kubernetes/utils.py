@@ -3834,7 +3834,7 @@ def check_credentials(context: Optional[str],
             namespace, limit=1, _request_timeout=timeout)
         # This call is "free" because this function is a cached call,
         # and it will not be called again in this function.
-        get_kubernetes_nodes(context=context, consistency=reads.CACHED)
+        get_kubernetes_nodes(context=context)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.

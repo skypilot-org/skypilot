@@ -5299,7 +5299,9 @@ def query_instances(
         is_ssh,
         identity,
         label_selector,
-        cache_accepts=lambda pods: _all_pods_up(pods, target_pod_names))
+        # Verifying a teardown must not see pods a stale cache still holds.
+        cache_accepts=((lambda pods: _all_pods_up(pods, target_pod_names))
+                       if non_terminated_only else None))
     # When we see no pods returned from the k8s api, we assume the pods have
     # been terminated by the user directly and mark the cluster as terminated
     # in the global user state.

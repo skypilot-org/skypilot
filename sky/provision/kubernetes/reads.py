@@ -172,9 +172,10 @@ def list_objects(
 
     Raises:
         exceptions.KubeAPIUnreachableError: The API server was needed and is
-            known to be unreachable, or failed after retries.
+            known to be unreachable, failed after retries, or answered 404 to
+            a list of a core resource.
         exceptions.KubernetesResourceNotServedError: The API server does not
-            serve the resource.
+            serve the resource, which is not in the core group.
     """
     return _read(context, resource, namespace, None, label_selector,
                  field_selector, consistency, convert, attempts)
@@ -275,6 +276,7 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                   if value)
     got = _IN_FLIGHT.do((context, path, query, convert),
                         lambda: _get(attempts,
+                                     resource.plural[:-1],
                                      context=context,
                                      resource_label=resource.label,
                                      path=path,
@@ -282,6 +284,11 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                                      convert=convert,
                                      is_list=name is None))
     if got is None:
+        if name is None and not resource.group:
+            # Every API server serves the core group.
+            raise exceptions.KubeAPIUnreachableError(
+                f'Kubernetes context {context!r} answered 404 to a '
+                f'{resource.label} list.')
         if name is None:
             raise exceptions.KubernetesResourceNotServedError(
                 f'Kubernetes context {context!r} does not serve '
@@ -295,13 +302,14 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                       reason=reason)
 
 
-def _get(attempts: Optional[int],
+def _get(attempts: Optional[int], resource_type: str,
          **kwargs: Any) -> Optional[Tuple[List[Any], str]]:
     """_get_once() under the Kubernetes API retries."""
     if attempts is None:
         attempts = kubernetes_utils.DEFAULT_MAX_RETRIES
     # pylint: disable-next=protected-access
-    retry = kubernetes_utils._retry_on_error(max_retries=attempts)
+    retry = kubernetes_utils._retry_on_error(max_retries=attempts,
+                                             resource_type=resource_type)
     return retry(_get_once)(**kwargs)
 
 
@@ -358,21 +366,29 @@ def _parse_list(
     items: List[Any] = []
     parsed = ijson.sendable_list()
     versions = ijson.sendable_list()
-    parsers = [
-        ijson.items_coro(parsed, 'items.item', use_float=True),
-        ijson.items_coro(versions, 'metadata.resourceVersion'),
-    ]
+    items_parser = ijson.items_coro(parsed, 'items.item', use_float=True)
+    # Dropped once it has the resourceVersion, which the API server writes
+    # before the items.
+    version_parser: Any = ijson.items_coro(versions, 'metadata.resourceVersion')
 
     def take_parsed() -> None:
         items.extend(parsed if convert is None else map(convert, parsed))
         del parsed[:]
 
     for chunk in iter(lambda: response.read(_CHUNK_SIZE), b''):
-        for parser in parsers:
-            parser.send(chunk)
+        items_parser.send(chunk)
+        if version_parser is not None:
+            version_parser.send(chunk)
+            if versions:
+                try:
+                    version_parser.close()
+                except ijson.IncompleteJSONError:
+                    pass  # It has not seen the rest of the response.
+                version_parser = None
         take_parsed()
-    for parser in parsers:
-        parser.close()
+    items_parser.close()
+    if version_parser is not None:
+        version_parser.close()
     take_parsed()
     return items, versions[0] if versions else ''
 
