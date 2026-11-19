@@ -5,7 +5,7 @@
 {{- include "skypilot.validateOAuthConfig" . }}
 {{- include "skypilot.validateExternalProxyConfig" . }}
 {{- $ingressNginx := index .Values "ingress-nginx" }}
-{{- if and $ingressNginx.enabled (not (index $ingressNginx.controller.config "use-http2")) }}
+{{- if and $ingressNginx.enabled (kindIs "invalid" (index $ingressNginx.controller.config "use-http2")) }}
 
 WARNING: The bundled ingress-nginx controller has HTTP/2 on, which exposes it to
 CVE-2026-123007 and CVE-2026-123633 (nginx2root). Upgrades with --reuse-values keep

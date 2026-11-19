@@ -13,6 +13,24 @@ tests:
           path: data["use-http2"]
           value: "false"
 
+  # `--set ingress-nginx.controller.config.use-http2=false` passes a boolean.
+  - it: should accept use-http2 as a boolean
+    template: charts/ingress-nginx/templates/controller-configmap.yaml
+    set:
+      ingress-nginx.controller.config.use-http2: false
+    asserts:
+      - equal:
+          path: data["use-http2"]
+          value: "false"
+
+  - it: should not warn when use-http2 is the boolean false
+    template: templates/NOTES.txt
+    set:
+      ingress-nginx.controller.config.use-http2: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: nginx2root
+
   - it: should not warn about HTTP/2 on a default install
     template: templates/NOTES.txt
     asserts:

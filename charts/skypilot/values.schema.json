@@ -630,6 +630,7 @@
                                 "use-http2": {
                                     "type": [
                                         "string",
+                                        "boolean",
                                         "null"
                                     ]
                                 }
