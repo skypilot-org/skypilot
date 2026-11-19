@@ -1807,6 +1807,8 @@ Default: see the yaml below.
         use-gzip: "true"
         gzip-level: 5
         gzip-min-length: 1000
+        # Disable HTTP/2, which CVE-2026-123007 and CVE-2026-123633 (nginx2root) require.
+        use-http2: "false"
         # Custom HTTP snippet to inject into the ingress-nginx configuration.
         http-snippet: |
           map $http_upgrade $connection_upgrade {
