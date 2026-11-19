@@ -63,6 +63,7 @@ import {
   CheckIcon,
   InfoIcon,
   Layers,
+  FilterX,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -597,6 +598,7 @@ export function ManagedJobs() {
         setLoading={setLoading}
         refreshDataRef={jobsRefreshRef}
         filters={filters}
+        onClearFilters={() => setFilters([])}
         view={view}
         setView={setView}
         onUserFilter={handleUserFilterClick}
@@ -723,6 +725,7 @@ export function ManagedJobsTable({
   setLoading,
   refreshDataRef,
   filters,
+  onClearFilters,
   view,
   setView,
   onUserFilter,
@@ -3004,6 +3007,28 @@ export function ManagedJobsTable({
                               {infraFilterUnsupported}
                             </p>
                           </div>
+                        ) : filters?.length > 0 ? (
+                          // A filter emptied the table, not the scope: the
+                          // scope hint below counts everyone's jobs with no
+                          // filter, and its button keeps the filters.
+                          <EmptyState
+                            icon={<FilterX size={20} strokeWidth={1.75} />}
+                            title="No jobs match your filters"
+                            description="Try adjusting your filters"
+                            action={
+                              onClearFilters ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={onClearFilters}
+                                  className="text-brand hover:text-brand-bright"
+                                >
+                                  Clear filters
+                                </Button>
+                              ) : null
+                            }
+                            minHeight={0}
+                          />
                         ) : userScope === 'mine' &&
                           currentUser &&
                           activeTab === 'all' &&

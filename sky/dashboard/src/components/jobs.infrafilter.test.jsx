@@ -104,6 +104,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { getCurrentUserInfo } from '@/data/connectors/client';
 import cachePreloader from '@/lib/cache-preloader';
@@ -244,6 +245,48 @@ describe('managed jobs Infra filter', () => {
     ).toBeTruthy();
     expect(screen.queryByText('No active jobs')).toBeNull();
     expect(screen.queryAllByText('Loading...')).toHaveLength(0);
+  });
+
+  it('says the filters match nothing, not that you have no jobs', async () => {
+    getCurrentUserInfo.mockResolvedValue({
+      id: 'alice',
+      name: 'alice@example.com',
+    });
+    const empty = {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      statusCounts: {},
+      controllerStopped: false,
+      hasNext: false,
+    };
+    // Alice has jobs, and so does everyone else: only the filter empties it.
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve(
+        params.nameMatch
+          ? empty
+          : { ...empty, total: 5, totalNoFilter: 5, jobs: PAGE }
+      )
+    );
+    await openAt('?name=zz-no-match');
+    expect(await screen.findByText('No jobs match your filters')).toBeTruthy();
+    expect(
+      screen.queryByText("You haven't submitted any managed jobs yet.")
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'View all jobs' })).toBeNull();
+
+    // The empty state's own button, not the chips row's.
+    const emptyState = screen
+      .getByText('No jobs match your filters')
+      .closest('td');
+    fireEvent.click(
+      within(emptyState).getByRole('button', { name: 'Clear filters' })
+    );
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('name')).toBe(null)
+    );
+    expect(await screen.findByText('ocmask-lm80')).toBeTruthy();
+    expect(screen.queryByText('No jobs match your filters')).toBeNull();
   });
 
   it('shows loading immediately on a direct All Jobs page refresh', async () => {
