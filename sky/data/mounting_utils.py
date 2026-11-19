@@ -223,6 +223,28 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
         read_only=read_only)
 
 
+def get_upcloud_mount_cmd(upcloud_profile_name: str,
+                          bucket_name: str,
+                          endpoint_url: str,
+                          mount_path: str,
+                          _bucket_sub_path: Optional[str] = None,
+                          read_only: bool = False) -> str:
+    """Returns a command to mount UpCloud Managed Object Storage bucket.
+
+    Like OCI, UpCloud rejects uploads that carry the trailing checksum
+    goofys's AWS SDK adds by default, which loses every write.
+    """
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        endpoint_url=endpoint_url,
+        cred_env=(f'AWS_PROFILE={upcloud_profile_name} '
+                  'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
+                  'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required'),
+        read_only=read_only)
+
+
 def get_coreweave_mount_cmd(cw_credentials_path: str,
                             coreweave_profile_name: str,
                             bucket_name: str,

@@ -17,6 +17,7 @@ import sky
 @pytest.mark.no_nebius  # Requires GCP to be enabled
 @pytest.mark.no_kubernetes  # Requires GCP to be enabled
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
+@pytest.mark.no_upcloud  # Requires GCP to be enabled
 # logs is a server-side setting: the test restarts the API server with it.
 @pytest.mark.no_remote_server
 @pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
@@ -76,6 +77,7 @@ def test_log_collection_to_gcp(generic_cloud: str):
 @pytest.mark.no_nebius  # Requires GCP to be enabled
 @pytest.mark.no_kubernetes  # Requires GCP to be enabled
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
+@pytest.mark.no_upcloud  # Requires GCP to be enabled
 # logs is a server-side setting: the test restarts the API server with it.
 @pytest.mark.no_remote_server
 @pytest.mark.no_dependency  # We can't restart the api server in the dependency test.

@@ -18,7 +18,11 @@ from sky.skylet import constants
     'examples/distributed-pytorch/train.yaml',
     'examples/distributed-pytorch/train-rdzv.yaml'
 ])
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'L40S',
+    'upcloud': 'L40S'
+}])
 def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
                                                                         str]):
     if generic_cloud in ('kubernetes', 'slurm'):
@@ -73,7 +77,11 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'L40S',
+    'upcloud': 'L40S'
+}])
 def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)

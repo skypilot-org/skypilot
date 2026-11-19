@@ -14,6 +14,7 @@ from smoke_tests import smoke_tests_utils
 @pytest.mark.no_fluidstack  # Requires AWS to be enabled
 @pytest.mark.no_nebius  # Requires AWS to be enabled
 @pytest.mark.no_seeweb  # Requires AWS to be enabled
+@pytest.mark.no_upcloud  # Requires AWS to be enabled
 # logs is a server-side setting: the test restarts the API server with it.
 @pytest.mark.no_remote_server
 @pytest.mark.no_dependency  # We can't restart the api server in the dependency test.

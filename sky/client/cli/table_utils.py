@@ -374,6 +374,14 @@ class ModalVolumeTable(RunPodVolumeTable):
         return 'Modal Volumes:\n' + str(self.table)
 
 
+class UpCloudVolumeTable(RunPodVolumeTable):
+    """The UpCloud volume table: the same columns as RunPod's."""
+
+    def format(self) -> str:
+        """Format the UpCloud volume table for display."""
+        return 'UpCloud File Storage Volumes:\n' + str(self.table)
+
+
 def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
@@ -413,6 +421,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         elif volume_type == volume.VolumeType.MODAL_VOLUME.value:
             modal_table = ModalVolumeTable(volume_list, show_all)
             table_str += modal_table.format()
+        elif volume_type == volume.VolumeType.UPCLOUD_FILE_STORAGE.value:
+            upcloud_table = UpCloudVolumeTable(volume_list, show_all)
+            table_str += upcloud_table.format()
     if table_str:
         return table_str
     else:

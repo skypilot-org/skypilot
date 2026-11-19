@@ -15,6 +15,7 @@ VOLUME_TYPE_TO_CLOUD = {
     volume_lib.VolumeType.HOSTPATH: clouds.Kubernetes(),
     volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
     volume_lib.VolumeType.MODAL_VOLUME: clouds.Modal(),
+    volume_lib.VolumeType.UPCLOUD_FILE_STORAGE: clouds.UpCloud(),
 }
 CLOUD_TO_VOLUME_TYPE = {
     clouds.Kubernetes(): [
@@ -22,6 +23,7 @@ CLOUD_TO_VOLUME_TYPE = {
     ],
     clouds.RunPod(): [volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME],
     clouds.Modal(): [volume_lib.VolumeType.MODAL_VOLUME],
+    clouds.UpCloud(): [volume_lib.VolumeType.UPCLOUD_FILE_STORAGE],
 }
 
 
@@ -107,6 +109,15 @@ class Volume:
                                labels=config.get('labels'),
                                use_existing=config.get('use_existing'),
                                config=config.get('config', {}))
+        if vt == volume_lib.VolumeType.UPCLOUD_FILE_STORAGE:
+            return UpCloudFileStorageVolume(
+                name=config.get('name'),
+                type=vol_type_val,
+                infra=config.get('infra'),
+                size=config.get('size'),
+                labels=config.get('labels'),
+                use_existing=config.get('use_existing'),
+                config=config.get('config', {}))
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
@@ -323,3 +334,18 @@ class ModalVolume(Volume):
         if self.region is not None or self.zone is not None:
             raise ValueError('Modal volumes do not support region or zone. '
                              'Use infra: modal.')
+
+
+class UpCloudFileStorageVolume(Volume):
+    """UpCloud File Storage."""
+
+    def _validate_config_extra(self) -> None:
+        if (not self.use_existing and self.size is not None and
+                int(self.size) < volume_lib.MIN_UPCLOUD_FILE_STORAGE_SIZE_GB):
+            raise ValueError(
+                f'UpCloud file storage size must be at least '
+                f'{volume_lib.MIN_UPCLOUD_FILE_STORAGE_SIZE_GB}GB.')
+        if not self.region:
+            raise ValueError(
+                'UpCloud region is required for file storage. Set it in the '
+                'infra field as an UpCloud zone id, e.g. upcloud/fi-hel2.')

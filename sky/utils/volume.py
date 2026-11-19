@@ -16,6 +16,7 @@ from sky.utils import schemas
 from sky.utils import status_lib
 
 MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB = 10
+MIN_UPCLOUD_FILE_STORAGE_SIZE_GB = 250
 
 
 class VolumeAccessMode(enum.Enum):
@@ -38,6 +39,7 @@ class VolumeType(enum.Enum):
     HOSTPATH = 'k8s-hostpath'
     RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
     MODAL_VOLUME = 'modal-volume'
+    UPCLOUD_FILE_STORAGE = 'upcloud-file-storage'
 
     @classmethod
     def supported_types(cls) -> list:

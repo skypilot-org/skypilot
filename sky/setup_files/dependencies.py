@@ -283,6 +283,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
+    # AWS deps cover Managed Object Storage via the `upcloud` boto3 profile.
+    'upcloud': aws_dependencies,
     'mithril': [],  # No dependencies needed for mithril
     # modal.clustered (multi-node) is exported since 1.6.0.
     'modal': ['modal>=1.6.0; python_version>="3.10"'],
