@@ -590,10 +590,12 @@ def fetch_in_pages(
     None when it cannot read the value. merge(last_value, rows) builds the
     result from the last page's value and the rows of every page.
 
+    The list ends at the first empty page or when `limit` items are fetched.
+
     Returns a request id that carries the combined result, or the request id
     of a page that failed. Returns None when a page is not answered in its
-    response, cannot be read, or is refused with NotSupportedError; the
-    caller then fetches the list in one call.
+    response, cannot be read, is refused with NotSupportedError, or does not
+    move the cursor; the caller then fetches the list in one call.
     """
     rows: List[Any] = []
     fetched = 0
@@ -612,11 +614,16 @@ def fetch_in_pages(
         page = read_page(value)
         if page is None:
             return None
+        previous_cursor = cursor
         page_rows, count, cursor = page
         rows.extend(page_rows)
         fetched += count
-        if count < size or (limit is not None and fetched >= limit):
+        # A short page does not end the list: the server can drop rows after
+        # applying its limit, e.g. records that fail validation.
+        if count == 0 or (limit is not None and fetched >= limit):
             break
+        if cursor == previous_cursor:
+            return None
     request_id.sync_response = (200, {
         **payload, 'return_value': json.dumps(merge(value, rows))
     })

@@ -54,6 +54,9 @@ class _Server:
         self.rows = sorted(rows, key=key)
         self.after = after
         self.calls: List[Dict[str, Any]] = []
+        # Rows dropped from a page after its limit, as a server drops
+        # records that fail validation.
+        self.dropped: List[str] = []
 
     def __call__(self, method, path, **kwargs):
         args = kwargs.get('json') or kwargs.get('params') or {}
@@ -63,8 +66,11 @@ class _Server:
         if limit is None or int(limit) > 2:
             return _response({'X-Skypilot-Request-ID': request_id})
         rows = [row for row in self.rows if self.after(row, args)]
+        page = [
+            row for row in rows[:int(limit)] if row['name'] not in self.dropped
+        ]
         return _response({server_constants.SYNC_CALL_HEADER: '1'},
-                         _payload(request_id, rows[:int(limit)]))
+                         _payload(request_id, page))
 
 
 def _rows(request_id) -> Optional[List[str]]:
@@ -149,11 +155,17 @@ class TestStatus:
                     c['json']['after_name']) for c in server.calls]
         # A cluster without a launch time continues from 0.
         assert cursors == [(2, None, None), (2, 300, 'c-new'),
-                           (2, 100, 'b-old')]
+                           (2, 100, 'b-old'), (2, 0, 'e-unknown')]
         assert all(c['sync_call'] for c in server.calls)
         assert _rows(request_id) == [
             'a-new', 'c-new', 'd-mid', 'b-old', 'e-unknown'
         ]
+
+    def test_a_short_page_does_not_end_the_list(self):
+        server = _cluster_server()
+        server.dropped = ['c-new']
+        request_id = _call(sdk.status, server)
+        assert _rows(request_id) == ['a-new', 'd-mid', 'b-old', 'e-unknown']
 
     @pytest.mark.parametrize('refresh', [
         common.StatusRefreshMode.AUTO,
@@ -183,6 +195,9 @@ class TestStorageLs:
         }, {
             'limit': 2,
             'after_name': 'n-b'
+        }, {
+            'limit': 2,
+            'after_name': 'n-c'
         }]
         assert _rows(request_id) == ['n-a', 'n-b', 'n-c']
 
@@ -208,6 +223,10 @@ class TestVolumesLs:
             'names': ['n-a', 'n-b', 'n-c'],
             'limit': '2',
             'after_name': 'n-b'
+        }, {
+            'names': ['n-a', 'n-b', 'n-c'],
+            'limit': '2',
+            'after_name': 'n-c'
         }]
         assert _rows(request_id) == ['n-a', 'n-b', 'n-c']
 
