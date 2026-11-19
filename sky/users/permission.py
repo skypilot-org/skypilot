@@ -1700,6 +1700,41 @@ def _policy_lock() -> Generator[None, None, None]:
 permission_service = PermissionService()
 
 
+def is_admin(user_id: str) -> bool:
+    """Whether `user_id` holds exactly the admin role.
+
+    An unknown role or a failed lookup is not admin.
+    """
+    try:
+        roles = permission_service.get_user_roles(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to look up roles of {user_id}; '
+                       f'treating as non-admin: {e}')
+        return False
+    return roles == [rbac.RoleName.ADMIN.value]
+
+
+def caller_is_admin() -> bool:
+    """Whether the user behind the current request is an admin.
+
+    Off the API server the request was authorized on the server already. So
+    was a request to a jobs or serve controller's own API server: the job was
+    checked when it was submitted, and that server only knows default roles.
+    That server copies its env from the controller process that started it,
+    which has one of the controller variables below; the main API server never
+    does, and a client cannot send them. Consolidated controller processes
+    have them too, so they must keep reaching these checks via the main
+    server, never in-process.
+    """
+    if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    # Presence, not value: a jobs controller sets the serve one to 'false'.
+    if (os.getenv(constants.OVERRIDE_CONSOLIDATION_MODE) is not None or
+            os.getenv(constants.IS_SKYPILOT_SERVE_CONTROLLER) is not None):
+        return True
+    return is_admin(common_utils.get_current_user().id)
+
+
 def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:
     """Reload config, then set up policies for a newly-created user.
 

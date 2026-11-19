@@ -585,6 +585,136 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "InfiniBand / RoCE throughput of each node running this cluster's GPU pods, summed over the node's RDMA ports (node-exporter's node_infiniband_port_data_* counters). Transmit is plotted up, receive down. The counters are per node, so on a shared node they include other workloads' traffic.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 18,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bps"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (cluster, node) (\n  irate(node_infiniband_port_data_transmitted_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{node}} tx",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (cluster, node) (\n  irate(node_infiniband_port_data_received_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{node}} rx",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Node RDMA Network Throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {

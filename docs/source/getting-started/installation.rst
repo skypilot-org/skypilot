@@ -143,16 +143,13 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 Install SkyPilot skill
 ----------------------
 
-The `SkyPilot skill <https://docs.skypilot.ai/en/latest/getting-started/skill.html>`__ teaches your AI agent (Claude Code, Codex, etc.) how to launch clusters, run jobs, and serve models with SkyPilot.
+The :ref:`SkyPilot skill <skill>` teaches your AI agent (Claude Code, Codex, etc.) how to launch clusters, run jobs, and serve models with SkyPilot.
 
-For Claude Code, run:
+Just tell your agent:
 
-.. code-block:: shell
+.. code-block:: text
 
-   claude plugin marketplace add skypilot-org/skypilot
-   claude plugin install skypilot@skypilot
-
-For other agents, follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md.
+   Fetch and follow https://docs.skypilot.ai/en/latest/getting-started/skill.html.md to install the SkyPilot skill.
 
 Restart the agent afterwards so it loads the skill.
 
