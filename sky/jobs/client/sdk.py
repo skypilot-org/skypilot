@@ -511,22 +511,13 @@ def _send_queue_v2(
 def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
     """The page size to fetch the queue in, or None to fetch it in one call.
 
-    The queue is paged when the server answers sync calls up to a smaller
-    `limit` than asked for and takes the job id cursor. Pages follow the
-    default order, newest top-level job first.
+    Pages follow the default order, newest top-level job first.
     """
-    max_limit = rest.get_sync_call_max_limit()
-    if max_limit is None or (body.limit is not None and
-                             body.limit <= max_limit):
-        return None
     if (body.include_tree or body.sort_by not in (None, 'job_id', 'id') or
             body.sort_order == 'asc'):
         return None
-    remote_api_version = versions.get_remote_api_version()
-    if (remote_api_version is None or remote_api_version <
-            server_constants.MIN_JOBS_QUEUE_CURSOR_API_VERSION):
-        return None
-    return max_limit
+    return client_common.sync_page_size(
+        body.limit, server_constants.MIN_JOBS_QUEUE_CURSOR_API_VERSION)
 
 
 def _queue_in_pages(
@@ -535,57 +526,37 @@ def _queue_in_pages(
                                             int, Dict[str, int], int]]]:
     """Fetches the queue as sync calls of up to page_size top-level jobs.
 
-    Returns a request id that carries the combined result, or the request id
-    of a page that failed. Returns None when a page is not answered in its
-    response or the server cannot page by job id; the caller then fetches
-    the queue in one call.
+    The counts in the result come from the last page.
     """
-    body = body.model_copy()
     if body.fields and 'root_job_id' not in body.fields:
         # Rows name their top-level job in root_job_id; the cursor needs it.
-        body.fields = [*body.fields, 'root_job_id']
-    wanted = body.limit
-    jobs: List[Dict[str, Any]] = []
-    num_trees = 0
-    while True:
-        size = page_size
-        if wanted is not None:
-            size = min(size, wanted - num_trees)
-        body.limit = size
-        request_id = _send_queue_v2(body)
-        if request_id.sync_response is None:
-            return None
-        status_code, payload = request_id.sync_response
-        if status_code != 200:
-            return None if _is_not_supported(payload) else request_id
-        value = json.loads(payload['return_value'])
+        body = body.model_copy(update={'fields': [*body.fields, 'root_job_id']})
+
+    def send(after_job_id: Optional[int], size: int) -> server_common.RequestId:
+        return _send_queue_v2(
+            body.model_copy(update={
+                'limit': size,
+                'after_job_id': after_job_id
+            }))
+
+    def read_page(value: Any) -> Optional[Tuple[List[Any], int, Any]]:
         if not isinstance(value, dict) or 'jobs' not in value:
             return None
-        page_jobs = value['jobs']
-        jobs.extend(page_jobs)
+        jobs = value['jobs']
         roots = {
             job['job_id']
             if job.get('root_job_id') is None else job['root_job_id']
-            for job in page_jobs
+            for job in jobs
         }
-        num_trees += len(roots)
-        if len(roots) < size or (wanted is not None and num_trees >= wanted):
-            break
-        body.after_job_id = min(roots)
-    value['jobs'] = jobs
-    request_id.sync_response = (200, {
-        **payload, 'return_value': json.dumps(value)
-    })
-    return request_id
+        return jobs, len(roots), min(roots) if roots else None
 
-
-def _is_not_supported(error_body: Any) -> bool:
-    """Whether a sync call failed with NotSupportedError."""
-    try:
-        error = json.loads(error_body['detail']['error'])
-        return error['type'] == exceptions.NotSupportedError.__name__
-    except (KeyError, TypeError, ValueError):
-        return False
+    return client_common.fetch_in_pages(send,
+                                        page_size,
+                                        read_page,
+                                        lambda last_value, jobs: {
+                                            **last_value, 'jobs': jobs
+                                        },
+                                        limit=body.limit)
 
 
 # Deprecated. Please use queue_v2 instead for better performance.

@@ -2104,8 +2104,39 @@ def status(
         include_credentials=_include_credentials,
         summary_response=_summary_response,
     )
+    page_size = None
+    if refresh == common.StatusRefreshMode.NONE:
+        page_size = client_common.sync_page_size(
+            None, server_constants.MIN_LIST_CURSOR_API_VERSION)
+    if page_size is not None:
+
+        def send(after: Optional[Tuple[int, str]],
+                 size: int) -> server_common.RequestId:
+            launched_at, name = after if after is not None else (None, None)
+            return _send_status(
+                body.model_copy(
+                    update={
+                        'limit': size,
+                        'after_launched_at': launched_at,
+                        'after_name': name
+                    }))
+
+        paged_request_id = client_common.fetch_list_in_pages(
+            send, page_size, lambda row:
+            (row.get('launched_at') or 0, row['name']))
+        if paged_request_id is not None:
+            return paged_request_id
+    return _send_status(body)
+
+
+def _send_status(
+    body: payloads.StatusBody
+) -> server_common.RequestId[List[responses.StatusResponse]]:
     response = server_common.make_authenticated_request(
-        'POST', '/status', json=json.loads(body.model_dump_json()))
+        'POST',
+        '/status',
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2213,6 +2244,25 @@ def storage_ls() -> server_common.RequestId[List[responses.StorageRecord]]:
         storage_records (List[responses.StorageRecord]):
             A list of storage records.
     """
+    page_size = client_common.sync_page_size(
+        None, server_constants.MIN_LIST_CURSOR_API_VERSION)
+    if page_size is not None:
+
+        def send(after_name: Optional[str],
+                 size: int) -> server_common.RequestId:
+            params: Dict[str, Union[int, str]] = {'limit': size}
+            if after_name is not None:
+                params['after_name'] = after_name
+            response = server_common.make_authenticated_request('GET',
+                                                                '/storage/ls',
+                                                                params=params,
+                                                                sync_call=True)
+            return server_common.get_request_id(response)
+
+        paged_request_id = client_common.fetch_list_in_pages(
+            send, page_size, lambda row: row['name'])
+        if paged_request_id is not None:
+            return paged_request_id
     response = server_common.make_authenticated_request('GET', '/storage/ls')
     return server_common.get_request_id(response)
 

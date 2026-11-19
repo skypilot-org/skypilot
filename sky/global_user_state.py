@@ -2963,8 +2963,10 @@ def get_clusters(
     user_hashes_filter: Optional[Set[str]] = None,
     cluster_names: Optional[List[str]] = None,
     summary_response: bool = False,
+    limit: Optional[int] = None,
+    after: Optional[Tuple[int, str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Get clusters from the database.
+    """Get clusters from the database, newest launch first.
 
     Args:
         exclude_managed_clusters: If True, exclude clusters that have
@@ -2975,6 +2977,9 @@ def get_clusters(
             that has user_hash field set to one of the values.
         cluster_names: If specified, only include clusters
             that has name field set to one of the values.
+        limit: If specified, return at most this many clusters.
+        after: If specified, only clusters after this (launched_at, name) in
+            the order returned.
     """
     # is a cluster has a null user_hash,
     # we treat it as belonging to the current user.
@@ -3028,7 +3033,17 @@ def get_clusters(
                     cluster_table.c.user_hash.in_(user_hashes_filter))
         if cluster_names is not None:
             query = query.filter(cluster_table.c.name.in_(cluster_names))
-        query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
+        launched_at = sqlalchemy.func.coalesce(cluster_table.c.launched_at, 0)
+        if after is not None:
+            after_launched_at, after_name = after
+            query = query.filter(
+                sqlalchemy.or_(
+                    launched_at < after_launched_at,
+                    sqlalchemy.and_(launched_at == after_launched_at,
+                                    cluster_table.c.name > after_name)))
+        query = query.order_by(launched_at.desc(), cluster_table.c.name.asc())
+        if limit is not None:
+            query = query.limit(limit)
         rows = query.all()
     records = []
 
@@ -3738,14 +3753,17 @@ def _storage_record_from_row(row: Any) -> Dict[str, Any]:
 
 
 @metrics_lib.time_me
-def get_storage(
-        workspaces_filter: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
-    """Gets storage records, optionally limited to some workspaces.
+def get_storage(workspaces_filter: Optional[Set[str]] = None,
+                limit: Optional[int] = None,
+                after_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Gets storage records by name, optionally limited to some workspaces.
 
     Args:
         workspaces_filter: If given, only storage in these workspaces is
             returned. An empty set therefore returns nothing, while None
             means the whole table.
+        limit: If given, return at most this many records.
+        after_name: If given, only storage named after this.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -3753,6 +3771,11 @@ def get_storage(
         if workspaces_filter is not None:
             query = query.filter(
                 storage_table.c.workspace.in_(list(workspaces_filter)))
+        if after_name is not None:
+            query = query.filter(storage_table.c.name > after_name)
+        query = query.order_by(storage_table.c.name)
+        if limit is not None:
+            query = query.limit(limit)
         rows = query.all()
     return [_storage_record_from_row(row) for row in rows]
 
@@ -3816,8 +3839,10 @@ def _query_volumes(
     is_ephemeral: Optional[bool],
     workspaces_filter: Optional[Set[str]],
     volume_names: Optional[List[str]],
+    limit: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> List[Any]:
-    """Rows of `columns` for the volumes every given filter allows."""
+    """Rows of `columns` for the volumes every given filter allows, by name."""
     engine = _db_manager.get_engine()
 
     def filtered(session: 'orm.Session') -> Any:
@@ -3827,6 +3852,11 @@ def _query_volumes(
         if workspaces_filter is not None:
             query = query.filter(
                 volume_table.c.workspace.in_(workspaces_filter))
+        if after_name is not None:
+            query = query.filter(volume_table.c.name > after_name)
+        query = query.order_by(volume_table.c.name)
+        if limit is not None:
+            query = query.limit(limit)
         return query
 
     rows: List[Any] = []
@@ -3844,6 +3874,10 @@ def _query_volumes(
                 rows.extend(
                     filtered(session).filter(
                         volume_table.c.name.in_(batch)).all())
+            # Each batch is ordered and limited on its own.
+            rows.sort(key=lambda row: row.name)
+            if limit is not None:
+                rows = rows[:limit]
     return rows
 
 
@@ -3852,8 +3886,10 @@ def get_volumes(
     is_ephemeral: Optional[bool] = None,
     workspaces_filter: Optional[Set[str]] = None,
     volume_names: Optional[List[str]] = None,
+    limit: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Get volumes from the database.
+    """Get volumes from the database, by name.
 
     Every filter given is applied, so a caller narrowing by name cannot widen
     what another filter allows -- naming a volume outside `workspaces_filter`
@@ -3867,10 +3903,13 @@ def get_volumes(
         volume_names: If specified, only include volumes with these names.
             An empty list therefore matches nothing, while None means "do not
             filter by name". Names with no row are simply absent.
+        limit: If specified, return at most this many volumes.
+        after_name: If specified, only volumes named after this.
     """
     return [
-        _volume_record_from_row(row) for row in _query_volumes(
-            [volume_table], is_ephemeral, workspaces_filter, volume_names)
+        _volume_record_from_row(row) for row in
+        _query_volumes([volume_table], is_ephemeral, workspaces_filter,
+                       volume_names, limit, after_name)
     ]
 
 

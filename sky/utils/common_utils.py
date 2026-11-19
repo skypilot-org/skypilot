@@ -1550,3 +1550,11 @@ def atomic_create_text(path: str, content: str, mode: int = 0o644) -> bool:
             os.remove(tmp_path)
         except FileNotFoundError:
             pass
+
+
+def check_page(limit: Optional[int], has_cursor: bool) -> None:
+    """Raises ValueError for a page size below 1 or a cursor without one."""
+    if limit is not None and limit < 1:
+        raise ValueError(f'Limit must be at least 1, got {limit}')
+    if has_cursor and limit is None:
+        raise ValueError('A cursor requires limit.')
