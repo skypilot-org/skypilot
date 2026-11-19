@@ -3756,13 +3756,13 @@ def _storage_record_from_row(row: Any) -> Dict[str, Any]:
 def get_storage(workspaces_filter: Optional[Set[str]] = None,
                 limit: Optional[int] = None,
                 after_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Gets storage records by name, optionally limited to some workspaces.
+    """Gets storage records, optionally limited to some workspaces.
 
     Args:
         workspaces_filter: If given, only storage in these workspaces is
             returned. An empty set therefore returns nothing, while None
             means the whole table.
-        limit: If given, return at most this many records.
+        limit: If given, return at most this many records, by name.
         after_name: If given, only storage named after this.
     """
     engine = _db_manager.get_engine()
@@ -3773,9 +3773,8 @@ def get_storage(workspaces_filter: Optional[Set[str]] = None,
                 storage_table.c.workspace.in_(list(workspaces_filter)))
         if after_name is not None:
             query = query.filter(storage_table.c.name > after_name)
-        query = query.order_by(storage_table.c.name)
         if limit is not None:
-            query = query.limit(limit)
+            query = query.order_by(storage_table.c.name).limit(limit)
         rows = query.all()
     return [_storage_record_from_row(row) for row in rows]
 
@@ -3842,7 +3841,10 @@ def _query_volumes(
     limit: Optional[int] = None,
     after_name: Optional[str] = None,
 ) -> List[Any]:
-    """Rows of `columns` for the volumes every given filter allows, by name."""
+    """Rows of `columns` for the volumes every given filter allows.
+
+    With `limit`, at most that many rows, by name.
+    """
     engine = _db_manager.get_engine()
 
     def filtered(session: 'orm.Session') -> Any:
@@ -3854,15 +3856,17 @@ def _query_volumes(
                 volume_table.c.workspace.in_(workspaces_filter))
         if after_name is not None:
             query = query.filter(volume_table.c.name > after_name)
-        query = query.order_by(volume_table.c.name)
-        if limit is not None:
-            query = query.limit(limit)
         return query
+
+    def page(query: Any) -> Any:
+        if limit is None:
+            return query
+        return query.order_by(volume_table.c.name).limit(limit)
 
     rows: List[Any] = []
     with orm.Session(engine) as session:
         if volume_names is None:
-            rows = filtered(session).all()
+            rows = page(filtered(session)).all()
         else:
             # Chunk the IN list for the same reason as
             # get_volumes_from_names: SQLite caps bound parameters and
@@ -3872,12 +3876,12 @@ def _query_volumes(
                 batch = volume_names[offset:offset +
                                      _CLUSTER_IN_QUERY_CHUNK_SIZE]
                 rows.extend(
-                    filtered(session).filter(
-                        volume_table.c.name.in_(batch)).all())
-            # Each batch is ordered and limited on its own.
-            rows.sort(key=lambda row: row.name)
+                    page(
+                        filtered(session).filter(
+                            volume_table.c.name.in_(batch))).all())
             if limit is not None:
-                rows = rows[:limit]
+                # Each batch is a page of its own.
+                rows = sorted(rows, key=lambda row: row.name)[:limit]
     return rows
 
 
@@ -3889,7 +3893,7 @@ def get_volumes(
     limit: Optional[int] = None,
     after_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Get volumes from the database, by name.
+    """Get volumes from the database.
 
     Every filter given is applied, so a caller narrowing by name cannot widen
     what another filter allows -- naming a volume outside `workspaces_filter`
@@ -3903,7 +3907,7 @@ def get_volumes(
         volume_names: If specified, only include volumes with these names.
             An empty list therefore matches nothing, while None means "do not
             filter by name". Names with no row are simply absent.
-        limit: If specified, return at most this many volumes.
+        limit: If specified, return at most this many volumes, by name.
         after_name: If specified, only volumes named after this.
     """
     return [

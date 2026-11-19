@@ -1744,13 +1744,13 @@ def storage_ls(
         limit: Optional[int] = None,
         after_name: Optional[str] = None) -> List[responses.StorageRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Gets the storages, by name.
+    """Gets the storages.
 
     Only storage in workspaces the calling user can read is returned, the
     same as for clusters, managed jobs and volumes.
 
     Args:
-        limit: Return at most this many storages.
+        limit: Return at most this many storages, by name.
         after_name: Return only storages named after this.
 
     Returns:

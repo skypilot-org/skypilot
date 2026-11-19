@@ -120,7 +120,7 @@ class TestStoragePages:
         def names(**kwargs):
             return [r['name'] for r in global_user_state.get_storage(**kwargs)]
 
-        assert names() == ['s-a', 's-b', 's-c']
+        assert sorted(names()) == ['s-a', 's-b', 's-c']
         assert names(limit=2) == ['s-a', 's-b']
         assert names(limit=2, after_name='s-b') == ['s-c']
 
@@ -156,7 +156,7 @@ class TestVolumePages:
     def test_pages_by_name(self, _volume_db):
         for name in ('vol-c', 'vol-a', 'vol-b'):
             _add_volume(name)
-        assert self._names() == ['vol-a', 'vol-b', 'vol-c']
+        assert sorted(self._names()) == ['vol-a', 'vol-b', 'vol-c']
         assert self._names(limit=2) == ['vol-a', 'vol-b']
         assert self._names(limit=2, after_name='vol-b') == ['vol-c']
 

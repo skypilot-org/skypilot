@@ -37,7 +37,7 @@ async def volume_list(
     limit: Optional[int] = None,
     after_name: Optional[str] = None,
 ) -> None:
-    """Gets the volumes, by name.
+    """Gets the volumes.
 
     Args:
         refresh: If True, refresh volume state from cloud APIs before returning.
@@ -47,7 +47,7 @@ async def volume_list(
         names: If given, return only these volumes, and narrow a `refresh` to
             them. Optional so that a client older than this parameter, which
             never sends it, keeps getting every volume.
-        limit: If given, return at most this many volumes.
+        limit: If given, return at most this many volumes, by name.
         after_name: If given, return only volumes named after this.
     """
     request_body = payloads.VolumeListBody(refresh=refresh,

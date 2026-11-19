@@ -273,7 +273,7 @@ def volume_list(
     limit: Optional[int] = None,
     after_name: Optional[str] = None,
 ) -> List[responses.VolumeRecord]:
-    """Gets volumes from the database, by name.
+    """Gets volumes from the database.
 
     Only volumes in workspaces the calling user can read are returned, matching
     how clusters and managed jobs are already listed.
@@ -286,7 +286,7 @@ def volume_list(
             within the caller's accessible workspaces and never past them, so
             naming a volume the caller cannot read still returns nothing. Names
             with no volume are ignored, the same as an empty listing.
-        limit: Return at most this many volumes.
+        limit: Return at most this many volumes, by name.
         after_name: Return only volumes named after this.
 
     Returns:
