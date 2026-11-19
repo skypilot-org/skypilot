@@ -513,13 +513,15 @@ def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
 
     The queue is paged when the server answers sync calls up to a smaller
     `limit` than asked for and takes the job id cursor. Pages follow the
-    default order, newest top-level job first.
+    default order, newest top-level job first. A refresh is not answered as
+    a sync call, so it is not paged.
     """
     max_limit = rest.get_sync_call_max_limit()
     if max_limit is None or (body.limit is not None and
                              body.limit <= max_limit):
         return None
-    if (body.include_tree or body.sort_by not in (None, 'job_id', 'id') or
+    if (body.refresh or body.include_tree or
+            body.sort_by not in (None, 'job_id', 'id') or
             body.sort_order == 'asc'):
         return None
     remote_api_version = versions.get_remote_api_version()
@@ -537,7 +539,7 @@ def _queue_in_pages(
 
     Returns a request id that carries the combined result, or the request id
     of a page that failed. Returns None when a page is not answered in its
-    response or the server cannot page by job id; the caller then fetches
+    response or the server does not page by job id; the caller then fetches
     the queue in one call.
     """
     body = body.model_copy()
@@ -557,7 +559,7 @@ def _queue_in_pages(
             return None
         status_code, payload = request_id.sync_response
         if status_code != 200:
-            return None if _is_not_supported(payload) else request_id
+            return None if _is_cursor_refused(payload) else request_id
         value = json.loads(payload['return_value'])
         if not isinstance(value, dict) or 'jobs' not in value:
             return None
@@ -568,6 +570,10 @@ def _queue_in_pages(
             if job.get('root_job_id') is None else job['root_job_id']
             for job in page_jobs
         }
+        if (body.after_job_id is not None and roots and
+                max(roots) >= body.after_job_id):
+            # Something on the way dropped the cursor and sent a page again.
+            return None
         num_trees += len(roots)
         if len(roots) < size or (wanted is not None and num_trees >= wanted):
             break
@@ -579,11 +585,11 @@ def _queue_in_pages(
     return request_id
 
 
-def _is_not_supported(error_body: Any) -> bool:
-    """Whether a sync call failed with NotSupportedError."""
+def _is_cursor_refused(error_body: Any) -> bool:
+    """Whether a sync call failed with QueueCursorNotSupportedError."""
     try:
         error = json.loads(error_body['detail']['error'])
-        return error['type'] == exceptions.NotSupportedError.__name__
+        return error['type'] == exceptions.QueueCursorNotSupportedError.__name__
     except (KeyError, TypeError, ValueError):
         return False
 

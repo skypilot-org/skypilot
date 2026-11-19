@@ -871,7 +871,7 @@ class TestQueue:
                             lambda handle: RefusingBackend())
         monkeypatch.setattr(jobs_core.backends, 'CloudVmRayBackend',
                             RefusingBackend)
-        with pytest.raises(exceptions.NotSupportedError,
+        with pytest.raises(exceptions.QueueCursorNotSupportedError,
                            match='too old to page'):
             jobs_core.queue_v2(refresh=False,
                                all_users=True,
@@ -894,7 +894,7 @@ class TestQueue:
             total=0, total_no_filter=0)
         monkeypatch.setattr(jobs_core.backend_utils,
                             'invoke_skylet_with_retries', lambda fn: response)
-        with pytest.raises(exceptions.NotSupportedError):
+        with pytest.raises(exceptions.QueueCursorNotSupportedError):
             jobs_core.queue_v2(refresh=False,
                                all_users=True,
                                limit=5,
@@ -950,7 +950,7 @@ class TestQueue:
                                                all_users=True,
                                                limit=5)
         assert seen['limit'] == 5 and total == 2
-        with pytest.raises(exceptions.NotSupportedError):
+        with pytest.raises(exceptions.QueueCursorNotSupportedError):
             jobs_core.queue_v2(refresh=False,
                                all_users=True,
                                limit=5,

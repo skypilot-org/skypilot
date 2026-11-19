@@ -331,13 +331,16 @@ class _DefaultManagedJobRunner:
             output = job_table_payload + stderr
             refusals = (
                 (managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER,
-                 managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE),
+                 managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE,
+                 exceptions.NotSupportedError),
                 (managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MARKER,
-                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE),
+                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE,
+                 exceptions.NotSupportedError),
                 (managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MARKER,
-                 managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE),
+                 managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE,
+                 exceptions.QueueCursorNotSupportedError),
             )
-            for marker, default_message in refusals:
+            for marker, default_message, error_class in refusals:
                 if marker not in output:
                     continue
                 # The controller refused the infra filter, the include_tree
@@ -345,7 +348,7 @@ class _DefaultManagedJobRunner:
                 # controller's own message instead of a traceback.
                 detail = output.partition(f'{marker}: ')[2].splitlines()
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
+                    raise error_class(
                         detail[0].strip() if detail else default_message)
             logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
@@ -1940,7 +1943,7 @@ def queue_v2(
                 # Same for the cursor: an old controller returns the first
                 # page again.
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
+                    raise exceptions.QueueCursorNotSupportedError(
                         managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return (jobs, response.total, dict(response.status_counts),
@@ -1971,7 +1974,7 @@ def queue_v2(
         protocol_kwargs['after_job_id'] = after_job_id
     elif after_job_id is not None:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
+            raise exceptions.QueueCursorNotSupportedError(
                 managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
     fetched = runner.fetch_managed_job_table(
         handle=handle,
