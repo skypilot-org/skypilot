@@ -50,6 +50,7 @@ export async function getCurrentUserInfo() {
         cachedUserInfo = {
           id: data.id || 'local',
           name: data.name || data.id || 'local',
+          role: data.role,
         };
       } else {
         // Not authenticated or error - use 'local' as fallback
