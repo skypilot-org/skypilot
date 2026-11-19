@@ -208,6 +208,8 @@ class _World:
         assert timeout
         if url == _WEBHOOK:
             self.webhooks.append(json)
+            if isinstance(self.webhook_response, Exception):
+                raise self.webhook_response
             return self.webhook_response
         self.http_checks.append((url, json, headers))
         if isinstance(self.source_response, Exception):
@@ -721,6 +723,35 @@ def test_failed_webhook_is_retried_on_the_next_pass(world):
 
     assert len(world.webhooks) == 2
     assert len(world.events) == 1
+
+
+def _refused_webhook():
+    response = _response({}, status_code=503)
+    response.url = _WEBHOOK
+    return response
+
+
+@pytest.mark.parametrize('failure, logged', [
+    (_refused_webhook, 'HTTP 503'),
+    (lambda: requests.ConnectionError(
+        "HTTPSConnectionPool(host='example.com', port=443): Max retries "
+        'exceeded with url: /idle-clusters'), 'ConnectionError'),
+])
+def test_failed_webhook_is_logged_without_its_url(world, monkeypatch, failure,
+                                                  logged):
+    """The URL is a credential, and requests quotes it in its errors."""
+    world.add_cluster()
+    world.run_until(_WINDOW - _INTERVAL)
+    world.webhook_response = failure()
+
+    _, warning = _run_and_capture_summary(world, monkeypatch, _WINDOW)
+
+    assert len(world.webhooks) == 1
+    message = warning.call_args_list[0].args[0]
+    assert 'Could not notify' in message
+    assert logged in message
+    assert 'example.com' not in message
+    assert 'idle-clusters' not in message
 
 
 @pytest.mark.parametrize('cluster', [

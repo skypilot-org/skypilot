@@ -126,19 +126,26 @@ _SOURCES: Dict[str, Callable[..., Optional[str]]] = {
 
 def _notify(config: Dict[str, Any], record: Dict[str, Any], reason: str,
             idle_since: int) -> None:
-    response = requests.post(config['notify']['webhook'],
-                             json={
-                                 'event': 'idle_warning',
-                                 'cluster': record['name'],
-                                 'user': record['user_name'],
-                                 'workspace': record['workspace'],
-                                 'reason': reason,
-                                 'action': 'notify',
-                                 'idle_since': idle_since,
-                                 'deadline': None,
-                             },
-                             timeout=_WEBHOOK_TIMEOUT_SECONDS)
-    response.raise_for_status()
+    # The webhook URL is a credential, and requests quotes the URL in the
+    # message of every error it raises.
+    try:
+        response = requests.post(config['notify']['webhook'],
+                                 json={
+                                     'event': 'idle_warning',
+                                     'cluster': record['name'],
+                                     'user': record['user_name'],
+                                     'workspace': record['workspace'],
+                                     'reason': reason,
+                                     'action': 'notify',
+                                     'idle_since': idle_since,
+                                     'deadline': None,
+                                 },
+                                 timeout=_WEBHOOK_TIMEOUT_SECONDS)
+    except requests.RequestException as e:
+        raise RuntimeError(
+            f'the webhook request failed ({type(e).__name__})') from None
+    if not response.ok:
+        raise RuntimeError(f'the webhook answered HTTP {response.status_code}')
     global_user_state.add_cluster_event(
         record['name'], status_lib.ClusterStatus.UP,
         f'Idle for the last {config["window"]} ({reason}). Owner notified.',
