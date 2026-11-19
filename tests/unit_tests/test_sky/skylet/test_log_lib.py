@@ -259,16 +259,15 @@ class TestRunWithLogKeyboardInterrupt(unittest.TestCase):
             env['PYTHONPATH'] = os.pathsep.join(
                 [repo_root, env.get('PYTHONPATH', '')])
             try:
-                return subprocess.run(
-                    [
-                        sys.executable, driver_path, mode, holder_path,
-                        pid_path, log_path
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    env=env,
-                    check=False)
+                return subprocess.run([
+                    sys.executable, driver_path, mode, holder_path, pid_path,
+                    log_path
+                ],
+                                      capture_output=True,
+                                      text=True,
+                                      timeout=60,
+                                      env=env,
+                                      check=False)
             finally:
                 try:
                     with open(pid_path, encoding='utf-8') as f:
