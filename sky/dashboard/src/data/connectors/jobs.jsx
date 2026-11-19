@@ -371,6 +371,9 @@ export async function getManagedJobs(options = {}) {
           ? new Date(job.submitted_at * 1000)
           : null,
         started_at: job.start_at ? new Date(job.start_at * 1000) : null,
+        // Epoch seconds for Telemetry absolute from/to on finished jobs.
+        start_at: job.start_at ?? null,
+        end_at: job.end_at ?? null,
         events: events,
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,

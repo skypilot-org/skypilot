@@ -3523,12 +3523,14 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
     if cluster_handle_required:
         # When a job has reached a terminal state, its cluster handle is gone,
         # so infra/resources can no longer be read from the handle. Make sure
-        # the last-cached infra ('cloud'/'region'/'zone') and the requested
-        # 'resources' string are still selected from the DB so they can be used
-        # as a fallback in get_managed_job_queue. These are real DB columns
-        # ('cloud'/'region'/'zone' are also in _NON_DB_FIELDS and were removed
-        # above, so re-add them here).
-        for field in ('cloud', 'region', 'zone', 'resources'):
+        # the last-cached infra ('cloud'/'region'/'zone'/
+        # 'cluster_name_on_cloud'), accelerators, and the requested
+        # 'resources' string are still selected from the DB so they can be
+        # used as a fallback in get_managed_job_queue. These are real DB
+        # columns (also in _NON_DB_FIELDS and were removed above, so
+        # re-add them here).
+        for field in ('cloud', 'region', 'zone', 'cluster_name_on_cloud',
+                      'accelerators', 'resources'):
             if field not in new_fields:
                 new_fields.append(field)
     return new_fields, cluster_handle_required
@@ -3958,10 +3960,11 @@ def get_managed_job_queue(
                 # reached a terminal state and its cluster has been torn down),
                 # so infra/resources can no longer be read from the live
                 # handle. Fall back to the last-cached infra
-                # ('cloud'/'region'/'zone', persisted on each successful
-                # launch/recovery via set_job_infra) and the requested
-                # resources string from the jobs DB, so the dashboard/CLI can
-                # still show where the job last ran instead of a bare '-'.
+                # ('cloud'/'region'/'zone'/'cluster_name_on_cloud', persisted
+                # on each successful launch/recovery via set_job_infra) and
+                # the requested resources string from the jobs DB, so the
+                # dashboard/CLI can still show where the job last ran instead
+                # of a bare '-', and Telemetry can keep filtering Grafana.
                 cloud = job.get('cloud')
                 region = job.get('region')
                 zone = job.get('zone')
@@ -3984,8 +3987,11 @@ def get_managed_job_queue(
                                             if cached_resources else '-')
                 job['cluster_resources_full'] = (cached_resources
                                                  if cached_resources else '-')
+                # Keep spot/job_info.cluster_name_on_cloud and spot.accelerators
+                # from the DB (written by set_job_infra) so finished jobs can
+                # still open Telemetry with the right GPU panels. Only clear
+                # handle-only fields that are not persisted.
                 job['labels'] = None
-                job['cluster_name_on_cloud'] = None
                 job['internal_services'] = None
                 job['internal_external_ips'] = None
 

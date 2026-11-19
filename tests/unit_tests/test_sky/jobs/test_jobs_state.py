@@ -2775,7 +2775,136 @@ def test_get_jobs_dict_reads_selected_columns_without_probing_row_mapping():
     # Columns the query did not select come back as None, not as an error.
     assert result['dag_yaml_content'] is None
     assert result['pool'] is None
-    # Two ambiguous columns (spot.spot_job_id and job_info.spot_job_id) are
-    # keyed by Column object and must stay on the RowMapping; nothing else
-    # may touch it.
-    assert row.direct_gets <= 2
+    # Ambiguous name pairs (spot/job_info spot_job_id and
+    # cluster_name_on_cloud) are keyed by Column object and must stay on
+    # the RowMapping; nothing else may touch it. Two pairs → ≤4 gets.
+    assert row.direct_gets <= 4
+
+
+def test_set_job_infra_persists_cluster_name_on_cloud(
+        _mock_managed_jobs_db_conn):
+    """set_job_infra stores cluster_name_on_cloud for finished-job Telemetry."""
+
+    async def mock_callback(status: str):
+        pass
+
+    async def _run():
+        job_id = state.set_job_info_without_job_id(name='telemetry-job',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        await state.set_starting_async(job_id, 0, 'run-1', 100.0, '{}', {},
+                                       mock_callback)
+        await state.set_started_async(job_id, 0, 100.0, mock_callback)
+        state.set_job_infra(job_id,
+                            cloud='Kubernetes',
+                            region='my-ctx',
+                            zone=None,
+                            cluster_name_on_cloud='task0-42-ab12',
+                            task_id=0,
+                            accelerators={'A100': 1},
+                            accelerators_set=True)
+        jobs, _ = state.get_managed_jobs_with_filters(
+            job_ids=[job_id],
+            fields=[
+                'job_id', 'task_id', 'cluster_name_on_cloud', 'cloud',
+                'accelerators'
+            ])
+        assert len(jobs) == 1
+        assert jobs[0]['cluster_name_on_cloud'] == 'task0-42-ab12'
+        assert jobs[0]['cloud'] == 'Kubernetes'
+        assert jobs[0]['accelerators'] == {'A100': 1}
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+
+def test_cluster_name_on_cloud_job_info_fallback_with_fields(
+        _mock_managed_jobs_db_conn):
+    """Field-selected queries still see job_info-only cluster names.
+
+    set_job_infra without task_id writes only job_info. Requesting
+    fields=['cluster_name_on_cloud'] must select both columns so the
+    spot→job_info fallback in the row mapper still works.
+    """
+    job_id = state.set_job_info_without_job_id(name='legacy-telemetry',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    state.set_job_infra(job_id, cluster_name_on_cloud='train-42-ab12')
+    jobs_all, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+    assert jobs_all[0]['cluster_name_on_cloud'] == 'train-42-ab12'
+    jobs_fields, _ = state.get_managed_jobs_with_filters(
+        job_ids=[job_id], fields=['job_id', 'cluster_name_on_cloud'])
+    assert jobs_fields[0]['cluster_name_on_cloud'] == 'train-42-ab12'
+
+
+def test_set_job_infra_persists_cluster_name_per_task(
+        _mock_managed_jobs_db_conn):
+    """Multi-task jobs keep a distinct cluster_name_on_cloud per task."""
+
+    async def mock_callback(status: str):
+        pass
+
+    async def _run():
+        job_id = state.set_job_info_without_job_id(name='pipeline-job',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        for task_id, task_name in ((0, 'train'), (1, 'eval')):
+            state.set_pending(job_id,
+                              task_id=task_id,
+                              task_name=task_name,
+                              resources_str='{}',
+                              metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        for task_id in (0, 1):
+            await state.set_starting_async(job_id, task_id, f'run-{task_id}',
+                                           100.0, '{}', {}, mock_callback)
+            await state.set_started_async(job_id, task_id, 100.0, mock_callback)
+        state.set_job_infra(job_id,
+                            cloud='Kubernetes',
+                            region='my-ctx',
+                            zone=None,
+                            cluster_name_on_cloud='train-42-aaaa',
+                            task_id=0)
+        state.set_job_infra(job_id,
+                            cloud='Kubernetes',
+                            region='my-ctx',
+                            zone=None,
+                            cluster_name_on_cloud='eval-42-bbbb',
+                            task_id=1)
+        jobs, _ = state.get_managed_jobs_with_filters(
+            job_ids=[job_id],
+            fields=['job_id', 'task_id', 'cluster_name_on_cloud'])
+        by_task = {j['task_id']: j['cluster_name_on_cloud'] for j in jobs}
+        assert by_task[0] == 'train-42-aaaa'
+        assert by_task[1] == 'eval-42-bbbb'
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()

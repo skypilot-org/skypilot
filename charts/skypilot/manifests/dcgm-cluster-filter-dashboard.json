@@ -79,7 +79,8 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "percent",
+          "noValue": "No data available \u2014 may be outside Prometheus retention"
         },
         "overrides": []
       },
@@ -195,7 +196,8 @@
               }
             ]
           },
-          "unit": "decmbytes"
+          "unit": "decmbytes",
+          "noValue": "No data available \u2014 may be outside Prometheus retention"
         },
         "overrides": []
       },
@@ -311,7 +313,8 @@
               }
             ]
           },
-          "unit": "celsius"
+          "unit": "celsius",
+          "noValue": "No data available \u2014 may be outside Prometheus retention"
         },
         "overrides": []
       },
@@ -427,7 +430,8 @@
               }
             ]
           },
-          "unit": "watt"
+          "unit": "watt",
+          "noValue": "No data available \u2014 may be outside Prometheus retention"
         },
         "overrides": []
       },
@@ -541,7 +545,8 @@
               }
             ]
           },
-          "unit": "none"
+          "unit": "none",
+          "noValue": "No data available \u2014 may be outside Prometheus retention"
         },
         "overrides": []
       },
@@ -767,7 +772,8 @@
             ]
           },
           "unit": "short",
-          "min": 0
+          "min": 0,
+          "noValue": "No data available \u2014 may be outside Prometheus retention"
         },
         "overrides": []
       },
@@ -871,7 +877,8 @@
             ]
           },
           "unit": "bytes",
-          "min": 0
+          "min": 0,
+          "noValue": "No data available \u2014 may be outside Prometheus retention"
         },
         "overrides": []
       },

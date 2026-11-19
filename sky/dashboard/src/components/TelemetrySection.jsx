@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -24,6 +24,15 @@ const TIME_RANGE_PRESETS = [
   { label: '7d', value: '7d' },
 ];
 
+// Finished-job Telemetry depends on Prometheus still holding the series.
+// Cross-origin Grafana iframes cannot report empty queries, so we surface
+// the hint in-dashboard (callout + footer) and set panel noValue in the
+// Grafana dashboard JSON for the in-panel empty overlay.
+const FINISHED_JOB_RETENTION_CALLOUT =
+  'No data available in a panel usually means this window is outside Prometheus retention (or the job emitted no samples).';
+const FINISHED_JOB_RETENTION_FOOTER =
+  'Finished-job Telemetry visibility depends on your Prometheus retention settings.';
+
 // Telemetry panels — all live in the same skypilot-dcgm-gpu dashboard,
 // pre-scoped to a single SkyPilot cluster via var-cluster. The `family`
 // field lets consumers hide GPU panels when the underlying cluster/job
@@ -46,6 +55,25 @@ const TELEMETRY_PANELS = [
   },
   { id: '7', title: 'Memory Usage', keyPrefix: 'mem-usage', family: 'host' },
 ];
+
+/**
+ * Absolute Grafana from/to (epoch ms strings) for a finished job window.
+ *
+ * @param {number|string|null|undefined} startAt - Job start_at (epoch seconds).
+ * @param {number|string|null|undefined} endAt - Job end_at (epoch seconds).
+ * @returns {{from: string, to: string}|null}
+ */
+export function jobRunTimeRange(startAt, endAt) {
+  if (startAt == null || endAt == null) {
+    return null;
+  }
+  const fromMs = Math.floor(Number(startAt) * 1000);
+  const toMs = Math.floor(Number(endAt) * 1000);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+    return null;
+  }
+  return { from: String(fromMs), to: String(toMs) };
+}
 
 /**
  * Build Grafana panel URL with filters. All panels live in the same
@@ -83,6 +111,8 @@ const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange, theme) => {
  * @param {React.ReactNode} props.headerExtra - Optional extra content for header (e.g., task selector)
  * @param {string} props.noMetricsMessage - Custom message when no metrics available
  * @param {boolean} props.hasGpu - When false, hide GPU panels and only show CPU/Memory.
+ * @param {number|string|null} [props.jobStartAt] - Finished-job start_at (epoch seconds).
+ * @param {number|string|null} [props.jobEndAt] - Finished-job end_at (epoch seconds).
  */
 export function TelemetrySection({
   clusterNameOnCloud,
@@ -92,12 +122,20 @@ export function TelemetrySection({
   headerExtra = null,
   noMetricsMessage = 'No telemetry available.',
   hasGpu = true,
+  jobStartAt = null,
+  jobEndAt = null,
 }) {
   const { resolvedTheme } = useTheme();
   const visiblePanels = hasGpu
     ? TELEMETRY_PANELS
     : TELEMETRY_PANELS.filter((p) => p.family !== 'gpu');
-  const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
+  const jobRange = jobRunTimeRange(jobStartAt, jobEndAt);
+  const [timeRange, setTimeRange] = useState(
+    () => jobRange || { from: 'now-1h', to: 'now' }
+  );
+  // When the user picks a relative preset, stop auto-pinning to the job
+  // window. "Job run" clears this so we follow start_at/end_at again.
+  const [manualRelativeOverride, setManualRelativeOverride] = useState(false);
   const [isExpanded, setIsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(storageKey);
@@ -106,11 +144,27 @@ export function TelemetrySection({
     return false;
   });
 
+  useEffect(() => {
+    if (manualRelativeOverride) {
+      return;
+    }
+    const next = jobRunTimeRange(jobStartAt, jobEndAt);
+    setTimeRange(next || { from: 'now-1h', to: 'now' });
+  }, [jobStartAt, jobEndAt, manualRelativeOverride]);
+
   const handleTimeRangePreset = (preset) => {
+    setManualRelativeOverride(true);
     setTimeRange({
       from: `now-${preset}`,
       to: 'now',
     });
+  };
+
+  const handleJobRunRange = () => {
+    setManualRelativeOverride(false);
+    if (jobRange) {
+      setTimeRange(jobRange);
+    }
   };
 
   const toggleExpanded = () => {
@@ -136,6 +190,18 @@ export function TelemetrySection({
       '_blank'
     );
   };
+
+  const isJobRunSelected =
+    jobRange &&
+    timeRange.from === jobRange.from &&
+    timeRange.to === jobRange.to;
+
+  const timeRangeButtonClass = (selected) =>
+    `px-2 py-1 text-xs font-medium rounded border transition-colors ${
+      selected
+        ? 'bg-brand-solid text-white border-transparent'
+        : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-hover'
+    }`;
 
   return (
     <div className="mt-6">
@@ -177,17 +243,23 @@ export function TelemetrySection({
                   <label className="text-sm font-medium text-content whitespace-nowrap">
                     Time Range:
                   </label>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 flex-wrap">
+                    {jobRange && (
+                      <button
+                        onClick={handleJobRunRange}
+                        className={timeRangeButtonClass(isJobRunSelected)}
+                      >
+                        Job run
+                      </button>
+                    )}
                     {TIME_RANGE_PRESETS.map((preset) => (
                       <button
                         key={preset.value}
                         onClick={() => handleTimeRangePreset(preset.value)}
-                        className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                        className={timeRangeButtonClass(
                           timeRange.from === `now-${preset.value}` &&
-                          timeRange.to === 'now'
-                            ? 'bg-brand-solid text-white border-transparent'
-                            : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-hover'
-                        }`}
+                            timeRange.to === 'now'
+                        )}
                       >
                         {preset.label}
                       </button>
@@ -198,37 +270,54 @@ export function TelemetrySection({
 
               {/* Show current selection info */}
               <div className="mt-2 text-xs text-content-tertiary">
-                Showing: {displayName} • Time: {timeRange.from} to{' '}
-                {timeRange.to}
+                Showing: {displayName} • Time:{' '}
+                {isJobRunSelected
+                  ? 'job run (start → end)'
+                  : `${timeRange.from} to ${timeRange.to}`}
               </div>
             </div>
 
             {clusterNameOnCloud ? (
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {visiblePanels.map((panel) => (
+              <>
+                {jobRange && (
                   <div
-                    key={panel.id}
-                    className="bg-surface rounded-md border border-line shadow-sm"
+                    className="mb-3 rounded-md border border-line bg-surface-subtle px-3 py-2 text-xs text-content-secondary"
+                    role="note"
                   >
-                    <div className="p-2">
-                      <iframe
-                        src={buildGrafanaPanelUrl(
-                          panel,
-                          clusterNameOnCloud,
-                          timeRange,
-                          resolvedTheme
-                        )}
-                        width="100%"
-                        height="400"
-                        frameBorder="0"
-                        title={panel.title}
-                        className="rounded"
-                        key={`${panel.keyPrefix}-${clusterNameOnCloud}-${timeRange.from}-${timeRange.to}-${refreshTrigger}`}
-                      />
-                    </div>
+                    {FINISHED_JOB_RETENTION_CALLOUT}
                   </div>
-                ))}
-              </div>
+                )}
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {visiblePanels.map((panel) => (
+                    <div
+                      key={panel.id}
+                      className="bg-surface rounded-md border border-line shadow-sm"
+                    >
+                      <div className="p-2">
+                        <iframe
+                          src={buildGrafanaPanelUrl(
+                            panel,
+                            clusterNameOnCloud,
+                            timeRange,
+                            resolvedTheme
+                          )}
+                          width="100%"
+                          height="400"
+                          frameBorder="0"
+                          title={panel.title}
+                          className="rounded"
+                          key={`${panel.keyPrefix}-${clusterNameOnCloud}-${timeRange.from}-${timeRange.to}-${refreshTrigger}`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {jobRange && (
+                  <p className="mt-3 text-xs text-content-tertiary">
+                    {FINISHED_JOB_RETENTION_FOOTER}
+                  </p>
+                )}
+              </>
             ) : (
               <div className="p-4 text-center text-content-tertiary bg-surface-subtle rounded-md">
                 {noMetricsMessage}

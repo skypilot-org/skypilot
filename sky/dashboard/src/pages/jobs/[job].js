@@ -984,6 +984,8 @@ function JobDetails({
                 }
                 storageKey={TELEMETRY_EXPANDED_KEY}
                 hasGpu={hasAccelerator(telemetryTask?.accelerators)}
+                jobStartAt={telemetryTask?.start_at}
+                jobEndAt={telemetryTask?.end_at}
                 noMetricsMessage={
                   telemetryTask?.pool
                     ? 'Telemetry is not available for pool jobs.'
