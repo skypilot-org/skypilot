@@ -447,7 +447,7 @@ def _cancel_slurm_job_steps():
             parts = line.split()
             assert len(parts) >= 2, 'Expected at least 2 parts'
             step_id, step_name = parts[0], parts[1]
-            if step_name == f'sky-2':
+            if step_name in (f'sky-2', f'sky-2-setup'):
                 subprocess.run(['scancel', step_id],
                                 check=False, capture_output=True)
     except Exception as e:
@@ -630,11 +630,29 @@ if script or False:
 
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
-        setup_flags = f'--overlap --nodes=None'
-        setup_srun, setup_cleanup = build_task_runner_cmd(
-            None, setup_flags, None, None,
-            is_setup=True
-        )
+        setup_options = shlex.join(
+            option.replace('{slurm_job_id}', '12345')
+            for option in [])
+        setup_flags = f'--overlap --nodes=None {setup_options}'
+        if 'named' == 'fresh':
+            setup_env = ' '.join(
+                shlex.quote(f'{key}={value}')
+                for key, value in None.items())
+            setup_cmd = None
+            setup_payload = (
+                f'/usr/bin/env {setup_env} /bin/bash -c '
+                f'{shlex.quote(setup_cmd)}')
+            setup_srun = (
+                "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {print $1}') && "
+                f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit '
+                f'--jobid=12345 --job-name=sky-2-setup '
+                f'--ntasks-per-node=1 {setup_flags} {setup_payload}')
+            setup_cleanup = lambda: None
+        else:
+            setup_srun, setup_cleanup = build_task_runner_cmd(
+                None, setup_flags, None, None,
+                is_setup=True
+            )
 
         # Run setup srun directly, streaming output to driver stdout
         setup_proc = subprocess.Popen(setup_srun, shell=True,

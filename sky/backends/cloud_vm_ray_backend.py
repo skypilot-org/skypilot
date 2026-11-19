@@ -7207,7 +7207,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return None
 
     def _get_task_codegen_class(
-            self, handle: CloudVmRayResourceHandle) -> task_codegen.TaskCodeGen:
+            self,
+            handle: CloudVmRayResourceHandle,
+            task: Optional[task_lib.Task] = None) -> task_codegen.TaskCodeGen:
         """Returns the appropriate TaskCodeGen for the given handle."""
         if isinstance(handle.launched_resources.cloud, clouds.Slurm):
             assert (handle.cached_cluster_info
@@ -7224,9 +7226,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 container_name = slurm_utils.pyxis_container_name(
                     handle.cluster_name_on_cloud)
 
+            resources = (task.best_resources or next(iter(task.resources))
+                         if task is not None else handle.launched_resources)
+            overrides = resources.cluster_config_overrides
+            setup_options = skypilot_config.get_nested(
+                ('slurm', 'setup_srun_options'), [], override_configs=overrides)
+            setup_mode = skypilot_config.get_nested(
+                ('slurm', 'setup_container_mode'),
+                'named',
+                override_configs=overrides)
             return task_codegen.SlurmCodeGen(
                 slurm_job_id,
                 container_name,
+                setup_srun_options=setup_options,
+                setup_container_mode=setup_mode,
+                fresh_setup_cmd=task.setup if task is not None else None,
+                fresh_setup_env=task.envs if task is not None else None,
             )
         else:
             return task_codegen.RayCodeGen()
@@ -7262,7 +7277,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
-        codegen = self._get_task_codegen_class(handle)
+        codegen = self._get_task_codegen_class(handle, task)
 
         codegen.add_prologue(job_id)
         codegen.add_setup(
@@ -7312,7 +7327,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
-        codegen = self._get_task_codegen_class(handle)
+        codegen = self._get_task_codegen_class(handle, task)
         # Each VM of a multi-host TPU slice on Kubernetes gets its worker
         # identity, which the provisioner recorded on the node.
         if handle.cached_cluster_info is not None:

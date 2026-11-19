@@ -7,7 +7,7 @@ import math
 import os
 import shlex
 import textwrap
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import colorama
 
@@ -711,6 +711,10 @@ class SlurmCodeGen(TaskCodeGen):
         self,
         slurm_job_id: str,
         container_name: Optional[str],
+        setup_srun_options: Optional[List[str]] = None,
+        setup_container_mode: Literal['named', 'fresh'] = 'named',
+        fresh_setup_cmd: Optional[str] = None,
+        fresh_setup_env: Optional[Dict[str, str]] = None,
     ):
         """Initialize SlurmCodeGen.
 
@@ -721,6 +725,12 @@ class SlurmCodeGen(TaskCodeGen):
         super().__init__()
         self._slurm_job_id = slurm_job_id
         self._container_name = container_name
+        if setup_container_mode not in ('named', 'fresh'):
+            raise ValueError('setup_container_mode must be named or fresh')
+        self._setup_srun_options = setup_srun_options or []
+        self._setup_container_mode = setup_container_mode
+        self._fresh_setup_cmd = fresh_setup_cmd
+        self._fresh_setup_env = fresh_setup_env or {}
 
     def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
@@ -765,7 +775,7 @@ class SlurmCodeGen(TaskCodeGen):
                         parts = line.split()
                         assert len(parts) >= 2, 'Expected at least 2 parts'
                         step_id, step_name = parts[0], parts[1]
-                        if step_name == f'sky-{self.job_id}':
+                        if step_name in (f'sky-{self.job_id}', f'sky-{self.job_id}-setup'):
                             subprocess.run(['scancel', step_id],
                                             check=False, capture_output=True)
                 except Exception as e:
@@ -815,6 +825,13 @@ class SlurmCodeGen(TaskCodeGen):
             self._setup_envs = setup_envs
             self._setup_log_dir = log_dir
             self._setup_num_nodes = num_nodes
+        if self._setup_container_mode == 'fresh' and setup_cmd is not None:
+            if self._fresh_setup_cmd is None:
+                raise ValueError(
+                    'fresh setup requires an explicit setup command')
+            self._setup_cmd = self._fresh_setup_cmd
+            self._setup_envs = dict(self._fresh_setup_env)
+            self._setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
 
     def add_task(
         self,
@@ -1027,11 +1044,29 @@ class SlurmCodeGen(TaskCodeGen):
 
                     # --overlap as we have already secured allocation with the srun for the run section,
                     # and otherwise this srun would get blocked and deadlock.
-                    setup_flags = f'--overlap --nodes={self._setup_num_nodes}'
-                    setup_srun, setup_cleanup = build_task_runner_cmd(
-                        {self._setup_cmd!r}, setup_flags, {self._setup_log_dir!r}, {self._setup_envs!r},
-                        is_setup=True
-                    )
+                    setup_options = shlex.join(
+                        option.replace('{{slurm_job_id}}', {self._slurm_job_id!r})
+                        for option in {self._setup_srun_options!r})
+                    setup_flags = f'--overlap --nodes={self._setup_num_nodes} {{setup_options}}'
+                    if {self._setup_container_mode!r} == 'fresh':
+                        setup_env = ' '.join(
+                            shlex.quote(f'{{key}}={{value}}')
+                            for key, value in {self._setup_envs!r}.items())
+                        setup_cmd = {self._setup_cmd!r}
+                        setup_payload = (
+                            f'/usr/bin/env {{setup_env}} /bin/bash -c '
+                            f'{{shlex.quote(setup_cmd)}}')
+                        setup_srun = (
+                            "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {{print $1}}') && "
+                            f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit '
+                            f'--jobid={self._slurm_job_id} --job-name=sky-{self.job_id}-setup '
+                            f'--ntasks-per-node=1 {{setup_flags}} {{setup_payload}}')
+                        setup_cleanup = lambda: None
+                    else:
+                        setup_srun, setup_cleanup = build_task_runner_cmd(
+                            {self._setup_cmd!r}, setup_flags, {self._setup_log_dir!r}, {self._setup_envs!r},
+                            is_setup=True
+                        )
 
                     # Run setup srun directly, streaming output to driver stdout
                     setup_proc = subprocess.Popen(setup_srun, shell=True,
