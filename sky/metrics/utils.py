@@ -571,6 +571,12 @@ SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     multiprocess_mode='livesum',
 )
 
+SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
+    'sky_apiserver_heavy_executors',
+    'Number of free heavy request executors in the API server',
+    multiprocess_mode='livesum',
+)
+
 # Active threads in on-demand thread executors. Each process has its own
 # executor with a per-process max_workers limit, so per-pid series are kept:
 # exhaustion is a per-process condition and a sum across processes can exceed
@@ -2106,14 +2112,18 @@ async def add_cluster_name_label(metrics_text: str,
 
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
-# CPU/memory, kube_pod_labels, and cAdvisor container metrics (per-pod
-# CPU/Memory in the Telemetry section joins on (pod, namespace) with
-# kube_pod_labels — same join shape the GPU panels use to filter by SkyPilot
-# cluster name).
+# CPU/memory, node RDMA throughput, kube_pod_labels, and cAdvisor container
+# metrics (per-pod CPU/Memory in the Telemetry section joins on (pod,
+# namespace) with kube_pod_labels — same join shape the GPU panels use to
+# filter by SkyPilot cluster name).
 GPU_METRICS_MATCH_PATTERNS = [
     '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
     'kube_pod_labels',
     'node_cpu_seconds_total{mode="idle"}',
+    # node-exporter's InfiniBand / RoCE byte counters, one series per RDMA
+    # device port. Per node (no pod label): the GPU dashboard's node network
+    # panel joins them to DCGM's series on (cluster, node).
+    '{__name__=~"node_infiniband_port_data_(transmitted|received)_bytes_total"}',  # pylint: disable=line-too-long
     'container_cpu_usage_seconds_total{container!="",container!="POD"}',
     'container_memory_working_set_bytes{container!="",container!="POD"}',
     # GPU allocation metrics — pod requests + node capacity for nvidia/amd

@@ -313,6 +313,19 @@ async def test_set_request_failed_if_pending_async(conditional_backend, status):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('status', list(RequestStatus))
+async def test_set_request_failed_if_active(conditional_backend, status):
+    await _create_request(status)
+
+    failed = await asyncio.to_thread(requests.set_request_failed_if_active,
+                                     'cond-request', ValueError('Boom'))
+
+    assert failed == (status in RequestStatus.active_statuses())
+    expected = RequestStatus.FAILED if failed else status
+    assert await _status() == expected
+
+
+@pytest.mark.asyncio
 async def test_noop_update_is_logged(conditional_backend, monkeypatch):
     monkeypatch.setattr(requests.sky_logging, 'logging_enabled',
                         lambda *_: True)

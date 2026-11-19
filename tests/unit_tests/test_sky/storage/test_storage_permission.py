@@ -251,7 +251,7 @@ def _launch_naming(user_id,
          mock.patch('sky.data.storage.common_utils.is_in_request_context',
                     return_value=True), \
          mock.patch('sky.jobs.server.core.clouds.Kubernetes.'
-                    'check_request_keeps_server_none', side_effect=_Proceeded):
+                    'check_request_keeps_server_identity', side_effect=_Proceeded):
         jobs_core._launch(task,
                           name=None,
                           pool=None,

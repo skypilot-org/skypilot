@@ -64,6 +64,9 @@ _MAX_RETRY = 6
 # raise the bound (or set it non-positive) for setups that legitimately take
 # longer.
 _DEFAULT_SETUP_COMMAND_TIMEOUT = 1800
+# Printed by the Kubernetes pod startup (kubernetes-ray.yml.j2) when the image
+# has no sshd and it could not be installed.
+NO_SSHD_MARKER = 'WARNING: sshd is not installed in this image'
 _DEFAULT_FILE_MOUNT_TIMEOUT = 600
 
 
@@ -548,7 +551,10 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     digest = hasher.hexdigest()
 
     @_auto_retry()
-    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
+    def _setup_node(runner: command_runner.CommandRunner,
+                    log_path: str) -> bool:
+        """Returns whether the node reported that it has no sshd."""
+        no_sshd = False
         for cmd in setup_commands:
             returncode, stdout, stderr = runner.run_setup(
                 cmd,
@@ -585,13 +591,23 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                     f'(exit code {returncode}). Error: '
                     f'===== stdout ===== \n{stdout}\n'
                     f'===== stderr ====={stderr}')
+            no_sshd = no_sshd or NO_SSHD_MARKER in stdout
+        return no_sshd
 
-    _parallel_ssh_with_cache(_setup_node,
-                             cluster_name,
-                             stage_name='setup_runtime_on_cluster',
-                             digest=digest,
-                             cluster_info=cluster_info,
-                             ssh_credentials=ssh_credentials)
+    # Cached nodes return None and are not counted.
+    results = _parallel_ssh_with_cache(_setup_node,
+                                       cluster_name,
+                                       stage_name='setup_runtime_on_cluster',
+                                       digest=digest,
+                                       cluster_info=cluster_info,
+                                       ssh_credentials=ssh_credentials)
+    ran = [r for r in results if r is not None]
+    num_no_sshd = sum(ran)
+    if num_no_sshd:
+        logger.warning(
+            f'{num_no_sshd} of {len(ran)} nodes have no sshd: ssh to '
+            'the cluster, VS Code and mpirun/pdsh between nodes will not '
+            'work. Install openssh-server in the image.')
 
 
 def _ray_gpu_options(custom_resource: str) -> str:

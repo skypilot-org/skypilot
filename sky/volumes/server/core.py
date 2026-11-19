@@ -9,6 +9,7 @@ import filelock
 
 from sky import check as sky_check
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import provision
@@ -18,6 +19,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.schemas.api import responses
 from sky.server import plugin_hooks
 from sky.skylet import constants
+from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -401,9 +403,19 @@ def volume_list(
         return records
 
 
+def _check_hostpath_caller_is_admin(config: models.VolumeConfig,
+                                    name: str) -> None:
+    """Deleting a k8s-hostpath volume can wipe its host path on every node."""
+    if (getattr(config, 'type', None) == volume_utils.VolumeType.HOSTPATH.value
+            and not permission.caller_is_admin()):
+        raise exceptions.PermissionDeniedError(
+            f'Only an admin can delete k8s-hostpath volume {name!r}.')
+
+
 def volume_delete(names: List[str],
                   ignore_not_found: bool = False,
-                  purge: bool = False) -> None:
+                  purge: bool = False,
+                  no_cleanup: bool = False) -> None:
     """Deletes volumes.
 
     Args:
@@ -411,6 +423,8 @@ def volume_delete(names: List[str],
         ignore_not_found: If True, ignore volumes that are not found.
         purge: If True, delete the volume from the database even if the
           deletion API fails.
+        no_cleanup: If True, keep the files of a k8s-hostpath volume even if
+          it was registered with cleanup_on_deletion.
 
     Raises:
         ValueError: If the volume does not exist
@@ -426,6 +440,8 @@ def volume_delete(names: List[str],
             config = volume.get('handle')
             if config is None:
                 raise ValueError(f'Volume {name} has no handle.')
+            # /volumes/delete checks it too; this is the record deleted.
+            _check_hostpath_caller_is_admin(config, name)
             cloud = config.cloud
             if not purge:
                 usedby_pods, usedby_clusters = provision.get_volume_usedby(
@@ -442,6 +458,12 @@ def volume_delete(names: List[str],
                     raise ValueError(
                         f'Volume {name} is used by {pod_str} {usedby_pods_str}.'
                     )
+            if no_cleanup and config.config.get('cleanup_on_deletion'):
+                config = config.model_copy(update={
+                    'config': {
+                        **config.config, 'cleanup_on_deletion': False
+                    }
+                })
             logger.debug(f'Deleting volume {name} with config {config}')
             with _volume_lock(name):
                 try:
@@ -581,6 +603,10 @@ def volume_apply(
         is_ephemeral: Whether the volume is ephemeral.
         creation_yaml: The YAML config used to create this volume.
     """
+    if (volume_type == volume_utils.VolumeType.HOSTPATH.value and
+            not permission.caller_is_admin()):
+        raise exceptions.PermissionDeniedError(
+            'k8s-hostpath volumes can only be registered by an admin.')
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
         # Reuse the method for cluster name on cloud to
         # generate the storage name on cloud.
