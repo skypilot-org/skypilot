@@ -3072,6 +3072,8 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
             status_expr=status_expr,
         )
     else:

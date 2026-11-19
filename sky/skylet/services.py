@@ -503,6 +503,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 limit=request.limit if request.HasField('limit') else None,
                 after_job_id=request.after_job_id
                 if request.HasField('after_job_id') else None,
+                sort_by=request.sort_by
+                if request.HasField('sort_by') else None,
+                sort_order=request.sort_order
+                if request.HasField('sort_order') else None,
                 user_hashes=user_hashes,
                 statuses=statuses,
                 fields=fields,

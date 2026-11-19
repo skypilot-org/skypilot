@@ -2422,6 +2422,18 @@ class TestPaginationByCursor:
                                                       statuses=pending)
         assert {j['job_id'] for j in rows} == {a}
 
+    def test_pages_keep_the_time_window(self, _mock_managed_jobs_db_conn):
+        # A member submitted inside the window under a root submitted before
+        # it: paged and unpaged listings return the same rows.
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        member = new_job('member', parent_job_id=root)
+        _set_created_at(_mock_managed_jobs_db_conn, root, 100.0)
+        _set_created_at(_mock_managed_jobs_db_conn, member, 300.0)
+        unpaged, _ = state.get_managed_jobs_with_filters(submitted_after=200.0)
+        assert {j['job_id'] for j in unpaged} == {member}
+        assert self._ids(submitted_after=200.0) == {member}
+
     def test_ascending_order(self, _mock_managed_jobs_db_conn):
         new_job = TestParentJobLinks._new_job
         a = new_job('a')

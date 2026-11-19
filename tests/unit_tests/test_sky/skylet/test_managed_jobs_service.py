@@ -424,6 +424,18 @@ class TestGetJobTable:
         ]
         assert response.total == 4
         assert response.after_job_id_applied is True
+        # Ascending: the page above the cursor.
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                limit=2,
+                sort_by='job_id',
+                sort_order='asc',
+                after_job_id=self.job_ids['job_id2']), context_mock)
+        context_mock.abort.assert_not_called()
+        assert [j.job_id for j in response.jobs
+               ] == [self.job_ids['job_id3'], self.job_ids['job_id4']]
 
     def test_get_job_table_no_accessible_workspaces(self):
         """Test basic GetJobTable functionality without specified accessible

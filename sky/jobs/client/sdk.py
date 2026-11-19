@@ -541,7 +541,7 @@ def _queue_in_pages(
     the queue in one call.
     """
     body = body.model_copy()
-    if body.fields is not None and 'root_job_id' not in body.fields:
+    if body.fields and 'root_job_id' not in body.fields:
         # Rows name their top-level job in root_job_id; the cursor needs it.
         body.fields = [*body.fields, 'root_job_id']
     wanted = body.limit

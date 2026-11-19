@@ -153,10 +153,11 @@ class TestPaging:
                ] == [(2, None), (1, 7)]
         assert _job_ids(request_id) == ([5, 7, 9, 10, 11], 5)
 
-    def test_all_fields_carry_the_root(self):
+    @pytest.mark.parametrize('fields', [None, []])
+    def test_all_fields_carry_the_root(self, fields):
         server = _Server(_TREES)
-        _queue_v2(server, fields=None)
-        assert server.bodies[0]['fields'] is None
+        _queue_v2(server, fields=fields)
+        assert server.bodies[0]['fields'] == fields
 
     @pytest.mark.parametrize('kwargs', [{
         'limit': 2
