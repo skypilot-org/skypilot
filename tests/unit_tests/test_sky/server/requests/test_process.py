@@ -8,6 +8,7 @@ import unittest.mock
 
 import pytest
 
+from sky.server.requests import process as requests_process
 from sky.server.requests.process import BurstableExecutor
 from sky.server.requests.process import DisposableExecutor
 from sky.server.requests.process import PoolExecutor
@@ -298,8 +299,6 @@ def test_pool_executor_warm_start_runs_initializer(tmp_path):
 
 def test_pool_executor_warm_start_limits_concurrent_startup(tmp_path):
     """At most _WARM_START_CONCURRENCY workers start at the same time."""
-    from sky.server.requests import (
-        process)  # pylint: disable=import-outside-toplevel
     log_path = str(tmp_path / 'init.log')
     executor = PoolExecutor(max_workers=5,
                             warm_start=True,
@@ -317,7 +316,7 @@ def test_pool_executor_warm_start_limits_concurrent_startup(tmp_path):
         for _, delta in events:
             overlap += delta
             peak = max(peak, overlap)
-        assert peak <= process._WARM_START_CONCURRENCY
+        assert peak <= requests_process._WARM_START_CONCURRENCY
     finally:
         executor.shutdown()
 
