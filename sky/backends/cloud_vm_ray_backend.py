@@ -961,6 +961,9 @@ class RetryingVmProvisioner(object):
                 instance_type=to_provision.instance_type,
                 accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
+                **({
+                    'resources': to_provision
+                } if isinstance(cloud, clouds.Slurm) else {}),
         ):
             if zones is None:
                 yield None

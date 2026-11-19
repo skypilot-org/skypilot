@@ -353,6 +353,117 @@ class TestBuildSbatchDirectives:
                                           self._partition(maxtime=3600), 'cpu')
         assert result == '\n#SBATCH --time=2:00:00'
 
+    def test_time_aliases_emit_one_directive(self):
+        result = _build_sbatch_directives({
+            't': '1:00:00',
+            'time': '2:00:00',
+        }, self._partition(maxtime=3600), 'cpu')
+        assert result == '\n#SBATCH --time=2:00:00'
+
+    @pytest.mark.parametrize('options,expected', [
+        ({
+            'time': 0
+        }, '--time=0'),
+        ({
+            't': 0
+        }, '--t=0'),
+        ({
+            'time': '0'
+        }, '--time=0'),
+        ({
+            'time': 0,
+            't': '1:00:00'
+        }, '--time=0'),
+    ])
+    def test_zero_time_is_explicit_unlimited(self, options, expected):
+        result = _build_sbatch_directives(options,
+                                          self._partition(maxtime=3600), 'cpu')
+        assert result == f'\n#SBATCH {expected}'
+
+
+class TestSubmissionPartitionInfo:
+
+    @pytest.mark.parametrize('maxtimes,defaults,compatible', [
+        ((3600, 3600), (None, None), True),
+        ((3600, 7200), (None, None), False),
+        ((None, None), ('01:00:00', '02:00:00'), False),
+        ((None, None), ('01:00:00', '01:00:00'), True),
+        ((None, None), (None, '01:00:00'), False),
+    ])
+    @pytest.mark.parametrize('options', [{}, {
+        'time': '00:30:00'
+    }, {
+        't': '30'
+    }, {
+        'time': False
+    }, {
+        'time': 0
+    }, {
+        't': 0
+    }])
+    def test_joint_time_defaults(self, monkeypatch, maxtimes, defaults,
+                                 compatible, options):
+        inventory = {
+            name: slurm_adaptor.SlurmPartition(name, False, maximum, default)
+            for name, maximum, default in zip(('cpu-a',
+                                               'cpu-b'), maxtimes, defaults)
+        }
+        monkeypatch.setattr(slurm_instance.slurm_utils, 'get_partition_infos',
+                            lambda _: inventory)
+        explicit = any(value is not None and value is not False
+                       for value in options.values())
+        if compatible or explicit:
+            result = slurm_instance.get_submission_partition_info(
+                'cluster', 'cpu-a,cpu-b', options)
+            assert result == inventory['cpu-a']
+            directives = _build_sbatch_directives(options, result,
+                                                  'cpu-a,cpu-b')
+            assert directives.count('#SBATCH --time=') + directives.count(
+                '#SBATCH --t=') <= 1
+        else:
+            with pytest.raises(ValueError, match='incompatible time defaults'):
+                slurm_instance.get_submission_partition_info(
+                    'cluster', 'cpu-a,cpu-b', options)
+
+    def test_missing_joint_member_rejected_even_with_explicit_time(
+            self, monkeypatch):
+        monkeypatch.setattr(slurm_instance.slurm_utils, 'get_partition_infos',
+                            lambda _: {})
+        with pytest.raises(ValueError, match='Partitions missing'):
+            slurm_instance.get_submission_partition_info(
+                'cluster', 'cpu-a,cpu-b', {'time': '00:30:00'})
+
+    def test_single_partition_keeps_native_lookup(self, monkeypatch):
+        info = slurm_adaptor.SlurmPartition('cpu', False, None, '01:00:00')
+        lookup = mock.Mock(return_value=info)
+        monkeypatch.setattr(slurm_instance.slurm_utils, 'get_partition_info',
+                            lookup)
+        assert slurm_instance.get_submission_partition_info(
+            'cluster', 'cpu', {}) == info
+        lookup.assert_called_once_with('cluster', 'cpu')
+
+    @pytest.mark.parametrize('selection', [
+        '',
+        ',cpu-a',
+        'cpu-a,',
+        'cpu-a,,cpu-b',
+        'cpu-a,cpu-a',
+        ' cpu-a',
+        'cpu-a, cpu-b',
+    ])
+    def test_malformed_selection_rejected_at_submission_boundary(
+            self, monkeypatch, selection):
+        lookup = mock.Mock()
+        monkeypatch.setattr(slurm_instance.slurm_utils, 'get_partition_info',
+                            lookup)
+        monkeypatch.setattr(slurm_instance.slurm_utils, 'get_partition_infos',
+                            lookup)
+        with pytest.raises(ValueError,
+                           match='Invalid Slurm partition selection'):
+            slurm_instance.get_submission_partition_info(
+                'cluster', selection, {'time': 0})
+        lookup.assert_not_called()
+
 
 class TestSbatchConfigSchema:
     """Test sbatch_options schema validation in config YAML."""

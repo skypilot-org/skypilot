@@ -20,11 +20,13 @@ from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.catalog import slurm_catalog
 from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
+from sky.utils import config_utils
 from sky.utils import schemas
 from sky.utils import yaml_utils
 
@@ -658,6 +660,183 @@ class TestRegionsWithOfferingPartitionMap:
         assert [region.name for region in regions] == ['cluster-b']
 
 
+class TestPartitionSets:
+
+    @pytest.fixture(autouse=True)
+    def _inventory(self, monkeypatch):
+        monkeypatch.setattr(slurm_cloud.Slurm, 'existing_allowed_clusters',
+                            mock.Mock(return_value=['cluster-a']))
+        monkeypatch.setattr(slurm_cloud.Slurm, 'check_features_are_supported',
+                            mock.Mock())
+        monkeypatch.setattr(slurm_utils, 'get_all_slurm_cluster_names',
+                            lambda: ['cluster-a'])
+        monkeypatch.setattr(slurm_utils, 'get_partitions',
+                            lambda _: ['cpu-a', 'cpu-b', 'gpu'])
+        monkeypatch.setattr(slurm_utils, 'lookup_cpu_partition',
+                            lambda _: 'cpu-a')
+        monkeypatch.setattr(slurm_utils, 'lookup_gpu_partition_map',
+                            lambda *_: ['gpu'])
+        monkeypatch.setattr(slurm_utils, 'check_instance_fits', lambda *_:
+                            (True, None))
+
+    @pytest.mark.parametrize('zone,expected', [
+        (None, 'cpu-b,cpu-a'),
+        ('cpu-b,cpu-a', 'cpu-b,cpu-a'),
+        ('cpu-b', 'cpu-b'),
+    ])
+    def test_resource_partition_set_survives_backend(self, zone, expected):
+        resource = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            region='cluster-a',
+            zone=zone,
+            instance_type='8CPU--32GB',
+            _cluster_config_overrides={
+                'slurm': {
+                    'cpu_partition': 'cpu-b,cpu-a'
+                }
+            })
+        provisioner = object.__new__(cloud_vm_ray_backend.RetryingVmProvisioner)
+        offered = list(
+            provisioner._yield_zones(resource, 1, 'test', None, False))
+        assert [[zone.name for zone in zones] for zones in offered
+               ] == [[expected]]
+
+    @pytest.mark.parametrize('instance_type,expected', [
+        ('8CPU--32GB', 'cpu-a'),
+        ('8CPU--32GB--H100:1', 'gpu'),
+    ])
+    def test_single_cpu_and_gpu_selection_unchanged(self, instance_type,
+                                                    expected):
+        regions = slurm_cloud.Slurm.regions_with_offering(
+            instance_type, None, False, 'cluster-a', None)
+        assert [z.name for z in regions[0].zones] == [expected]
+
+    def test_explicit_set_and_membership_validation(self, monkeypatch):
+        monkeypatch.setattr(slurm_utils, 'lookup_cpu_partition', lambda _: None)
+        cloud = slurm_cloud.Slurm()
+        assert cloud.validate_region_zone('cluster-a',
+                                          'cpu-a,cpu-b') == ('cluster-a',
+                                                             'cpu-a,cpu-b')
+        with pytest.raises(ValueError, match='not found'):
+            cloud.validate_region_zone('cluster-a', 'cpu-a,unknown')
+        regions = cloud.regions_with_offering('8CPU--32GB', None, False,
+                                              'cluster-a', 'cpu-a,cpu-b')
+        assert [z.name for z in regions[0].zones] == ['cpu-a,cpu-b']
+
+    @pytest.mark.parametrize('selection', [
+        '',
+        ',cpu-a',
+        'cpu-a,',
+        'cpu-a,,cpu-b',
+        'cpu-a,cpu-a',
+        ' cpu-a',
+        'cpu-a, cpu-b',
+    ])
+    def test_malformed_selection_rejected_at_cloud_boundary(self, selection):
+        with pytest.raises(ValueError,
+                           match='Invalid Slurm partition selection'):
+            slurm_cloud.Slurm().validate_region_zone('cluster-a', selection)
+
+    def test_conservative_price_until_assigned(self, monkeypatch):
+        monkeypatch.setattr(
+            slurm_catalog, 'get_hourly_cost',
+            lambda _instance, _spot, _region, zone: {
+                'cpu-a': 1.0,
+                'cpu-b': 2.0
+            }[zone])
+        cloud = slurm_cloud.Slurm()
+        assert cloud.instance_type_to_hourly_cost('8CPU--32GB', False,
+                                                  'cluster-a',
+                                                  'cpu-a,cpu-b') == 2.0
+        assert cloud.instance_type_to_hourly_cost('8CPU--32GB', False,
+                                                  'cluster-a', 'cpu-a') == 1.0
+
+    @pytest.mark.parametrize('conflict',
+                             [None, 'account', 'time', 'image_id', 'task'])
+    def test_joint_deploy_settings_and_task_overrides(self, monkeypatch,
+                                                      conflict):
+        config = config_utils.Config({
+            'cluster_configs': {
+                'cluster-a': {
+                    'partition_configs': {
+                        'cpu-a': {
+                            'sbatch_options': {
+                                'account': 'cpu',
+                                'time': '1:00:00'
+                            }
+                        },
+                        'cpu-b': {
+                            'sbatch_options': {
+                                'account':
+                                    ('other' if conflict in ('account',
+                                                             'task') else 'cpu'
+                                    ),
+                                'time': ('2:00:00' if conflict
+                                         in ('time', 'task') else '1:00:00'),
+                            }
+                        },
+                    }
+                }
+            }
+        })
+        monkeypatch.setattr(skypilot_config, 'get_workspace_cloud',
+                            lambda _: config)
+        for name in ('get_effective_region_config', 'get_effective_queue_name',
+                     'get_effective_slurm_account', 'get_nested'):
+            monkeypatch.setattr(skypilot_config, name,
+                                lambda *_args, **_kwargs: None)
+        ssh = mock.Mock()
+        ssh.lookup.return_value = {
+            'hostname': 'login',
+            'user': 'test',
+            'identityfile': ['/key']
+        }
+        monkeypatch.setattr(slurm_utils, 'get_slurm_ssh_config', lambda: ssh)
+        monkeypatch.setattr(slurm_utils, 'get_submit_user', lambda _: None)
+        monkeypatch.setattr(slurm_utils, 'resolve_sky_base_dir',
+                            lambda *_: '/shared/sky')
+        monkeypatch.setattr(slurm, 'SlurmClient', mock.Mock())
+        resource = mock.MagicMock(unsafe=True)
+        resource.instance_type = '8CPU--32GB'
+        resource.zone = 'cpu-a,cpu-b'
+        resource.assert_launchable.return_value = resource
+        resource.extract_docker_image.side_effect = ([
+            'image-a', 'image-b'
+        ] if conflict == 'image_id' else ['image-a', 'image-a'])
+        resource.cluster_config_overrides = ({
+            'slurm': {
+                'sbatch_options': {
+                    'account': 'task',
+                    't': '30'
+                }
+            }
+        } if conflict == 'task' else {})
+        args = (resource, mock.Mock(), clouds.Region('cluster-a'),
+                [clouds.Zone('cpu-a,cpu-b')], 1)
+        if conflict in ('account', 'time', 'image_id'):
+            with pytest.raises(ValueError,
+                               match='incompatible deployment settings'):
+                slurm_cloud.Slurm().make_deploy_resources_variables(*args)
+        else:
+            variables = slurm_cloud.Slurm().make_deploy_resources_variables(
+                *args)
+            assert variables['slurm_partition'] == 'cpu-a,cpu-b'
+            assert variables['image_id'] == 'image-a'
+            assert variables['snapshot_id']
+            if conflict == 'task':
+                assert variables['sbatch_options'] == {
+                    'account': 'task',
+                    'time': '30'
+                }
+
+    def test_joint_gpu_submission_is_not_silently_changed(self):
+        resource = mock.Mock(instance_type='8CPU--32GB--H100:1')
+        with pytest.raises(ValueError, match='only for CPU jobs'):
+            slurm_cloud.Slurm().make_deploy_resources_variables(
+                resource, mock.Mock(), clouds.Region('cluster-a'),
+                [clouds.Zone('gpu,cpu-a')], 1)
+
+
 class TestLookupGpuPartitionMap:
     """Test slurm_utils.lookup_gpu_partition_map()."""
 
@@ -1134,6 +1313,31 @@ class TestSbatchOptionsPrecedence:
             skypilot_config._GLOBAL_CONFIG_PATH = saved_global
             skypilot_config._PROJECT_CONFIG_PATH = saved_project
             skypilot_config._global_config_context = saved_ctx
+
+    @pytest.mark.parametrize('options', [
+        {
+            'time': 0
+        },
+        {
+            't': 0
+        },
+        {
+            'time': 0,
+            't': 30
+        },
+    ])
+    def test_task_zero_time_overrides_defaults_and_aliases(
+            self, tmp_path, options):
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path, {'slurm': {
+                'sbatch_options': {
+                    'time': '1:00:00'
+                }
+            }},
+            cluster_config_overrides={'slurm': {
+                'sbatch_options': options
+            }})
+        assert result == {'time': 0}
 
     def test_global_only(self, tmp_path):
         """Level 1: Only global sbatch_options set."""
@@ -1656,6 +1860,52 @@ class TestCreateVirtualInstance:
         client.submit_job.assert_not_called()
         mock_wait_for_job_nodes.assert_called_once()
         assert record.head_instance_id == slurm_utils.instance_id('42', 'node1')
+
+    @pytest.mark.parametrize('existing_job', [False, True])
+    @pytest.mark.parametrize('partition', ['cpus', 'cpu-a,cpu-b'])
+    @patch('sky.provision.slurm.instance._wait_for_job_ready')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_record_reports_allocated_partition(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_wait_for_job_ready, existing_job, partition, monkeypatch):
+        del mock_wait_for_job_nodes, mock_wait_for_job_ready
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        client = mock_slurm_client.return_value
+        client.query_jobs.side_effect = (
+            lambda name, states: ['42']
+            if existing_job and 'running' in states else [])
+        client.submit_job.return_value = '42'
+        client.run_command.return_value = (0, 'RUNNING|cpu-b,cpu-a\n', '')
+        inventory = {
+            name: slurm.SlurmPartition(name, False, 3600, None)
+            for name in ('cpu-a', 'cpu-b')
+        }
+        monkeypatch.setattr(slurm_utils, 'get_partition_infos',
+                            lambda _: inventory)
+        config = self._make_non_container_config(2)
+        config.provider_config['partition'] = partition
+        if existing_job:
+            # A resumed allocation must survive changed partition defaults.
+            inventory['cpu-b'] = slurm.SlurmPartition('cpu-b', False, 7200,
+                                                      None)
+
+        record = slurm_instance._create_virtual_instance(
+            region='us-west-2',
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster',
+            config=config,
+        )
+
+        assert client.submit_job.called != existing_job
+        assert record.zone == ('cpu-b' if ',' in partition else partition)
 
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
