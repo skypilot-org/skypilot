@@ -729,7 +729,8 @@ class GCPComputeInstance(GCPInstance):
                 config['machineType'],
                 region=zone.rpartition('-')[0],
                 zone=zone,
-                specific_reservations=specific_reservations)
+                specific_reservations=specific_reservations,
+                project_id=project_id)
             # Filter the reservations by the user-specified ones, because
             # reservations contain auto reservations as well, which do not
             # need to explicitly specify in the config for creating instances.
