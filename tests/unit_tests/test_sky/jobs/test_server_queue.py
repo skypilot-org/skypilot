@@ -1114,6 +1114,7 @@ class TestDumpManagedJobQueue:
                                                page,
                                                limit,
                                                tree_root_ids=None,
+                                               after_job_id=None,
                                                sort_by=None,
                                                sort_order=None,
                                                submitted_after=None,

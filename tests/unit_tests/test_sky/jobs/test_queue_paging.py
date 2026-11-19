@@ -20,7 +20,8 @@ def _entrypoint():
 
 def _request(request_id, value=None, error=None):
     request = requests_lib.Request(request_id=request_id,
-                                   name='jobs.queue_v2',
+                                   name=server_constants.REQUEST_NAME_PREFIX +
+                                   'jobs.queue_v2',
                                    entrypoint=_entrypoint,
                                    request_body=payloads.RequestBody(),
                                    status=requests_lib.RequestStatus.SUCCEEDED,
