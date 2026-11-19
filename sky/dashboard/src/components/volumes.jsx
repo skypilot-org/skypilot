@@ -992,8 +992,10 @@ export function VolumesTable({
         const adminOnly = volume.type === 'k8s-hostpath' && isAdmin === false;
         return (
           <TableCell>
-            {/* Also on a wrapper: a disabled button shows no tooltip. */}
+            {/* Also on a wrapper: a disabled button shows no tooltip. The
+                wrapper is inline-block so it covers the whole button. */}
             <span
+              className="inline-block"
               title={
                 readOnly
                   ? 'Read-only: you are not a member of this volume’s workspace'
