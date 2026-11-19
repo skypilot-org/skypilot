@@ -406,7 +406,7 @@ class TestVolumeCommands:
         prompt = confirm.call_args[0][0]
         assert ('/mnt/data on every node of ctx1' in prompt) == warned
         assert ('use --no-cleanup to keep the files' in prompt) == warned
-        # Wiping defaults to no.
+        # Defaults to no only when files would be wiped.
         assert confirm.call_args[1]['default'] is (not warned)
         assert mock_delete.call_args[1]['no_cleanup'] is bool(args)
 
