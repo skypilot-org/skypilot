@@ -2,7 +2,7 @@
 
 import asyncio
 import contextlib
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import fastapi
 
@@ -16,6 +16,7 @@ from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.users import permission
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import registry
@@ -61,6 +62,30 @@ async def volume_list(
 def _check_volumes_writable(auth_user: models.User, names: List[str]) -> None:
     for name in names:
         workspaces_core.check_volume_write_permission(auth_user, name)
+    # Deleting one can wipe its host path on every node.
+    hostpath_names = [
+        name for name in names
+        if _is_hostpath(global_user_state.get_volume_by_name(name))
+    ]
+    if hostpath_names and not permission.is_admin(auth_user.id):
+        raise exceptions.PermissionDeniedError(
+            'Only an admin can delete k8s-hostpath volumes: '
+            f'{", ".join(hostpath_names)}')
+
+
+def _is_hostpath(record: Optional[Dict[str, Any]]) -> bool:
+    return (record is not None and
+            record['handle'].type == volume_utils.VolumeType.HOSTPATH.value)
+
+
+def _check_hostpath_registrable(auth_user: Optional[models.User],
+                                volume_type: Optional[str]) -> None:
+    """Only an admin may register a volume exposing a node directory."""
+    if (auth_user is not None and
+            volume_type == volume_utils.VolumeType.HOSTPATH.value and
+            not permission.is_admin(auth_user.id)):
+        raise exceptions.PermissionDeniedError(
+            'k8s-hostpath volumes can only be registered by an admin.')
 
 
 @router.post('/delete')
@@ -125,6 +150,11 @@ async def volume_validate(
         request: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
+    # A 400, not a 403: the SDK only surfaces a synchronous 400 from here.
+    with _volume_errors_as_400():
+        await context_utils.to_thread_with_executor(
+            None, _check_hostpath_registrable, request.state.auth_user,
+            volume_validate_body.volume_type)
     volume_config = {
         'name': volume_validate_body.name,
         'type': volume_validate_body.volume_type,
@@ -163,6 +193,10 @@ async def volume_validate(
 async def volume_apply(request: fastapi.Request,
                        volume_apply_body: payloads.VolumeApplyBody) -> None:
     """Creates or registers a volume."""
+    with _volume_errors_as_400():
+        await context_utils.to_thread_with_executor(
+            None, _check_hostpath_registrable, request.state.auth_user,
+            volume_apply_body.volume_type)
     volume_cloud = volume_apply_body.cloud
     volume_type = volume_apply_body.volume_type
     volume_config = volume_apply_body.config

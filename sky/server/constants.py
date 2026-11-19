@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 70  # managed jobs: after_job_id cursor on the queue
+API_VERSION = 71  # managed jobs: after_job_id cursor on the queue
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -68,7 +68,7 @@ MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 66
 # Minimum server API version whose managed-jobs queue takes `after_job_id`
 # (a cursor: the page after this top-level job, in job id order). An older
 # server ignores the field and returns the first page again.
-MIN_JOBS_QUEUE_CURSOR_API_VERSION = 70
+MIN_JOBS_QUEUE_CURSOR_API_VERSION = 71
 
 # The HTTP header naming the user an admin service account acts as.
 IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'
@@ -90,6 +90,9 @@ MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
 # its schema, and dropping it on the client would launch different hardware
 # (one 8-chip VM instead of a 2x4 slice), so the client raises instead.
 MIN_TPU_MULTI_HOST_API_VERSION = 69
+# Minimum server API version that accepts `no_cleanup` on volume delete. An
+# older server ignores the field and would wipe the host path anyway.
+MIN_VOLUME_NO_CLEANUP_API_VERSION = 70
 
 # Servers >= this version omit the bulky pickled `handle` from each replica
 # in serve/pool status responses, shipping pre-computed `infra` /

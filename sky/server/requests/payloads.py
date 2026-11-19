@@ -614,6 +614,9 @@ class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
     purge: bool = False
+    # Keep a k8s-hostpath volume's files even if it was registered with
+    # cleanup_on_deletion.
+    no_cleanup: bool = False
 
 
 class VolumeListBody(RequestBody):
