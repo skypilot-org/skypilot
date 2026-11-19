@@ -63,6 +63,10 @@ class _CoreApi:
         self.list_node_calls += 1
         return _Response(json.dumps({'items': self.nodes}).encode())
 
+    def call_api(self, path, method, **kwargs):
+        assert (path, method) == ('/api/v1/nodes', 'GET')
+        return self.list_node(**kwargs)
+
 
 def _request(allowed_node: str) -> contextvars.Context:
     """A request whose client config allows only `allowed_node`."""
@@ -87,6 +91,8 @@ def _request(allowed_node: str) -> contextvars.Context:
 def core_api(monkeypatch):
     api = _CoreApi(_NODES)
     monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda context=None: api)
+    monkeypatch.setattr('sky.adaptors.kubernetes.api_client',
                         lambda context=None: api)
     annotations.clear_request_level_cache()
     yield api

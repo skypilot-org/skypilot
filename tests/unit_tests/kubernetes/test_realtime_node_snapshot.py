@@ -108,6 +108,15 @@ class _CoreApi:
         pods = [p for p in self.pods if p['status']['phase'] not in excluded]
         return _Response(json.dumps({'items': pods}).encode())
 
+    def call_api(self, path, method, query_params, **kwargs):
+        del kwargs
+        assert method == 'GET'
+        if path == '/api/v1/nodes':
+            return self.list_node()
+        assert path == '/api/v1/pods', path
+        return self.list_pod_for_all_namespaces(
+            field_selector=dict(query_params)['fieldSelector'])
+
 
 _h100 = functools.partial(
     _node,
@@ -270,6 +279,8 @@ def _serve(monkeypatch, core_api: _CoreApi,
     """Starts a request served by core_api and the snapshot provider."""
     annotations.clear_request_level_cache()
     monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda context=None: core_api)
+    monkeypatch.setattr('sky.adaptors.kubernetes.api_client',
                         lambda context=None: core_api)
     monkeypatch.setattr(plugin_extensions.NodeInfoSource,
                         '_snapshot_provider_func', provider)

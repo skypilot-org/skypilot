@@ -19,6 +19,7 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import kai
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
 from sky.utils import subprocess_utils
@@ -771,25 +772,30 @@ def test_pod_termination_reason_null_finished_at(monkeypatch):
 
 def test_list_namespaced_pod_success(monkeypatch):
     """Test that list_namespaced_pod returns pods from the API response."""
-    mock_pod1 = mock.MagicMock()
-    mock_pod1.metadata.name = 'test-pod-1'
-    mock_pod1.status.phase = 'Running'
+    calls = []
 
-    mock_pod2 = mock.MagicMock()
-    mock_pod2.metadata.name = 'test-pod-2'
-    mock_pod2.status.phase = 'Pending'
+    def list_objects(context, resource, **kwargs):
+        calls.append((context, resource, kwargs))
+        return reads.ReadResult(items=[{
+            'metadata': {
+                'name': 'test-pod-1'
+            },
+            'status': {
+                'phase': 'Running'
+            }
+        }, {
+            'metadata': {
+                'name': 'test-pod-2'
+            },
+            'status': {
+                'phase': 'Pending'
+            }
+        }],
+                                resource_version='7',
+                                staleness_seconds=0,
+                                reason=reads.REASON_FRESH)
 
-    mock_response = mock.MagicMock()
-    mock_response.items = [mock_pod1, mock_pod2]
-    mock_response.api_version = 'v1'
-    mock_response.kind = 'PodList'
-    mock_response.metadata = mock.MagicMock()
-
-    core_api_mock = mock.MagicMock()
-    core_api_mock.list_namespaced_pod.return_value = mock_response
-
-    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                        lambda *args, **kwargs: core_api_mock)
+    monkeypatch.setattr(instance.reads, 'list_objects', list_objects)
 
     pods = instance.list_namespaced_pod(
         context='test-context',
@@ -799,9 +805,15 @@ def test_list_namespaced_pod_success(monkeypatch):
         identity='Kubernetes cluster',
         label_selector='skypilot-cluster-name=test-cluster')
 
+    assert calls == [('test-context', reads.PODS, {
+        'namespace': 'test-namespace',
+        'label_selector': 'skypilot-cluster-name=test-cluster',
+        'consistency': reads.FRESH
+    })]
     assert len(pods) == 2
     assert pods[0].metadata.name == 'test-pod-1'
     assert pods[1].metadata.name == 'test-pod-2'
+    assert pods[1].status.phase == 'Pending'
 
 
 def test_query_instances_uses_correct_label_selector(monkeypatch):
@@ -811,17 +823,11 @@ def test_query_instances_uses_correct_label_selector(monkeypatch):
     captured_label_selector = []
 
     def mock_list_namespaced_pod(context, namespace, cluster_name_on_cloud,
-                                 is_ssh, identity, label_selector):
+                                 is_ssh, identity, label_selector, **kwargs):
         captured_label_selector.append(label_selector)
         mock_pod = mock.MagicMock()
         mock_pod.metadata.name = 'test-pod'
         mock_pod.status.phase = 'Running'
-
-        mock_response = mock.MagicMock()
-        mock_response.items = [mock_pod]
-        mock_response.api_version = 'v1'
-        mock_response.kind = 'PodList'
-        mock_response.metadata = mock.MagicMock()
         return [mock_pod]
 
     monkeypatch.setattr('sky.provision.kubernetes.instance.list_namespaced_pod',
@@ -1163,14 +1169,6 @@ class TestRbac409ConflictHandling:
     catches this, re-reads the resource, and falls through to compare/patch
     (upsert semantics).
     """
-
-    @pytest.fixture(autouse=True)
-    def mock_api_client(self, monkeypatch):
-        """Mock api_client so dict_to_k8s_object works without kubeconfig."""
-        import kubernetes as k8s_lib
-        bare_client = k8s_lib.client.ApiClient(k8s_lib.client.Configuration())
-        monkeypatch.setattr('sky.adaptors.kubernetes.api_client',
-                            lambda *args, **kwargs: bare_client)
 
     @staticmethod
     def _make_existing_role(rules):

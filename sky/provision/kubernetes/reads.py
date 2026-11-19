@@ -18,6 +18,7 @@ import dataclasses
 import json
 import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib import parse
 
@@ -25,10 +26,17 @@ import ijson
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.metrics import utils as metrics_utils
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import plugin_extensions
+
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import utils as kubernetes_utils
+else:
+    # utils imports this module.
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -264,10 +272,15 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                       reason=reason)
 
 
-@kubernetes_utils._retry_on_error()  # pylint: disable=protected-access
-def _get(*, context: Optional[str], resource_label: str, path: str,
-         query: Tuple[Tuple[str, str], ...],
-         is_list: bool) -> Optional[Tuple[List[Dict[str, Any]], str]]:
+def _get(**kwargs: Any) -> Optional[Tuple[List[Dict[str, Any]], str]]:
+    """_get_once() under the Kubernetes API retries."""
+    retry = kubernetes_utils._retry_on_error()  # pylint: disable=protected-access
+    return retry(_get_once)(**kwargs)
+
+
+def _get_once(*, context: Optional[str], resource_label: str, path: str,
+              query: Tuple[Tuple[str, str], ...],
+              is_list: bool) -> Optional[Tuple[List[Dict[str, Any]], str]]:
     """One GET of path: (items, resourceVersion), or None on 404."""
     start = time.monotonic()
     outcome = 'error'
@@ -311,11 +324,7 @@ def _object_version(items: List[Dict[str, Any]]) -> str:
 def _parse_list(response: Any) -> Tuple[List[Dict[str, Any]], str]:
     items: List[Dict[str, Any]] = []
     resource_version = ''
-    for key, value in ijson.kvitems(
-            response,
-            '',
-            use_float=True,
-            buf_size=kubernetes_utils.IJSON_BUFFER_SIZE):
+    for key, value in ijson.kvitems(response, '', use_float=True):
         if key == 'items':
             items = value or []
         elif key == 'metadata':
