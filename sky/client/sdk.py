@@ -46,7 +46,6 @@ from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import request_names
-from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import runtime_utils
@@ -60,7 +59,6 @@ from sky.utils import common_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
-from sky.utils import env_options
 from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -302,7 +300,9 @@ def enabled_clouds(workspace: Optional[str] = None,
         url = f'/enabled_clouds?expand={expand}'
     else:
         url = f'/enabled_clouds?workspace={workspace}&expand={expand}'
-    response = server_common.make_authenticated_request('GET', url)
+    response = server_common.make_authenticated_request('GET',
+                                                        url,
+                                                        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -536,7 +536,9 @@ def optimize(
 
 def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     """Gets the workspaces."""
-    response = server_common.make_authenticated_request('GET', '/workspaces')
+    response = server_common.make_authenticated_request('GET',
+                                                        '/workspaces',
+                                                        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -621,16 +623,6 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     # as a clean message rather than a raw HTTPError traceback.
     server_common.handle_request_error(response)
     return response.json()
-
-
-def _raise_exception_object_on_client(e: BaseException) -> None:
-    """Raise the exception object on the client."""
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stacktrace = getattr(e, 'stacktrace', str(e))
-        logger.error('=== Traceback on SkyPilot API Server ===\n'
-                     f'{stacktrace}')
-    with ux_utils.print_exception_no_traceback():
-        raise e
 
 
 @usage_lib.entrypoint
@@ -733,7 +725,7 @@ def validate(
     response = server_common.make_authenticated_request(
         'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
-        _raise_exception_object_on_client(
+        client_common.raise_exception_object_on_client(
             exceptions.deserialize_exception(response.json().get('detail')))
 
 
@@ -1911,7 +1903,10 @@ def cluster_job_spec(
     """
     body = payloads.ClusterJobSpecBody(cluster_name=cluster_name, job_id=job_id)
     response = server_common.make_authenticated_request(
-        'POST', '/cluster_job_spec', json=json.loads(body.model_dump_json()))
+        'POST',
+        '/cluster_job_spec',
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2441,7 +2436,8 @@ def realtime_kubernetes_gpu_availability(
     response = server_common.make_authenticated_request(
         'POST',
         '/realtime_kubernetes_gpu_availability',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2474,7 +2470,8 @@ def kubernetes_node_info(
     response = server_common.make_authenticated_request(
         'POST',
         '/kubernetes_node_info',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        sync_call=True)
     return server_common.get_request_id(response)
 
 
@@ -2513,6 +2510,7 @@ def status_kubernetes() -> server_common.RequestId[
 
 # === API request APIs ===
 @usage_lib.entrypoint
+@client_common.return_sync_call_result
 @annotations.client_api
 def get(request_id: server_common.RequestId[T]) -> T:
     """Waits for and gets the result of a request.
@@ -2540,32 +2538,12 @@ def get(request_id: server_common.RequestId[T]) -> T:
         retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
-    request_task = None
-    if response.status_code == 200:
-        request_task = requests_lib.Request.decode(
-            payloads.RequestPayload(**response.json()))
-    elif response.status_code == 500:
-        try:
-            request_task = requests_lib.Request.decode(
-                payloads.RequestPayload(**response.json().get('detail')))
-            logger.debug(f'Got request with error: {request_task.name}')
-        except Exception:  # pylint: disable=broad-except
-            request_task = None
-    if request_task is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to get request {request_id}: '
-                               f'{response.status_code} {response.text}')
-    error = request_task.get_error()
-    if error is not None:
-        error_obj = error['object']
-        _raise_exception_object_on_client(error_obj)
-    if request_task.status == requests_lib.RequestStatus.CANCELLED:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.RequestCancelled(
-                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
-                f'({request_task.request_id}) is cancelled by another process.'
-                f'{colorama.Style.RESET_ALL}')
-    return request_task.get_return_value()
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    return client_common.request_result(request_id, response.status_code, body,
+                                        lambda: response.text)
 
 
 @typing.overload
@@ -2589,6 +2567,7 @@ def stream_and_get(request_id: None = None,
 
 
 @usage_lib.entrypoint
+@client_common.return_sync_call_result
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 @rest.retry_transient_errors()

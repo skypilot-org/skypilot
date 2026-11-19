@@ -847,6 +847,25 @@ def add_or_update_user(
             if existing_user is not None:
                 return (False, user) if return_user else False
 
+        # Read first: the upsert below locks the row until COMMIT even when
+        # nothing changes, which serializes concurrent requests of one user.
+        row = session.execute(
+            sqlalchemy.select(user_table).where(
+                user_table.c.id == user.id)).fetchone()
+        if (row is not None and row.name == user.name and
+            (not user.password or row.password == user.password) and
+            (not user.user_type or row.type == user.user_type)):
+            if return_user:
+                return False, models.User(
+                    id=row.id,
+                    name=row.name,
+                    password=row.password,
+                    created_at=row.created_at,
+                    user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
+                )
+            return False
+
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
             # vs existing
@@ -1447,6 +1466,13 @@ def add_cluster_event(cluster_name: str,
         return
     if transitioned_at is None:
         transitioned_at = int(time.time())
+    if nop_if_duplicate:
+        last_event = get_last_cluster_event(cluster_hash, event_type=event_type)
+        if duplicate_regex is not None and last_event is not None:
+            if re.search(duplicate_regex, last_event):
+                return
+        elif last_event == reason:
+            return
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
@@ -1457,17 +1483,8 @@ def add_cluster_event(cluster_name: str,
             session.rollback()
             raise ValueError('Unsupported database dialect')
 
-        cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
-        last_status = cluster_row.first(
-        ).status if cluster_row and cluster_row.first() is not None else None
-        if nop_if_duplicate:
-            last_event = get_last_cluster_event(cluster_hash,
-                                                event_type=event_type)
-            if duplicate_regex is not None and last_event is not None:
-                if re.search(duplicate_regex, last_event):
-                    return
-            elif last_event == reason:
-                return
+        last_status = session.query(
+            cluster_table.c.status).filter_by(name=cluster_name).scalar()
         try:
             request_id = common_utils.get_current_request_id()
             session.execute(
@@ -2070,13 +2087,18 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
     provision_log_path = get_cluster_provision_log_path(cluster_name)
 
     with orm.Session(engine) as session:
-        # usage_intervals is not None and not empty
-        if usage_intervals:
+        # Close the running interval. A closed one ended when the cluster
+        # stopped; a stopped cluster does not accrue usage until it starts.
+        if usage_intervals and usage_intervals[-1][1] is None:
             assert cluster_hash is not None, cluster_name
             start_time = usage_intervals.pop()[0]
             end_time = int(time.time())
             usage_intervals.append((start_time, end_time))
             _set_cluster_usage_intervals(cluster_hash, usage_intervals)
+        elif terminate and cluster_hash is not None:
+            # Keeps a stopped cluster that was just torn down in history views
+            # filtered by recent activity.
+            _set_cluster_last_activity_time(cluster_hash, int(time.time()))
 
         if provision_log_path:
             assert cluster_hash is not None, cluster_name
@@ -2542,6 +2564,17 @@ def _set_cluster_usage_intervals(
     assert count <= 1, count
     if count == 0:
         raise ValueError(f'Cluster hash {cluster_hash} not found.')
+
+
+def _set_cluster_last_activity_time(cluster_hash: str,
+                                    last_activity_time: int) -> None:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.query(cluster_history_table).filter_by(
+            cluster_hash=cluster_hash).update({
+                cluster_history_table.c.last_activity_time: last_activity_time,
+            })
+        session.commit()
 
 
 @metrics_lib.time_me

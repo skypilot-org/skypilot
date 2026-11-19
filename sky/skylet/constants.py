@@ -56,6 +56,9 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
 SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.56.1'
+# The Ray of clusters created before each cluster's Ray version was recorded
+# (backend_utils._ray_version_for_cluster).
+SKY_LEGACY_RAY_VERSION = '2.9.3'
 
 # To avoid user image causing issue with the SkyPilot runtime, we run SkyPilot
 # commands the following prefix:
@@ -393,22 +396,22 @@ SKY_USER_ENV_CREATION_COMMANDS = (
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
+# Succeeds when the runtime env already has Ray at {ray_version}. Also used by
+# the Kubernetes pod template, which must decide this before installing Ray.
+SKY_RAY_INSTALLED_CHECK_CMD = (f'{SKY_UV_PIP_CMD} list | grep "ray " | '
+                               'grep {ray_version} 2>&1 > /dev/null')
 RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{SETUP_SKY_DIRS_COMMANDS}'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
-    # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
-    # causing the error:
-    #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
-    f'{SKY_UV_PIP_CMD} install "setuptools<70"; '
-    # Always pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy
-    # issues with Sentinel values. We force this even when ray is already
-    # installed (e.g. baked into the SkyPilot AMI), since the ray-version
-    # idempotency guard below would otherwise skip the install and leave
-    # click at whatever the AMI shipped.
-    # See: https://github.com/ray-project/ray/issues/56747
-    f'{SKY_UV_PIP_CMD} install "click<8.3.0"; '
+    # The legacy Ray breaks on click>=8.3 (ray-project/ray#56747) and on
+    # setuptools>=70 (its dashboard agent imports pkg_resources and the node
+    # never joins), including when an image bakes it. Newer Ray needs neither.
+    f'[ "{{ray_version}}" != "{SKY_LEGACY_RAY_VERSION}" ] || '
+    f'{SKY_UV_PIP_CMD} install "setuptools<70" "click<8.3.0" || '
+    'echo "WARNING - could not install setuptools<70 and click<8.3.0 for '
+    'Ray {ray_version}."; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -422,17 +425,14 @@ RAY_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
-    f'{SKY_UV_PIP_CMD} list | grep "ray " | '
-    'grep {ray_version} 2>&1 > /dev/null '
+    f'{SKY_RAY_INSTALLED_CHECK_CMD} '
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
-    # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
-    # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
     # No -U: uv's -U upgrades the whole dependency tree, so on an image baked
     # with another ray it also bumps unrelated packages (cryptography,
     # urllib3, ...) that other Python environments on the image rely on.
-    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0" '  # pylint: disable=line-too-long
+    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" '  # pylint: disable=line-too-long
     # Fail loudly: carrying on would leave the node on another Ray, with the
     # patches skipped. The usual cause is a runtime env older than the Python
     # this Ray supports (Ray 2.52+ needs 3.10+), on a cluster set up before
@@ -481,6 +481,8 @@ COPY_SKYPILOT_TEMPLATES_COMMANDS = (
     f'find {SKY_TEMPLATES_DIRECTORY} -type f ! -name "*.py" ! -name "*.md" '
     '-exec chmod +x {} + ; ')
 
+_SKY_WHEEL_SPEC = (f'"$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
+                   f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]"')
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
@@ -496,9 +498,11 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     'if [ "{cloud}" = "azure" ]; then '
     f'{SKY_UV_PIP_CMD} install --prerelease=allow "{dependencies.AZURE_CLI}";'
     'fi;'
-    # Install skypilot from wheel
-    f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
-    f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
+    # Install skypilot from wheel. Offline first: for a local wheel, uv
+    # queries the index even when every dependency is already installed, so a
+    # pod without internet access would fail here although it needs nothing.
+    f'{{ {SKY_UV_PIP_CMD} install --offline {_SKY_WHEEL_SPEC} > /dev/null 2>&1 '
+    f'|| {SKY_UV_PIP_CMD} install {_SKY_WHEEL_SPEC}; }} && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; ')
 
@@ -870,6 +874,12 @@ ENV_VAR_SERVER_EXEC_AUTH_CACHE = (
 # process that shares the requests table runs a version that reads them.
 ENV_VAR_SERVER_STORE_LARGE_RESULTS = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}STORE_LARGE_RESULTS')
+
+# Server-side only: number of processes per API server that run heavy requests
+# (sky.server.requests.heavy_requests); unset or 0 runs them as short requests.
+# Set it only once every API server process that shares the requests table runs
+# a version that knows the heavy schedule type.
+ENV_VAR_SERVER_HEAVY_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}HEAVY_WORKERS'
 
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
