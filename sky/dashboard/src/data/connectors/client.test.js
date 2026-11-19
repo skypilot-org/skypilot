@@ -65,3 +65,23 @@ describe('apiClient.fetch', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('getCurrentUserInfo', () => {
+  test('keeps the role, which the volumes page gates delete on', async () => {
+    global.fetch.mockReset();
+    global.fetch.mockResolvedValue(
+      jsonResponse({ id: 'user-1', name: 'alice', role: 'user' })
+    );
+    // A fresh module, so the cache holds this response.
+    let client;
+    jest.isolateModules(() => {
+      client = require('@/data/connectors/client');
+    });
+
+    await expect(client.getCurrentUserInfo()).resolves.toEqual({
+      id: 'user-1',
+      name: 'alice',
+      role: 'user',
+    });
+  });
+});
