@@ -806,6 +806,7 @@ class RequestWorker:
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
+                warm_start=env_options.Options.EAGER_EXECUTOR_WORKERS.get(),
                 initializer=executor_initializer,
                 initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors

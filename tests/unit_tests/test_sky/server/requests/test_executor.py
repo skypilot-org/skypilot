@@ -3440,3 +3440,40 @@ async def test_caller_usage_of_an_inline_request(in_process_env,
                           kind='sync') == 1
     assert _caller_sample(
         metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL) == 0
+
+
+@pytest.mark.parametrize('env_value,expected', [(None, False), ('1', True),
+                                                ('true', True), ('0', False)])
+def test_request_worker_passes_eager_workers_flag(monkeypatch, env_value,
+                                                  expected):
+    """SKYPILOT_EAGER_EXECUTOR_WORKERS turns on warm start for the pool."""
+    if env_value is None:
+        monkeypatch.delenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', raising=False)
+    else:
+        monkeypatch.setenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', env_value)
+    captured = {}
+
+    class FakeExecutor:
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(executor.process, 'BurstableExecutor', FakeExecutor)
+    monkeypatch.setattr(executor, '_get_queue',
+                        lambda schedule_type: mock.Mock())
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        config=server_config.WorkerConfig(garanteed_parallelism=2,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+    worker._cancel_event.set()
+    # Run off the main thread so run() leaves signal handlers and the
+    # process title alone.
+    thread = threading.Thread(target=worker.run)
+    thread.start()
+    thread.join(timeout=30)
+    assert not thread.is_alive()
+    assert captured['warm_start'] is expected

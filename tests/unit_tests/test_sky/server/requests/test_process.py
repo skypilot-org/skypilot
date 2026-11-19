@@ -227,3 +227,133 @@ def test_disposable_executor_fails_a_killed_worker():
         assert executor.submit(none_task).result(timeout=30) is None
     finally:
         executor.shutdown()
+
+
+def get_pid():
+    """Returns the pid of the worker that ran the task."""
+    return os.getpid()
+
+
+def slow_init(log_path, seconds):
+    """Initializer that sleeps and records its start and end time."""
+    start = time.time()
+    time.sleep(seconds)
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(f'{os.getpid()} {start} {time.time()}\n')
+
+
+def _wait_until(predicate, timeout=30.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_pool_executor_lazy_by_default():
+    """Without warm start, no worker starts until a task is submitted."""
+    executor = PoolExecutor(max_workers=3)
+    try:
+        time.sleep(0.5)
+        assert len(executor._processes) == 0
+        assert executor.wait_for_warm_start(timeout=0)
+    finally:
+        executor.shutdown()
+
+
+def test_pool_executor_warm_start_starts_all_workers():
+    """Warm start brings up every worker before any task is submitted."""
+    executor = PoolExecutor(max_workers=4, warm_start=True)
+    try:
+        assert executor.wait_for_warm_start(timeout=60)
+        pids = set(executor._processes)
+        assert len(pids) == 4
+        assert all(p.is_alive() for p in executor._processes.values())
+        assert _wait_until(lambda: executor.starting_workers() == 0)
+        # Tasks run on the pre-started workers; no extra worker is spawned.
+        futures = [executor.submit(get_pid) for _ in range(8)]
+        assert {f.result(timeout=30) for f in futures} <= pids
+        assert set(executor._processes) == pids
+    finally:
+        executor.shutdown()
+
+
+def test_pool_executor_warm_start_runs_initializer(tmp_path):
+    """The pool's own initializer still runs once in every worker."""
+    log_path = str(tmp_path / 'init.log')
+    executor = PoolExecutor(max_workers=3,
+                            warm_start=True,
+                            initializer=slow_init,
+                            initargs=(log_path, 0.05))
+    try:
+        assert executor.wait_for_warm_start(timeout=60)
+        assert _wait_until(lambda: executor.starting_workers() == 0)
+        with open(log_path, encoding='utf-8') as f:
+            init_pids = {int(line.split()[0]) for line in f}
+        assert init_pids == set(executor._processes)
+    finally:
+        executor.shutdown()
+
+
+def test_pool_executor_warm_start_limits_concurrent_startup(tmp_path):
+    """At most _WARM_START_CONCURRENCY workers start at the same time."""
+    from sky.server.requests import (
+        process)  # pylint: disable=import-outside-toplevel
+    log_path = str(tmp_path / 'init.log')
+    executor = PoolExecutor(max_workers=5,
+                            warm_start=True,
+                            initializer=slow_init,
+                            initargs=(log_path, 0.4))
+    try:
+        assert executor.wait_for_warm_start(timeout=60)
+        assert _wait_until(lambda: executor.starting_workers() == 0)
+        with open(log_path, encoding='utf-8') as f:
+            windows = [tuple(map(float, line.split()[1:])) for line in f]
+        assert len(windows) == 5
+        events = sorted([(start, 1) for start, _ in windows] +
+                        [(end, -1) for _, end in windows])
+        overlap = peak = 0
+        for _, delta in events:
+            overlap += delta
+            peak = max(peak, overlap)
+        assert peak <= process._WARM_START_CONCURRENCY
+    finally:
+        executor.shutdown()
+
+
+def test_pool_executor_warm_start_stops_on_shutdown(tmp_path):
+    """Shutting down during warm start stops it without errors."""
+    log_path = str(tmp_path / 'init.log')
+    executor = PoolExecutor(max_workers=6,
+                            warm_start=True,
+                            initializer=slow_init,
+                            initargs=(log_path, 0.5))
+    executor.shutdown()
+    assert executor.wait_for_warm_start(timeout=10)
+    assert len(executor._processes or {}) < 6
+
+
+def test_pool_executor_warm_start_rejects_fork():
+    """Warm start refuses a fork context."""
+    import multiprocessing  # pylint: disable=import-outside-toplevel
+    if 'fork' not in multiprocessing.get_all_start_methods():
+        pytest.skip('fork is not available on this platform')
+    with pytest.raises(ValueError):
+        PoolExecutor(max_workers=1,
+                     warm_start=True,
+                     mp_context=multiprocessing.get_context('fork'))
+
+
+def test_burstable_executor_warm_start_applies_to_guaranteed_pool():
+    """Warm start reaches the guaranteed pool, including a rebuilt one."""
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 burst_workers=1,
+                                 warm_start=True)
+    try:
+        assert executor._executor is not None
+        assert executor._executor.wait_for_warm_start(timeout=60)
+        assert len(executor._executor._processes) == 2
+        assert executor._guaranteed_pool_kwargs['warm_start'] is True
+    finally:
+        executor.shutdown()
