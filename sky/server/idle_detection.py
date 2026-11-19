@@ -126,30 +126,34 @@ _SOURCES: Dict[str, Callable[..., Optional[str]]] = {
 
 def _notify(config: Dict[str, Any], record: Dict[str, Any], reason: str,
             idle_since: int) -> None:
-    # The webhook URL is a credential, and requests quotes the URL in the
-    # message of every error it raises.
-    try:
-        response = requests.post(config['notify']['webhook'],
-                                 json={
-                                     'event': 'idle_warning',
-                                     'cluster': record['name'],
-                                     'user': record['user_name'],
-                                     'workspace': record['workspace'],
-                                     'reason': reason,
-                                     'action': 'notify',
-                                     'idle_since': idle_since,
-                                     'deadline': None,
-                                 },
-                                 timeout=_WEBHOOK_TIMEOUT_SECONDS)
-    except requests.RequestException as e:
-        raise RuntimeError(
-            f'the webhook request failed ({type(e).__name__})') from None
-    if not response.ok:
-        raise RuntimeError(f'the webhook answered HTTP {response.status_code}')
+    response = requests.post(config['notify']['webhook'],
+                             json={
+                                 'event': 'idle_warning',
+                                 'cluster': record['name'],
+                                 'user': record['user_name'],
+                                 'workspace': record['workspace'],
+                                 'reason': reason,
+                                 'action': 'notify',
+                                 'idle_since': idle_since,
+                                 'deadline': None,
+                             },
+                             timeout=_WEBHOOK_TIMEOUT_SECONDS)
+    response.raise_for_status()
     global_user_state.add_cluster_event(
         record['name'], status_lib.ClusterStatus.UP,
         f'Idle for the last {config["window"]} ({reason}). Owner notified.',
         global_user_state.ClusterEventType.STATUS_CHANGE)
+
+
+def _describe(error: Exception) -> str:
+    # requests quotes the URL, or a header value, in the message of every
+    # error it raises; the webhook URL is a credential and a source URL or
+    # its headers may carry one.
+    if isinstance(error, requests.HTTPError) and error.response is not None:
+        return f'HTTP {error.response.status_code}'
+    if isinstance(error, requests.RequestException):
+        return type(error).__name__
+    return common_utils.format_exception(error)
 
 
 def _save_state(record: Dict[str, Any], state: Optional[Dict[str,
@@ -212,7 +216,7 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
             counts['errors'] += 1
             logger.warning(
                 f'Could not tell whether cluster {record["name"]!r} is idle; '
-                f'treating it as active: {common_utils.format_exception(e)}')
+                f'treating it as active: {_describe(e)}')
         # The source may have taken longer to answer than leadership lasts.
         if not leading():
             return
@@ -246,7 +250,7 @@ def _check_cluster(record: Dict[str, Any], config: Dict[str, Any],
                     logger.warning(
                         f'Could not notify the owner of idle cluster '
                         f'{record["name"]!r}; will retry on the next pass: '
-                        f'{common_utils.format_exception(e)}')
+                        f'{_describe(e)}')
     if state != previous:
         _save_state(record, state)
 

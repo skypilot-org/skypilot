@@ -885,6 +885,39 @@ def test_idle_event_is_not_read_as_a_stop_or_an_abnormal_state(world):
     assert not reason.startswith(global_user_state.PROVISION_FAILED_PREFIX)
 
 
+def _refused_query():
+    response = _vector(0, status_code=503)
+    response.url = 'https://user:hunter2@metrics.example.com/api/v1/query'
+    return response
+
+
+@pytest.mark.parametrize('config', [_prometheus_config, _http_config])
+@pytest.mark.parametrize('failure, logged', [
+    (_refused_query, 'HTTP 503'),
+    (lambda: requests.ConnectionError(
+        "HTTPSConnectionPool(host='metrics.example.com', port=443): Max "
+        'retries exceeded with url: /api/v1/query?token=hunter2'),
+     'ConnectionError'),
+    (lambda: requests.exceptions.InvalidHeader(
+        "Invalid header value: 'Bearer hunter2'"), 'InvalidHeader'),
+])
+def test_failed_source_is_logged_without_its_url(monkeypatch, config, failure,
+                                                 logged):
+    """A source URL may carry credentials; requests quotes it in errors."""
+    world = _World(monkeypatch, config())
+    world.add_cluster()
+    world.run_until(_WINDOW - _INTERVAL)
+    world.source_response = failure()
+
+    _, warning = _run_and_capture_summary(world, monkeypatch, _WINDOW)
+
+    message = warning.call_args_list[0].args[0]
+    assert 'Could not tell whether' in message
+    assert logged in message
+    assert 'example.com' not in message
+    assert 'hunter2' not in message
+
+
 def test_pass_summary_warns_about_source_errors(world, monkeypatch):
     """A broken source makes every cluster look active; the log says so."""
     world.add_cluster('train')
