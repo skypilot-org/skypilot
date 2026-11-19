@@ -175,6 +175,41 @@ class TestClusters:
         assert 'multiple workspaces accessible' in result.output
         down.assert_not_called()
 
+    @pytest.fixture
+    def stopped(self, clusters, monkeypatch):
+        del clusters
+        monkeypatch.setattr(f'{__name__}._CLUSTERS', [{
+            **r, 'status': status_lib.ClusterStatus.STOPPED
+        } for r in _CLUSTERS])
+        start = mock.MagicMock(return_value='req')
+        monkeypatch.setattr('sky.client.sdk.start', start)
+        return start
+
+    def test_start_all_stays_in_the_workspace(self, stopped):
+        result = cli_testing.CliRunner().invoke(command.start, ['-a'],
+                                                input='\n')
+        assert not result.exception, result.output
+        assert '[Y/n]' in result.output
+        assert _names(stopped) == ['own']
+
+    def test_start_glob_stays_in_the_workspace_exact_name_does_not(
+            self, stopped):
+        result = cli_testing.CliRunner().invoke(command.start, ['own*', 'bobs'],
+                                                input='\n')
+        assert 'Aborted' in result.output, result.output
+        assert 'other users (1): bob: bobs' in result.output
+        assert '[y/N]' in result.output
+        stopped.assert_not_called()
+        result = cli_testing.CliRunner().invoke(command.start,
+                                                ['own*', 'bobs', '-y'])
+        assert not result.exception, result.output
+        assert _names(stopped) == ['bobs', 'own']
+        stopped.reset_mock()
+        result = cli_testing.CliRunner().invoke(command.start,
+                                                ['own-b', 'bob*', '-y'])
+        assert not result.exception, result.output
+        assert _names(stopped) == ['bobs', 'own-b']
+
     def test_cancel_all_users_defaults_to_no(self, monkeypatch):
         monkeypatch.setattr(
             'sky.client.cli.command._get_cluster_records_and_set_ssh_config',
