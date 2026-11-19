@@ -610,6 +610,7 @@ export function ManagedJobs() {
 
       {/* Pools table - always visible */}
       <div className="mb-4">
+        <h3 className="text-base leading-none mb-3">Pools</h3>
         <PoolsTable
           refreshInterval={REFRESH_INTERVAL}
           setLoading={setLoading}
@@ -3627,9 +3628,6 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
 
   return (
     <Card>
-      <div className="flex items-center justify-between p-4">
-        <h3 className="text-lg font-semibold">Pools</h3>
-      </div>
       <div className="overflow-x-auto rounded-lg">
         <Table className="min-w-full table-fixed">
           <TableHeader>
