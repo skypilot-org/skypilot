@@ -205,7 +205,7 @@ def _step1_harness(pkg_mgr: str, present: str, install_ok: bool,
     # Ends after the core-failure `fi`: cut inside it, bash fails to parse
     # the script and every case exits non-zero.
     body = _extract(
-        'PACKAGES="rsync curl',
+        'PACKAGES="rsync',
         '{% if k8s_enable_docker_all or k8s_enable_docker_build %}')
     stub = textwrap.dedent(f"""
         # Presence stub must come AFTER the template's own pkg_present
@@ -279,7 +279,7 @@ def test_step1_publishes_core_marker_before_optional_packages():
     launch behind gcc/pciutils/fuse3 and defeat the INSTALL_FIRST split.
     """
     body = _extract(
-        'PACKAGES="rsync curl',
+        'PACKAGES="rsync',
         'Error: core package installation failed across all sources')
     first_publish = body.index('touch "$CORE_PKGS_READY"')
     optional_install = body.index('MISSING_PACKAGES')
@@ -356,6 +356,13 @@ def _write_exe(path: str, body: str) -> None:
     os.chmod(path, 0o755)
 
 
+def _template_packages() -> str:
+    line = next(l.strip()
+                for l in _template_lines()
+                if l.strip().startswith('PACKAGES="'))
+    return line[len('PACKAGES="'):line.index('"', len('PACKAGES="'))]
+
+
 def _classify(present: str, uv_runs: bool, **render_vars) -> str:
     """Runs the real core/optional split; prints INSTALL_FIRST|MISSING."""
     body = _extract('# curl is core only when this setup downloads with it',
@@ -368,7 +375,7 @@ def _classify(present: str, uv_runs: bool, **render_vars) -> str:
             _write_exe(os.path.join(tmp, '.local', 'bin', 'uv'), 'exit 0\n')
         script = textwrap.dedent(f"""
             HOME={tmp}
-            PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server"
+            PACKAGES="{_template_packages()}"
             pkg_present() {{ case "$1" in {present}) return 0;; *) return 1;; esac; }}
             """) + body + '\necho "$INSTALL_FIRST|$MISSING_PACKAGES"\n'
         result = _run(script, errexit=True)
@@ -382,6 +389,14 @@ def test_wget_is_never_core():
     first, missing = _classify('curl|rsync', uv_runs=False).split('|')
     assert 'wget' not in first.split()
     assert 'wget' in missing.split()
+
+
+@pytest.mark.parametrize('uv_runs', [True, False])
+def test_patch_is_the_first_optional_package(uv_runs):
+    """STEP 2 waits up to 60s for `patch` before patching Ray, so it must not
+    queue behind gcc and the other optional packages."""
+    _, missing = _classify('nothing', uv_runs=uv_runs).split('|')
+    assert missing.split()[0] == 'patch'
 
 
 def test_curl_is_optional_when_uv_already_runs():

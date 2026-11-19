@@ -1067,7 +1067,9 @@ available_node_types:
                 # for hf-mount, rclone, blobfuse2, etc.). On Ubuntu 22.04+
                 # `fuse3 Breaks: fuse` (both ship /usr/bin/fusermount), so the
                 # two packages cannot coexist. FUSE is handled out-of-band below.
-                PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server";
+                # Missing optional packages install in this order; patch goes
+                # first because STEP 2 waits for it before patching Ray.
+                PACKAGES="rsync patch curl wget netcat gcc pciutils openssh-server";
 
                 # --- Portable package-manager support (CC-328 / TICKET-039) ---
                 # This bootstrap historically assumed apt/dpkg (Debian/Ubuntu).
