@@ -6307,8 +6307,6 @@ def _select_gpu_resource_key(capacity_keys: Set[str]) -> str:
 
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
-    if context is None:
-        context = get_current_kube_config_context_name()
     try:
         return get_gpu_resource_key_from_nodes(
             _get_unfiltered_kubernetes_nodes(context=context,

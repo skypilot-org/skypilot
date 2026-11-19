@@ -44,12 +44,14 @@ def _node(name: str, gpus: str = '') -> Dict[str, Any]:
 def _pod(name: str = _HEAD,
          phase: str = 'Running',
          ready: bool = True,
-         deleting: bool = False) -> Dict[str, Any]:
+         deleting: bool = False,
+         component: Optional[str] = None) -> Dict[str, Any]:
     metadata = {
         'name': name,
         'namespace': 'default',
         'labels': {
-            provision_constants.TAG_SKYPILOT_CLUSTER_NAME: 'c'
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME: 'c',
+            'component': component or name,
         },
         'creationTimestamp': '2026-11-19T00:00:00Z',
     }
@@ -166,6 +168,12 @@ def test_gpu_resource_key_comes_from_node_capacity(serve):
     assert utils.get_gpu_resource_key(_CONTEXT) == 'nvidia.com/gpu'
 
 
+def test_gpu_resource_key_without_a_context_reads_the_default_target(serve):
+    fake = serve([_node('gpu', gpus='8')])
+    utils.get_gpu_resource_key()
+    assert fake.call_args.args == (None, reads.NODES)
+
+
 def test_allocated_resources_read_pods_holding_resources(serve):
     pod = _pod()
     pod['spec'] = {
@@ -236,6 +244,15 @@ def test_a_healthy_cluster_is_read_from_a_cache(monkeypatch, serve):
     assert call.kwargs['label_selector'] == (
         f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}=c')
     assert call.kwargs['attempts'] == 1
+
+
+def test_a_healthy_deployment_pod_is_read_from_a_cache(monkeypatch, serve):
+    pod = _pod(name='c-deployment-7d9f8-x2x4k', component=_HEAD)
+    fake = serve(pods=[[pod]])
+    assert _query_instances(monkeypatch) == {
+        'c-deployment-7d9f8-x2x4k': (status_lib.ClusterStatus.UP, None)
+    }
+    assert _consistencies(fake) == [reads.CACHED]
 
 
 @pytest.mark.parametrize('cached', [

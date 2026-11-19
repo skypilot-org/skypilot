@@ -5380,7 +5380,11 @@ def _all_pods_up(pods: List[Any], target_pod_names: Set[str]) -> bool:
     """Whether every expected pod is present, Running and healthy."""
     if not pods:
         return False
-    if not target_pod_names <= {pod.metadata.name for pod in pods}:
+    # Services select pods by component label; a Deployment's pod has a
+    # generated name.
+    present = ({pod.metadata.name for pod in pods} |
+               {(pod.metadata.labels or {}).get('component') for pod in pods})
+    if not target_pod_names <= present:
         return False
     return all(pod.status.phase == 'Running' and pod.metadata.deletion_timestamp
                is None and _get_pod_health_issues(pod) is None for pod in pods)
