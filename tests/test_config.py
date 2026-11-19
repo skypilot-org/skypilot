@@ -3039,7 +3039,8 @@ def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
     }, None),
     ('kubernetes', {
         'allowed_queues': ['q']
-    }, None),
+    }, "Workspace 'team-a' has allowed queues \\['q'\\] but no default queue"),
+    ('kubernetes', {}, None),
     ('kubernetes', {
         'queue': 'q',
         'allowed_queues': ['other']

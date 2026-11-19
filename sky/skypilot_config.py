@@ -1681,9 +1681,14 @@ def check_queue_allowed(workspace: str,
     """Checks that `queue` is one of the workspace's allowed queues."""
     allowed = ((workspace_config.get(cloud) or {}).get('quota') or
                {}).get('allowed_queues')
-    if allowed is None or queue is None or queue in allowed:
+    if allowed is None or queue in allowed or (queue is None and
+                                               not is_default):
         return
     name = workspace_config.get('name') or workspace
+    if is_default and queue is None:
+        raise ValueError(
+            f'Workspace {name!r} has allowed queues {allowed} but no default '
+            'queue. Set a default queue from the allowed queues.')
     if is_default:
         raise ValueError(
             f'Default queue {queue!r} of workspace {name!r} is not in its '
