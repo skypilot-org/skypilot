@@ -646,6 +646,7 @@ Delete volumes.
 - `NAMES` — text
 - `--all`, `-a` — Delete all volumes.
 - `--purge`, `-p` — Forcibly delete the volume from the volumes table even if the deletion API fails.
+- `--no-cleanup` — Keep the files of k8s-hostpath volumes registered with cleanup_on_deletion.
 - `--yes`, `-y` — Skip confirmation prompt.
 - `--async`, `--no-async` — Run the command asynchronously.
 

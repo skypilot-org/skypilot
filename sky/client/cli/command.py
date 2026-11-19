@@ -366,7 +366,16 @@ def _drop_unwritable_volumes(listed: List[responses.VolumeRecord],
     if skipped:
         click.echo(f'Skipping {len(skipped)} volume(s) in workspaces you '
                    f'cannot modify: {", ".join(skipped)}')
-    return [name for name in names if name not in skipped]
+    names = [name for name in names if name not in skipped]
+    hostpath = sorted(
+        volume['name'] for volume in listed if volume['name'] in names and
+        volume.get('type') == volume_utils.VolumeType.HOSTPATH.value)
+    if hostpath and server_common.make_authenticated_request(
+            'GET', '/users/role').json().get('role') != 'admin':
+        click.echo(f'Skipping {len(hostpath)} k8s-hostpath volume(s) only an '
+                   f'admin can delete: {", ".join(hostpath)}')
+        names = [name for name in names if name not in hostpath]
+    return names
 
 
 def _async_call_or_wait(request_id: server_common.RequestId[T],
@@ -5821,6 +5830,12 @@ def volumes_ls(names: List[str],
               required=False,
               help=('Forcibly delete the volume from the volumes table even '
                     'if the deletion API fails.'))
+@click.option('--no-cleanup',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Keep the files of k8s-hostpath volumes registered with '
+                    'cleanup_on_deletion.'))
 @click.option('--yes',
               '-y',
               default=False,
@@ -5833,6 +5848,7 @@ def volumes_delete(
         names: List[str],
         all: bool,  # pylint: disable=redefined-builtin
         purge: bool,
+        no_cleanup: bool,
         yes: bool,
         async_call: bool):
     """Delete volumes.
@@ -5852,6 +5868,9 @@ def volumes_delete(
         \b
         # Forcibly delete a volume.
         sky volumes delete pvc1 -p
+        \b
+        # Delete a k8s-hostpath volume but keep its files on the nodes.
+        sky volumes delete hostpath1 --no-cleanup
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
@@ -5881,16 +5900,30 @@ def volumes_delete(
         if not yes:
             volume_names = ', '.join(names)
             volume_str = 'volumes' if len(names) > 1 else 'volume'
-            click.confirm(
-                f'Deleting {len(names)} {volume_str}: '
-                f'{volume_names}. Proceed?',
-                default=True,
-                abort=True,
-                show_default=True)
+            # A k8s-hostpath volume with cleanup wipes its host path on every
+            # node: say where, and default to no.
+            wiped = [] if no_cleanup else [
+                f'  {volume["name"]}: {volume["config"].get("host_path")} on '
+                f'every node of {volume.get("region")}'
+                for volume in all_volumes
+                if volume['name'] in names and
+                volume.get('type') == volume_utils.VolumeType.HOSTPATH.value and
+                volume['config'].get('cleanup_on_deletion')
+            ]
+            prompt = f'Deleting {len(names)} {volume_str}: {volume_names}.'
+            if wiped:
+                prompt += ('\nThis also deletes everything under:\n' +
+                           '\n'.join(wiped) +
+                           '\n(use --no-cleanup to keep the files)')
+            click.confirm(f'{prompt}\nProceed?',
+                          default=not wiped,
+                          abort=True,
+                          show_default=True)
 
         try:
-            _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
-                                async_call, 'sky.volumes.delete')
+            _async_call_or_wait(
+                volumes_sdk.delete(names, purge=purge, no_cleanup=no_cleanup),
+                async_call, 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')

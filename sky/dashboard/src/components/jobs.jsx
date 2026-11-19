@@ -610,6 +610,7 @@ export function ManagedJobs() {
 
       {/* Pools table - always visible */}
       <div className="mb-4">
+        <h3 className="text-base leading-none mb-3">Pools</h3>
         <PoolsTable
           refreshInterval={REFRESH_INTERVAL}
           setLoading={setLoading}
