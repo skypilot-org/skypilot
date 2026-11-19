@@ -29,6 +29,12 @@ jest.mock('@/hooks/useWorkspacesConfig', () => {
     }),
   };
 });
+// The caller's role, for the admin-only delete of a k8s-hostpath volume.
+const mockRole = { role: 'admin' };
+jest.mock('@/data/connectors/users', () => ({
+  __esModule: true,
+  getUserRole: jest.fn(() => Promise.resolve(mockRole)),
+}));
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
@@ -44,6 +50,7 @@ import {
 } from '@testing-library/react';
 import dashboardCache from '@/lib/cache';
 import { useTableColumns } from '@/plugins/PluginProvider';
+import { getUserRole } from '@/data/connectors/users';
 import { VolumesTable } from '@/components/volumes';
 
 // A CSI provisioner's refusal, long enough that the cell must truncate it.
@@ -461,5 +468,36 @@ describe('VolumesTable workspace column', () => {
     expect(deleteButton('vol-a').disabled).toBe(false);
     expect(deleteButton('vol-b').disabled).toBe(true);
     expect(deleteButton('vol-b').closest('span').title).toMatch(/Read-only/);
+  });
+});
+
+describe('VolumesTable delete of a k8s-hostpath volume', () => {
+  afterEach(() => {
+    mockRole.role = 'admin';
+  });
+
+  const deleteButton = (container, name) =>
+    Array.from(container.querySelectorAll('table tbody tr'))
+      .find((row) => row.textContent.includes(name))
+      .querySelector('button[title="Delete volume"]');
+
+  it.each([
+    ['user', 'vol-hp', true],
+    ['user', 'vol-pvc', false],
+    ['admin', 'vol-hp', false],
+  ])('for a %s, %s disabled: %s', async (role, name, disabled) => {
+    mockRole.role = role;
+    const { container } = await renderTable([
+      { ...volume('vol-hp'), type: 'k8s-hostpath' },
+      volume('vol-pvc'),
+    ]);
+    // Let the role land, so an enabled button is not just a role not yet known.
+    await waitFor(() => expect(getUserRole).toHaveBeenCalled());
+    await act(async () => {});
+
+    expect(deleteButton(container, name).disabled).toBe(disabled);
+    expect(deleteButton(container, name).closest('span').title).toBe(
+      disabled ? 'Only an admin can delete k8s-hostpath volumes' : ''
+    );
   });
 });

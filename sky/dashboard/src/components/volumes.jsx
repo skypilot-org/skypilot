@@ -25,6 +25,7 @@ import {
   persistPageSize,
 } from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
+import { getUserRole } from '@/data/connectors/users';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
@@ -196,7 +197,9 @@ export function Volumes() {
     try {
       const result = await deleteVolume(volumeToDelete.name, { noCleanup });
       if (!result.success) {
-        throw new Error(result.msg);
+        throw Object.assign(new Error(result.msg), {
+          forbidden: result.forbidden,
+        });
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
@@ -222,7 +225,9 @@ export function Volumes() {
         noCleanup,
       });
       if (!result.success) {
-        throw new Error(result.msg);
+        throw Object.assign(new Error(result.msg), {
+          forbidden: result.forbidden,
+        });
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
@@ -410,7 +415,7 @@ export function Volumes() {
                       checked={cleanupHostPath}
                       onChange={(e) => setCleanupHostPath(e.target.checked)}
                       disabled={deleteLoading}
-                      className="cursor-pointer mt-0.5"
+                      className="h-4 w-4 cursor-pointer mt-0.5 flex-shrink-0"
                     />
                     <span>
                       Also delete everything under{' '}
@@ -475,13 +480,13 @@ export function Volumes() {
                         </>
                       )}
                     </p>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-start gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={purgeConfirmed}
                         onChange={(e) => setPurgeConfirmed(e.target.checked)}
                         disabled={purgeLoading}
-                        className="cursor-pointer"
+                        className="h-4 w-4 cursor-pointer mt-0.5 flex-shrink-0"
                       />
                       <span>
                         I understand force removal may not delete the underlying
@@ -513,7 +518,8 @@ export function Volumes() {
                           ? 'Retry Delete'
                           : 'Delete'}
                     </Button>
-                    {deleteError && (
+                    {/* Force removal is refused just the same. */}
+                    {deleteError && !deleteError.forbidden && (
                       <Button
                         variant="outline"
                         onClick={() => setShowPurgeUI(true)}
@@ -570,6 +576,20 @@ export function VolumesTable({
   // volumes from.
   const { isWorkspaceWritable, workspacesConfig, loaded } =
     useWorkspacesConfig();
+  // Only an admin may delete a k8s-hostpath volume. Unknown (null) leaves
+  // delete enabled; the server still enforces it.
+  const [isAdmin, setIsAdmin] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getUserRole()
+      .then((data) => {
+        if (!cancelled) setIsAdmin(data?.role === 'admin');
+      })
+      .catch((err) => console.error('Failed to fetch user role:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Rows carry the workspace name, which filters and sorting go by; older
   // servers send only the id.
   const rows = useMemo(
@@ -970,6 +990,7 @@ export function VolumesTable({
         const writable = isWorkspaceWritable(volume.workspace);
         // Until the workspaces load, delete is disabled without a reason.
         const readOnly = loaded && !writable;
+        const adminOnly = volume.type === 'k8s-hostpath' && isAdmin === false;
         return (
           <TableCell>
             {/* Also on a wrapper: a disabled button shows no tooltip. */}
@@ -977,14 +998,16 @@ export function VolumesTable({
               title={
                 readOnly
                   ? 'Read-only: you are not a member of this volume’s workspace'
-                  : undefined
+                  : adminOnly
+                    ? 'Only an admin can delete k8s-hostpath volumes'
+                    : undefined
               }
             >
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => onDeleteVolume(volume)}
-                disabled={!writable}
+                disabled={!writable || adminOnly}
                 className="text-red-fg hover:text-red-fg-strong hover:bg-red-tint"
                 title="Delete volume"
                 aria-label="Delete volume"
