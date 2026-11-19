@@ -443,9 +443,10 @@ def _confirm_bulk(operation: str,
                   noun: str,
                   records: List[Any],
                   workspace_id: Optional[str],
-                  name_key: str = 'name') -> None:
+                  name_key: str = 'name',
+                  warning: str = '') -> None:
     """Asks before a bulk operation. Other users' targets are listed by owner
-    and make the default answer no."""
+    and make the default answer no; so does a warning."""
     user = sdk.api_info().user
     me = user.id if user is not None else common_utils.get_user_hash()
     own = [str(r[name_key]) for r in records if r.get('user_hash') == me]
@@ -456,8 +457,10 @@ def _confirm_bulk(operation: str,
             others[owner].append(str(r[name_key]))
     head = f'{operation} {len(records)} {noun}{"s" if len(records) > 1 else ""}'
     if not others:
-        click.confirm(f'{head}: {", ".join(own)}. Proceed?',
-                      default=True,
+        prompt = f'{head}: {", ".join(own)}.'
+        click.confirm(f'{prompt}\n{warning}\nProceed?'
+                      if warning else f'{prompt} Proceed?',
+                      default=not warning,
                       abort=True,
                       show_default=True)
         return
@@ -474,6 +477,8 @@ def _confirm_bulk(operation: str,
         lines.append(f'  yours ({len(own)}): {", ".join(own)}')
     lines.append(f'  other users ({num_others}): ' + '; '.join(
         f'{owner}: {", ".join(names)}' for owner, names in others.items()))
+    if warning:
+        lines.append(warning)
     lines.append(f'{num_others} of them belong to other users. Proceed?')
     click.confirm('\n'.join(lines),
                   default=False,
@@ -6080,35 +6085,37 @@ def volumes_delete(
                     _get_glob_matches([v['name'] for v in bulk_volumes],
                                       patterns,
                                       resource_type='Volume'))))
-    if names:
-        if not yes and is_bulk:
+    if names and not yes:
+        # A k8s-hostpath volume with cleanup wipes its host path on every
+        # node: say where, and default to no.
+        wiped = [] if no_cleanup else [
+            f'  {volume["name"]}: {volume["config"].get("host_path")} on '
+            f'every node of {volume.get("region")}'
+            for volume in all_volumes
+            if volume['name'] in names and
+            volume.get('type') == volume_utils.VolumeType.HOSTPATH.value and
+            volume['config'].get('cleanup_on_deletion')
+        ]
+        warning = ('This also deletes everything under:\n' + '\n'.join(wiped) +
+                   '\n(use --no-cleanup to keep the files)') if wiped else ''
+        if is_bulk:
             records_by_name = {v['name']: v for v in all_volumes}
-            _confirm_bulk('Deleting', 'volume',
-                          [records_by_name[name] for name in names],
-                          target_workspace)
-        elif not yes:
+            _confirm_bulk('Deleting',
+                          'volume', [records_by_name[name] for name in names],
+                          target_workspace,
+                          warning=warning)
+        else:
             volume_names = ', '.join(names)
             volume_str = 'volumes' if len(names) > 1 else 'volume'
-            # A k8s-hostpath volume with cleanup wipes its host path on every
-            # node: say where, and default to no.
-            wiped = [] if no_cleanup else [
-                f'  {volume["name"]}: {volume["config"].get("host_path")} on '
-                f'every node of {volume.get("region")}'
-                for volume in all_volumes
-                if volume['name'] in names and
-                volume.get('type') == volume_utils.VolumeType.HOSTPATH.value and
-                volume['config'].get('cleanup_on_deletion')
-            ]
             prompt = f'Deleting {len(names)} {volume_str}: {volume_names}.'
-            if wiped:
-                prompt += ('\nThis also deletes everything under:\n' +
-                           '\n'.join(wiped) +
-                           '\n(use --no-cleanup to keep the files)')
+            if warning:
+                prompt += f'\n{warning}'
             click.confirm(f'{prompt}\nProceed?',
-                          default=not wiped,
+                          default=not warning,
                           abort=True,
                           show_default=True)
 
+    if names:
         try:
             _async_call_or_wait(
                 volumes_sdk.delete(names, purge=purge, no_cleanup=no_cleanup),

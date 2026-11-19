@@ -254,6 +254,36 @@ class TestStorageAndVolumes:
         assert not result.exception, result.output
         assert sorted(delete.call_args.args[0]) == ['bobs', 'own']
 
+    @pytest.mark.parametrize('owner', ['alice', 'bob'])
+    @pytest.mark.parametrize('selector', [['-a'], ['h*']])
+    def test_volumes_delete_bulk_warns_before_wiping_a_host_path(
+            self, monkeypatch, owner, selector):
+        volumes = [
+            _record('hp',
+                    owner,
+                    type='k8s-hostpath',
+                    region='ctx1',
+                    config={
+                        'host_path': '/mnt/data',
+                        'cleanup_on_deletion': True
+                    })
+        ]
+        monkeypatch.setattr('sky.volumes.client.sdk.ls', mock.MagicMock())
+        monkeypatch.setattr('sky.client.sdk.workspaces', mock.MagicMock())
+        monkeypatch.setattr('sky.client.sdk.get',
+                            mock.MagicMock(side_effect=[volumes, {}]))
+        monkeypatch.setattr(
+            'sky.server.common.make_authenticated_request',
+            lambda *a, **kw: mock.MagicMock(json=lambda: {'role': 'admin'}))
+        delete = mock.MagicMock(return_value='req')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', delete)
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                selector,
+                                                input='\n')
+        assert '/mnt/data on every node of ctx1' in result.output, result.output
+        assert '[y/N]' in result.output, result.output
+        delete.assert_not_called()
+
 
 class TestManagedJobs:
 
