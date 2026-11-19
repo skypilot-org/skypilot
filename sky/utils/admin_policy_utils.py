@@ -204,9 +204,6 @@ def _check_requested_queues(
     """Checks that each task's queue is allowed in its workspace."""
     tasks = ([entrypoint]
              if isinstance(entrypoint, task_lib.Task) else entrypoint.tasks)
-    workspace = skypilot_config.get_active_workspace()
-    workspace_config = skypilot_config.get_nested(
-        ('workspaces', workspace), default_value=None) or {}
     for task in tasks:
         for resources in task.resources:
             job_config = resources.cluster_config_overrides or {}
@@ -214,9 +211,7 @@ def _check_requested_queues(
                 queue = ((job_config.get(cloud) or {}).get('quota') or
                          {}).get('queue')
                 try:
-                    skypilot_config.check_queue_allowed(workspace,
-                                                        workspace_config, cloud,
-                                                        queue)
+                    skypilot_config.check_active_workspace_queue(cloud, queue)
                 except ValueError as e:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.PermissionDeniedError(

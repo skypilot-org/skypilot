@@ -1693,6 +1693,14 @@ def check_queue_allowed(workspace: str,
                      f'Allowed queues: {allowed}')
 
 
+def check_active_workspace_queue(cloud: str, queue: Optional[str]) -> None:
+    """Checks that `queue` is allowed in the active workspace."""
+    workspace = get_active_workspace()
+    workspace_config = get_nested(
+        ('workspaces', workspace), default_value=None) or {}
+    check_queue_allowed(workspace, workspace_config, cloud, queue)
+
+
 def get_effective_slurm_account(
         cluster: Optional[str] = None,
         partition: Optional[str] = None,
