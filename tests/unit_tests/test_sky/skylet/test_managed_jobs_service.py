@@ -408,6 +408,23 @@ class TestGetJobTable:
         member_row = next(j for j in response.jobs if j.job_id == member)
         assert member_row.root_job_id == root
 
+    def test_get_job_table_after_job_id(self):
+        """The cursor returns the page after a job, and the response says the
+        field was honoured."""
+        context_mock = mock.Mock()
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                limit=2,
+                after_job_id=self.job_ids['job_id3']), context_mock)
+        context_mock.abort.assert_not_called()
+        assert sorted(j.job_id for j in response.jobs) == [
+            self.job_ids['job_id1'], self.job_ids['job_id2']
+        ]
+        assert response.total == 4
+        assert response.after_job_id_applied is True
+
     def test_get_job_table_no_accessible_workspaces(self):
         """Test basic GetJobTable functionality without specified accessible
          workspaces - should return all jobs."""

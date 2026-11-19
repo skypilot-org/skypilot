@@ -271,13 +271,15 @@ class TestQueue:
                                sort_order,
                                submitted_after=None,
                                submitted_before=None,
-                               include_tree=False):
+                               include_tree=False,
+                               after_job_id=None):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
                 'accessible_workspaces': accessible_workspaces,
                 'job_ids': job_ids,
                 'include_tree': include_tree,
+                'after_job_id': after_job_id,
                 'workspace_match': workspace_match,
                 'name_match': name_match,
                 'pool_match': pool_match,
@@ -812,6 +814,148 @@ class TestQueue:
         # Visibility is not a filter: all_users=False is allowed.
         jobs_core.queue_v2(refresh=False, job_ids=[1], include_tree=True)
 
+    def test_queue_cursor_reaches_the_controller(self, monkeypatch):
+        jobs = [_make_job(1), _make_job(2)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        captured = {}
+        fake = jobs_core.managed_job_utils.ManagedJobCodeGen.get_job_table
+
+        def capturing(**kwargs):
+            captured.update(kwargs)
+            return fake(**kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_utils.ManagedJobCodeGen,
+                            'get_job_table', capturing)
+        jobs_core.queue_v2(refresh=False, all_users=True, limit=5)
+        assert captured['after_job_id'] is None
+        jobs_core.queue_v2(refresh=False,
+                           all_users=True,
+                           limit=5,
+                           after_job_id=2)
+        assert captured['after_job_id'] == 2
+        assert captured['page'] == 1 and captured['limit'] == 5
+
+    def test_queue_refuses_a_cursor_it_cannot_apply(self, monkeypatch):
+        self._patch_backend_and_utils(monkeypatch, [_make_job(1)])
+        with pytest.raises(ValueError, match='requires limit'):
+            jobs_core.queue_v2(refresh=False, all_users=True, after_job_id=2)
+        with pytest.raises(ValueError, match='cannot be combined with page'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               page=2,
+                               limit=5,
+                               after_job_id=2)
+        with pytest.raises(ValueError, match='requires sorting by job id'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               limit=5,
+                               sort_by='name',
+                               after_job_id=2)
+
+    def test_queue_surfaces_a_controller_that_refuses_the_cursor(
+            self, monkeypatch):
+        self._patch_backend_and_utils(monkeypatch, [_make_job(1)])
+        marker = jobs_core.managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MARKER
+
+        class RefusingBackend:
+
+            def run_on_head(self,
+                            handle,
+                            code,
+                            require_outputs,
+                            stream_logs,
+                            separate_stderr=False):
+                return 1, '', f'RuntimeError: {marker}: too old to page\n'
+
+        monkeypatch.setattr(jobs_core.backend_utils, 'get_backend_from_handle',
+                            lambda handle: RefusingBackend())
+        monkeypatch.setattr(jobs_core.backends, 'CloudVmRayBackend',
+                            RefusingBackend)
+        with pytest.raises(exceptions.NotSupportedError,
+                           match='too old to page'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               limit=5,
+                               after_job_id=2)
+
+    def test_queue_refuses_a_cursor_the_grpc_controller_ignored(
+            self, monkeypatch):
+        self._patch_backend_and_utils(monkeypatch, [_make_job(1)])
+
+        class GrpcHandle:
+            is_grpc_enabled_with_flag = True
+
+            def get_grpc_channel(self):
+                return None
+
+        monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                            lambda *args, **kwargs: GrpcHandle())
+        response = jobs_core.managed_jobsv1_pb2.GetJobTableResponse(
+            total=0, total_no_filter=0)
+        monkeypatch.setattr(jobs_core.backend_utils,
+                            'invoke_skylet_with_retries', lambda fn: response)
+        with pytest.raises(exceptions.NotSupportedError):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               limit=5,
+                               after_job_id=2)
+        response.after_job_id_applied = True
+        jobs, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                                  all_users=True,
+                                                  limit=5,
+                                                  after_job_id=2)
+        assert jobs == [] and total == 0
+
+    def test_queue_spares_a_runner_that_predates_the_cursor(self, monkeypatch):
+        # Only a request with a cursor is refused.
+        jobs = [_make_job(1), _make_job(2)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        default = jobs_core._DefaultManagedJobRunner()  # pylint: disable=protected-access
+        seen = {}
+
+        class OldRunner:
+
+            def fetch_managed_job_table(self, *, handle, backend, skip_finished,
+                                        accessible_workspaces, job_ids,
+                                        include_tree, workspace_match,
+                                        name_match, pool_match, infra_match,
+                                        page, limit, user_hashes, statuses,
+                                        fields, sort_by, sort_order,
+                                        submitted_after, submitted_before):
+                seen['limit'] = limit
+                return default.fetch_managed_job_table(
+                    handle=handle,
+                    backend=backend,
+                    skip_finished=skip_finished,
+                    accessible_workspaces=accessible_workspaces,
+                    job_ids=job_ids,
+                    include_tree=include_tree,
+                    workspace_match=workspace_match,
+                    name_match=name_match,
+                    pool_match=pool_match,
+                    infra_match=infra_match,
+                    page=page,
+                    limit=limit,
+                    user_hashes=user_hashes,
+                    statuses=statuses,
+                    fields=fields,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                    submitted_after=submitted_after,
+                    submitted_before=submitted_before)
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: OldRunner())
+        _, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                               all_users=True,
+                                               limit=5)
+        assert seen['limit'] == 5 and total == 2
+        with pytest.raises(exceptions.NotSupportedError):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               limit=5,
+                               after_job_id=2)
+
 
 class TestGetManagedJobQueueIncludeTree:
     """`get_managed_job_queue` turns `include_tree` into resolved tree roots
@@ -881,6 +1025,20 @@ class TestGetManagedJobQueueIncludeTree:
             jobs_utils.get_managed_job_queue(job_ids=[5],
                                              include_tree=True,
                                              skip_finished=True)
+
+
+class TestGetManagedJobQueueCursor:
+
+    def test_passes_the_cursor_on_the_first_page(self, monkeypatch):
+        seen = TestGetManagedJobQueueIncludeTree()._patch(monkeypatch, roots=[])
+        jobs_utils.get_managed_job_queue(limit=5, after_job_id=9)
+        assert seen['jobs']['after_job_id'] == 9
+        assert seen['jobs']['page'] == 1 and seen['jobs']['limit'] == 5
+
+    def test_refuses_a_cursor_without_limit(self, monkeypatch):
+        TestGetManagedJobQueueIncludeTree()._patch(monkeypatch, roots=[])
+        with pytest.raises(ValueError, match='requires limit'):
+            jobs_utils.get_managed_job_queue(after_job_id=9)
 
 
 def test_queue_v2_body_carries_include_tree():
