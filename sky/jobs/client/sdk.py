@@ -511,9 +511,11 @@ def _send_queue_v2(
 def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
     """The page size to fetch the queue in, or None to fetch it in one call.
 
-    Pages follow the default order, newest top-level job first.
+    Pages follow the default order, newest top-level job first. A refresh is
+    not answered as a sync call, so it is not paged.
     """
-    if (body.include_tree or body.sort_by not in (None, 'job_id', 'id') or
+    if (body.refresh or body.include_tree or
+            body.sort_by not in (None, 'job_id', 'id') or
             body.sort_order == 'asc'):
         return None
     return client_common.sync_page_size(
@@ -539,7 +541,9 @@ def _queue_in_pages(
                 'after_job_id': after_job_id
             }))
 
-    def read_page(value: Any) -> Optional[Tuple[List[Any], int, Any]]:
+    def read_page(
+            value: Any, after_job_id: Optional[int]
+    ) -> Optional[Tuple[List[Any], int, Any]]:
         if not isinstance(value, dict) or 'jobs' not in value:
             return None
         jobs = value['jobs']
@@ -548,6 +552,8 @@ def _queue_in_pages(
             if job.get('root_job_id') is None else job['root_job_id']
             for job in jobs
         }
+        if (after_job_id is not None and roots and max(roots) >= after_job_id):
+            return None
         return jobs, len(roots), min(roots) if roots else None
 
     return client_common.fetch_in_pages(send,

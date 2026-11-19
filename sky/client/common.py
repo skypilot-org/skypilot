@@ -578,24 +578,27 @@ def sync_page_size(limit: Optional[int], min_api_version: int) -> Optional[int]:
 def fetch_in_pages(
     send: Callable[[Any, int], server_common.RequestId],
     page_size: int,
-    read_page: Callable[[Any], Optional[Tuple[List[Any], int, Any]]],
+    read_page: Callable[[Any, Any], Optional[Tuple[List[Any], int, Any]]],
     merge: Callable[[Any, List[Any]], Any],
     limit: Optional[int] = None,
 ) -> Optional[server_common.RequestId]:
     """Fetches a list as sync calls of up to page_size items each.
 
     send(cursor, size) sends one page; the first cursor is None.
-    read_page(value) returns a page's rows, how many items they count as
-    against the page size and `limit`, and the cursor of the next page; or
-    None when it cannot read the value. merge(last_value, rows) builds the
-    result from the last page's value and the rows of every page.
+    read_page(value, cursor) returns the rows of the page sent with `cursor`,
+    how many items they count as against the page size and `limit`, and the
+    cursor of the next page. It returns None when it cannot read the value,
+    or when a row does not come after `cursor`: something on the way dropped
+    the cursor and sent an earlier page again. merge(last_value, rows) builds
+    the result from the last page's value and the rows of every page.
 
     The list ends at the first empty page or when `limit` items are fetched.
 
     Returns a request id that carries the combined result, or the request id
     of a page that failed. Returns None when a page is not answered in its
-    response, cannot be read, is refused with NotSupportedError, or does not
-    move the cursor; the caller then fetches the list in one call.
+    response, read_page returns None, or the server refuses the cursor with
+    QueueCursorNotSupportedError; the caller then fetches the list in one
+    call.
     """
     rows: List[Any] = []
     fetched = 0
@@ -609,12 +612,11 @@ def fetch_in_pages(
             return None
         status_code, payload = request_id.sync_response
         if status_code != 200:
-            return None if _is_not_supported(payload) else request_id
+            return None if _is_cursor_refused(payload) else request_id
         value = json.loads(payload['return_value'])
-        page = read_page(value)
+        page = read_page(value, cursor)
         if page is None:
             return None
-        previous_cursor = cursor
         page_rows, count, cursor = page
         rows.extend(page_rows)
         fetched += count
@@ -622,8 +624,6 @@ def fetch_in_pages(
         # applying its limit, e.g. records that fail validation.
         if count == 0 or (limit is not None and fetched >= limit):
             break
-        if cursor == previous_cursor:
-            return None
     request_id.sync_response = (200, {
         **payload, 'return_value': json.dumps(merge(value, rows))
     })
@@ -632,26 +632,32 @@ def fetch_in_pages(
 
 def fetch_list_in_pages(
     send: Callable[[Any, int], server_common.RequestId], page_size: int,
-    cursor_of: Callable[[Dict[str, Any]], Any]
+    cursor_of: Callable[[Dict[str, Any]],
+                        Any], follows: Callable[[Dict[str, Any], Any], bool]
 ) -> Optional[server_common.RequestId]:
     """fetch_in_pages for a request that returns a list of rows.
 
-    cursor_of(row) is the cursor after that row.
+    cursor_of(row) is the cursor after that row; follows(row, cursor) is
+    whether the row comes after that cursor.
     """
 
-    def read_page(value: Any) -> Optional[Tuple[List[Any], int, Any]]:
+    def read_page(value: Any,
+                  cursor: Any) -> Optional[Tuple[List[Any], int, Any]]:
         if not isinstance(value, list):
+            return None
+        if cursor is not None and not all(
+                follows(row, cursor) for row in value):
             return None
         return value, len(value), cursor_of(value[-1]) if value else None
 
     return fetch_in_pages(send, page_size, read_page, lambda _, rows: rows)
 
 
-def _is_not_supported(error_body: Any) -> bool:
-    """Whether a sync call failed with NotSupportedError."""
+def _is_cursor_refused(error_body: Any) -> bool:
+    """Whether a sync call failed with QueueCursorNotSupportedError."""
     try:
         error = json.loads(error_body['detail']['error'])
-        return error['type'] == exceptions.NotSupportedError.__name__
+        return error['type'] == exceptions.QueueCursorNotSupportedError.__name__
     except (KeyError, TypeError, ValueError):
         return False
 

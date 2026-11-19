@@ -2121,9 +2121,16 @@ def status(
                         'after_name': name
                     }))
 
+        def cursor_of(row: Dict[str, Any]) -> Tuple[int, str]:
+            return row.get('launched_at') or 0, row['name']
+
+        def follows(row: Dict[str, Any], after: Tuple[int, str]) -> bool:
+            # Newest launch first, then by name.
+            launched_at, name = cursor_of(row)
+            return (-launched_at, name) > (-after[0], after[1])
+
         paged_request_id = client_common.fetch_list_in_pages(
-            send, page_size, lambda row:
-            (row.get('launched_at') or 0, row['name']))
+            send, page_size, cursor_of, follows)
         if paged_request_id is not None:
             return paged_request_id
     return _send_status(body)
@@ -2260,7 +2267,8 @@ def storage_ls() -> server_common.RequestId[List[responses.StorageRecord]]:
             return server_common.get_request_id(response)
 
         paged_request_id = client_common.fetch_list_in_pages(
-            send, page_size, lambda row: row['name'])
+            send, page_size, lambda row: row['name'],
+            lambda row, after_name: row['name'] > after_name)
         if paged_request_id is not None:
             return paged_request_id
     response = server_common.make_authenticated_request('GET', '/storage/ls')

@@ -595,7 +595,7 @@ class TestJobsLaunch:
     _ACCESS = 'sky.workspaces.core.get_workspace_access_sets'
     _ACTIVE = 'sky.data.storage.skypilot_config.get_active_workspace'
     _NEXT_STEP = ('sky.jobs.server.core.clouds.Kubernetes.'
-                  'check_request_keeps_server_none')
+                  'check_request_keeps_server_identity')
 
     @staticmethod
     def _launch(storage_name=None, source=None, persistent=False):
@@ -836,9 +836,9 @@ class TestServeStorage:
              mock.patch('sky.serve.server.impl.serve_utils.'
                         'validate_service_task'), \
              mock.patch('sky.serve.server.impl.clouds.Kubernetes.'
-                        'check_request_keeps_server_none'), \
+                        'check_request_keeps_server_identity'), \
              mock.patch('sky.serve.server.impl.clouds.Kubernetes.'
-                        'check_task_keeps_server_none'), \
+                        'check_task_keeps_server_identity'), \
              mock.patch('sky.serve.server.impl.controller_utils.'
                         'get_controller_for_pool'), \
              mock.patch('sky.serve.server.impl.backend_utils.'

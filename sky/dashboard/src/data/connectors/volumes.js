@@ -63,20 +63,33 @@ export async function getVolumes() {
   }
 }
 
-export async function deleteVolume(volumeName, { purge = false } = {}) {
+export async function deleteVolume(
+  volumeName,
+  { purge = false, noCleanup = false } = {}
+) {
   let msg = '';
   try {
     const response = await apiClient.post('/volumes/delete', {
       names: [volumeName],
       purge,
+      no_cleanup: noCleanup,
     });
     if (!response.ok) {
       console.error(
         `Initial API request to delete volume failed with status ${response.status}`
       );
+      // A refusal (e.g. 403) says why in `detail`.
+      const detail = await response
+        .json()
+        .then((body) => body?.detail)
+        .catch(() => null);
       return {
         success: false,
-        msg: `Failed to delete volume with status ${response.status}`,
+        forbidden: response.status === 403,
+        msg:
+          typeof detail === 'string'
+            ? `Failed to delete volume: ${detail}`
+            : `Failed to delete volume with status ${response.status}`,
       };
     }
     const id = response.headers.get('X-SkyPilot-Request-ID');

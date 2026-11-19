@@ -62,6 +62,8 @@ class _Server:
         self.bodies: List[dict] = []
         # Request ids of the calls answered with this error, if any.
         self.errors: Dict[int, Exception] = {}
+        # Whether the server drops the cursor and answers the first page.
+        self.ignores_cursor = False
 
     def __call__(self, method, path, json=None, timeout=None, sync_call=False):
         del timeout  # Unused.
@@ -76,7 +78,7 @@ class _Server:
             body = _request(request_id, error=self.errors[call])
             return _sync_response(500, {'detail': body})
         roots = sorted(self.trees, reverse=True)
-        if json['after_job_id'] is not None:
+        if json['after_job_id'] is not None and not self.ignores_cursor:
             roots = [root for root in roots if root < json['after_job_id']]
         jobs = []
         for root in roots[:limit]:
@@ -121,7 +123,7 @@ def _queue_v2(server, api_version=_CURSOR_VERSION, **kwargs):
          mock.patch.object(jobs_sdk.server_common,
                            'make_authenticated_request',
                            side_effect=server):
-        return raw_queue_v2(refresh=False, **kwargs)
+        return raw_queue_v2(**{'refresh': False, **kwargs})
 
 
 def _job_ids(request_id):
@@ -191,10 +193,33 @@ class TestPaging:
 
     def test_refused_cursor_falls_back_to_one_call(self):
         server = _Server(_TREES)
-        server.errors[2] = jobs_sdk.exceptions.NotSupportedError('too old')
+        server.errors[2] = (
+            jobs_sdk.exceptions.QueueCursorNotSupportedError('too old'))
         request_id = _queue_v2(server)
         assert [b['limit'] for b in server.bodies] == [2, 2, None]
         assert request_id == 'req-3'
+
+    def test_another_not_supported_error_raises_from_get(self):
+        server = _Server(_TREES)
+        server.errors[2] = jobs_sdk.exceptions.NotSupportedError('no infra')
+        request_id = _queue_v2(server)
+        assert len(server.bodies) == 2
+        with pytest.raises(jobs_sdk.exceptions.NotSupportedError,
+                           match='no infra'):
+            sdk.get(request_id)
+
+    def test_an_ignored_cursor_falls_back_to_one_call(self):
+        server = _Server(_TREES)
+        server.ignores_cursor = True
+        request_id = _queue_v2(server)
+        assert [b['limit'] for b in server.bodies] == [2, 2, None]
+        assert request_id == 'req-3'
+
+    def test_one_call_with_refresh(self):
+        server = _Server(_TREES)
+        request_id = _queue_v2(server, refresh=True)
+        assert [b['limit'] for b in server.bodies] == [None]
+        assert request_id == 'req-1'
 
     def test_failed_page_raises_from_get(self):
         server = _Server(_TREES)

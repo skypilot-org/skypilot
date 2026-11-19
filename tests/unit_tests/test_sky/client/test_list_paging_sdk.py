@@ -57,6 +57,8 @@ class _Server:
         # Rows dropped from a page after its limit, as a server drops
         # records that fail validation.
         self.dropped: List[str] = []
+        # Whether the server drops the cursor and answers the first page.
+        self.ignores_cursor = False
 
     def __call__(self, method, path, **kwargs):
         args = kwargs.get('json') or kwargs.get('params') or {}
@@ -65,7 +67,10 @@ class _Server:
         limit = args.get('limit')
         if limit is None or int(limit) > 2:
             return _response({'X-Skypilot-Request-ID': request_id})
-        rows = [row for row in self.rows if self.after(row, args)]
+        rows = [
+            row for row in self.rows
+            if self.ignores_cursor or self.after(row, args)
+        ]
         page = [
             row for row in rows[:int(limit)] if row['name'] not in self.dropped
         ]
@@ -200,6 +205,18 @@ class TestStorageLs:
             'after_name': 'n-c'
         }]
         assert _rows(request_id) == ['n-a', 'n-b', 'n-c']
+
+    def test_an_ignored_cursor_falls_back_to_one_call(self):
+        server = _by_name_server()
+        server.ignores_cursor = True
+        request_id = _call(sdk.storage_ls, server)
+        assert [c.get('params') for c in server.calls] == [{
+            'limit': 2
+        }, {
+            'limit': 2,
+            'after_name': 'n-b'
+        }, None]
+        assert request_id == 'req-3'
 
     def test_queued_page_falls_back_to_one_call(self, monkeypatch):
         monkeypatch.setattr(rest, '_sync_call_max_limit', 3)
