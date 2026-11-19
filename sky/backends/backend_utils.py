@@ -502,6 +502,19 @@ def path_size_megabytes(path: str) -> int:
 class FileMountHelper(object):
     """Helper for handling file mounts."""
 
+    @staticmethod
+    def quote_shell_path(path: str) -> str:
+        """Quotes a file-mount path while preserving remote home expansion."""
+        if path == '~':
+            return '~'
+        if path.startswith('~/'):
+            return '~/' + shlex.quote(path[2:])
+        if path == '$HOME':
+            return '"$HOME"'
+        if path.startswith('$HOME/'):
+            return '"$HOME"/' + shlex.quote(path[len('$HOME/'):])
+        return shlex.quote(path)
+
     @classmethod
     def wrap_file_mount(cls, path: str) -> str:
         """Prepends ~/<opaque dir>/ to a path to work around permission issues.
@@ -558,16 +571,23 @@ class FileMountHelper(object):
         sudo = f'{sudo_cmd} ' if sudo_cmd else ''
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $(whoami).
-        dir_of_symlink = os.path.dirname(source)
+        dir_of_symlink = shlex.quote(os.path.dirname(source))
+        source = shlex.quote(source)
+        # Keep remote home expansion for wrapped file-mount paths.
+        for prefix in ('~/', '$HOME/'):
+            if target.startswith(prefix):
+                target = ('~/' if prefix == '~/' else '"$HOME"/') + shlex.quote(
+                    target[len(prefix):])
+                break
+        else:
+            target = cls.quote_shell_path(target)
         commands = [
-            # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
-            # chown $(whoami) on it so user can use these intermediate dirs
-            # (excluding /).
             f'{sudo}mkdir -p {dir_of_symlink}',
-            # p: path so far
-            ('(p=""; '
-             f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             f'p=${{p}}/${{w}}; {sudo}chown $(whoami) $p; done)')
+            # Walk ancestors without splitting path components on whitespace.
+            (f'(p={dir_of_symlink}; while [ "$p" ]; do '
+             'while [ "${p%/}" != "$p" ]; do p=${p%/}; done; '
+             '[ "$p" ] || break; '
+             f'{sudo}chown $(whoami) "$p" || exit; p=${{p%/*}}; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
@@ -576,7 +596,7 @@ class FileMountHelper(object):
             # Error out if source is an existing, non-symlink directory/file.
             f'((test -L {source} && {sudo}rm {source} >/dev/null 2>&1) || '
             f'(test ! -e {source} || '
-            f'(echo "!!! Failed mounting because path exists ({source})"; '
+            f'(echo "!!! Failed mounting because path exists ("{source}")"; '
             'exit 1)))',
         ]
         commands += [

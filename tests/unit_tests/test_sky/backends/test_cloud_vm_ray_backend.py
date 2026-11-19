@@ -1,7 +1,9 @@
 """Unit tests for CloudVmRayBackend task configuration redaction and locking."""
 
 import multiprocessing
+import os
 import socket
+import subprocess
 import time
 import types
 from unittest.mock import MagicMock
@@ -30,6 +32,50 @@ def test_command_length_local_shell_limit():
     command = "a'b" * 5000
     assert not backend_utils.is_command_length_over_limit(command)
     assert backend_utils.is_command_length_over_limit(command, quote_levels=4)
+
+
+@pytest.mark.parametrize(
+    'destination',
+    ['/home/user/remote dir/mounted dir', '~/remote dir/mounted dir'])
+def test_execute_file_mounts_quotes_remote_destination_for_mkdir(
+        tmp_path, monkeypatch, destination):
+    source = tmp_path / 'source dir'
+    source.mkdir()
+    home = tmp_path / 'remote home'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+
+    backend = cloud_vm_ray_backend.CloudVmRayBackend.__new__(
+        cloud_vm_ray_backend.CloudVmRayBackend)
+    backend.log_dir = str(tmp_path / 'logs')
+    handle = MagicMock()
+    handle.launched_resources.cloud = clouds.Kubernetes()
+    handle.get_command_runners.return_value = [MagicMock()]
+    transfer_calls = []
+    monkeypatch.setattr(backend_utils, 'path_size_megabytes', lambda _: 0)
+    monkeypatch.setattr(cloud_vm_ray_backend.backend_utils,
+                        'parallel_data_transfer_to_nodes',
+                        lambda *args, **kwargs: transfer_calls.append(kwargs))
+    monkeypatch.setattr(cloud_vm_ray_backend.subprocess_utils,
+                        'get_max_workers_for_file_mounts', lambda *args: 1)
+    monkeypatch.setattr(cloud_vm_ray_backend.rich_utils, 'force_update_status',
+                        lambda _: None)
+    monkeypatch.setattr(cloud_vm_ray_backend.subprocess_utils,
+                        'run_in_parallel', lambda *args, **kwargs: None)
+
+    backend._execute_file_mounts(handle, {destination: str(source)})
+
+    command = transfer_calls[0]['cmd']
+    result = subprocess.run(['bash', '-c', command],
+                            cwd=tmp_path,
+                            env=dict(os.environ, HOME=str(home)),
+                            capture_output=True,
+                            text=True)
+    expected = home / (destination[2:] if destination.startswith('~/') else
+                       '.sky/file_mounts/home/user/remote dir/mounted dir')
+    assert result.returncode == 0, result.stderr
+    assert expected.is_dir()
+    assert not (tmp_path / 'dir').exists()
 
 
 def test_non_slurm_cpu_demand_uses_ray_default():

@@ -6871,9 +6871,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 if os.path.isfile(full_src):
                     mkdir_for_wrapped_dst = (
-                        f'mkdir -p {os.path.dirname(wrapped_dst)}')
+                        'mkdir -p ' +
+                        backend_utils.FileMountHelper.quote_shell_path(
+                            os.path.dirname(wrapped_dst)))
                 else:
-                    mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+                    mkdir_for_wrapped_dst = ('mkdir -p ' +
+                                             backend_utils.FileMountHelper.
+                                             quote_shell_path(wrapped_dst))
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
                 backend_utils.parallel_data_transfer_to_nodes(
@@ -6894,13 +6898,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 sync_cmd = (storage.make_sync_dir_command(
                     source=src, destination=wrapped_dst))
                 # It is a directory so make sure it exists.
-                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+                mkdir_for_wrapped_dst = (
+                    'mkdir -p ' +
+                    backend_utils.FileMountHelper.quote_shell_path(wrapped_dst))
             else:
                 sync_cmd = (storage.make_sync_file_command(
                     source=src, destination=wrapped_dst))
                 # It is a file so make sure *its parent dir* exists.
                 mkdir_for_wrapped_dst = (
-                    f'mkdir -p {os.path.dirname(wrapped_dst)}')
+                    'mkdir -p ' +
+                    backend_utils.FileMountHelper.quote_shell_path(
+                        os.path.dirname(wrapped_dst)))
 
             download_target_commands = [
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
