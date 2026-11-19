@@ -487,10 +487,15 @@ ingress:
   tls:
     enabled: false
 
+# ingress-nginx is retired upstream and its nginx no longer gets security fixes.
+# Traefik (below) serves the chart's Ingresses by default. Set
+# `ingress-nginx.enabled: true` and `traefik.enabled: false` to keep ingress-nginx.
 ingress-nginx:
-  enabled: true
+  enabled: false
   controller:
     allowSnippetAnnotations: true
+    # Also configures the LoadBalancer Service in front of Traefik, which keeps
+    # this Service's name so existing installs keep their external address.
     service:
       type: LoadBalancer
       # Default annotations for the ingress controller service. We want an L4 loadbalancer by default for maximum compatibility,
@@ -521,6 +526,52 @@ ingress-nginx:
             default upgrade;
             ''      close;
         }
+
+# Traefik serves the chart's Ingresses through its ingress-nginx provider, which
+# reads the nginx.ingress.kubernetes.io annotations the chart sets. Fields here
+# map to the Traefik chart: https://github.com/traefik/traefik-helm-chart
+traefik:
+  enabled: true
+  deployment:
+    replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  # Namespaced RBAC limits Traefik to the release namespace, including Secrets.
+  # The chart adds a ClusterRole for reading IngressClasses.
+  rbac:
+    namespaced: true
+  providers:
+    kubernetesCRD:
+      enabled: false
+    kubernetesIngress:
+      enabled: false
+    kubernetesIngressNGINX:
+      enabled: true
+  # The chart renders the IngressClass and the LoadBalancer Service.
+  ingressClass:
+    enabled: false
+  service:
+    enabled: false
+  gateway:
+    enabled: false
+  ports:
+    web:
+      http:
+        aliasHeadersStrategy: delete
+      transport:
+        respondingTimeouts:
+          # The default (60s) bounds the whole request, which cuts off slow uploads.
+          readTimeout: 3600s
+    websecure:
+      http:
+        aliasHeadersStrategy: delete
+      transport:
+        respondingTimeouts:
+          readTimeout: 3600s
+  global:
+    checkNewVersion: false
+    sendAnonymousUsage: false
 
 # RBAC controls the in-cluster permissions for the SkyPilot API server.
 rbac:

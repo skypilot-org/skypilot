@@ -1,0 +1,104 @@
+{{- $ingressNginx := index .Values "ingress-nginx" }}
+{{- $traefik := .Values.traefik | default dict }}
+{{- if $traefik.enabled }}
+{{- $nginxProvider := dig "providers" "kubernetesIngressNGINX" dict $traefik }}
+{{- /* Helm renders a dependency whose condition path is missing, and the
+       Traefik chart's own values set enabled: true. `helm upgrade
+       --reuse-values` from a chart version without Traefik therefore renders
+       Traefik with only its upstream defaults. */}}
+{{- if not $nginxProvider.enabled }}
+{{- if $ingressNginx.enabled }}
+{{- fail "\nThis release runs the bundled ingress-nginx controller, which is retired upstream. This chart version bundles Traefik instead, but `--reuse-values` keeps the values of the chart version this release was first installed with, which have no Traefik settings. Re-run the upgrade with one of:\n  --reset-then-reuse-values --set ingress-nginx.enabled=false   # switch to Traefik; keeps the external address\n  --set traefik.enabled=false                                  # stay on ingress-nginx" }}
+{{- end }}
+{{- fail "\nThe chart's Traefik settings are missing, which happens when `--reuse-values` keeps the values of a chart version without Traefik. Re-run the upgrade with `--reset-then-reuse-values`, or add `--set traefik.enabled=false` if you bring your own ingress controller." }}
+{{- end }}
+{{- if $ingressNginx.enabled }}
+{{- fail "\nEnable only one ingress controller: set ingress-nginx.enabled=false to use Traefik, or traefik.enabled=false to keep ingress-nginx." }}
+{{- end }}
+{{- $svc := $ingressNginx.controller.service | default dict }}
+# Traefik's ingress-nginx provider serves Ingresses of this class.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: {{ $nginxProvider.ingressClass | default "nginx" }}
+  labels:
+    app.kubernetes.io/name: {{ include "skypilot.traefikName" . }}
+    app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" . }}
+spec:
+  controller: {{ $nginxProvider.controllerClass | default "k8s.io/ingress-nginx" }}
+---
+# The LoadBalancer Service in front of Traefik. It keeps the ingress-nginx
+# controller Service's name, labels and ports, so a release that switches
+# controllers keeps its external address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skypilot.ingressControllerServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: controller
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type | default "LoadBalancer" }}
+  ipFamilyPolicy: {{ $svc.ipFamilyPolicy | default "SingleStack" }}
+  ipFamilies:
+    {{- toYaml ($svc.ipFamilies | default (list "IPv4")) | nindent 4 }}
+  {{- with $svc.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with $svc.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  selector:
+    app.kubernetes.io/name: {{ include "skypilot.traefikName" . }}
+    app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" . }}
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: web
+      appProtocol: http
+      {{- with ($svc.nodePorts).http }}
+      nodePort: {{ . }}
+      {{- end }}
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: websecure
+      appProtocol: https
+      {{- with ($svc.nodePorts).https }}
+      nodePort: {{ . }}
+      {{- end }}
+---
+# Traefik runs with namespaced RBAC; IngressClasses are cluster-scoped.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-%s-traefik-ingressclasses" .Release.Name .Release.Namespace | trunc 63 | trimSuffix "-" }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-%s-traefik-ingressclasses" .Release.Name .Release.Namespace | trunc 63 | trimSuffix "-" }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-%s-traefik-ingressclasses" .Release.Name .Release.Namespace | trunc 63 | trimSuffix "-" }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "skypilot.traefikServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

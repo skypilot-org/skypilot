@@ -220,3 +220,52 @@ false
   {{- fail "Error\nauth.externalProxy.enabled cannot be used together with ingress.oauth2-proxy.enabled. These authentication methods are mutually exclusive. Please:\n1. Disable auth.externalProxy.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Name of the ingress-nginx controller Service. The LoadBalancer Service in front
+of Traefik keeps this name, so a release that switches controllers keeps its
+external address. Mirrors the ingress-nginx chart's controller fullname.
+*/}}
+{{- define "skypilot.ingressControllerServiceName" -}}
+{{- $ingressNginx := index .Values "ingress-nginx" -}}
+{{- $base := "" -}}
+{{- if $ingressNginx.fullnameOverride -}}
+{{- $base = $ingressNginx.fullnameOverride -}}
+{{- else -}}
+{{- $name := default "ingress-nginx" $ingressNginx.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- $base = .Release.Name -}}
+{{- else -}}
+{{- $base = printf "%s-%s" .Release.Name $name -}}
+{{- end -}}
+{{- end -}}
+{{- printf "%s-controller" ($base | trunc 63 | trimSuffix "-") | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Traefik subchart names, mirroring the Traefik chart's helpers: the pod
+selector labels and the ServiceAccount name.
+*/}}
+{{- define "skypilot.traefikName" -}}
+{{- default "traefik" .Values.traefik.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "skypilot.traefikInstance" -}}
+{{- default (printf "%s-%s" .Release.Name .Release.Namespace) .Values.traefik.instanceLabelOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "skypilot.traefikServiceAccountName" -}}
+{{- $traefik := .Values.traefik -}}
+{{- $fullname := "" -}}
+{{- if $traefik.fullnameOverride -}}
+{{- $fullname = $traefik.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default "traefik" $traefik.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- $fullname = .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $fullname = printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- default $fullname (($traefik.serviceAccount).name) -}}
+{{- end -}}
