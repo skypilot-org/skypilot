@@ -4112,8 +4112,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             str(handle.launched_resources.cloud))
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Syncing workdir', log_path)):
-            subprocess_utils.run_in_parallel(_sync_workdir_node, runners,
-                                             num_threads)
+            if not provision_lib.sync_workdir(
+                    repr(handle.launched_resources.cloud), runners,
+                    full_workdir, SKY_REMOTE_WORKDIR, log_path):
+                subprocess_utils.run_in_parallel(_sync_workdir_node, runners,
+                                                 num_threads)
         logger.info(ux_utils.finishing_message('Synced workdir.', log_path))
 
     def _sync_file_mounts(
