@@ -2184,8 +2184,8 @@ class Kubernetes(clouds.Cloud):
         # Deliberately not swallowing a failure to list nodes: the caller
         # reports None as "no node advertises this resource", which would be a
         # misleading diagnosis for an API or permission error.
-        nodes = kubernetes_utils.get_kubernetes_nodes(
-            context=context, consistency=reads.Cached())
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context,
+                                                      consistency=reads.CACHED)
         for node in nodes:
             allocatable = node.status.allocatable or {}
             labels = node.metadata.labels or {}
@@ -2280,7 +2280,7 @@ class Kubernetes(clouds.Cloud):
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(
-                context=context, consistency=reads.Cached())
+                context=context, consistency=reads.CACHED)
             for node in nodes:
                 if node.metadata.labels:
                     # Check for Nebius clusters

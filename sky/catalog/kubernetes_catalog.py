@@ -178,8 +178,8 @@ def _list_accelerators(
         if not has_gpu:
             return {}, {}, {}
 
-        nodes = kubernetes_utils.get_kubernetes_nodes(
-            context=context, consistency=reads.Cached())
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context,
+                                                      consistency=reads.CACHED)
         gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)
 
     lf, _ = kubernetes_utils.detect_gpu_label_formatter_from_nodes(nodes)
@@ -206,7 +206,7 @@ def _list_accelerators(
         try:
             allocated_qty_by_node = (
                 kubernetes_utils.get_allocated_gpu_qty_by_node(
-                    context=context, consistency=reads.Cached()))
+                    context=context, consistency=reads.CACHED))
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 logger.warning(

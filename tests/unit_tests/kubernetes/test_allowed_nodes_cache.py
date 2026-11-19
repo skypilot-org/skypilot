@@ -52,20 +52,17 @@ class _Response(io.BytesIO):
         pass
 
 
-class _CoreApi:
+class _ApiClient:
 
     def __init__(self, nodes: List[Dict[str, Any]]):
         self.nodes = nodes
         self.list_node_calls = 0
 
-    def list_node(self, **kwargs):
+    def call_api(self, path, method, **kwargs):
         del kwargs
+        assert (path, method) == ('/api/v1/nodes', 'GET')
         self.list_node_calls += 1
         return _Response(json.dumps({'items': self.nodes}).encode())
-
-    def call_api(self, path, method, **kwargs):
-        assert (path, method) == ('/api/v1/nodes', 'GET')
-        return self.list_node(**kwargs)
 
 
 def _request(allowed_node: str) -> contextvars.Context:
@@ -88,10 +85,8 @@ def _request(allowed_node: str) -> contextvars.Context:
 
 
 @pytest.fixture
-def core_api(monkeypatch):
-    api = _CoreApi(_NODES)
-    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                        lambda context=None: api)
+def api(monkeypatch):
+    api = _ApiClient(_NODES)
     monkeypatch.setattr('sky.adaptors.kubernetes.api_client',
                         lambda context=None: api)
     annotations.clear_request_level_cache()
@@ -99,7 +94,7 @@ def core_api(monkeypatch):
     annotations.clear_request_level_cache()
 
 
-def test_each_request_gets_its_own_node_filter(core_api):
+def test_each_request_gets_its_own_node_filter(api):
     gpu_request = _request('gpu-node')
     cpu_request = _request('cpu-node')
 
@@ -112,10 +107,10 @@ def test_each_request_gets_its_own_node_filter(core_api):
     assert gpu_request.run(node_names) == ['gpu-node']
     assert cpu_request.run(node_names) == ['cpu-node']
     assert gpu_request.run(node_names) == ['gpu-node']
-    assert core_api.list_node_calls == 1
+    assert api.list_node_calls == 1
 
 
-@pytest.mark.usefixtures('core_api')
+@pytest.mark.usefixtures('api')
 def test_accelerator_detection_follows_each_request_node_filter():
     gpu_request = _request('gpu-node')
     cpu_request = _request('cpu-node')

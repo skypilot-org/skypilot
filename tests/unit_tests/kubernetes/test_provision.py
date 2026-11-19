@@ -774,23 +774,25 @@ def test_list_namespaced_pod_success(monkeypatch):
     """Test that list_namespaced_pod returns pods from the API response."""
     calls = []
 
-    def list_objects(context, resource, **kwargs):
+    def list_objects(context, resource, *, convert, **kwargs):
         calls.append((context, resource, kwargs))
-        return reads.ReadResult(items=[{
-            'metadata': {
-                'name': 'test-pod-1'
-            },
-            'status': {
-                'phase': 'Running'
-            }
-        }, {
-            'metadata': {
-                'name': 'test-pod-2'
-            },
-            'status': {
-                'phase': 'Pending'
-            }
-        }],
+        return reads.ReadResult(items=[
+            convert(item) for item in [{
+                'metadata': {
+                    'name': 'test-pod-1'
+                },
+                'status': {
+                    'phase': 'Running'
+                }
+            }, {
+                'metadata': {
+                    'name': 'test-pod-2'
+                },
+                'status': {
+                    'phase': 'Pending'
+                }
+            }]
+        ],
                                 resource_version='7',
                                 staleness_seconds=0,
                                 reason=reads.REASON_FRESH)
@@ -808,7 +810,8 @@ def test_list_namespaced_pod_success(monkeypatch):
     assert calls == [('test-context', reads.PODS, {
         'namespace': 'test-namespace',
         'label_selector': 'skypilot-cluster-name=test-cluster',
-        'consistency': reads.FRESH
+        'consistency': reads.FRESH,
+        'attempts': 1,
     })]
     assert len(pods) == 2
     assert pods[0].metadata.name == 'test-pod-1'

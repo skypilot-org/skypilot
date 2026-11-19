@@ -10,7 +10,6 @@ from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils
-from sky.utils import annotations
 from sky.utils import plugin_extensions
 from sky.utils import status_lib
 
@@ -75,56 +74,43 @@ def _pod(name: str = _HEAD,
     }
 
 
-class _Reads:
-    """Records list_objects() calls; answers pod lists in turn."""
-
-    def __init__(self, nodes: List[Dict[str, Any]],
-                 pods: List[List[Dict[str, Any]]]):
-        self.nodes = nodes
-        self.pods = pods
-        self.calls: List[Dict[str, Any]] = []
-
-    def list_objects(self,
-                     context: Optional[str],
-                     resource: reads.Resource,
-                     *,
-                     namespace: Optional[str] = None,
-                     label_selector: Optional[str] = None,
-                     field_selector: Optional[str] = None,
-                     consistency: reads.Consistency = reads.Cached()):
-        self.calls.append({
-            'context': context,
-            'resource': resource,
-            'namespace': namespace,
-            'label_selector': label_selector,
-            'field_selector': field_selector,
-            'consistency': consistency,
-        })
-        if resource == reads.NODES:
-            items = self.nodes
-        else:
-            items = self.pods[0] if len(self.pods) == 1 else self.pods.pop(0)
-        return reads.ReadResult(items=items,
-                                resource_version='1',
-                                staleness_seconds=0,
-                                reason=None)
-
-    def consistencies(self) -> List[reads.Consistency]:
-        return [call['consistency'] for call in self.calls]
-
-
 @pytest.fixture
-def fake_reads(monkeypatch):
+def serve(monkeypatch):
+    """Answers reads.list_objects() with nodes and, in turn, pod lists.
+
+    A Cached read is answered from the cache when `cached`, otherwise from
+    the API server. The last pod list answers all later reads.
+    """
 
     def install(nodes: Optional[List[Dict[str, Any]]] = None,
-                *pods: List[Dict[str, Any]]) -> _Reads:
-        fake = _Reads(nodes or [_node('gpu', gpus='8')], list(pods) or [[]])
-        monkeypatch.setattr(reads, 'list_objects', fake.list_objects)
+                pods: Optional[List[List[Dict[str, Any]]]] = None,
+                cached: bool = True) -> mock.Mock:
+        pod_answers = list(pods or [[]])
+
+        def list_objects(context,
+                         resource,
+                         *,
+                         consistency,
+                         convert=None,
+                         **kwargs):
+            del context, kwargs
+            if resource == reads.NODES:
+                items = nodes or [_node('gpu', gpus='8')]
+            else:
+                items = (pod_answers.pop(0)
+                         if len(pod_answers) > 1 else pod_answers[0])
+            from_cache = cached and isinstance(consistency, reads.Cached)
+            return reads.ReadResult(
+                items=[convert(item) for item in items] if convert else items,
+                resource_version='1',
+                staleness_seconds=0,
+                reason=None if from_cache else reads.REASON_NO_SOURCE)
+
+        fake = mock.Mock(side_effect=list_objects)
+        monkeypatch.setattr(reads, 'list_objects', fake)
         return fake
 
-    annotations.clear_request_level_cache()
-    yield install
-    annotations.clear_request_level_cache()
+    return install
 
 
 @pytest.fixture
@@ -133,22 +119,35 @@ def cache_source(monkeypatch):
                         mock.Mock())
 
 
-def test_nodes_are_read_from_the_api_server_by_default(fake_reads):
-    fake = fake_reads([_node('n1')])
+def _consistencies(fake: mock.Mock) -> List[reads.Consistency]:
+    return [call.kwargs['consistency'] for call in fake.call_args_list]
+
+
+def test_nodes_are_read_from_the_api_server_by_default(serve):
+    fake = serve([_node('n1')])
     nodes = utils.get_kubernetes_nodes(context=_CONTEXT)
     assert [node.metadata.name for node in nodes] == ['n1']
-    assert fake.consistencies() == [reads.FRESH]
-    assert fake.calls[0]['resource'] == reads.NODES
+    assert fake.call_args.args == (_CONTEXT, reads.NODES)
+    assert _consistencies(fake) == [reads.FRESH]
 
 
-def test_request_cache_keeps_consistencies_apart(fake_reads):
-    fake = fake_reads([_node('n1')])
+@pytest.mark.usefixtures('cache_source')
+def test_request_cache_keeps_consistencies_apart(serve):
+    fake = serve([_node('n1')])
     for _ in range(2):
         utils.get_kubernetes_nodes(context=_CONTEXT)
-        utils.get_kubernetes_nodes(context=_CONTEXT, consistency=reads.Cached())
-    assert fake.consistencies() == [reads.FRESH, reads.Cached()]
+        utils.get_kubernetes_nodes(context=_CONTEXT, consistency=reads.CACHED)
+    assert _consistencies(fake) == [reads.FRESH, reads.CACHED]
 
 
+def test_without_a_source_one_node_list_serves_every_read(serve):
+    fake = serve([_node('n1')])
+    utils.get_kubernetes_nodes(context=_CONTEXT)
+    utils.get_kubernetes_nodes(context=_CONTEXT, consistency=reads.CACHED)
+    assert fake.call_count == 1
+
+
+@pytest.mark.usefixtures('cache_source')
 @pytest.mark.parametrize('read', [
     lambda: utils.detect_accelerator_resource(_CONTEXT),
     lambda: utils.detect_gpu_label_formatter(_CONTEXT),
@@ -156,18 +155,18 @@ def test_request_cache_keeps_consistencies_apart(fake_reads):
     lambda: utils.get_spot_label(_CONTEXT),
     lambda: utils.get_unlabeled_accelerator_nodes(_CONTEXT),
 ])
-def test_read_only_node_reads_accept_a_cache(fake_reads, read):
-    fake = fake_reads([_node('gpu', gpus='8'), _node('cpu')])
+def test_read_only_node_reads_accept_a_cache(serve, read):
+    fake = serve([_node('gpu', gpus='8'), _node('cpu')])
     read()
-    assert fake.consistencies() == [reads.Cached()]
+    assert _consistencies(fake) == [reads.CACHED]
 
 
-def test_gpu_resource_key_comes_from_node_capacity(fake_reads):
-    fake_reads([_node('gpu', gpus='8')])
+def test_gpu_resource_key_comes_from_node_capacity(serve):
+    serve([_node('gpu', gpus='8')])
     assert utils.get_gpu_resource_key(_CONTEXT) == 'nvidia.com/gpu'
 
 
-def test_allocated_resources_read_pods_holding_resources(fake_reads):
+def test_allocated_resources_read_pods_holding_resources(serve):
     pod = _pod()
     pod['spec'] = {
         'nodeName': 'gpu',
@@ -181,28 +180,26 @@ def test_allocated_resources_read_pods_holding_resources(fake_reads):
             }
         }]
     }
-    fake = fake_reads(None, [pod])
+    fake = serve(pods=[[pod]])
     gpus, cpu_memory = utils.get_allocated_resources_by_node(
-        context=_CONTEXT, consistency=reads.Cached())
+        context=_CONTEXT, consistency=reads.CACHED)
     assert gpus == {'gpu': 1}
     assert cpu_memory == {'gpu': (2.0, 0.0)}
-    call = next(call for call in fake.calls if call['resource'] == reads.PODS)
-    assert call['consistency'] == reads.Cached()
-    assert 'status.phase!=Succeeded' in call['field_selector']
-    assert 'status.phase!=Running' not in call['field_selector']
+    call = next(
+        call for call in fake.call_args_list if call.args[1] == reads.PODS)
+    assert call.kwargs['consistency'] == reads.CACHED
+    assert 'status.phase!=Succeeded' in call.kwargs['field_selector']
+    assert 'status.phase!=Running' not in call.kwargs['field_selector']
 
 
-def test_skypilot_pods_are_read_from_a_cache(fake_reads):
-    fake = fake_reads(None, [_pod()])
+def test_skypilot_pods_are_read_from_a_cache(serve):
+    fake = serve(pods=[[_pod()]])
     pods = utils.get_skypilot_pods(_CONTEXT)
-    assert fake.calls == [{
-        'context': _CONTEXT,
-        'resource': reads.PODS,
-        'namespace': None,
-        'label_selector': provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
-        'field_selector': None,
-        'consistency': reads.Cached(),
-    }]
+    assert fake.call_args.args == (_CONTEXT, reads.PODS)
+    assert fake.call_args.kwargs['label_selector'] == (
+        provision_constants.TAG_SKYPILOT_CLUSTER_NAME)
+    assert fake.call_args.kwargs['consistency'] == reads.CACHED
+    assert fake.call_args.kwargs['attempts'] == 1
     assert pods[0].metadata.name == _HEAD
     assert pods[0].status.start_time == datetime.datetime(
         2026, 11, 19, 0, 0, 10, tzinfo=datetime.timezone.utc)
@@ -228,19 +225,19 @@ def _query_instances(monkeypatch) -> Dict[str, Any]:
                                     })
 
 
-@pytest.mark.usefixtures('cache_source')
-def test_a_healthy_cluster_is_read_from_a_cache(monkeypatch, fake_reads):
-    fake = fake_reads(None, [_pod()])
+def test_a_healthy_cluster_is_read_from_a_cache(monkeypatch, serve):
+    fake = serve(pods=[[_pod()]])
     assert _query_instances(monkeypatch) == {
         _HEAD: (status_lib.ClusterStatus.UP, None)
     }
-    assert fake.consistencies() == [reads.Cached()]
-    assert fake.calls[0]['namespace'] == 'default'
-    assert fake.calls[0]['label_selector'] == (
+    assert _consistencies(fake) == [reads.CACHED]
+    call = fake.call_args
+    assert call.kwargs['namespace'] == 'default'
+    assert call.kwargs['label_selector'] == (
         f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}=c')
+    assert call.kwargs['attempts'] == 1
 
 
-@pytest.mark.usefixtures('cache_source')
 @pytest.mark.parametrize('cached', [
     [],
     [_pod(phase='Pending')],
@@ -248,19 +245,18 @@ def test_a_healthy_cluster_is_read_from_a_cache(monkeypatch, fake_reads):
     [_pod(deleting=True)],
     [_pod(name='c-worker')],
 ])
-def test_the_api_server_confirms_an_unhealthy_answer(monkeypatch, fake_reads,
-                                                     cached):
-    fake = fake_reads(None, cached, [_pod()])
+def test_the_api_server_confirms_an_unhealthy_cached_answer(
+        monkeypatch, serve, cached):
+    fake = serve(pods=[cached, [_pod()]])
     assert _query_instances(monkeypatch) == {
         _HEAD: (status_lib.ClusterStatus.UP, None)
     }
-    assert fake.consistencies() == [reads.Cached(), reads.FRESH]
+    assert _consistencies(fake) == [reads.CACHED, reads.FRESH]
 
 
-def test_without_a_cache_an_unhealthy_answer_is_read_once(
-        monkeypatch, fake_reads):
-    fake = fake_reads(None, [_pod(phase='Pending')])
+def test_an_answer_from_the_api_server_is_read_once(monkeypatch, serve):
+    fake = serve(pods=[[_pod(phase='Pending')]], cached=False)
     assert _query_instances(monkeypatch) == {
         _HEAD: (status_lib.ClusterStatus.INIT, None)
     }
-    assert fake.consistencies() == [reads.Cached()]
+    assert _consistencies(fake) == [reads.CACHED]

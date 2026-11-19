@@ -288,8 +288,8 @@ def candidate_shapes(context: Optional[str], k8s_acc_label_key: Optional[str],
         return set()
     node_selector = node_selector or {}
     shapes = set()
-    for node in kubernetes_utils.get_kubernetes_nodes(
-            context=context, consistency=reads.Cached()):
+    for node in kubernetes_utils.get_kubernetes_nodes(context=context,
+                                                      consistency=reads.CACHED):
         labels = node.metadata.labels or {}
         if labels.get(k8s_acc_label_key) not in k8s_acc_label_values:
             continue

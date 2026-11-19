@@ -1231,7 +1231,7 @@ def _detect_gpu_label_formatter(
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
     del allowed_nodes_key  # Only part of the cache key.
     return detect_gpu_label_formatter_from_nodes(
-        get_kubernetes_nodes(context=context, consistency=reads.Cached()))
+        get_kubernetes_nodes(context=context, consistency=reads.CACHED))
 
 
 detect_gpu_label_formatter.cache_clear = (  # type: ignore[attr-defined]
@@ -1767,7 +1767,7 @@ def detect_accelerator_resource(
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
-    nodes = get_kubernetes_nodes(context=context, consistency=reads.Cached())
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_accelerator = (get_gpu_resource_key(context) in cluster_resources or
@@ -2228,7 +2228,7 @@ def inject_allowed_nodes_affinity(
         allowed_names = set(allowed_nodes_config.get('names', []))
         allowed_ips = set(allowed_nodes_config.get('ips', []))
         all_nodes = get_kubernetes_nodes(context=context,
-                                         consistency=reads.Cached())
+                                         consistency=reads.CACHED)
         hostnames = set()
         for node in all_nodes:
             matched = False
@@ -2305,16 +2305,26 @@ def get_kubernetes_nodes(
     return _filter_allowed_nodes(nodes, context)
 
 
-@annotations.lru_cache(scope='request', maxsize=10)
 def _get_unfiltered_kubernetes_nodes(
         *, context: Optional[str],
         consistency: reads.Consistency) -> List[V1Node]:
-    result = reads.list_objects(context, reads.NODES, consistency=consistency)
-    return [V1Node.from_dict(item) for item in result.items]
+    if not plugin_extensions.ClusterStateSource.is_registered():
+        # Every read goes to the API server, so one list serves both.
+        consistency = reads.FRESH
+    return _list_nodes(context=context, consistency=consistency)
+
+
+@annotations.lru_cache(scope='request', maxsize=10)
+def _list_nodes(*, context: Optional[str],
+                consistency: reads.Consistency) -> List[V1Node]:
+    return reads.list_objects(context,
+                              reads.NODES,
+                              consistency=consistency,
+                              convert=V1Node.from_dict).items
 
 
 get_kubernetes_nodes.cache_clear = (  # type: ignore[attr-defined]
-    _get_unfiltered_kubernetes_nodes.cache_clear)
+    _list_nodes.cache_clear)
 
 
 def _iter_terminated_states(cs):
@@ -2987,9 +2997,9 @@ def get_allocated_resources_by_node(
     result = reads.list_objects(context,
                                 reads.PODS,
                                 field_selector=field_selector,
-                                consistency=consistency)
-    return _sum_allocated_resources_by_node(
-        (V1Pod.from_dict(item) for item in result.items), context)
+                                consistency=consistency,
+                                convert=V1Pod.from_dict)
+    return _sum_allocated_resources_by_node(result.items, context)
 
 
 def _sum_allocated_resources_by_node(
@@ -3140,7 +3150,7 @@ def adjust_resources_to_allocatable(
     """
     if dryrun:
         return cpus, mem
-    nodes = get_kubernetes_nodes(context=context, consistency=reads.Cached())
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     ready_nodes = [n for n in nodes if n.is_ready()]
 
     # If any node has strictly more capacity than requested for both
@@ -3278,7 +3288,7 @@ def check_instance_fits(
                        f'{tpu_list_in_cluster_str}. Note that multi-host TPU '
                        'podslices are currently not unsupported.')
 
-    nodes = get_kubernetes_nodes(context=context, consistency=reads.Cached())
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
@@ -3824,7 +3834,7 @@ def check_credentials(context: Optional[str],
             namespace, limit=1, _request_timeout=timeout)
         # This call is "free" because this function is a cached call,
         # and it will not be called again in this function.
-        get_kubernetes_nodes(context=context, consistency=reads.Cached())
+        get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
@@ -5317,8 +5327,7 @@ def get_spot_label(
     """
     # Check if the cluster supports spot instances by checking nodes for known
     # spot label keys and values
-    for node in get_kubernetes_nodes(context=context,
-                                     consistency=reads.Cached()):
+    for node in get_kubernetes_nodes(context=context, consistency=reads.CACHED):
         for _, (key, value) in SPOT_LABEL_MAP.items():
             if key in node.metadata.labels and node.metadata.labels[
                     key] == value:
@@ -5337,22 +5346,22 @@ def get_spot_label(
 def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     """Converts a dictionary to a Kubernetes object.
 
-    Useful for comparing two Kubernetes objects. Adapted from
-    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # pylint: disable=line-too-long
+    Useful for comparing two Kubernetes objects.
 
     Args:
         object_dict: Dictionary representing the Kubernetes object
         object_type: Type of the Kubernetes object. E.g., 'V1Pod', 'V1Service'.
     """
+    # ApiClient.deserialize() takes a response; this is the step after it
+    # parses the response's JSON.
+    # pylint: disable-next=protected-access
+    return _deserializing_api_client()._ApiClient__deserialize(
+        object_dict, object_type)
 
-    class FakeKubeResponse:
 
-        def __init__(self, obj):
-            self.data = json.dumps(obj)
-
-    fake_kube_response = FakeKubeResponse(object_dict)
-    return _deserializing_api_client().deserialize(fake_kube_response,
-                                                   object_type)
+def k8s_pod_from_dict(pod: Dict[str, Any]) -> Any:
+    """Converts a pod in Kubernetes API JSON to a kubernetes client V1Pod."""
+    return dict_to_k8s_object(pod, 'V1Pod')
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
@@ -5374,7 +5383,7 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     Returns:
         List[Any]: List of unlabeled nodes with accelerators.
     """
-    nodes = get_kubernetes_nodes(context=context, consistency=reads.Cached())
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     nodes_with_accelerator = []
     for node in nodes:
         if get_gpu_resource_key(context) in node.status.capacity:
@@ -5496,7 +5505,7 @@ def _get_kubernetes_node_info(
                 allowed_config = get_allowed_nodes_config(resolved_context)
                 if allowed_config is not None:
                     allowed_nodes = get_kubernetes_nodes(
-                        context=resolved_context, consistency=reads.Cached())
+                        context=resolved_context, consistency=reads.CACHED)
                     allowed_names = {n.metadata.name for n in allowed_nodes}
                     result = models.KubernetesNodesInfo(
                         node_info_dict={
@@ -5517,7 +5526,7 @@ def _get_kubernetes_node_info(
     # the current context).
     if context is None:
         context = get_current_kube_config_context_name()
-    nodes = get_kubernetes_nodes(context=context, consistency=reads.Cached())
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     configured_tolerations = get_configured_tolerations(context)
 
     lf, _ = detect_gpu_label_formatter(context)
@@ -5547,7 +5556,7 @@ def _get_kubernetes_node_info(
         # When there are GPU nodes, get both GPU and CPU/memory in one call
         try:
             allocated_qty_by_node, allocated_cpu_memory_by_node = get_allocated_resources_by_node(
-                context=context, consistency=reads.Cached())
+                context=context, consistency=reads.CACHED)
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 error_on_get_allocated_resources = True
@@ -5559,7 +5568,7 @@ def _get_kubernetes_node_info(
         # This is an extra API call compared to master branch
         try:
             _, allocated_cpu_memory_by_node = get_allocated_resources_by_node(
-                context=context, consistency=reads.Cached())
+                context=context, consistency=reads.CACHED)
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 error_on_get_allocated_resources = True
@@ -6001,12 +6010,13 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     """
     if context is None:
         context = get_current_kube_config_context_name()
-    result = reads.list_objects(
+    return reads.list_objects(
         context,
         reads.PODS,
         label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
-        consistency=reads.Cached())
-    return [dict_to_k8s_object(item, 'V1Pod') for item in result.items]
+        consistency=reads.CACHED,
+        convert=k8s_pod_from_dict,
+        attempts=1).items
 
 
 def is_tpu_on_gke(accelerator: str, normalize: bool = True) -> bool:
@@ -6297,7 +6307,7 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
     try:
         return get_gpu_resource_key_from_nodes(
             _get_unfiltered_kubernetes_nodes(context=context,
-                                             consistency=reads.Cached()))
+                                             consistency=reads.CACHED))
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
