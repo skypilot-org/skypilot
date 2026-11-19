@@ -1,4 +1,5 @@
 """Tests for the autostop activity check (``autostop.activity_check``)."""
+import inspect
 import shlex
 import subprocess
 import time
@@ -6,10 +7,16 @@ from unittest import mock
 
 import pytest
 
+import sky
 from sky import backends
 from sky import core
+from sky import exceptions
 from sky import resources as resources_lib
+from sky.client import sdk as client_sdk
 from sky.schemas.generated import autostopv1_pb2
+from sky.server import common as server_common
+from sky.server import constants as server_constants
+from sky.server import versions
 from sky.skylet import autostop_lib
 from sky.skylet import configs
 from sky.skylet import events
@@ -17,6 +24,7 @@ from sky.skylet import runtime_utils
 from sky.skylet import services
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import dag_utils
 from sky.utils import schemas
 from sky.utils import status_lib
 
@@ -98,42 +106,93 @@ class TestActivityCheckReportsActive:
 
 class TestStopEventUsesActivityCheck:
 
-    def _tick(self, wait_for, check_active):
+    def _tick(self,
+              wait_for,
+              check_active,
+              during_check=lambda world: None,
+              stored_check=True):
         config = autostop_lib.AutostopConfig(1, 0, 'cloudvmray', wait_for)
+        world = {'config': config, 'ssh': False}
+
+        def run_check():
+            during_check(world)
+            return check_active
+
         with mock.patch.object(autostop_lib, 'get_autostop_config',
-                               return_value=config), \
+                               side_effect=lambda: world['config']), \
              mock.patch.object(events.psutil, 'boot_time', return_value=0), \
              mock.patch.object(events.job_lib, 'is_cluster_idle',
                                return_value=True), \
              mock.patch.object(events.managed_job_state,
                                'get_num_alive_jobs', return_value=0), \
              mock.patch.object(autostop_lib, 'has_active_ssh_sessions',
-                               return_value=False), \
+                               side_effect=lambda: world['ssh']) as ssh, \
+             mock.patch.object(autostop_lib, 'get_activity_check',
+                               return_value={'run': 'x'}
+                               if stored_check else None), \
              mock.patch.object(autostop_lib,
                                'activity_check_reports_active',
-                               return_value=check_active) as check, \
+                               side_effect=run_check) as check, \
              mock.patch.object(autostop_lib, 'get_last_active_time',
                                return_value=time.time() - 3600), \
              mock.patch.object(autostop_lib,
                                'set_last_active_time_to_now') as reset, \
              mock.patch.object(events.StopEvent, '_stop_cluster') as stop:
             events.StopEvent.__new__(events.StopEvent)._run()
-        return check, reset, stop
+        return check, reset, stop, ssh
 
     def test_active_check_resets_timer(self):
-        _, reset, stop = self._tick(autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
-                                    True)
+        _, reset, stop, _ = self._tick(
+            autostop_lib.AutostopWaitFor.JOBS_AND_SSH, True)
         reset.assert_called_once()
         stop.assert_not_called()
 
     def test_idle_check_lets_cluster_stop(self):
-        _, reset, stop = self._tick(autostop_lib.AutostopWaitFor.JOBS, False)
+        check, reset, stop, _ = self._tick(autostop_lib.AutostopWaitFor.JOBS,
+                                           False)
+        check.assert_called_once()
         reset.assert_not_called()
         stop.assert_called_once()
 
     def test_wait_for_none_skips_check(self):
-        check, _, stop = self._tick(autostop_lib.AutostopWaitFor.NONE, True)
+        check, _, stop, _ = self._tick(autostop_lib.AutostopWaitFor.NONE, True)
         check.assert_not_called()
+        stop.assert_called_once()
+
+    def test_ssh_session_opened_during_the_check_keeps_the_cluster(self):
+
+        def connect(world):
+            world['ssh'] = True
+
+        check, reset, stop, _ = self._tick(
+            autostop_lib.AutostopWaitFor.JOBS_AND_SSH, False, connect)
+        check.assert_called_once()
+        stop.assert_not_called()
+        reset.assert_called_once()
+
+    @pytest.mark.parametrize('changed', [
+        autostop_lib.AutostopConfig(-1, 0, 'cloudvmray',
+                                    autostop_lib.AutostopWaitFor.JOBS),
+        autostop_lib.AutostopConfig(10**6, 0, 'cloudvmray',
+                                    autostop_lib.AutostopWaitFor.JOBS),
+    ])
+    def test_autostop_changed_during_the_check_is_honored(self, changed):
+
+        def change(world):
+            world['config'] = changed
+
+        check, _, stop, _ = self._tick(autostop_lib.AutostopWaitFor.JOBS, False,
+                                       change)
+        check.assert_called_once()
+        stop.assert_not_called()
+
+    def test_cluster_without_a_check_reads_ssh_once(self):
+        check, _, stop, ssh = self._tick(
+            autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+            False,
+            stored_check=False)
+        check.assert_not_called()
+        ssh.assert_called_once()
         stop.assert_called_once()
 
 
@@ -283,3 +342,67 @@ class TestControllerStart:
 
     def test_restart_without_check_clears_it(self):
         assert self._start({'idle_minutes': 10}) == {}
+
+
+class TestApiVersionGate:
+
+    def _dag(self, autostop):
+        task = sky.Task(run='true')
+        task.set_resources(sky.Resources(autostop=autostop))
+        dag = sky.Dag()
+        dag.add(task)
+        return dag
+
+    @pytest.mark.parametrize(
+        'remote',
+        [None, server_constants.MIN_AUTOSTOP_ACTIVITY_CHECK_API_VERSION - 1])
+    def test_older_server_is_refused(self, remote):
+        dag = self._dag({'idle_minutes': 5, 'activity_check': {'run': 'x'}})
+        with mock.patch.object(versions, 'get_remote_api_version',
+                               return_value=remote), \
+             pytest.raises(exceptions.APINotSupportedError,
+                           match='activity_check'):
+            client_sdk._check_autostop_activity_check_api_version(dag)
+
+    def test_supporting_server_is_accepted(self):
+        dag = self._dag({'idle_minutes': 5, 'activity_check': {'run': 'x'}})
+        with mock.patch.object(versions,
+                               'get_remote_api_version',
+                               return_value=server_constants.
+                               MIN_AUTOSTOP_ACTIVITY_CHECK_API_VERSION):
+            client_sdk._check_autostop_activity_check_api_version(dag)
+
+    @pytest.mark.parametrize('autostop', [None, {'idle_minutes': 5}, False])
+    def test_task_without_a_check_reaches_an_older_server(self, autostop):
+        dag = self._dag(autostop)
+        with mock.patch.object(versions,
+                               'get_remote_api_version',
+                               return_value=None):
+            client_sdk._check_autostop_activity_check_api_version(dag)
+        assert 'activity_check' not in dag_utils.dump_dag_to_yaml_str(dag)
+
+    def test_disabled_autostop_that_kept_a_check_reaches_an_older_server(self):
+        dag = self._dag({'idle_minutes': 5, 'activity_check': {'run': 'x'}})
+        for resources in dag.tasks[0].resources:
+            resources.autostop_config.enabled = False
+        with mock.patch.object(versions,
+                               'get_remote_api_version',
+                               return_value=None):
+            client_sdk._check_autostop_activity_check_api_version(dag)
+        assert 'activity_check' not in dag_utils.dump_dag_to_yaml_str(dag)
+
+    def test_the_gated_field_is_exactly_what_is_sent(self):
+        dag = self._dag({'idle_minutes': 5, 'activity_check': {'run': 'x'}})
+        assert 'activity_check' in dag_utils.dump_dag_to_yaml_str(dag)
+
+    @pytest.mark.parametrize('entrypoint', ['validate', 'optimize'])
+    def test_entrypoints_run_the_gate(self, entrypoint):
+        dag = self._dag({'idle_minutes': 5, 'activity_check': {'run': 'x'}})
+        with mock.patch.object(versions, 'get_remote_api_version',
+                               return_value=None), \
+             mock.patch.object(server_common,
+                               'make_authenticated_request') as request, \
+             pytest.raises(exceptions.APINotSupportedError,
+                           match='activity_check'):
+            inspect.unwrap(getattr(client_sdk, entrypoint))(dag)
+        request.assert_not_called()

@@ -493,6 +493,29 @@ def _check_tpu_multi_host_api_version(dag: 'sky.Dag') -> None:
                 f'{server_constants.MIN_TPU_MULTI_HOST_API_VERSION}.')
 
 
+def _check_autostop_activity_check_api_version(dag: 'sky.Dag') -> None:
+    """Raises if a task sets autostop.activity_check and the API server is
+    too old to know it.
+
+    The field cannot be dropped silently: without it the cluster could stop
+    while the check would have reported it active.
+    """
+    if not any(resources.autostop_config is not None and 'activity_check' in
+               (resources.autostop_config.to_yaml_config() or {})
+               for task in dag.tasks
+               for resources in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_AUTOSTOP_ACTIVITY_CHECK_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'The API server does not support '
+                '`autostop.activity_check`; upgrade it to a version that '
+                'supports API_VERSION >= '
+                f'{server_constants.MIN_AUTOSTOP_ACTIVITY_CHECK_API_VERSION}.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -523,6 +546,7 @@ def optimize(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_tpu_multi_host_api_version(dag)
+    _check_autostop_activity_check_api_version(dag)
     _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -657,6 +681,7 @@ def validate(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_tpu_multi_host_api_version(dag)
+    _check_autostop_activity_check_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
