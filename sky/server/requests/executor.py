@@ -1208,9 +1208,21 @@ def _gated_sigterm_handler(signum: int,
     _process_worker unhandled and break the entire pool. Swallow it; the
     cancellation path already targets the worker by pid, so a stray SIGTERM
     on an idle worker just means we lost the race with the request finishing.
+
+    The interrupt is one-shot: the flag is cleared before raising, so a
+    second SIGTERM for the same request (e.g. a racing duplicate cancel)
+    cannot raise another KeyboardInterrupt inside the cancellation cleanup
+    of the first one. Interrupting that cleanup can leave the worker stuck
+    inside the cancelled request forever (#11364): entrypoints such as
+    run_with_log catch the first interrupt and kill their children, and a
+    second interrupt escaping into that unwinding can deadlock it (e.g. in
+    Popen.__exit__ closing a stream whose reader thread is still blocked),
+    so the pool worker never reports a result or takes another request.
     """
     del signum, frame
+    global _in_request_execution  # pylint: disable=global-statement
     if _in_request_execution:
+        _in_request_execution = False
         raise KeyboardInterrupt
     # logger isn't async-signal-safe (re-entrant lock); use os.write.
     try:

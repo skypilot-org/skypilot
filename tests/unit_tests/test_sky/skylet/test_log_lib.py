@@ -1,11 +1,85 @@
 """Unit tests for skylet log_lib."""
 
 from io import StringIO
+import os
+import pathlib
+import signal
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 
 from sky.skylet import log_lib
+
+_HOLDER_SCRIPT = textwrap.dedent("""\
+    import os
+    import sys
+    import time
+
+    mode, pid_path = sys.argv[1:3]
+    if os.fork() > 0:
+        sys.exit(0)
+    if mode == 'own-session':
+        os.setsid()
+    with open(pid_path, 'w', encoding='utf-8') as f:
+        f.write(str(os.getpid()))
+    time.sleep(60)
+    """)
+
+_DRIVER_SCRIPT = textwrap.dedent("""\
+    import os
+    import signal
+    import sys
+    import threading
+    import time
+
+    import psutil
+
+    from sky.skylet import log_lib
+
+    mode, holder_path, pid_path, log_path = sys.argv[1:5]
+
+
+    def _sigterm_handler(signum, frame):
+        raise KeyboardInterrupt
+
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
+
+    def _cancel_when_holder_ready():
+        deadline = time.time() + 30
+        while not os.path.exists(pid_path) and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
+    threading.Thread(target=_cancel_when_holder_ready, daemon=True).start()
+    try:
+        log_lib.run_with_log(
+            f'{sys.executable} {holder_path} {mode} {pid_path}; sleep 60',
+            log_path,
+            shell=True)
+        print('returned', flush=True)
+    except KeyboardInterrupt:
+        with open(pid_path, encoding='utf-8') as f:
+            holder_pid = int(f.read())
+        deadline = time.time() + 5
+        holder_dead = False
+        while time.time() < deadline and not holder_dead:
+            try:
+                holder_dead = (psutil.Process(holder_pid).status() ==
+                               psutil.STATUS_ZOMBIE)
+            except psutil.NoSuchProcess:
+                holder_dead = True
+            if not holder_dead:
+                time.sleep(0.1)
+        print(f'interrupted holder_dead={holder_dead}', flush=True)
+    rc = log_lib.run_with_log('echo ok', log_path, shell=True)
+    print(f'reused rc={rc}', flush=True)
+    """)
 
 
 class TestLogBuffer(unittest.TestCase):
@@ -164,6 +238,54 @@ class TestRunWithLogTimeout(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(returncode, 0)
+
+
+class TestRunWithLogKeyboardInterrupt(unittest.TestCase):
+    """run_with_log must not wedge when a cancelled command's subprocess
+    leaves a process holding its stderr pipe outside the process tree."""
+
+    def _run_cancelled_driver(self, mode):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            holder_path = os.path.join(tmp_dir, 'holder.py')
+            driver_path = os.path.join(tmp_dir, 'driver.py')
+            pid_path = os.path.join(tmp_dir, 'holder.pid')
+            log_path = os.path.join(tmp_dir, 'run.log')
+            with open(holder_path, 'w', encoding='utf-8') as f:
+                f.write(_HOLDER_SCRIPT)
+            with open(driver_path, 'w', encoding='utf-8') as f:
+                f.write(_DRIVER_SCRIPT)
+            env = dict(os.environ)
+            repo_root = str(pathlib.Path(log_lib.__file__).resolve().parents[2])
+            env['PYTHONPATH'] = os.pathsep.join(
+                [repo_root, env.get('PYTHONPATH', '')])
+            try:
+                return subprocess.run([
+                    sys.executable, driver_path, mode, holder_path, pid_path,
+                    log_path
+                ],
+                                      capture_output=True,
+                                      text=True,
+                                      timeout=60,
+                                      env=env,
+                                      check=False)
+            finally:
+                try:
+                    with open(pid_path, encoding='utf-8') as f:
+                        os.kill(int(f.read()), signal.SIGKILL)
+                except (FileNotFoundError, ProcessLookupError, ValueError):
+                    pass
+
+    def test_interrupt_kills_process_group_holder(self):
+        result = self._run_cancelled_driver('group')
+        self.assertIn('interrupted holder_dead=True', result.stdout,
+                      result.stderr[-2000:])
+        self.assertIn('reused rc=0', result.stdout, result.stderr[-2000:])
+
+    def test_interrupt_returns_with_detached_holder(self):
+        result = self._run_cancelled_driver('own-session')
+        self.assertIn('interrupted holder_dead=False', result.stdout,
+                      result.stderr[-2000:])
+        self.assertIn('reused rc=0', result.stdout, result.stderr[-2000:])
 
 
 if __name__ == '__main__':

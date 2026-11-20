@@ -54,6 +54,10 @@ def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
     ...
 
 
+def _kill_process_group(proc) -> None:
+    ...
+
+
 @typing.overload
 def run_with_log(cmd: Union[List[str], str],
                  log_path: str,
