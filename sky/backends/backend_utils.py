@@ -4605,6 +4605,8 @@ def get_clusters(
     include_credentials: bool = False,
     summary_response: bool = False,
     include_handle: bool = True,
+    limit: Optional[int] = None,
+    after: Optional[Tuple[int, str]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -4625,6 +4627,10 @@ def get_clusters(
             return clusters from the current user.
         include_credentials: If True, include ssh credentials in the records of
             the clusters the current user owns.
+        limit: If provided, return at most this many clusters, newest launch
+            first.
+        after: If provided, only clusters after this (launched_at, name), the
+            last cluster of the previous page.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -4680,13 +4686,16 @@ def get_clusters(
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
-        summary_response=summary_response)
+        summary_response=summary_response,
+        limit=limit,
+        after=after)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
-    if cluster_names is not None:
+    # A page holds only some of the named clusters.
+    if cluster_names is not None and limit is None:
         record_names = {record['name'] for record in records}
         not_found_clusters = ux_utils.get_non_matched_query(
             cluster_names, record_names)

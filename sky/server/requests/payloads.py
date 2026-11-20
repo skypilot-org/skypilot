@@ -429,6 +429,11 @@ class StatusBody(RequestBody):
     summary_response: bool = False
     # Include the cluster handle in the response
     include_handle: bool = True
+    # A page of at most `limit` clusters, newest launch first. The cursor is the
+    # `launched_at` and `name` of the last cluster of the previous page.
+    limit: Optional[int] = None
+    after_launched_at: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class StartBody(RequestBody):
@@ -625,6 +630,16 @@ class VolumeListBody(RequestBody):
     # None means every volume, so a client that predates this field and never
     # sends it keeps getting the whole listing.
     volume_names: Optional[List[str]] = None
+    # A page of at most `limit` volumes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
+
+
+class StorageListBody(RequestBody):
+    """The request body for the storage list endpoint."""
+    # A page of at most `limit` storages by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class VolumeValidateBody(RequestBody):
@@ -715,6 +730,10 @@ class JobsQueueV2Body(RequestBody):
     infra_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
+    # Cursor: with `limit`, return the page of top-level jobs after this one
+    # in job id order. Servers older than MIN_JOBS_QUEUE_CURSOR_API_VERSION
+    # ignore this field, so the client checks the server version first.
+    after_job_id: Optional[int] = None
     statuses: Optional[List[str]] = None
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
@@ -1172,6 +1191,9 @@ class RecipeListBody(RequestBody):
     my_recipes_only: bool = False
     recipe_type: Optional[
         str] = None  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
+    # A page of at most `limit` recipes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

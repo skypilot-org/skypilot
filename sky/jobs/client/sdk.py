@@ -487,14 +487,82 @@ def queue_v2(
         # search box uses the same filter).
         name_match=name_match,
     )
-    path = '/jobs/queue/v2'
+    page_size = _queue_page_size(body)
+    if page_size is not None:
+        paged_request_id = _queue_in_pages(body, page_size)
+        if paged_request_id is not None:
+            return paged_request_id
+    return _send_queue_v2(body)
+
+
+def _send_queue_v2(
+    body: payloads.JobsQueueV2Body
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
+        str, int], int]]:
     response = server_common.make_authenticated_request(
         'POST',
-        path,
+        '/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
         sync_call=True)
     return server_common.get_request_id(response=response)
+
+
+def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
+    """The page size to fetch the queue in, or None to fetch it in one call.
+
+    Pages follow the default order, newest top-level job first. A refresh is
+    not answered as a sync call, so it is not paged.
+    """
+    if (body.refresh or body.include_tree or
+            body.sort_by not in (None, 'job_id', 'id') or
+            body.sort_order == 'asc'):
+        return None
+    return client_common.sync_page_size(
+        body.limit, server_constants.MIN_JOBS_QUEUE_CURSOR_API_VERSION)
+
+
+def _queue_in_pages(
+    body: payloads.JobsQueueV2Body, page_size: int
+) -> Optional[server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                            int, Dict[str, int], int]]]:
+    """Fetches the queue as sync calls of up to page_size top-level jobs.
+
+    The counts in the result come from the last page.
+    """
+    if body.fields and 'root_job_id' not in body.fields:
+        # Rows name their top-level job in root_job_id; the cursor needs it.
+        body = body.model_copy(update={'fields': [*body.fields, 'root_job_id']})
+
+    def send(after_job_id: Optional[int], size: int) -> server_common.RequestId:
+        return _send_queue_v2(
+            body.model_copy(update={
+                'limit': size,
+                'after_job_id': after_job_id
+            }))
+
+    def read_page(
+            value: Any, after_job_id: Optional[int]
+    ) -> Optional[Tuple[List[Any], int, Any]]:
+        if not isinstance(value, dict) or 'jobs' not in value:
+            return None
+        jobs = value['jobs']
+        roots = {
+            job['job_id']
+            if job.get('root_job_id') is None else job['root_job_id']
+            for job in jobs
+        }
+        if (after_job_id is not None and roots and max(roots) >= after_job_id):
+            return None
+        return jobs, len(roots), min(roots) if roots else None
+
+    return client_common.fetch_in_pages(send,
+                                        page_size,
+                                        read_page,
+                                        lambda last_value, jobs: {
+                                            **last_value, 'jobs': jobs
+                                        },
+                                        limit=body.limit)
 
 
 # Deprecated. Please use queue_v2 instead for better performance.

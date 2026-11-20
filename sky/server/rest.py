@@ -394,6 +394,11 @@ def set_sync_call_max_limit(max_limit: Optional[int]) -> None:
     _sync_call_max_limit = max_limit
 
 
+def get_sync_call_max_limit() -> Optional[int]:
+    """The largest `limit` the server answers as a sync call, or None."""
+    return _sync_call_max_limit
+
+
 def is_sync_response(response: 'requests.Response') -> bool:
     """Whether the server answered the request as a sync call."""
     return response.headers.get(constants.SYNC_CALL_HEADER) == '1'

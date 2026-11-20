@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 70  # no_cleanup for volume delete
+API_VERSION = 72  # limit and cursor on cluster/volume/storage/recipe lists
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -65,6 +65,14 @@ MIN_JOBS_DEPENDS_ON_API_VERSION = 64
 # Minimum server API version that accepts the task's `job:` section
 # (`job.wait_for_scheduling_timeout`).
 MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 66
+# Minimum server API version whose managed-jobs queue takes `after_job_id`
+# (a cursor: the page after this top-level job, in job id order). An older
+# server ignores the field and returns the first page again.
+MIN_JOBS_QUEUE_CURSOR_API_VERSION = 71
+# Minimum server API version whose `status`, `volume_list`, `storage_ls` and
+# recipe list take `limit` and a cursor. An older server ignores them and
+# returns the whole list.
+MIN_LIST_CURSOR_API_VERSION = 72
 
 # The HTTP header naming the user an admin service account acts as.
 IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'

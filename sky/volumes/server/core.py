@@ -272,6 +272,8 @@ def volume_list(
     is_ephemeral: Optional[bool] = None,
     refresh: bool = False,
     volume_names: Optional[List[str]] = None,
+    limit: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> List[responses.VolumeRecord]:
     """Gets volumes from the database.
 
@@ -286,6 +288,8 @@ def volume_list(
             within the caller's accessible workspaces and never past them, so
             naming a volume the caller cannot read still returns nothing. Names
             with no volume are ignored, the same as an empty listing.
+        limit: Return at most this many volumes, by name.
+        after_name: Return only volumes named after this.
 
     Returns:
         [
@@ -313,6 +317,7 @@ def volume_list(
             }
         ]
     """
+    common_utils.check_page(limit, after_name is not None)
     # Visibility, not usability: read-only workspaces' volumes must be listed.
     # See the same call in jobs/server/core.py for managed jobs and in
     # backend_utils for clusters.
@@ -339,7 +344,9 @@ def volume_list(
         volumes = global_user_state.get_volumes(
             is_ephemeral=is_ephemeral,
             workspaces_filter=accessible_workspaces,
-            volume_names=volume_names)
+            volume_names=volume_names,
+            limit=limit,
+            after_name=after_name)
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
 
