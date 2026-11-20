@@ -1065,6 +1065,8 @@ def override_request_env_and_config(
                 _, user = global_user_state.add_or_update_user(user,
                                                                return_user=True)
                 _seed_role_if_missing(user.id)
+            else:
+                user = global_user_state.get_user(user.id) or user
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
