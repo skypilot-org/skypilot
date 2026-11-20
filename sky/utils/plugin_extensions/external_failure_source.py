@@ -21,6 +21,9 @@ Example usage in core SkyPilot:
 
     # Clear failures for a cluster
     cleared = ExternalFailureSource.clear(cluster_name='my-cluster')
+
+    # Ask whether an infrastructure failure explains a failed job
+    failures = ExternalFailureSource.diagnose_job_failure('my-cluster')
 """
 import dataclasses
 from typing import Any, Dict, List, Optional, Protocol
@@ -79,6 +82,13 @@ class ClearClusterFailuresFunc(Protocol):
         ...
 
 
+class DiagnoseJobFailureFunc(Protocol):
+    """Protocol for diagnose_job_failure function."""
+
+    def __call__(self, cluster_name: str) -> List[Dict[str, Any]]:
+        ...
+
+
 class ExternalFailureSource:
     """Singleton class for external cluster failure source.
 
@@ -94,10 +104,15 @@ class ExternalFailureSource:
 
     _get_func: Optional[GetClusterFailuresFunc] = None
     _clear_func: Optional[ClearClusterFailuresFunc] = None
+    _diagnose_job_failure_func: Optional[DiagnoseJobFailureFunc] = None
 
     @classmethod
-    def register(cls, get_failures: GetClusterFailuresFunc,
-                 clear_failures: ClearClusterFailuresFunc) -> None:
+    def register(
+            cls,
+            get_failures: GetClusterFailuresFunc,
+            clear_failures: ClearClusterFailuresFunc,
+            diagnose_job_failure: Optional[DiagnoseJobFailureFunc] = None
+    ) -> None:
         """Register an external failure source implementation.
 
         Only one external failure source can be registered at a time.
@@ -114,9 +129,18 @@ class ExternalFailureSource:
                             cluster_name: Optional[str])
                            -> List[Dict[str, Any]]
                 Returns list of dicts of the failures that were cleared.
+            diagnose_job_failure: Optional function that checks, on demand,
+                whether a failure of the infrastructure under a cluster
+                explains a job that just failed on it. See
+                diagnose_job_failure() for when it is called.
+                Signature: (cluster_name: str) -> List[Dict[str, Any]]
+                Returns list of dicts with the same keys as get_failures;
+                an empty list means no such failure was found. It may block
+                while the source confirms the failure.
         """
         cls._get_func = get_failures
         cls._clear_func = clear_failures
+        cls._diagnose_job_failure_func = diagnose_job_failure
         logger.debug('Registered external failure source')
 
     @classmethod
@@ -171,4 +195,33 @@ class ExternalFailureSource:
                                    cluster_hash=cluster_hash)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to clear cluster failures: {e}')
+            return []
+
+    @classmethod
+    def diagnose_job_failure(cls, cluster_name: str) -> List[Dict[str, Any]]:
+        """Check whether an infrastructure failure explains a failed job.
+
+        get() returns failures the source has already recorded against a
+        cluster. Some infrastructure failures kill the job's program before
+        the source has recorded them and while the cluster still looks
+        healthy, so the job would be blamed on the user program. This asks
+        the source to check the cluster's infrastructure now.
+
+        Args:
+            cluster_name: Name of the cluster the job failed on.
+
+        Returns:
+            List of dictionaries containing failure records, with the same
+            keys as get(). Returns empty list if no such failure was found,
+            if the registered source does not support this check, or if the
+            check itself failed.
+        """
+        if cls._diagnose_job_failure_func is None:
+            return []
+        try:
+            # pylint: disable=not-callable
+            return cls._diagnose_job_failure_func(cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to diagnose job failure on cluster '
+                           f'{cluster_name!r}: {e}')
             return []
