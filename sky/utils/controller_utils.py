@@ -1473,9 +1473,10 @@ MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
 MAX_TOTAL_RUNNING_JOBS = 2000
 # The controllers count the jobs they hold against MAX_TOTAL_RUNNING_JOBS in
 # cost units, so a job that is cheaper to run can count for less than a full
-# job. A job costs JOB_COST_UNITS until a launch brings its cluster up, and
-# then whatever the cluster's runtime reports (see sky.jobs.runtime.cost_units);
-# a runtime reporting JOB_COST_UNITS // 5 lets five such jobs run in the place
+# job. Initial launch and recovery start at JOB_COST_UNITS. A park or a
+# completed launch refreshes the runtime estimate (sky.jobs.runtime.cost_units).
+# An estimate set while parked persists when the launch resumes. A
+# runtime reporting JOB_COST_UNITS // 5 lets five such jobs run in the place
 # of one. Integers keep the cap arithmetic exact, and the large unit leaves
 # room for fine-grained costs.
 JOB_COST_UNITS = 1_000_000

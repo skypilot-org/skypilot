@@ -8,7 +8,10 @@ from unittest import mock
 
 import pytest
 
+from sky import backends
 from sky import exceptions
+from sky import resources as resources_lib
+from sky import task as task_lib
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
 from sky.skylet import constants
@@ -65,7 +68,28 @@ def test_is_oom_failure_still_reads_the_reason_before_the_output():
 def _make_bare_executor():
     executor = recovery_strategy.StrategyExecutor.__new__(
         recovery_strategy.StrategyExecutor)
+    executor.job_costs = None
     return executor
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('job_costs', [None, {1: 1_000_000}])
+async def test_strategy_factory_keeps_the_shared_cost_table(job_costs):
+    lock = asyncio.Lock()
+    task = task_lib.Task(run='true').set_resources(
+        resources_lib.Resources(job_recovery={'strategy': 'FAILOVER'}))
+    executor = recovery_strategy.StrategyExecutor.make(
+        'test-cluster',
+        mock.Mock(spec=backends.CloudVmRayBackend),
+        task,
+        1,
+        0,
+        None,
+        set(),
+        lock,
+        asyncio.Condition(lock),
+        job_costs=job_costs)
+    assert executor.job_costs is job_costs
 
 
 def _request_payload(status: str, status_msg=None):
@@ -371,6 +395,52 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
             in patches.set_backoff_pending.await_args.kwargs['reason'])
     # The task was set back to STARTING on resume.
     patches.set_restarting.assert_awaited_once_with(1, 0, False)
+    # Parking must not tear down the partially provisioned cluster.
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('exit_kind', ['resume', 'vanished', 'error', 'cancel'])
+async def test_park_refreshes_runtime_cost_without_an_exit_transition(
+        monkeypatch, exit_kind):
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    full = recovery_strategy.controller_utils.JOB_COST_UNITS
+    executor.job_costs = {executor.job_id: full}
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: True)
+    hook = mock.Mock(return_value=full // 5)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'cost_units',
+                        hook)
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda _: 'handle')
+
+    async def wait_for_request(request_id):
+        # Cost is refreshed after yielding the scarce launch slot.
+        assert executor.job_id not in executor.starting
+        assert executor.job_costs == {executor.job_id: full // 5}
+        if exit_kind == 'error':
+            raise RuntimeError('request store unavailable')
+        if exit_kind == 'cancel':
+            raise asyncio.CancelledError()
+        return None if exit_kind == 'vanished' else request_id
+
+    executor._wait_for_parked_request = wait_for_request
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        recovery_strategy._LaunchRequestParked('req-123', 'queued'), None
+    ])
+    if exit_kind == 'error':
+        with pytest.raises(RuntimeError, match='request store unavailable'):
+            await executor._launch(max_retry=1, raise_on_failure=True)
+    elif exit_kind == 'cancel':
+        with pytest.raises(asyncio.CancelledError):
+            await executor._launch(max_retry=1, raise_on_failure=True)
+    else:
+        assert await executor._launch(max_retry=1,
+                                      raise_on_failure=True) == 123.45
+    hook.assert_called_once_with('handle')
+    assert executor.job_costs == {executor.job_id: full // 5}
     # Parking must NOT tear down the (partially provisioned) cluster.
     executor._cleanup_cluster.assert_not_called()
 
