@@ -11,6 +11,7 @@ import filelock
 
 from sky import sky_logging
 from sky import skypilot_config
+from sky.jobs import cancel_signal
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -184,6 +185,10 @@ def run_log_gc():
     tasks.append(
         threading.Thread(target=gc_controller_logs_for_job, daemon=True))
     tasks.append(threading.Thread(target=gc_task_logs_for_job, daemon=True))
+    # Not a log, but it needs the same thing: exactly one process that cleans
+    # up, however many controller processes there are.
+    tasks.append(
+        threading.Thread(target=cancel_signal.gc_stale_files, daemon=True))
     for task in tasks:
         task.start()
     for task in tasks:
