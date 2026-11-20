@@ -8,6 +8,7 @@ import requests.exceptions as requests_exceptions
 from sky import clouds
 from sky.resources import Resources
 from sky.serve import serve_utils
+from sky.skylet import constants
 
 # String path for mock.patch — can't use the constant directly because
 # mock.patch needs the dotted path to the attribute being patched.
@@ -127,7 +128,8 @@ class TestIsConsolidationMode:
         """pool=True routes through controller_utils.is_jobs_consolidation_mode
         with the pool extra validator, so the two readers share one source."""
         monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
-        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            monkeypatch.delenv(name, raising=False)
         with mock.patch('sky.utils.controller_utils.is_jobs_consolidation_mode',
                         return_value=helper_result) as mock_helper:
             assert serve_utils.is_consolidation_mode(pool=True) is helper_result
@@ -156,7 +158,8 @@ class TestIsConsolidationMode:
                                                        (False, False)])
     def test_serve_reads_config_only(self, config_value, expected, monkeypatch):
         """pool=False: reads serve config key; signal file must not affect."""
-        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            monkeypatch.delenv(name, raising=False)
         with tempfile.TemporaryDirectory() as tmpdir:
             signal_file = pathlib.Path(tmpdir) / 'signal'
             signal_file.touch()  # signal file present should not matter
@@ -169,12 +172,13 @@ class TestIsConsolidationMode:
                     ('serve', 'controller', 'consolidation_mode'),
                     default_value=False)
 
-    @mock.patch.dict('os.environ', {'IS_SKYPILOT_JOB_CONTROLLER': '1'},
-                     clear=False)
-    def test_override_env_forces_true_for_serve(self):
-        """OVERRIDE_CONSOLIDATION_MODE forces True in the serve (pool=False)
-        branch. Pool case goes through the helper which has its own OVERRIDE
+    @pytest.mark.parametrize('env_name',
+                             constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE)
+    def test_override_env_forces_true_for_serve(self, monkeypatch, env_name):
+        """Either controller-process-tree name forces True in the serve
+        (pool=False) branch. Pool case goes through the helper which has its own
         short-circuit tested in controller_utils."""
+        monkeypatch.setenv(env_name, '1')
         with mock.patch('sky.serve.serve_utils.skypilot_config'):
             assert serve_utils.is_consolidation_mode(pool=False) is True
 

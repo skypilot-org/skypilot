@@ -172,14 +172,14 @@ def start_controller() -> None:
     run_controller_cmd = (f'{sys.executable} -u -m'
                           f'sky.jobs.controller {controller_uuid}')
 
-    # Bake IS_SKYPILOT_JOB_CONTROLLER into the shell command rather than
-    # mutating os.environ. Setting os.environ here was harmless before
+    # Bake the controller-process-tree variables into the shell command rather
+    # than mutating os.environ. Setting os.environ here was harmless before
     # PR #9731 (the daemon ran in a child process with its own isolated env),
     # but after #9731 the daemon runs as a main-process thread — the mutation
     # leaks permanently into the API server's os.environ and causes
     # serve_utils.is_consolidation_mode() to return True for all serve
     # requests, even when serve consolidation mode is not configured.
-    run_cmd = (f'export {constants.OVERRIDE_CONSOLIDATION_MODE}=true; '
+    run_cmd = (f'{constants.CONTROLLER_PROCESS_TREE_EXPORTS}'
                f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
 
@@ -273,7 +273,7 @@ def maybe_start_controllers(
         # sky/templates/jobs-controller.yaml.j2. In particular it is never
         # reached from the controller process itself -- where
         # is_consolidation_mode() returns True unconditionally because
-        # start_controller() exports OVERRIDE_CONSOLIDATION_MODE. See
+        # start_controller() exports ENV_VAR_IN_CONTROLLER_PROCESS_TREE. See
         # tests/unit_tests/test_sky/jobs/test_consolidation_mode_gate.py.
         #
         # Corollary: in the transitional misconfiguration where
