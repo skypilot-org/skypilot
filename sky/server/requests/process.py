@@ -13,24 +13,9 @@ from sky.utils import subprocess_utils
 
 logger = logging.getLogger(__name__)
 
-# Warm start: how many workers may be starting (spawned but not yet done with
-# their initializer) at the same time. Each one imports SkyPilot, so starting
-# all of them at once would compete for the CPU the server needs.
-_WARM_START_CONCURRENCY = 2
-# How often the warm-start thread checks whether it can start another worker.
-_WARM_START_POLL_SECONDS = 0.05
-# Stop warm start if no starting worker becomes ready for this long, e.g. when
-# the initializer fails. Workers then start on demand, as without warm start.
-_WARM_START_STALL_TIMEOUT_SECONDS = 300
-
-
-def _initializer_with_ready_signal(ready_count, initializer: Optional[Callable],
-                                   initargs: Tuple) -> None:
-    """Runs the pool's initializer, then counts this worker as ready."""
-    if initializer is not None:
-        initializer(*initargs)
-    with ready_count.get_lock():
-        ready_count.value += 1
+# Warm start starts one worker per interval, so that workers importing SkyPilot
+# do not all compete for CPU when the server starts.
+_WARM_START_INTERVAL_SECONDS = 0.5
 
 
 class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
@@ -42,27 +27,11 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
     2. Idle check: support check if there are any idle workers.
     3. Proactive shutdown: SIGTERM worker processes when the executor is
        shutting down instead of indefinitely waiting.
-    4. Warm start (opt-in): start every worker up front, a few at a time,
-       instead of on the first submits that find no idle worker.
+    4. Warm start (opt-in): start every worker in the background, one per
+       interval, instead of on the first submits that find no idle worker.
     """
 
     def __init__(self, max_workers: int, warm_start: bool = False, **kwargs):
-        self._warm_start = warm_start
-        if warm_start:
-            # Warm start spawns workers from a background thread, which is
-            # only safe without fork (cpython gh-90622); with fork, Python
-            # 3.11+ would also start every worker at once. The API server
-            # already uses spawn (see executor.py).
-            if kwargs.get('mp_context') is None:
-                kwargs['mp_context'] = multiprocessing.get_context('spawn')
-            if kwargs['mp_context'].get_start_method() == 'fork':
-                raise ValueError('warm_start requires a non-fork mp_context.')
-            # Each worker signals readiness once its initializer has run, so
-            # warm start can limit how many are starting at the same time.
-            self._ready_count = kwargs['mp_context'].Value('i', 0)
-            kwargs['initargs'] = (self._ready_count, kwargs.get('initializer'),
-                                  kwargs.get('initargs', ()))
-            kwargs['initializer'] = _initializer_with_ready_signal
         super().__init__(max_workers=max_workers, **kwargs)
         self.max_workers: int = max_workers
         # The number of workers that are handling tasks, atomicity across
@@ -74,100 +43,45 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         # 3. Thread 1 schedules the task to other pool even if the pool is
         #    currently idle.
         self.running: atomic.AtomicInt = atomic.AtomicInt(0)
-        # Set by shutdown, under _shutdown_lock, to stop warm start.
-        self._warm_start_stopped = False
+        self._warm_start_stop = threading.Event()
         self._warm_start_thread: Optional[threading.Thread] = None
         if warm_start:
-            self._warm_start_thread = threading.Thread(target=self._warm_up,
-                                                       name='pool-warm-start',
-                                                       daemon=True)
-            self._warm_start_thread.start()
-
-    # Warm start drives ProcessPoolExecutor's private state (_shutdown_lock,
-    # _processes, _spawn_process, ...), which differs across Python versions;
-    # `_pool` gives untyped access to it in one place.
-    @property
-    def _pool(self) -> Any:
-        return self
-
-    def _start_worker(self) -> None:
-        """Starts one worker process. Call with _shutdown_lock held."""
-        # pylint: disable=protected-access
-        pool = self._pool
-        if hasattr(concurrent.futures.ProcessPoolExecutor, '_spawn_process'):
-            # Python 3.11+.
-            pool._spawn_process()
-            return
-        # Python 3.9 and 3.10 start workers inline in _adjust_process_count;
-        # this is the same code, without its idle-worker check.
-        worker_fn: Any = getattr(concurrent.futures.process, '_process_worker')
-        proc = pool._mp_context.Process(
-            target=worker_fn,
-            args=(pool._call_queue, pool._result_queue, pool._initializer,
-                  pool._initargs))
-        proc.start()
-        pool._processes[proc.pid] = proc
-        # pylint: enable=protected-access
-
-    def starting_workers(self) -> int:
-        """Workers started that have not finished their initializer yet.
-
-        Counts every live worker, including ones started on demand by submit,
-        so warm start never adds to a burst of on-demand starts.
-        """
-        if not self._warm_start:
-            return 0
-        processes = self._pool._processes  # pylint: disable=protected-access
-        return max(0, len(processes or {}) - self._ready_count.value)
+            # Starting workers from another thread is only safe without fork
+            # (cpython gh-90622). The stdlib flag for that exists on Python
+            # 3.11+, which also added _spawn_process.
+            if getattr(self, '_safe_to_dynamically_spawn_children', False):
+                self._warm_start_thread = threading.Thread(
+                    target=self._warm_up, name='pool-warm-start', daemon=True)
+                self._warm_start_thread.start()
+            else:
+                logger.warning('Executor warm start needs Python 3.11+ and a '
+                               'non-fork start method; workers will start on '
+                               'demand.')
 
     def _warm_up(self) -> None:
-        """Starts every worker, at most _WARM_START_CONCURRENCY at a time.
+        """Starts one worker per interval until the pool is full.
 
-        Workers that are ready take requests while the rest are starting, so
-        the pool serves requests during warm start. Submits during warm start
-        may also spawn workers, up to max_workers in total, as they do today.
+        The lock is held only while starting each process, so workers that are
+        up take tasks while the rest start.
         """
+        # ProcessPoolExecutor has no public way to add a worker without
+        # occupying the idle ones, so this uses its private state.
         # pylint: disable=protected-access
-        pool = self._pool
-        started_at = time.monotonic()
-        stalled_since: Optional[float] = None
+        pool: Any = self
         while True:
             with pool._shutdown_lock:
-                if (self._warm_start_stopped or pool._shutdown_thread or
-                        pool._broken):
+                if pool._broken or pool._shutdown_thread:
                     return
                 if len(pool._processes) >= self.max_workers:
                     break
-                if self.starting_workers() < _WARM_START_CONCURRENCY:
-                    pool._start_executor_manager_thread()
-                    self._start_worker()
-                    # Let the manager thread watch the new worker right away.
-                    pool._executor_manager_thread_wakeup.wakeup()
-                    stalled_since = None
-                elif stalled_since is None:
-                    stalled_since = time.monotonic()
-                elif (time.monotonic() - stalled_since >
-                      _WARM_START_STALL_TIMEOUT_SECONDS):
-                    logger.warning(
-                        'Warm start stopped: no worker became ready in '
-                        f'{_WARM_START_STALL_TIMEOUT_SECONDS}s. Remaining '
-                        'workers will start on demand.')
-                    return
-            time.sleep(_WARM_START_POLL_SECONDS)
+                pool._start_executor_manager_thread()
+                pool._spawn_process()
+                # Let the manager thread watch the new worker right away.
+                pool._executor_manager_thread_wakeup.wakeup()
+            if self._warm_start_stop.wait(_WARM_START_INTERVAL_SECONDS):
+                return
         # pylint: enable=protected-access
-        logger.info(f'Warm start: {self.max_workers} workers started in '
-                    f'{time.monotonic() - started_at:.1f}s.')
-
-    def wait_for_warm_start(self, timeout: Optional[float] = None) -> bool:
-        """Waits for warm start to finish starting workers.
-
-        Returns True when warm start is done or was not enabled, False on
-        timeout.
-        """
-        if self._warm_start_thread is None:
-            return True
-        self._warm_start_thread.join(timeout)
-        return not self._warm_start_thread.is_alive()
+        logger.info(f'Warm start: {self.max_workers} workers started.')
 
     def submit(self, fn, /, *args, **kwargs) -> concurrent.futures.Future:
         """Submit a task for execution.
@@ -191,12 +105,11 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         # Here wait means wait for the proactive cancellation complete.
         # TODO(aylei): we may support wait=True in the future if needed.
         assert wait is True, 'wait=False is not supported'
-        # Snapshot the workers and stop warm start under the lock warm start
-        # spawns under, so no worker can start after the snapshot and be left
-        # out of the shutdown below.
-        with self._pool._shutdown_lock:  # pylint: disable=protected-access
-            self._warm_start_stopped = True
-            executor_processes = list(self._processes.values())
+        # Stop warm start first, so no worker starts after the snapshot below.
+        self._warm_start_stop.set()
+        if self._warm_start_thread is not None:
+            self._warm_start_thread.join()
+        executor_processes = list(self._processes.values())
         # Shutdown the executor so that executor process can exit once the
         # running task is finished or interrupted.
         super().shutdown(wait=False)
