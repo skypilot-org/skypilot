@@ -19,6 +19,7 @@ import json
 import os
 import pickle
 import shlex
+import signal
 import subprocess
 import time
 import typing
@@ -49,6 +50,9 @@ _SSH_DAEMON_PROCESS_NAMES = frozenset({'sshd', 'dropbear'})
 
 _AUTOSTOP_CONFIG_KEY = 'autostop_config'
 _HOOKS_CONFIG_KEY = 'lifecycle_hooks'
+_ACTIVITY_CHECK_CONFIG_KEY = 'autostop_activity_check'
+
+DEFAULT_ACTIVITY_CHECK_TIMEOUT_SECONDS = 10
 
 # This key-value is stored inside the 'configs' sqlite3 database, because both
 # user-issued commands (this module) and the Skylet process running the
@@ -367,6 +371,65 @@ def get_hooks() -> List[Dict[str, Any]]:
         return []
 
 
+def set_activity_check(check: Optional[Dict[str, Any]]) -> None:
+    """Store the autostop activity check, or clear it when ``check`` is None.
+
+    Kept apart from the pickled ``AutostopConfig`` so a later
+    ``sky autostop`` (which does not carry the check) leaves it in place.
+    """
+    configs.set_config(_ACTIVITY_CHECK_CONFIG_KEY,
+                       json.dumps(check) if check else '')
+
+
+def get_activity_check() -> Optional[Dict[str, Any]]:
+    raw = configs.get_config(_ACTIVITY_CHECK_CONFIG_KEY)
+    return json.loads(raw) if raw else None
+
+
+def activity_check_reports_active() -> bool:
+    """Run the stored activity check; True means the cluster is active.
+
+    Exit code 0 means active and 1 means idle. Any other exit code, a
+    timeout or a failure to run counts as active, so a broken check never
+    stops the cluster.
+    """
+    check = get_activity_check()
+    if check is None:
+        return False
+    timeout = check.get('timeout', DEFAULT_ACTIVITY_CHECK_TIMEOUT_SECONDS)
+    try:
+        # A new session puts everything the check starts in one process
+        # group we can kill, and no pipes means a backgrounded child cannot
+        # keep us waiting after the check itself has exited.
+        proc = subprocess.Popen(['bash', '-c', check['run']],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+    except OSError as e:
+        logger.warning(f'Autostop activity check failed to run: {e}; '
+                       'treating the cluster as active.')
+        return True
+    try:
+        returncode: Optional[int] = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        returncode = None
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    if returncode is None:
+        proc.wait()
+        logger.warning(f'Autostop activity check timed out after {timeout}s; '
+                       'treating the cluster as active.')
+        return True
+    if returncode == 1:
+        return False
+    if returncode != 0:
+        logger.warning(f'Autostop activity check exited with {returncode}; '
+                       'treating the cluster as active.')
+    return True
+
+
 def set_last_active_time_to_now() -> None:
     """Sets the last active time to time.time()."""
     logger.debug('Setting last active time.')
@@ -504,13 +567,16 @@ class AutostopCodeGen:
                      down: bool = False,
                      hook: Optional[str] = None,
                      hook_timeout: Optional[int] = None,
-                     hooks: Optional[List[Dict[str, Any]]] = None) -> str:
+                     hooks: Optional[List[Dict[str, Any]]] = None,
+                     activity_check: Optional[Dict[str, Any]] = None) -> str:
         """Render skylet-side autostop + hooks setup as a Python one-liner.
 
         Dual-emits for mixed-version environments:
           - skylet < 4 / 5: legacy signatures (no hook / waitless)
           - skylet 5–6: single-hook form via `hook` / `hook_timeout`
           - skylet ≥ 7: set_autostop + set_hooks(full list)
+          - skylet ≥ 8: also set_activity_check; ``activity_check=None``
+            leaves the stored check alone and ``{}`` clears it
         """
         if wait_for is None:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
@@ -541,6 +607,13 @@ class AutostopCodeGen:
             set_hooks_line = ''
         else:
             set_hooks_line = f'\n autostop_lib.set_hooks({hooks!r})'
+        if activity_check is None:
+            activity_check_line = ''
+        else:
+            stored_check = activity_check or None
+            activity_check_line = (
+                '\n if skylet_lib_version >= 8: '
+                f'\n  autostop_lib.set_activity_check({stored_check!r})')
         code = [
             '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
             '\nif skylet_lib_version < 4: '
@@ -557,7 +630,8 @@ class AutostopCodeGen:
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
             f'hook_timeout={hook_timeout})'
-            f'{set_hooks_line}',
+            f'{set_hooks_line}'
+            f'{activity_check_line}',
         ]
         return cls._build(code)
 

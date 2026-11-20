@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 70  # no_cleanup for volume delete
+API_VERSION = 71  # autostop.activity_check in the resources of a task
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -86,6 +86,11 @@ MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
 # its schema, and dropping it on the client would launch different hardware
 # (one 8-chip VM instead of a 2x4 slice), so the client raises instead.
 MIN_TPU_MULTI_HOST_API_VERSION = 69
+# Minimum server API version that accepts `autostop.activity_check`. An older
+# server rejects the field in its schema, and dropping it on the client would
+# let the cluster stop while the check would have reported it active, so the
+# client raises instead.
+MIN_AUTOSTOP_ACTIVITY_CHECK_API_VERSION = 71
 # Minimum server API version that accepts `no_cleanup` on volume delete. An
 # older server ignores the field and would wipe the host path anyway.
 MIN_VOLUME_NO_CLEANUP_API_VERSION = 70

@@ -81,6 +81,13 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
             elif request.hooks:
                 autostop_lib.set_hooks(
                     autostop_lib.hooks_from_protobuf(request.hooks))
+            if request.clear_activity_check:
+                autostop_lib.set_activity_check(None)
+            elif request.HasField('activity_check'):
+                autostop_lib.set_activity_check({
+                    'run': request.activity_check.run,
+                    'timeout': request.activity_check.timeout,
+                })
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

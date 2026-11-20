@@ -72,6 +72,9 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+    # Command whose exit code tells the skylet whether the cluster is active;
+    # see autostop_lib.activity_check_reports_active().
+    activity_check: Optional[Dict[str, Any]] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -82,6 +85,8 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
+        if self.activity_check is not None:
+            config['activity_check'] = self.activity_check
         return config
 
     @classmethod
@@ -113,6 +118,12 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
+            if 'activity_check' in config:
+                autostop_config.activity_check = {
+                    'timeout':
+                        autostop_lib.DEFAULT_ACTIVITY_CHECK_TIMEOUT_SECONDS,
+                    **config['activity_check'],
+                }
             # `hook` / `hook_timeout` are consumed by Resources before this
             # method is called and routed into the top-level `hooks` list.
             return autostop_config
