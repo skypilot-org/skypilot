@@ -1172,3 +1172,88 @@ def test_ssh_into_cluster_in_new_workspace(generic_cloud: str):
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test allowed_queues ----------
+@pytest.mark.no_remote_server
+# We can't restart the api server in the dependency test.
+@pytest.mark.no_dependency
+def test_workspace_allowed_queues(generic_cloud: str):
+    """A job that names a queue outside its workspace's allowed queues is
+    rejected at submission; an allowed queue, or no queue, is not. On
+    Kubernetes, a queue set on the pod some other way is rejected too."""
+    # Overlaid onto the existing server config by override_sky_config.
+    config_dict = {
+        'workspaces': {
+            'queues-ws': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'normal',
+                        'allowed_queues': ['high', 'normal'],
+                    }
+                }
+            }
+        }
+    }
+    local_dir_obj = tempfile.TemporaryDirectory(prefix='sky_ws_queues_')
+    task_yamls = {}
+    for queue in ('other', 'high'):
+        task_yamls[queue] = os.path.join(local_dir_obj.name, f'{queue}.yaml')
+        with open(task_yamls[queue], 'w', encoding='utf-8') as f:
+            f.write(
+                textwrap.dedent(f"""\
+                run: echo hi
+                config:
+                  kubernetes:
+                    quota:
+                      queue: {queue}
+                """))
+    # A queue label set directly on the pod skips the submission check, so
+    # only the queue the cluster ends up with catches it.
+    task_yamls['label'] = os.path.join(local_dir_obj.name, 'label.yaml')
+    with open(task_yamls['label'], 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+            run: echo hi
+            config:
+              kubernetes:
+                custom_metadata:
+                  labels:
+                    kueue.x-k8s.io/queue-name: other
+            """))
+
+    name = smoke_tests_utils.get_cluster_name()
+    rejected = ('echo "$s" | grep "Queue \'other\' is not allowed in '
+                'workspace \'queues-ws\'"')
+    launch = (f'sky launch -y --dryrun --config active_workspace=queues-ws '
+              f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG}')
+    commands = [
+        # Restart so the server picks up the merged config.
+        smoke_tests_utils.SKY_API_RESTART,
+        f's=$({launch} {task_yamls["other"]} 2>&1) && exit 1; echo "$s"; '
+        f'{rejected}',
+        f'{launch} {task_yamls["high"]}',
+        f'{launch} echo hi',
+    ]
+    if generic_cloud == 'kubernetes':
+        # A real launch: the queue is checked while the cluster config is
+        # written, before any pod is created.
+        commands.append(
+            f's=$(sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace=queues-ws {task_yamls["label"]} 2>&1) '
+            f'&& exit 1; echo "$s"; {rejected}')
+    test = smoke_tests_utils.Test(
+        'test_workspace_allowed_queues',
+        commands,
+        teardown=(f'sky down -y {name} --config active_workspace=queues-ws '
+                  f'|| true; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=10 * 60,
+    )
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        local_dir_obj.cleanup()

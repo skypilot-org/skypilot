@@ -1639,6 +1639,15 @@ _SBATCH_OPTIONS_SCHEMA = {
     },
 }
 
+# The queues a workspace's jobs can use. Unset means any queue.
+_ALLOWED_QUEUES_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'string',
+        'minLength': 1,
+    },
+}
+
 # `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
 # `quota.account` the account it is charged to (`sbatch --account`), mirroring
 # `kubernetes.quota.queue`. Permissive so plugins can layer their own
@@ -1658,6 +1667,7 @@ _SLURM_QUOTA_SCHEMA = {
             'type': 'string',
             'minLength': 1,
         },
+        'allowed_queues': _ALLOWED_QUEUES_SCHEMA,
     },
 }
 
@@ -2973,6 +2983,7 @@ def get_config_schema():
                                 'queue': {
                                     'type': 'string',
                                 },
+                                'allowed_queues': _ALLOWED_QUEUES_SCHEMA,
                             },
                         },
                         'context_configs': {
