@@ -147,7 +147,7 @@ To view the status of your SkyPilot clusters, use :code:`sky status`:
 .. code-block:: console
 
     $ sky status
-    Clusters
+    Your clusters
     NAME       WORKSPACE  INFRA                      RESOURCES                    STATUS  AUTOSTOP  LAUNCHED
     mycluster  prod       Kubernetes (k8s-context1)  1x(cpus=2, mem=4, ...)       UP      -         10 mins ago
     dev        ml-team    Kubernetes (k8s-context2)  1x(gpus=H100:1, cpus=4, ...) UP      10m       1 hr ago
@@ -157,7 +157,7 @@ When connected to a shared :ref:`SkyPilot API server <sky-api-server>`, you can 
 .. code-block:: console
 
     $ sky status -u
-    Clusters
+    All users' clusters
     NAME       USER              WORKSPACE  INFRA                      RESOURCES                            STATUS  AUTOSTOP  LAUNCHED
     mycluster  alice@example.com prod       Kubernetes (k8s-context1)  1x(cpus=2, mem=4, ...)               UP      -         10 mins ago
     dev        alice@example.com ml-team    Kubernetes (k8s-context2)  1x(gpus=H100:1, cpus=4, mem=16, ...) UP      10m       1 hr ago

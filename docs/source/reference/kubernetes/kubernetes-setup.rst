@@ -447,7 +447,7 @@ Or run :code:`sky status -u`:
 .. code-block:: console
 
     $ sky status -u
-    Clusters
+    All users' clusters
     NAME                USER               WORKSPACE         INFRA                   RESOURCES                                   STATUS   AUTOSTOP  LAUNCHED
     training-multinode  alice@skypilot.co  ml-team           Kubernetes (nebius)     2x(gpus=H100:8, cpus=200, mem=800, ...)     RUNNING  60m       5d ago
     dev-alice           alice@skypilot.co  research-private  Kubernetes (coreweave)  1x(gpus=H200:1, cpus=8, mem=32, ...)        RUNNING  -         6d ago

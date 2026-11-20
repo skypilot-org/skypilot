@@ -89,9 +89,9 @@ EOF
 # kind delete cluster --name kind-cluster-2
 
 # Define the contents to match
-MATCH_CONTENT_1="No existing clusters."
-MATCH_CONTENT_2="No in-progress managed jobs."
-MATCH_CONTENT_3="No live services."
+MATCH_CONTENT_1="No existing clusters accessible to you."
+MATCH_CONTENT_2="No in-progress managed jobs accessible to you."
+MATCH_CONTENT_3="No live services accessible to you."
 
 # Define the total duration and interval
 TOTAL_DURATION=600  # 10 minutes in seconds

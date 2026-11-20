@@ -118,7 +118,8 @@ def show_status_table(cluster_records: List[responses.StatusResponse],
             cluster_str += ', '.join(not_found_clusters)
             click.echo(f'{cluster_str} not found.')
     elif not cluster_records:
-        click.echo('No existing clusters.')
+        scope = 'accessible to you' if show_user else 'owned by you'
+        click.echo(f'No existing clusters {scope}.')
     return num_pending_autostop
 
 
