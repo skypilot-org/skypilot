@@ -112,9 +112,11 @@ async def pin_recipe(
     request: fastapi.Request,
     pin_body: payloads.RecipePinBody,
 ) -> None:
-    """Toggle pin status of a recipe (admin only)."""
-    # Note: Admin check should be performed in the core function or
-    # via middleware. For now, the API is available to all authenticated users.
+    """Toggle pin status of a recipe.
+
+    Any user who may write recipes (not a viewer) may pin or unpin one; pins
+    are shared by everyone, like the recipes themselves.
+    """
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.RECIPE_PIN,
