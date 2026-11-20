@@ -12,18 +12,21 @@ import re
 import select
 import shlex
 import signal
+import stat as stat_lib
 import subprocess
 import sys
 import tempfile
 import textwrap
 import threading
 import time
-from typing import (BinaryIO, Dict, Iterable, Iterator, List, Optional, TextIO,
-                    Tuple, Union)
+import typing
+from typing import (BinaryIO, Dict, Iterable, Iterator, List, Optional, Set,
+                    TextIO, Tuple, Union)
 
 import colorama
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import context
@@ -32,6 +35,11 @@ from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    import psutil
+else:
+    psutil = adaptors_common.LazyImport('psutil')
+
 SKY_LOG_WAITING_GAP_SECONDS = 1
 SKY_LOG_WAITING_MAX_RETRY = 5
 SKY_LOG_TAILING_GAP_SECONDS = 0.2
@@ -39,6 +47,11 @@ SKY_LOG_TAILING_GAP_SECONDS = 0.2
 # streaming when tail > 0.
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
 _ORPHAN_WATCHDOG_INTERVAL_SECONDS = 5
+_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS = 1
+# How long the output pipe may stay open after the command exits while no
+# process in its session holds it, before the remaining writers are
+# terminated.
+_ESCAPED_WRITER_GRACE_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
 
@@ -159,6 +172,151 @@ def process_subprocess_stream(proc, stdout_stream_handler,
     return stdout, stderr
 
 
+def _process_sessions() -> Dict[int, int]:
+    """Maps PIDs, other than this process, to their session IDs."""
+    sessions: Dict[int, int] = {}
+    own_pid = os.getpid()
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit() or int(entry) == own_pid:
+            continue
+        try:
+            sessions[int(entry)] = os.getsid(int(entry))
+        except OSError:
+            continue
+    return sessions
+
+
+def _pipe_writers(pipe_links: Set[str], pids: Iterable[int]) -> List[int]:
+    """Returns the PIDs that hold the write end of any of the pipes."""
+    writers = []
+    for pid in pids:
+        fd_dir = f'/proc/{pid}/fd'
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            path = f'{fd_dir}/{fd}'
+            try:
+                # The mode of a /proc/<pid>/fd link is the fd's access mode.
+                if (os.readlink(path) in pipe_links and
+                        os.lstat(path).st_mode & stat_lib.S_IWUSR):
+                    writers.append(pid)
+                    break
+            except OSError:
+                continue
+    return writers
+
+
+def _fds_hidden(pid: int) -> bool:
+    """Returns whether a live process's fds cannot be read, e.g. under sudo.
+
+    Zombies are excluded: their fd directories are unreadable too, but they
+    hold no fds.
+    """
+    if os.access(f'/proc/{pid}/fd', os.R_OK):
+        return False
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
+        return False
+
+
+def _command_exited(proc: subprocess.Popen) -> bool:
+    """Returns whether the command exited, without reaping it.
+
+    The command must stay unreaped while its output streams. The subprocess
+    daemon treats a reaped command as gone and kills its remaining children.
+    """
+    if proc.returncode is not None:
+        return True
+    try:
+        return os.waitid(os.P_PID, proc.pid,
+                         os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except ChildProcessError:
+        # Already reaped by another thread.
+        return True
+
+
+def _start_escaped_writer_reaper(
+        proc: subprocess.Popen) -> Tuple[threading.Event, threading.Event]:
+    """Unblocks output streaming when processes outlive the command.
+
+    Streaming reads the command's stdout/stderr until EOF. A process that
+    leaves the command's session (e.g. via setsid) and keeps the pipe open
+    blocks the read after the command exits, so the exit code is never
+    returned. Once the command has exited and, for
+    _ESCAPED_WRITER_GRACE_SECONDS, the pipe has been held only by processes
+    outside the command's session, those processes are terminated. While a
+    process in the command's session holds the pipe (e.g. a `cmd &`
+    background job, including one in its own process group), streaming waits
+    for it as before. Linux only; on other platforms this is a no-op.
+
+    Args:
+        proc: The command, started with start_new_session=True so its PID
+            is its session ID.
+
+    Returns:
+        A tuple of two events: one the caller sets once streaming finishes,
+        to stop the reaper; and one the reaper sets once the command has
+        exited and only processes outside its session hold the pipe, so a
+        timeout no longer applies to the command.
+    """
+    stop = threading.Event()
+    output_escaped = threading.Event()
+    if not sys.platform.startswith('linux'):
+        return stop, output_escaped
+    streams = [s for s in (proc.stdout, proc.stderr) if s is not None]
+    pipe_links = {f'pipe:[{os.fstat(s.fileno()).st_ino}]' for s in streams}
+
+    def _reap() -> None:
+        escaped_since = None
+        warned: Set[int] = set()
+        while not stop.wait(_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS):
+            if not _command_exited(proc):
+                continue
+            sessions = _process_sessions()
+            members = [p for p, s in sessions.items() if s == proc.pid]
+            # A member whose fds cannot be read may hold the pipe.
+            if (_pipe_writers(pipe_links, members) or
+                    any(_fds_hidden(p) for p in members)):
+                escaped_since = None
+                output_escaped.clear()
+                continue
+            if escaped_since is None:
+                escaped_since = time.monotonic()
+                output_escaped.set()
+            if (time.monotonic() - escaped_since <
+                    _ESCAPED_WRITER_GRACE_SECONDS):
+                continue
+            holders = []
+            for pid in _pipe_writers(pipe_links, sessions):
+                try:
+                    holder = psutil.Process(pid)
+                    cmdline = ' '.join(holder.cmdline())[:200]
+                    holder.terminate()
+                except psutil.Error:
+                    continue
+                if pid not in warned:
+                    warned.add(pid)
+                    logger.warning(
+                        f'Terminating process {pid} ({cmdline!r}): it left '
+                        f'the session of command {proc.pid}, which exited, '
+                        'and still holds its output open.')
+                holders.append(holder)
+            _, alive = psutil.wait_procs(holders, timeout=10)
+            for holder in alive:
+                try:
+                    holder.kill()
+                except psutil.Error:
+                    continue
+            # Retry surviving holders only once per grace period.
+            escaped_since = time.monotonic()
+
+    threading.Thread(target=_reap, daemon=True).start()
+    return stop, output_escaped
+
+
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
@@ -175,6 +333,7 @@ def run_with_log(
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
     timeout: Optional[int] = None,
+    reap_escaped_writers: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
@@ -192,6 +351,11 @@ def run_with_log(
         timeout: Optional timeout in seconds. If the command does not complete
             within this time, it will be terminated and TimeoutExpired will be
             raised. None means no timeout (default).
+        reap_escaped_writers: Whether to terminate processes that left the
+            command's session and still hold its output open after it exits,
+            so the exit code is returned. Only for job commands: for other
+            callers such a process may be shared, e.g. an SSH ControlMaster
+            that multiplexes other sessions.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -296,8 +460,14 @@ def run_with_log(
 
             def _timeout_handler():
                 nonlocal timeout_triggered
+                if output_escaped is not None and output_escaped.is_set():
+                    return
                 timeout_triggered = True
                 subprocess_utils.kill_children_processes(proc.pid)
+
+            reaper_stop = output_escaped = None
+            if reap_escaped_writers and proc.stdout is not None:
+                reaper_stop, output_escaped = _start_escaped_writer_reaper(proc)
 
             if timeout is not None:
                 timer = threading.Timer(timeout, _timeout_handler)
@@ -323,6 +493,8 @@ def run_with_log(
             finally:
                 if timer is not None:
                     timer.cancel()
+                if reaper_stop is not None:
+                    reaper_stop.set()
 
             # Check if timeout was triggered during stream processing
             if timeout_triggered:
@@ -438,7 +610,8 @@ def run_bash_command_with_log(bash_command: str,
                             stream_logs=stream_logs,
                             with_ray=with_ray,
                             streaming_prefix=streaming_prefix,
-                            shell=True)
+                            shell=True,
+                            reap_escaped_writers=True)
 
 
 def run_bash_command_with_log_and_return_pid(
