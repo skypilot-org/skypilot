@@ -53,7 +53,7 @@ def _mock_global_user_state_db(tmp_path, monkeypatch):
     """Create a temporary SQLite DB for global_user_state to avoid conflicts.
 
     GetJobTable calls managed_job_utils.get_managed_job_queue() which in turn
-    calls global_user_state.get_cluster_name_to_handle_map(). This triggers
+    calls global_user_state.get_handles_from_cluster_names(). This triggers
     global_user_state database initialization, which can conflict with the
     managed jobs database fixture causing Alembic migration errors in CI.
     """
