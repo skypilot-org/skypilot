@@ -882,6 +882,165 @@
                 }
             }
         },
+        "traefik": {
+            "type": "object",
+            "properties": {
+                "deployment": {
+                    "type": "object",
+                    "properties": {
+                        "replicas": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "gateway": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "global": {
+                    "type": "object",
+                    "properties": {
+                        "checkNewVersion": {
+                            "type": "boolean"
+                        },
+                        "sendAnonymousUsage": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "ingressClass": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "podDisruptionBudget": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "minAvailable": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "ports": {
+                    "type": "object",
+                    "properties": {
+                        "web": {
+                            "type": "object",
+                            "properties": {
+                                "http": {
+                                    "type": "object",
+                                    "properties": {
+                                        "aliasHeadersStrategy": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "transport": {
+                                    "type": "object",
+                                    "properties": {
+                                        "respondingTimeouts": {
+                                            "type": "object",
+                                            "properties": {
+                                                "readTimeout": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "websecure": {
+                            "type": "object",
+                            "properties": {
+                                "http": {
+                                    "type": "object",
+                                    "properties": {
+                                        "aliasHeadersStrategy": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "transport": {
+                                    "type": "object",
+                                    "properties": {
+                                        "respondingTimeouts": {
+                                            "type": "object",
+                                            "properties": {
+                                                "readTimeout": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "providers": {
+                    "type": "object",
+                    "properties": {
+                        "kubernetesCRD": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                }
+                            }
+                        },
+                        "kubernetesIngress": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                }
+                            }
+                        },
+                        "kubernetesIngressNGINX": {
+                            "type": "object",
+                            "properties": {
+                                "allowSnippetAnnotations": {
+                                    "type": "boolean"
+                                },
+                                "enabled": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    }
+                },
+                "rbac": {
+                    "type": "object",
+                    "properties": {
+                        "namespaced": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "service": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                }
+            }
+        },
         "vastCredentials": {
             "type": "object",
             "properties": {

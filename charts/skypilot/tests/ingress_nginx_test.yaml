@@ -3,6 +3,9 @@ suite: ingress_nginx_test
 templates:
   - charts/ingress-nginx/templates/controller-configmap.yaml
   - templates/NOTES.txt
+set:
+  ingress-nginx.enabled: true
+  traefik.enabled: false
 tests:
   - it: should disable HTTP/2 on the bundled controller by default
     template: charts/ingress-nginx/templates/controller-configmap.yaml
@@ -31,7 +34,7 @@ tests:
       - notMatchRegexRaw:
           pattern: nginx2root
 
-  - it: should not warn about HTTP/2 on a default install
+  - it: should not warn about HTTP/2 when use-http2 is at its default
     template: templates/NOTES.txt
     asserts:
       - notMatchRegexRaw:

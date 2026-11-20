@@ -16,3 +16,16 @@ not pick up the new default. Turn HTTP/2 off with:
     --version {{ .Chart.Version }} --reuse-values \
     --set ingress-nginx.controller.config.use-http2=false
 {{- end }}
+{{- if $ingressNginx.enabled }}
+
+NOTICE: This release runs the bundled ingress-nginx controller, which is retired
+upstream and no longer gets security fixes. Switch to the bundled Traefik
+controller, which keeps this release's external address:
+
+  helm upgrade -n {{ .Release.Namespace }} {{ .Release.Name }} skypilot/{{ .Chart.Name }} \
+    --version {{ .Chart.Version }} --reset-then-reuse-values \
+    --set ingress-nginx.enabled=false --set traefik.enabled=true
+
+--reset-then-reuse-values (Helm 3.14+) applies this chart version's defaults,
+including the Traefik settings, and keeps the values you set.
+{{- end }}

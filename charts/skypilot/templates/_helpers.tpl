@@ -220,3 +220,180 @@ false
   {{- fail "Error\nauth.externalProxy.enabled cannot be used together with ingress.oauth2-proxy.enabled. These authentication methods are mutually exclusive. Please:\n1. Disable auth.externalProxy.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Name of the ingress-nginx controller Service. The LoadBalancer Service in front
+of Traefik keeps this name, so a release that switches controllers keeps its
+external address. Mirrors the ingress-nginx chart's controller fullname.
+*/}}
+{{- define "skypilot.ingressControllerServiceName" -}}
+{{- $ingressNginx := index .Values "ingress-nginx" -}}
+{{- $base := "" -}}
+{{- if $ingressNginx.fullnameOverride -}}
+{{- $base = $ingressNginx.fullnameOverride -}}
+{{- else -}}
+{{- $name := default "ingress-nginx" $ingressNginx.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- $base = .Release.Name -}}
+{{- else -}}
+{{- $base = printf "%s-%s" .Release.Name $name -}}
+{{- end -}}
+{{- end -}}
+{{- printf "%s-%s" ($base | trunc 63 | trimSuffix "-") (default "controller" $ingressNginx.controller.name) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Traefik subchart names, mirroring the Traefik chart's helpers: the pod
+selector labels and the ServiceAccount name.
+*/}}
+{{- define "skypilot.traefikName" -}}
+{{- default "traefik" .Values.traefik.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "skypilot.traefikInstance" -}}
+{{- default (printf "%s-%s" .Release.Name .Release.Namespace) .Values.traefik.instanceLabelOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "skypilot.traefikServiceAccountName" -}}
+{{- $traefik := .Values.traefik -}}
+{{- $fullname := "" -}}
+{{- if $traefik.fullnameOverride -}}
+{{- $fullname = $traefik.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default "traefik" $traefik.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- $fullname = .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $fullname = printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- default $fullname (($traefik.serviceAccount).name) -}}
+{{- end -}}
+
+{{/*
+Labels of the Services in front of Traefik: the ingress-nginx controller
+Service's labels plus ingress-nginx.controller.service.labels.
+Usage: include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc)
+*/}}
+{{- define "skypilot.traefikServiceLabels" -}}
+app.kubernetes.io/name: ingress-nginx
+app.kubernetes.io/instance: {{ .root.Release.Name }}
+app.kubernetes.io/component: controller
+{{- with .svc.labels }}
+{{ toYaml . }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Traefik entry point for an ingress-nginx controller port name.
+*/}}
+{{- define "skypilot.traefikTargetPort" -}}
+{{- $target := toString . -}}
+{{- if eq $target "http" -}}
+web
+{{- else if eq $target "https" -}}
+websecure
+{{- else -}}
+{{- fail (printf "\nThe ingress-nginx.controller.service target port %q has no Traefik equivalent. Traefik serves the ingress-nginx ports http and https; set targetPorts to one of them." $target) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Spec of a Service in front of Traefik. It renders the fields of the
+ingress-nginx chart's controller Service templates (controller-service.yaml
+and controller-service-internal.yaml, chart 4.11.8) with that chart's
+defaults, so a release that switches controllers keeps its Services as they
+were. The selector points at Traefik, and target ports map to Traefik's entry
+points: the ingress-nginx `http` port to `web`, `https` to `websecure`. A load
+balancer that terminates TLS and sends plaintext to the controller's http port
+(targetPorts.https: http) keeps doing so.
+Usage: include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $settings "internal" bool)
+where $svc is ingress-nginx.controller.service and $settings is $svc itself
+or $svc.internal.
+*/}}
+{{- define "skypilot.traefikServiceSpec" -}}
+{{- $svc := .svc -}}
+{{- $s := .s | default dict -}}
+{{- $mainType := $svc.type | default "LoadBalancer" -}}
+{{- $type := $mainType -}}
+{{- if .internal }}{{- $type = $s.type | default $mainType -}}{{- end -}}
+type: {{ $type }}
+{{- with $s.clusterIP }}
+clusterIP: {{ . }}
+{{- end }}
+{{- with $s.externalIPs }}
+externalIPs:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $s.loadBalancerIP }}
+loadBalancerIP: {{ . }}
+{{- end }}
+{{- with $s.loadBalancerSourceRanges }}
+loadBalancerSourceRanges:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $s.loadBalancerClass }}
+loadBalancerClass: {{ . }}
+{{- end }}
+{{- if hasKey $s "allocateLoadBalancerNodePorts" }}
+allocateLoadBalancerNodePorts: {{ $s.allocateLoadBalancerNodePorts }}
+{{- end }}
+{{- with $s.externalTrafficPolicy }}
+externalTrafficPolicy: {{ . }}
+{{- end }}
+{{- with $s.sessionAffinity }}
+sessionAffinity: {{ . }}
+{{- end }}
+{{- with $s.healthCheckNodePort }}
+healthCheckNodePort: {{ . }}
+{{- end }}
+{{- /* ingress-nginx defaults these to SingleStack and [IPv4], and omits a field
+       that is set empty, so Kubernetes picks the IP families. */}}
+{{- $ipFamilyPolicy := "SingleStack" }}
+{{- if hasKey $s "ipFamilyPolicy" }}{{- $ipFamilyPolicy = $s.ipFamilyPolicy }}{{- end }}
+{{- with $ipFamilyPolicy }}
+ipFamilyPolicy: {{ . }}
+{{- end }}
+{{- $ipFamilies := list "IPv4" }}
+{{- if hasKey $s "ipFamilies" }}{{- $ipFamilies = $s.ipFamilies }}{{- end }}
+{{- with $ipFamilies }}
+ipFamilies:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+selector:
+  app.kubernetes.io/name: {{ include "skypilot.traefikName" .root }}
+  app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" .root }}
+{{- /* ingress-nginx decides node ports from the main Service type for both Services. */}}
+{{- $setNodePorts := or (eq $mainType "NodePort") (eq $mainType "LoadBalancer") }}
+{{- $ports := $s.ports | default dict }}
+{{- $mainPorts := $svc.ports | default dict }}
+{{- $nodePorts := $s.nodePorts | default dict }}
+{{- $targets := $s.targetPorts | default dict }}
+{{- $mainTargets := $svc.targetPorts | default dict }}
+{{- $appProtocol := dig "appProtocol" true $s }}
+ports:
+{{- if dig "enableHttp" true $svc }}
+  - name: http
+    port: {{ $ports.http | default $mainPorts.http | default 80 }}
+    protocol: TCP
+    targetPort: {{ include "skypilot.traefikTargetPort" ($targets.http | default $mainTargets.http | default "http") }}
+    {{- if $appProtocol }}
+    appProtocol: http
+    {{- end }}
+    {{- if and $setNodePorts $nodePorts.http }}
+    nodePort: {{ $nodePorts.http }}
+    {{- end }}
+{{- end }}
+{{- if dig "enableHttps" true $svc }}
+  - name: https
+    port: {{ $ports.https | default $mainPorts.https | default 443 }}
+    protocol: TCP
+    targetPort: {{ include "skypilot.traefikTargetPort" ($targets.https | default $mainTargets.https | default "https") }}
+    {{- if $appProtocol }}
+    appProtocol: https
+    {{- end }}
+    {{- if and $setNodePorts $nodePorts.https }}
+    nodePort: {{ $nodePorts.https }}
+    {{- end }}
+{{- end }}
+{{- end -}}
