@@ -7,6 +7,7 @@ import pytest
 
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as k8s_utils
 from sky.provision.kubernetes.instance import _check_nodes_health
 from sky.provision.kubernetes.instance import _get_pod_health_issues
@@ -222,6 +223,22 @@ def _make_k8s_node(name: str, ready: bool):
     return node
 
 
+def _get_node_via_read_node(context, resource, name, **kwargs):
+    """reads.get_object() answered by the faked core_api().read_node()."""
+    del kwargs
+    assert resource == reads.NODES
+    try:
+        items = [kubernetes.core_api(context).read_node(name)]
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+        items = []
+    return reads.ReadResult(items=items,
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=None)
+
+
 def _forbidden_api(*args, **kwargs):  # pylint: disable=unused-argument
     """A core API whose node reads are denied (no RBAC on nodes)."""
     api = mock.MagicMock()
@@ -231,6 +248,10 @@ def _forbidden_api(*args, **kwargs):  # pylint: disable=unused-argument
 
 class TestCheckNodesHealth:
     """Tests for _check_nodes_health."""
+
+    @pytest.fixture(autouse=True)
+    def _read_nodes_through_core_api(self, monkeypatch):
+        monkeypatch.setattr(reads, 'get_object', _get_node_via_read_node)
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')

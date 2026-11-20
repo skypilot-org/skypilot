@@ -12,9 +12,10 @@ from unittest import mock
 
 from sky import backends
 from sky import clouds
-from sky.adaptors import kubernetes
+from sky import exceptions
 from sky.backends import backend_utils
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import status_lib
 
@@ -291,28 +292,43 @@ class TestNodeTaints:
 
     @staticmethod
     def _node(ready, taints=(), unschedulable=False):
-        now = datetime.datetime.now(datetime.timezone.utc)
-        return SimpleNamespace(status=SimpleNamespace(conditions=[
-            SimpleNamespace(type='Ready', status='True' if ready else 'Unknown')
-        ]),
-                               spec=SimpleNamespace(unschedulable=unschedulable,
-                                                    taints=[
-                                                        SimpleNamespace(
-                                                            key=k,
-                                                            value=v,
-                                                            effect='NoExecute',
-                                                            time_added=now)
-                                                        for k, v in taints
-                                                    ]))
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return {
+            'metadata': {
+                'name': 'n1'
+            },
+            'spec': {
+                'unschedulable': unschedulable,
+                'taints': [{
+                    'key': k,
+                    'value': v,
+                    'effect': 'NoExecute',
+                    'timeAdded': now
+                } for k, v in taints],
+            },
+            'status': {
+                'conditions': [{
+                    'type': 'Ready',
+                    'status': 'True' if ready else 'Unknown'
+                }]
+            },
+        }
 
     def _check(self, monkeypatch, node, tolerations=()):
-        api = mock.Mock()
-        if isinstance(node, Exception):
-            api.read_node.side_effect = node
-        else:
-            api.read_node.return_value = node
-        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                            lambda *a, **kw: api)
+
+        def get_object(context, resource, name, *, consistency, convert,
+                       attempts):
+            assert (context, resource, name) == ('ctx', reads.NODES, 'n1')
+            assert isinstance(consistency, reads.Cached)
+            assert attempts == 1
+            if isinstance(node, Exception):
+                raise node
+            return reads.ReadResult(items=[convert(node)] if node else [],
+                                    resource_version='',
+                                    staleness_seconds=0,
+                                    reason=None)
+
+        monkeypatch.setattr(k8s_instance.reads, 'get_object', get_object)
         monkeypatch.setattr(k8s_instance.plugin_extensions.NodeInfoSource,
                             'get', staticmethod(lambda context: None))
         return k8s_instance._check_nodes_health(
@@ -342,11 +358,11 @@ class TestNodeTaints:
         }]) == {}
 
     def test_a_deleted_node(self, monkeypatch):
-        gone = kubernetes.api_exception()(status=404)
-        assert self._check(monkeypatch, gone) == {'n1': 'deleted'}
+        assert self._check(monkeypatch, None) == {'n1': 'deleted'}
 
     def test_an_unreadable_node_is_not_reported(self, monkeypatch):
-        forbidden = kubernetes.api_exception()(status=403)
+        forbidden = exceptions.KubeAPIUnreachableError(
+            'Kubernetes API error: (403)')
         assert self._check(monkeypatch, forbidden) == {}
 
     def test_an_untolerated_taint_on_a_ready_node(self, monkeypatch):

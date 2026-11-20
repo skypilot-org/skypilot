@@ -18,8 +18,6 @@ import typing
 from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional, Set,
                     Tuple, Union)
 
-import ijson
-
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -33,6 +31,7 @@ from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import reads
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -72,8 +71,6 @@ DEFAULT_HOME_DIRECTORY = '/home/sky'
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
 # and store all data that needs to be persisted in future.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = DEFAULT_HOME_DIRECTORY
-
-IJSON_BUFFER_SIZE = 64 * 1024  # 64KB, default from ijson
 
 
 class KubernetesHighPerformanceNetworkType(enum.Enum):
@@ -551,6 +548,42 @@ def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
         _CONTEXT_UNREACHABLE_CHECKS.append(check)
 
 
+# Observers of the attempts of `_retry_on_error`-wrapped calls on a named
+# context. Each is called with the context name, the exception the attempt
+# raised (None if it returned), and the attempt's duration in seconds.
+ContextCallObserver = Callable[[str, Optional[Exception], float], None]
+_CONTEXT_CALL_OBSERVERS: List[ContextCallObserver] = []
+
+
+def register_context_call_observer(observer: ContextCallObserver) -> None:
+    """Register a function called after every attempt of a wrapped call.
+
+    It runs in the calling thread, so it must be cheap and must not block.
+    Idempotent.
+    """
+    if observer not in _CONTEXT_CALL_OBSERVERS:
+        _CONTEXT_CALL_OBSERVERS.append(observer)
+
+
+def _call_observed(context: Optional[str], func: Callable, args: tuple,
+                   kwargs: dict) -> Any:
+    start = time.monotonic()
+    error: Optional[Exception] = None
+    try:
+        return func(*args, **kwargs)
+    except Exception as e:
+        error = e
+        raise
+    finally:
+        if context is not None:
+            duration = time.monotonic() - start
+            for observer in _CONTEXT_CALL_OBSERVERS:
+                try:
+                    observer(context, error, duration)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Context call observer failed: {e}')
+
+
 def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
     """Why `context` is known to be unreachable, or None.
 
@@ -607,7 +640,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
             for attempt in range(max_retries):
                 try:
-                    return func(*args, **kwargs)
+                    return _call_observed(context, func, args, kwargs)
                 except (kubernetes.max_retry_error(),
                         kubernetes.api_exception(),
                         kubernetes.config_exception()) as e:
@@ -1198,7 +1231,7 @@ def _detect_gpu_label_formatter(
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
     del allowed_nodes_key  # Only part of the cache key.
     return detect_gpu_label_formatter_from_nodes(
-        get_kubernetes_nodes(context=context))
+        get_kubernetes_nodes(context=context, consistency=reads.CACHED))
 
 
 detect_gpu_label_formatter.cache_clear = (  # type: ignore[attr-defined]
@@ -1734,7 +1767,7 @@ def detect_accelerator_resource(
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
-    nodes = get_kubernetes_nodes(context=context)
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_accelerator = (get_gpu_resource_key(context) in cluster_resources or
@@ -2194,7 +2227,8 @@ def inject_allowed_nodes_affinity(
         # the actual node objects rather than assuming equality.
         allowed_names = set(allowed_nodes_config.get('names', []))
         allowed_ips = set(allowed_nodes_config.get('ips', []))
-        all_nodes = get_kubernetes_nodes(context=context)
+        all_nodes = get_kubernetes_nodes(context=context,
+                                         consistency=reads.CACHED)
         hostnames = set()
         for node in all_nodes:
             matched = False
@@ -2246,7 +2280,10 @@ def inject_allowed_nodes_affinity(
     return pod_spec
 
 
-def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
+def get_kubernetes_nodes(
+        *,
+        context: Optional[str] = None,
+        consistency: reads.Consistency = reads.FRESH) -> List[V1Node]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
@@ -2254,36 +2291,40 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     If allowed_nodes is configured in ~/.sky/config.yaml, the returned list
     is filtered to only include nodes matching the config. All criteria
     (labels, names, IPs) are OR'd.
+
+    Args:
+        context: Kubernetes context.
+        consistency: reads.Cached(max_age) or reads.FRESH.
     """
-    nodes = _get_unfiltered_kubernetes_nodes(context=context)
     if context is None:
         context = get_current_kube_config_context_name()
+    nodes = _get_unfiltered_kubernetes_nodes(context=context,
+                                             consistency=consistency)
     # allowed_nodes is part of the request's config, so the cached list is
     # filtered on every call.
     return _filter_allowed_nodes(nodes, context)
 
 
-@annotations.lru_cache(scope='request', maxsize=10)
-@_retry_on_error(resource_type='node')
-def _get_unfiltered_kubernetes_nodes(*, context: Optional[str]) -> List[V1Node]:
-    if context is None:
-        context = get_current_kube_config_context_name()
+def _get_unfiltered_kubernetes_nodes(
+        *, context: Optional[str],
+        consistency: reads.Consistency) -> List[V1Node]:
+    if not plugin_extensions.ClusterStateSource.is_registered():
+        # Every read goes to the API server, so one list serves both.
+        consistency = reads.FRESH
+    return _list_nodes(context=context, consistency=consistency)
 
-    # Return raw urllib3.HTTPResponse object so that we can parse the json
-    # more efficiently.
-    response = kubernetes.core_api(context).list_node(
-        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-    try:
-        return [
-            V1Node.from_dict(item_dict) for item_dict in ijson.items(
-                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
-        ]
-    finally:
-        response.release_conn()
+
+@annotations.lru_cache(scope='request', maxsize=10)
+def _list_nodes(*, context: Optional[str],
+                consistency: reads.Consistency) -> List[V1Node]:
+    return reads.list_objects(context,
+                              reads.NODES,
+                              consistency=consistency,
+                              convert=V1Node.from_dict).items
 
 
 get_kubernetes_nodes.cache_clear = (  # type: ignore[attr-defined]
-    _get_unfiltered_kubernetes_nodes.cache_clear)
+    _list_nodes.cache_clear)
 
 
 def _iter_terminated_states(cs):
@@ -2924,16 +2965,20 @@ class V1Pod:
                        ]))
 
 
-@_retry_on_error(resource_type='pod')
 def get_allocated_resources_by_node(
     *,
     context: Optional[str] = None,
+    consistency: reads.Consistency = reads.FRESH,
 ) -> Tuple[Dict[str, int], Dict[str, Tuple[float, float]]]:
     """Gets allocated GPU, CPU, and memory by each node by fetching pods in
     all namespaces in kubernetes cluster indicated by context.
 
     This function combines GPU and CPU/memory allocation tracking into a single
     API call for better performance.
+
+    Args:
+        context: Kubernetes context.
+        consistency: reads.Cached(max_age) or reads.FRESH.
 
     Returns:
         Tuple of (allocated_gpu_qty_by_node, allocated_cpu_memory_by_node):
@@ -2949,18 +2994,12 @@ def get_allocated_resources_by_node(
         field_selector = ','.join(
             [f'status.phase!={status}' for status in non_included_pod_statuses])
 
-    # Return raw urllib3.HTTPResponse object so that we can parse the json
-    # more efficiently.
-    response = kubernetes.core_api(context).list_pod_for_all_namespaces(
-        _request_timeout=kubernetes.API_TIMEOUT,
-        _preload_content=False,
-        field_selector=field_selector)
-    try:
-        return _sum_allocated_resources_by_node(
-            (V1Pod.from_dict(item_dict) for item_dict in ijson.items(
-                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)), context)
-    finally:
-        response.release_conn()
+    result = reads.list_objects(context,
+                                reads.PODS,
+                                field_selector=field_selector,
+                                consistency=consistency,
+                                convert=V1Pod.from_dict)
+    return _sum_allocated_resources_by_node(result.items, context)
 
 
 def _sum_allocated_resources_by_node(
@@ -3017,10 +3056,10 @@ def _sum_allocated_resources_by_node(
     return allocated_qty_by_node, allocated_cpu_memory_by_node
 
 
-@_retry_on_error(resource_type='pod')
 def get_allocated_gpu_qty_by_node(
     *,
     context: Optional[str] = None,
+    consistency: reads.Consistency = reads.FRESH,
 ) -> Dict[str, int]:
     """Gets allocated GPU quantity by each node by fetching pods in
     all namespaces in kubernetes cluster indicated by context.
@@ -3028,7 +3067,8 @@ def get_allocated_gpu_qty_by_node(
     Note: For better performance when you also need CPU/memory allocation,
     use get_allocated_resources_by_node() instead.
     """
-    allocated_qty_by_node, _ = get_allocated_resources_by_node(context=context)
+    allocated_qty_by_node, _ = get_allocated_resources_by_node(
+        context=context, consistency=consistency)
     return allocated_qty_by_node
 
 
@@ -3110,7 +3150,7 @@ def adjust_resources_to_allocatable(
     """
     if dryrun:
         return cpus, mem
-    nodes = get_kubernetes_nodes(context=context)
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     ready_nodes = [n for n in nodes if n.is_ready()]
 
     # If any node has strictly more capacity than requested for both
@@ -3248,7 +3288,7 @@ def check_instance_fits(
                        f'{tpu_list_in_cluster_str}. Note that multi-host TPU '
                        'podslices are currently not unsupported.')
 
-    nodes = get_kubernetes_nodes(context=context)
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
@@ -5287,7 +5327,7 @@ def get_spot_label(
     """
     # Check if the cluster supports spot instances by checking nodes for known
     # spot label keys and values
-    for node in get_kubernetes_nodes(context=context):
+    for node in get_kubernetes_nodes(context=context, consistency=reads.CACHED):
         for _, (key, value) in SPOT_LABEL_MAP.items():
             if key in node.metadata.labels and node.metadata.labels[
                     key] == value:
@@ -5306,21 +5346,34 @@ def get_spot_label(
 def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     """Converts a dictionary to a Kubernetes object.
 
-    Useful for comparing two Kubernetes objects. Adapted from
-    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # pylint: disable=line-too-long
+    Useful for comparing two Kubernetes objects.
 
     Args:
         object_dict: Dictionary representing the Kubernetes object
         object_type: Type of the Kubernetes object. E.g., 'V1Pod', 'V1Service'.
     """
+    # ApiClient.deserialize() takes a response; this is the step after it
+    # parses the response's JSON.
+    # pylint: disable-next=protected-access
+    return _deserializing_api_client()._ApiClient__deserialize(
+        object_dict, object_type)
 
-    class FakeKubeResponse:
 
-        def __init__(self, obj):
-            self.data = json.dumps(obj)
+def k8s_pod_from_dict(pod: Dict[str, Any]) -> Any:
+    """Converts a pod in Kubernetes API JSON to a kubernetes client V1Pod."""
+    return dict_to_k8s_object(pod, 'V1Pod')
 
-    fake_kube_response = FakeKubeResponse(object_dict)
-    return kubernetes.api_client().deserialize(fake_kube_response, object_type)
+
+def k8s_node_from_dict(node: Dict[str, Any]) -> Any:
+    """Converts a node in Kubernetes API JSON to a kubernetes client V1Node."""
+    return dict_to_k8s_object(node, 'V1Node')
+
+
+@annotations.lru_cache(scope='global', maxsize=1)
+def _deserializing_api_client() -> Any:
+    # Deserializing needs no cluster configuration.
+    return kubernetes.kubernetes.client.ApiClient(
+        kubernetes.kubernetes.client.Configuration())
 
 
 def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
@@ -5335,7 +5388,7 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     Returns:
         List[Any]: List of unlabeled nodes with accelerators.
     """
-    nodes = get_kubernetes_nodes(context=context)
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     nodes_with_accelerator = []
     for node in nodes:
         if get_gpu_resource_key(context) in node.status.capacity:
@@ -5457,7 +5510,7 @@ def _get_kubernetes_node_info(
                 allowed_config = get_allowed_nodes_config(resolved_context)
                 if allowed_config is not None:
                     allowed_nodes = get_kubernetes_nodes(
-                        context=resolved_context)
+                        context=resolved_context, consistency=reads.CACHED)
                     allowed_names = {n.metadata.name for n in allowed_nodes}
                     result = models.KubernetesNodesInfo(
                         node_info_dict={
@@ -5478,7 +5531,7 @@ def _get_kubernetes_node_info(
     # the current context).
     if context is None:
         context = get_current_kube_config_context_name()
-    nodes = get_kubernetes_nodes(context=context)
+    nodes = get_kubernetes_nodes(context=context, consistency=reads.CACHED)
     configured_tolerations = get_configured_tolerations(context)
 
     lf, _ = detect_gpu_label_formatter(context)
@@ -5508,7 +5561,7 @@ def _get_kubernetes_node_info(
         # When there are GPU nodes, get both GPU and CPU/memory in one call
         try:
             allocated_qty_by_node, allocated_cpu_memory_by_node = get_allocated_resources_by_node(
-                context=context)
+                context=context, consistency=reads.CACHED)
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 error_on_get_allocated_resources = True
@@ -5520,7 +5573,7 @@ def _get_kubernetes_node_info(
         # This is an extra API call compared to master branch
         try:
             _, allocated_cpu_memory_by_node = get_allocated_resources_by_node(
-                context=context)
+                context=context, consistency=reads.CACHED)
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 error_on_get_allocated_resources = True
@@ -5956,31 +6009,19 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
     Returns:
         A list of Kubernetes pod objects.
+
+    Raises:
+        exceptions.ResourcesUnavailableError: The pods could not be read.
     """
     if context is None:
         context = get_current_kube_config_context_name()
-
-    # Try the external pod info source first, if one is registered.
-    if plugin_extensions.PodInfoSource.is_registered():
-        if context is not None:
-            result = plugin_extensions.PodInfoSource.get(context)
-            if result is not None:
-                logger.debug(f'Got pod info from external provider for '
-                             f'{context}')
-                return result
-        # Fall through to direct Kubernetes API query if provider returns None
-
-    try:
-        pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
-            _request_timeout=kubernetes.API_TIMEOUT).items
-    except kubernetes.max_retry_error():
-        raise exceptions.ResourcesUnavailableError(
-            'Timed out trying to get SkyPilot pods from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get pods --selector=skypilot-cluster-name --all-namespaces'
-        ) from None
-    return pods
+    return reads.list_objects(
+        context,
+        reads.PODS,
+        label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
+        consistency=reads.CACHED,
+        convert=k8s_pod_from_dict,
+        attempts=1).items
 
 
 def is_tpu_on_gke(accelerator: str, normalize: bool = True) -> bool:
@@ -6267,21 +6308,9 @@ def _select_gpu_resource_key(capacity_keys: Set[str]) -> str:
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
     try:
-        response = kubernetes.core_api(context).list_node(
-            _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-        try:
-            supported_gpu_keys = set(SUPPORTED_GPU_RESOURCE_KEYS.values())
-            capacity_keys: typing.Set[str] = set()
-            for capacity in ijson.items(response,
-                                        'items.item.status.capacity',
-                                        buf_size=IJSON_BUFFER_SIZE):
-                capacity_keys.update(
-                    supported_gpu_keys.intersection(capacity.keys()))
-                if len(capacity_keys) == len(supported_gpu_keys):
-                    break
-            return _select_gpu_resource_key(capacity_keys)
-        finally:
-            response.release_conn()
+        return get_gpu_resource_key_from_nodes(
+            _get_unfiltered_kubernetes_nodes(context=context,
+                                             consistency=reads.CACHED))
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')

@@ -16,6 +16,7 @@ from sky.adaptors import kubernetes
 from sky.catalog import CloudFilter
 from sky.catalog import common
 from sky.clouds import cloud
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import plugin_extensions
 
@@ -177,7 +178,8 @@ def _list_accelerators(
         if not has_gpu:
             return {}, {}, {}
 
-        nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context,
+                                                      consistency=reads.CACHED)
         gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)
 
     lf, _ = kubernetes_utils.detect_gpu_label_formatter_from_nodes(nodes)
@@ -203,7 +205,8 @@ def _list_accelerators(
         # Get the allocated GPU quantity by each node
         try:
             allocated_qty_by_node = (
-                kubernetes_utils.get_allocated_gpu_qty_by_node(context=context))
+                kubernetes_utils.get_allocated_gpu_qty_by_node(
+                    context=context, consistency=reads.CACHED))
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 logger.warning(
