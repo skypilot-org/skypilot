@@ -151,6 +151,50 @@ tests:
               targetPort: websecure
               appProtocol: https
 
+  # A load balancer that terminates TLS sends plaintext to the controller's http
+  # port (ingress-nginx's AWS NLB example); it must reach Traefik's web entry
+  # point, not its TLS entry point.
+  - it: should send TLS-terminated traffic to the web entry point
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    set:
+      ingress-nginx.controller.service.targetPorts.https: http
+    asserts:
+      - equal:
+          path: spec.ports[0].targetPort
+          value: web
+      - equal:
+          path: spec.ports[1].name
+          value: https
+      - equal:
+          path: spec.ports[1].targetPort
+          value: web
+
+  - it: should apply the internal Service's own target ports
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller-internal
+    set:
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        networking.gke.io/load-balancer-type: Internal
+      ingress-nginx.controller.service.internal.targetPorts.https: http
+    asserts:
+      - equal:
+          path: spec.ports[1].targetPort
+          value: web
+
+  - it: should refuse a target port with no Traefik equivalent
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.controller.service.targetPorts.https: metrics
+    asserts:
+      - failedTemplate:
+          errorPattern: has no Traefik equivalent
+
   - it: should refuse ingress-nginx TCP and UDP port mappings
     template: templates/traefik.yaml
     set:

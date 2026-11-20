@@ -285,11 +285,28 @@ app.kubernetes.io/component: controller
 {{- end -}}
 
 {{/*
+Traefik entry point for an ingress-nginx controller port name.
+*/}}
+{{- define "skypilot.traefikTargetPort" -}}
+{{- $target := toString . -}}
+{{- if eq $target "http" -}}
+web
+{{- else if eq $target "https" -}}
+websecure
+{{- else -}}
+{{- fail (printf "\nThe ingress-nginx.controller.service target port %q has no Traefik equivalent. Traefik serves the ingress-nginx ports http and https; set targetPorts to one of them." $target) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Spec of a Service in front of Traefik. It renders the fields of the
 ingress-nginx chart's controller Service templates (controller-service.yaml
 and controller-service-internal.yaml, chart 4.11.8) with that chart's
 defaults, so a release that switches controllers keeps its Services as they
-were; only the selector and target ports change.
+were. The selector points at Traefik, and target ports map to Traefik's entry
+points: the ingress-nginx `http` port to `web`, `https` to `websecure`. A load
+balancer that terminates TLS and sends plaintext to the controller's http port
+(targetPorts.https: http) keeps doing so.
 Usage: include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $settings "internal" bool)
 where $svc is ingress-nginx.controller.service and $settings is $svc itself
 or $svc.internal.
@@ -341,13 +358,15 @@ selector:
 {{- $ports := $s.ports | default dict }}
 {{- $mainPorts := $svc.ports | default dict }}
 {{- $nodePorts := $s.nodePorts | default dict }}
+{{- $targets := $s.targetPorts | default dict }}
+{{- $mainTargets := $svc.targetPorts | default dict }}
 {{- $appProtocol := dig "appProtocol" true $s }}
 ports:
 {{- if dig "enableHttp" true $svc }}
   - name: http
     port: {{ $ports.http | default $mainPorts.http | default 80 }}
     protocol: TCP
-    targetPort: web
+    targetPort: {{ include "skypilot.traefikTargetPort" ($targets.http | default $mainTargets.http | default "http") }}
     {{- if $appProtocol }}
     appProtocol: http
     {{- end }}
@@ -359,7 +378,7 @@ ports:
   - name: https
     port: {{ $ports.https | default $mainPorts.https | default 443 }}
     protocol: TCP
-    targetPort: websecure
+    targetPort: {{ include "skypilot.traefikTargetPort" ($targets.https | default $mainTargets.https | default "https") }}
     {{- if $appProtocol }}
     appProtocol: https
     {{- end }}
