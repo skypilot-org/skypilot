@@ -11,6 +11,7 @@ from kubernetes.client import V1ObjectMeta
 from kubernetes.client import V1Pod
 from kubernetes.client import V1PodStatus
 import pytest
+import urllib3
 
 from sky import exceptions
 from sky import global_user_state
@@ -39,6 +40,7 @@ class FakeKai:
         self.live_pods = {}
         self.calls = []
         self.pod_group_events = []
+        self.event_lists = 0
         # Plurals SkyPilot may not read, and whether PodGroups are served.
         self.forbidden = set()
         self.serves_pod_groups = True
@@ -103,6 +105,7 @@ class FakeKai:
 
     def list_namespaced_event(self, namespace, field_selector, **kwargs):
         del namespace, kwargs
+        self.event_lists += 1
         fields = dict(term.split('=') for term in field_selector.split(','))
         return SimpleNamespace(items=[
             event for event in self.pod_group_events
@@ -352,17 +355,23 @@ RECLAIMED = (f'KAI evicted the pod (reclaim): Pod {NAMESPACE}/{POD} was '
              f'preempted by workload {NAMESPACE}/other')
 
 
+def _pod_group_event(action, message, uid='pg-uid', at=None):
+    return SimpleNamespace(
+        reason='Evict',
+        message=message,
+        last_timestamp=at,
+        metadata=SimpleNamespace(annotations={'evictor-action-type': action}),
+        involved_object=SimpleNamespace(kind='PodGroup', name=CLUSTER, uid=uid))
+
+
 def _evict_event(pod_name, uid='pg-uid', at=None):
     # A reclaim as KAI records it: the first line names the pod, and
     # one line per affected queue follows.
-    return SimpleNamespace(
-        reason='Evict',
-        message=(f'Pod {NAMESPACE}/{pod_name} was preempted by workload '
-                 f'{NAMESPACE}/other.\nq (entitlement 4 GPU) uses <GPU: 8>'),
-        last_timestamp=at,
-        metadata=SimpleNamespace(
-            annotations={'evictor-action-type': 'reclaim'}),
-        involved_object=SimpleNamespace(kind='PodGroup', name=CLUSTER, uid=uid))
+    return _pod_group_event(
+        'reclaim', (f'Pod {NAMESPACE}/{pod_name} was preempted by workload '
+                    f'{NAMESPACE}/other.\nq (entitlement 4 GPU) uses <GPU: 8>'),
+        uid=uid,
+        at=at)
 
 
 POD_CREATED = datetime.datetime(2026, 10, 21, tzinfo=datetime.timezone.utc)
@@ -441,6 +450,131 @@ def test_status_refresh_ignores_other_kai_evictions(cluster, monkeypatch,
     cluster.pod_group_events = [event]
 
     assert 'KAI' not in _refresh_reason(monkeypatch)
+
+
+HEAD = f'{CLUSTER}-head'
+# What the kubelet leaves on a pod KAI deletes.
+KILLING = SimpleNamespace(reason='Killing',
+                          message='Stopping container ray-node')
+
+
+def _termination_cause(monkeypatch, pod_events=None, kai_queue='q'):
+    """Why a status refresh says the head and POD are gone."""
+
+    def get_pod_events(context, namespace, pod_name):
+        del context, namespace
+        return (pod_events or {}).get(pod_name, [KILLING])
+
+    monkeypatch.setattr(instance, '_get_pod_events', get_pod_events)
+    provider_config = {'context': CONTEXT, 'namespace': NAMESPACE}
+    if kai_queue is not None:
+        provider_config['kai_queue'] = kai_queue
+    # Neither pod's node is known, so no node is read.
+    pod_nodes = {HEAD: None, POD: None}
+    return instance.get_cluster_termination_cause(provider_config,
+                                                  pod_nodes,
+                                                  tolerations=[],
+                                                  since=POD_CREATED)
+
+
+# Messages as KAI Scheduler v0.18.7 words them.
+@pytest.mark.parametrize(
+    'action,message,expected',
+    [
+        ('preempt',
+         f'Pod {NAMESPACE}/{HEAD} was preempted by higher priority workload '
+         f'{NAMESPACE}/other',
+         f'Pods preempted by KAI Scheduler: Pod {NAMESPACE}/{HEAD} was '
+         f'preempted by higher priority workload {NAMESPACE}/other.'),
+        ('reclaim',
+         f'Pod {NAMESPACE}/{HEAD} was preempted by workload {NAMESPACE}/other.'
+         '\nq uses <GPU: 8> with a quota of <GPU: 4>',
+         'Pods reclaimed by KAI Scheduler for another queue: Pod '
+         f'{NAMESPACE}/{HEAD} was preempted by workload {NAMESPACE}/other.'),
+        ('consolidation',
+         f'Pod {NAMESPACE}/{HEAD} was preempted and rescheduled due to bin '
+         'packing (resource consolidation) procedure',
+         'Pods evicted by KAI Scheduler for consolidation: Pod '
+         f'{NAMESPACE}/{HEAD} was preempted and rescheduled due to bin '
+         'packing (resource consolidation) procedure.'),
+        # A worker's eviction explains the cluster as well as the head's.
+        ('stalegangeviction',
+         'Workload doesn\'t meet the minimum required number of pods (2), '
+         f'evicting remaining pod: {NAMESPACE}/{POD}',
+         'Pods evicted by KAI Scheduler: Workload doesn\'t meet the minimum '
+         'required number of pods (2), evicting remaining pod: '
+         f'{NAMESPACE}/{POD}.'),
+    ],
+    ids=['preempt', 'reclaim', 'consolidation', 'stalegangeviction'])
+def test_termination_cause_names_kai_eviction(cluster, monkeypatch, action,
+                                              message, expected):
+    cluster.pod_groups[CLUSTER] = {'metadata': {'uid': 'pg-uid'}}
+    cluster.pod_group_events = [_pod_group_event(action, message)]
+
+    assert _termination_cause(monkeypatch) == expected
+
+
+def test_termination_cause_off_kai_reads_no_pod_group_events(
+        cluster, monkeypatch):
+    cluster.pod_groups[CLUSTER] = {'metadata': {'uid': 'pg-uid'}}
+    cluster.pod_group_events = [_evict_event(HEAD)]
+
+    assert _termination_cause(monkeypatch, kai_queue=None) is None
+    assert cluster.event_lists == 0
+
+
+def test_termination_cause_prefers_the_pods_own_deletion_event(
+        cluster, monkeypatch):
+    cluster.pod_groups[CLUSTER] = {'metadata': {'uid': 'pg-uid'}}
+    cluster.pod_group_events = [_evict_event(HEAD)]
+    evicted = SimpleNamespace(reason='Evicted',
+                              message='The node was low on resource: memory.',
+                              reporting_component='kubelet',
+                              involved_object=SimpleNamespace(name=POD))
+
+    cause = _termination_cause(monkeypatch, {POD: [evicted]})
+
+    assert cause == (
+        'Pods evicted by kubelet: The node was low on resource: memory.')
+    assert cluster.event_lists == 0
+
+
+@pytest.mark.parametrize('method,error', [
+    ('list_namespaced_event', FakeApiException(500)),
+    ('list_namespaced_event',
+     urllib3.exceptions.ReadTimeoutError(None, None, 'Read timed out.')),
+    ('get_namespaced_custom_object', FakeApiException(500)),
+],
+                         ids=['list-error', 'list-timeout', 'pod-group-error'])
+def test_termination_cause_survives_a_failed_kai_read(cluster, monkeypatch,
+                                                      method, error):
+    cluster.pod_groups[CLUSTER] = {'metadata': {'uid': 'pg-uid'}}
+    cluster.pod_group_events = [_evict_event(HEAD)]
+
+    def _fail(*args, **kwargs):
+        del args, kwargs
+        raise error
+
+    monkeypatch.setattr(cluster, method, _fail)
+
+    assert _termination_cause(monkeypatch) is None
+
+
+@pytest.mark.parametrize(
+    'event',
+    [
+        _evict_event(HEAD, uid='earlier-pod-group'),
+        _evict_event(f'{HEAD}0'),
+        # The same PodGroup, but before the cluster launched.
+        _evict_event(HEAD, at=POD_CREATED - datetime.timedelta(hours=1)),
+    ],
+    ids=['earlier-pod-group', 'other-pod', 'before-the-launch'])
+def test_termination_cause_ignores_other_kai_evictions(cluster, monkeypatch,
+                                                       event):
+    cluster.pod_groups[CLUSTER] = {'metadata': {'uid': 'pg-uid'}}
+    cluster.pod_group_events = [event]
+
+    assert _termination_cause(monkeypatch) is None
 
 
 def _patch_pod_read(monkeypatch, pod):
