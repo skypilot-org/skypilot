@@ -129,6 +129,7 @@ class TestClusters:
         down, _ = clusters
         result = cli_testing.CliRunner().invoke(command.down, ['-u', '-y'])
         assert not result.exception, result.output
+        assert 'Skipped' not in result.output
         assert _names(down) == ['bobs', 'own', 'own-b']
 
     def test_server_without_auth_is_not_narrowed(self, clusters, monkeypatch):
@@ -229,10 +230,14 @@ class TestClusters:
                 'workspace to act on them.' in result.output)
         assert 'bobs-b' not in result.output
         assert _names(down) == ['bobs', 'own']
-        for args in (['-a', '-y'], ['own*', '-y']):
+        for args in (['-a', '-y'], ['own*', '-y'], ['-a', 'own*', '-y']):
             result = cli_testing.CliRunner().invoke(command.down, args)
-            assert ('Skipped 3 clusters in other workspaces: 3 yours (own-b, '
-                    'own-c and 1 more). Switch' in result.output), args
+            assert result.output.count(
+                'Skipped 3 clusters in other workspaces: 3 yours (own-b, '
+                'own-c and 1 more). Switch') == 1, (args, result.output)
+        # Nothing left out, nothing said.
+        result = cli_testing.CliRunner().invoke(command.down, ['bob[s]', '-y'])
+        assert 'Skipped' not in result.output, result.output
 
     def test_cancel_all_users_defaults_to_no(self, monkeypatch):
         monkeypatch.setattr(

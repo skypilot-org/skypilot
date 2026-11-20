@@ -394,16 +394,18 @@ def _note_other_workspaces(noun: str,
                            name_key: str = 'name') -> None:
     """Says which of the records a bulk selector reached it leaves out for
     being in another workspace: the caller's own by name, others' as a count."""
-    kept = {r[name_key] for r in _in_workspace(records, workspace_id)}
-    skipped = {
-        r[name_key]: r
-        for r in records
-        if r[name_key] not in kept and r.get('workspace') is not None
-    }
+    kept = {id(r) for r in _in_workspace(records, workspace_id)}
+    # Keyed by workspace too: a name may repeat across workspaces, and a job
+    # has a row per task.
+    skipped = {(r['workspace'], r[name_key]): r
+               for r in records
+               if id(r) not in kept and r.get('workspace') is not None}
     if not skipped:
         return
     me = _caller_hash()
-    own = [str(key) for key, r in skipped.items() if r.get('user_hash') == me]
+    own = [
+        str(key[1]) for key, r in skipped.items() if r.get('user_hash') == me
+    ]
     parts = []
     if own:
         more = f' and {len(own) - 2} more' if len(own) > 2 else ''
@@ -4069,9 +4071,11 @@ def _down_or_stop_clusters(
             if controller_utils.Controllers.from_name(
                 cluster['name'], expect_exact_match=False) is None
         ]
-        _note_other_workspaces(
-            'cluster', [c for c in listed if c['name'] not in exact_names],
-            target_workspace)
+        if not (apply_to_all or all_users):
+            # Otherwise -a below says it, for what it takes over.
+            _note_other_workspaces(
+                'cluster', [c for c in listed if c['name'] not in exact_names],
+                target_workspace)
         records_by_name = {
             cluster['name']: cluster
             for cluster in listed
