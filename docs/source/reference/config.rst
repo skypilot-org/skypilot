@@ -203,6 +203,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
+    :ref:`nested_virtualization <config-yaml-aws-nested-virtualization>`: false
     :ref:`ssh_user <config-yaml-aws-ssh-user>`: ubuntu
     :ref:`prioritize_reservations <config-yaml-aws-prioritize-reservations>`: false
     :ref:`specific_reservations <config-yaml-aws-specific-reservations>`:
@@ -1184,6 +1185,30 @@ Encrypted boot disk (optional).
 
 Set to ``true`` to encrypt the boot disk of all AWS instances launched by
 SkyPilot. This is useful for compliance with data protection regulations.
+
+Default: ``false``.
+
+.. _config-yaml-aws-nested-virtualization:
+
+``aws.nested_virtualization``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable nested virtualization (optional).
+
+Set to ``true`` to launch AWS instances with
+`nested virtualization <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html>`_
+enabled, so that ``/dev/kvm`` is available and KVM or Hyper-V can run inside
+the instance (e.g., for Firecracker microVMs, Android emulators, or VM-based
+sandboxes).
+
+Only some instance types support it (e.g., the ``m7i``, ``c7i``, ``r7i`` and
+``m8i``, ``c8i``, ``r8i`` families); set ``instance_type`` in your task's
+``resources`` to one of them. Requires ``boto3>=1.42.48``.
+
+.. code-block:: yaml
+
+  aws:
+    nested_virtualization: true
 
 Default: ``false``.
 

@@ -882,6 +882,13 @@ class AWS(clouds.Cloud):
             keys=('disk_encrypted',),
             default_value=False)
 
+        nested_virtualization = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('nested_virtualization',),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides)
+
         # Resource types whose tagging must not be silently given up. By
         # default a refusal to tag volumes degrades to a warning; naming
         # `volume` here makes it fail the launch instead, for deployments that
@@ -925,6 +932,7 @@ class AWS(clouds.Cloud):
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'disk_encrypted': disk_encrypted,
+            'nested_virtualization': nested_virtualization,
             'use_spot': resources.use_spot,
             'region': region_name,
             'zones': ','.join(zone_names),
