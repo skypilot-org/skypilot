@@ -334,6 +334,30 @@ tests:
       - failedTemplate:
           errorPattern: ingress-nginx.tcp and ingress-nginx.udp port mappings are not supported
 
+  - it: should refuse a Traefik namespace other than the release namespace
+    template: templates/traefik.yaml
+    set:
+      traefik.namespaceOverride: edge
+    asserts:
+      - failedTemplate:
+          errorPattern: traefik.namespaceOverride=edge is not supported
+
+  - it: should refuse an ingress-nginx namespace other than the release namespace
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.namespaceOverride: ingress
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress-nginx.namespaceOverride=ingress puts the ingress-nginx controller Service in namespace ingress
+
+  - it: should accept a namespace override equal to the release namespace
+    template: templates/traefik.yaml
+    set:
+      traefik.namespaceOverride: skypilot
+      ingress-nginx.namespaceOverride: skypilot
+    asserts:
+      - notFailedTemplate: {}
+
   - it: should bind the IngressClass ClusterRole to Traefik's ServiceAccount
     template: templates/traefik.yaml
     documentSelector:

@@ -24,6 +24,16 @@
 {{- if or $ingressNginx.tcp $ingressNginx.udp }}
 {{- fail "\ningress-nginx.tcp and ingress-nginx.udp port mappings are not supported with the bundled Traefik controller. To keep them, use ingress-nginx instead: --set traefik.enabled=false --set ingress-nginx.enabled=true" }}
 {{- end }}
+{{- with $traefik.namespaceOverride }}
+{{- if ne . $.Release.Namespace }}
+{{- fail (printf "\ntraefik.namespaceOverride=%s is not supported: the chart creates the Service in front of Traefik and Traefik's IngressClass permission in the release namespace %s. Remove traefik.namespaceOverride." . $.Release.Namespace) }}
+{{- end }}
+{{- end }}
+{{- with $ingressNginx.namespaceOverride }}
+{{- if ne . $.Release.Namespace }}
+{{- fail (printf "\ningress-nginx.namespaceOverride=%s puts the ingress-nginx controller Service in namespace %s, but the bundled Traefik controller's Service is in the release namespace %s. Switching controllers would replace the load balancer and change its address. To keep the address, stay on ingress-nginx: --set traefik.enabled=false --set ingress-nginx.enabled=true. If a new address is fine, remove ingress-nginx.namespaceOverride." . . $.Release.Namespace) }}
+{{- end }}
+{{- end }}
 {{- $traefikClass := $nginxProvider.ingressClass | default "nginx" }}
 {{- $ingressClasses := dict }}
 {{- if .Values.ingress.enabled }}
