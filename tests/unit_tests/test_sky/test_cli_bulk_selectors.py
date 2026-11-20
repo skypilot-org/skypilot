@@ -190,6 +190,8 @@ class TestClusters:
                                                 input='\n')
         assert not result.exception, result.output
         assert '[Y/n]' in result.output
+        assert ('Skipped 1 cluster in other workspaces: 1 yours (own-b).'
+                in result.output)
         assert _names(stopped) == ['own']
 
     def test_start_glob_stays_in_the_workspace_exact_name_does_not(
@@ -209,6 +211,28 @@ class TestClusters:
                                                 ['own-b', 'bob*', '-y'])
         assert not result.exception, result.output
         assert _names(stopped) == ['bobs', 'own-b']
+
+    def test_other_workspaces_name_yours_and_count_the_rest(
+            self, clusters, monkeypatch):
+        up = status_lib.ClusterStatus.UP
+        monkeypatch.setattr(
+            f'{__name__}._CLUSTERS', _CLUSTERS + [
+                _record('own-c', 'alice', 'ws-b', status=up),
+                _record('own-d', 'alice', 'ws-b', status=up),
+                _record('bobs-b', 'bob', 'ws-b', status=up),
+            ])
+        down, _ = clusters
+        result = cli_testing.CliRunner().invoke(command.down, ['-u', '-y'])
+        assert not result.exception, result.output
+        assert ('Skipped 4 clusters in other workspaces: 3 yours (own-b, '
+                'own-c and 1 more), 1 of other users. Switch the active '
+                'workspace to act on them.' in result.output)
+        assert 'bobs-b' not in result.output
+        assert _names(down) == ['bobs', 'own']
+        for args in (['-a', '-y'], ['own*', '-y']):
+            result = cli_testing.CliRunner().invoke(command.down, args)
+            assert ('Skipped 3 clusters in other workspaces: 3 yours (own-b, '
+                    'own-c and 1 more). Switch' in result.output), args
 
     def test_cancel_all_users_defaults_to_no(self, monkeypatch):
         monkeypatch.setattr(
@@ -241,10 +265,27 @@ class TestStorageAndVolumes:
                                                 ['-a', '-y'])
         assert not result.exception, result.output
         assert _names(delete) == ['own']
+        # The legacy one is in no workspace, not in another one.
+        assert ('Skipped 1 storage in other workspaces: 1 yours (own-b).'
+                in result.output)
         delete.reset_mock()
         result = cli_testing.CliRunner().invoke(command.storage_delete,
                                                 ['legacy', '-y'])
         assert _names(delete) == ['legacy']
+
+    def test_storage_glob_names_yours_in_other_workspaces(self, monkeypatch):
+        storages = [_record('own', 'alice'), _record('own-b', 'alice', 'ws-b')]
+        monkeypatch.setattr('sky.client.sdk.storage_ls', mock.MagicMock())
+        monkeypatch.setattr('sky.client.sdk.get',
+                            mock.MagicMock(return_value=storages))
+        delete = mock.MagicMock(return_value='req')
+        monkeypatch.setattr('sky.client.sdk.storage_delete', delete)
+        result = cli_testing.CliRunner().invoke(command.storage_delete,
+                                                ['own*', '-y'])
+        assert not result.exception, result.output
+        assert ('Skipped 1 storage in other workspaces: 1 yours (own-b).'
+                in result.output)
+        assert _names(delete) == ['own']
 
     def test_storage_from_a_server_without_the_field_is_not_narrowed(
             self, monkeypatch):
@@ -283,6 +324,8 @@ class TestStorageAndVolumes:
         result = cli_testing.CliRunner().invoke(command.volumes_delete, ['-a'],
                                                 input='\n')
         assert 'other users (1): bob: bobs' in result.output, result.output
+        assert ('Skipped 1 volume in other workspaces: 1 yours (own-b).'
+                in result.output)
         delete.assert_not_called()
         result = cli_testing.CliRunner().invoke(command.volumes_delete, ['-a'],
                                                 input='y\n')
@@ -359,6 +402,13 @@ class TestManagedJobs:
         assert sorted(kwargs['job_ids']) == [1, 2]
         assert not kwargs['all'] and not kwargs['all_users']
 
+    def test_all_names_your_jobs_in_other_workspaces(self, queue):
+        result = cli_testing.CliRunner().invoke(command.jobs_cancel, ['-a'],
+                                                input='\n')
+        assert ('Skipped 1 managed job in other workspaces: 1 yours (3).'
+                in result.output), result.output
+        queue.assert_not_called()
+
     def test_yes_keeps_the_server_side_selection(self, queue):
         result = cli_testing.CliRunner().invoke(command.jobs_cancel,
                                                 ['-u', '-y'])
@@ -396,7 +446,9 @@ class TestServeAndPoolDown:
                                                 input='\n')
         assert 'Aborted' in result.output, result.output
         assert 'other users (1): bob: bobs' in result.output
-        assert 'own-b' not in result.output
+        assert 'yours (1): own\n' in result.output
+        assert ('Skipped 1 service in other workspaces: 1 yours (own-b).'
+                in result.output)
         services.assert_not_called()
 
     def test_user_down_all_lists_own_only(self, services, monkeypatch):

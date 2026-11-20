@@ -383,6 +383,39 @@ def _in_workspace(records: List[Any], workspace_id: Optional[str]) -> List[Any]:
     return [r for r in records if r.get('workspace') == workspace_id]
 
 
+def _caller_hash() -> str:
+    user = sdk.api_info().user
+    return user.id if user is not None else common_utils.get_user_hash()
+
+
+def _note_other_workspaces(noun: str,
+                           records: List[Any],
+                           workspace_id: Optional[str],
+                           name_key: str = 'name') -> None:
+    """Says which of the records a bulk selector reached it leaves out for
+    being in another workspace: the caller's own by name, others' as a count."""
+    kept = {r[name_key] for r in _in_workspace(records, workspace_id)}
+    skipped = {
+        r[name_key]: r
+        for r in records
+        if r[name_key] not in kept and r.get('workspace') is not None
+    }
+    if not skipped:
+        return
+    me = _caller_hash()
+    own = [str(key) for key, r in skipped.items() if r.get('user_hash') == me]
+    parts = []
+    if own:
+        more = f' and {len(own) - 2} more' if len(own) > 2 else ''
+        parts.append(f'{len(own)} yours ({", ".join(own[:2])}{more})')
+    if len(own) < len(skipped):
+        parts.append(f'{len(skipped) - len(own)} of other users')
+    plural = 's' if len(skipped) > 1 else ''
+    click.echo(f'Skipped {len(skipped)} {noun}{plural} in other workspaces: '
+               f'{", ".join(parts)}. Switch the active workspace to act on '
+               'them.')
+
+
 def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
                           workspace_id: Optional[str]) -> Optional[List[Any]]:
     """The services or pools `down` reaches, as the server picks them: -a and
@@ -428,6 +461,10 @@ def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
         click.echo(f'Skipping {noun}s whose workspace is unknown or not '
                    f'readable (name them to tear them down): '
                    f'{", ".join(r["name"] for r in unknown)}')
+    _note_other_workspaces(
+        'pool' if is_pool else 'service',
+        _selected([r for r in records if r.get('workspace') is not None]),
+        workspace_id)
     return [r for r in records if r['name'] in exact_names] + _selected(
         _in_workspace(records, workspace_id))
 
@@ -447,8 +484,7 @@ def _confirm_bulk(operation: str,
                   warning: str = '') -> None:
     """Asks before a bulk operation. Other users' targets are listed by owner
     and make the default answer no; so does a warning."""
-    user = sdk.api_info().user
-    me = user.id if user is not None else common_utils.get_user_hash()
+    me = _caller_hash()
     own = [str(r[name_key]) for r in records if r.get('user_hash') == me]
     others: Dict[str, List[str]] = collections.defaultdict(list)
     for r in records:
@@ -3594,24 +3630,29 @@ def start(
             click.echo('Both --all and cluster(s) specified for sky start. '
                        'Letting --all take effect.')
 
-        all_clusters = _in_workspace(
-            _get_cluster_records_and_set_ssh_config(
-                clusters=None, refresh=common.StatusRefreshMode.AUTO),
-            target_workspace)
-
         # Get all clusters that are not controllers.
-        cluster_records = [
-            cluster for cluster in all_clusters
+        all_clusters = [
+            cluster for cluster in _get_cluster_records_and_set_ssh_config(
+                clusters=None, refresh=common.StatusRefreshMode.AUTO)
             if controller_utils.Controllers.from_name(
                 cluster['name'], expect_exact_match=False) is None
         ]
+        _note_other_workspaces('cluster', [
+            c for c in all_clusters
+            if force or c['status'] != status_lib.ClusterStatus.UP
+        ], target_workspace)
+        cluster_records = _in_workspace(all_clusters, target_workspace)
     if cluster_records is None:
         # Get GLOB cluster names
         exact_names = {name for name in clusters if not _is_glob_pattern(name)}
+        listed = _get_cluster_records_and_set_ssh_config(
+            clusters, refresh=common.StatusRefreshMode.AUTO)
+        _note_other_workspaces('cluster', [
+            r for r in listed if r['name'] not in exact_names and
+            (force or r['status'] != status_lib.ClusterStatus.UP)
+        ], target_workspace)
         cluster_records = [
-            record for record in _get_cluster_records_and_set_ssh_config(
-                clusters, refresh=common.StatusRefreshMode.AUTO)
-            if record['name'] in exact_names or
+            record for record in listed if record['name'] in exact_names or
             _in_workspace([record], target_workspace)
         ]
 
@@ -4022,13 +4063,20 @@ def _down_or_stop_clusters(
         ]
         controllers_str = ', '.join(map(repr, controllers))
         exact_names = {name for name in names if not _is_glob_pattern(name)}
-        records_by_name = {
-            cluster['name']: cluster
+        listed = [
+            cluster
             for cluster in _get_cluster_records_and_set_ssh_config(names)
             if controller_utils.Controllers.from_name(
-                cluster['name'], expect_exact_match=False) is None and
-            (cluster['name'] in exact_names or
-             _in_workspace([cluster], target_workspace))
+                cluster['name'], expect_exact_match=False) is None
+        ]
+        _note_other_workspaces(
+            'cluster', [c for c in listed if c['name'] not in exact_names],
+            target_workspace)
+        records_by_name = {
+            cluster['name']: cluster
+            for cluster in listed
+            if cluster['name'] in exact_names or
+            _in_workspace([cluster], target_workspace)
         }
         names = list(records_by_name)
 
@@ -4088,11 +4136,6 @@ def _down_or_stop_clusters(
         names += controllers
 
     if apply_to_all or all_users:
-        all_clusters = _in_workspace(
-            _get_cluster_records_and_set_ssh_config(clusters=None,
-                                                    all_users=all_users),
-            target_workspace)
-        records_by_name = {record['name']: record for record in all_clusters}
         if names:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
@@ -4102,14 +4145,18 @@ def _down_or_stop_clusters(
 
         # do not select already stopped clusters for stop command.
         # stopped clusters are still included for down or autostop commands.
-        names = [
-            record['name']
-            for record in all_clusters
+        reachable = [
+            record for record in _get_cluster_records_and_set_ssh_config(
+                clusters=None, all_users=all_users)
             if controller_utils.Controllers.from_name(
                 record['name'], expect_exact_match=False) is None and
             (down or idle_minutes_to_autostop is not None or
              record['status'] != status_lib.ClusterStatus.STOPPED)
         ]
+        _note_other_workspaces('cluster', reachable, target_workspace)
+        all_clusters = _in_workspace(reachable, target_workspace)
+        records_by_name = {record['name']: record for record in all_clusters}
+        names = list(records_by_name)
 
     clusters = names
     usage_lib.record_cluster_name_for_current_operation(clusters)
@@ -5692,6 +5739,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     target_workspace = _bulk_workspace() if is_bulk else None
     storages = sdk.get(sdk.storage_ls())
     if all:
+        _note_other_workspaces('storage', storages, target_workspace)
         storages = _in_workspace(storages, target_workspace)
         if not storages:
             click.echo('No storage(s) to delete.')
@@ -5700,6 +5748,10 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     else:
         exact_names = [name for name in names if not _is_glob_pattern(name)]
         patterns = [name for name in names if _is_glob_pattern(name)]
+        _note_other_workspaces('storage', [
+            s for s in storages if s['name'] not in exact_names and any(
+                fnmatch.fnmatch(s['name'], p) for p in patterns)
+        ], target_workspace)
         names = list(
             set(
                 _get_glob_matches([s['name'] for s in storages], exact_names) +
@@ -6065,6 +6117,7 @@ def volumes_delete(
     # -a and patterns act on the active workspace only.
     bulk_volumes = _in_workspace(all_volumes, target_workspace)
     if all:
+        _note_other_workspaces('volume', all_volumes, target_workspace)
         if not bulk_volumes:
             click.echo('No volumes to delete.')
             return
@@ -6076,6 +6129,10 @@ def volumes_delete(
         # cannot be deleted; only pattern matches are narrowed.
         exact_names = [n for n in names if not _is_glob_pattern(n)]
         patterns = [n for n in names if _is_glob_pattern(n)]
+        _note_other_workspaces('volume', [
+            v for v in all_volumes if v['name'] not in exact_names and any(
+                fnmatch.fnmatch(v['name'], p) for p in patterns)
+        ], target_workspace)
         names = list(
             set(
                 _get_glob_matches(
@@ -6934,6 +6991,10 @@ def jobs_cancel(
                                       queue_result)
         # One row per task: keep one per job.
         jobs_by_id: Dict[int, responses.ManagedJobRecord] = {}
+        _note_other_workspaces('managed job',
+                               job_records,
+                               target_workspace,
+                               name_key='job_id')
         for job in _in_workspace(job_records, target_workspace):
             jobs_by_id.setdefault(job['job_id'], job)
         if not jobs_by_id:
