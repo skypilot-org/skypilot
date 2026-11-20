@@ -43,8 +43,8 @@ If the pending reason is ``FailedScheduling`` and the information indicates ther
 
 .. _sky-api-server-troubleshooting-ingress-nginx-conflicts:
 
-Ingress-nginx controller conflicts
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Ingress controller conflicts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If you encounter similar errors as below when deploying the API server:
 
@@ -52,5 +52,4 @@ If you encounter similar errors as below when deploying the API server:
 
     Error: Unable to continue with install: IngressClass "nginx" in namespace "" exists and cannot be imported into the current release: invalid ownership metadata; annotation validation error: key "meta.helm.sh/release-name" must equal "test": current value is "skypilot"
 
-It is likely you have an existing ingress-nginx controller deployed in the Kubernetes cluster. Or have an existing SkyPilot API server deployed which by default installs an ingress-nginx controller. If this is the case, you can follow the instructions in :ref:`Reusing ingress controller for API server <sky-api-server-helm-multiple-deploy>` to reuse the existing ingress-nginx controller to solve this issue.
-
+The chart creates the cluster-wide ``nginx`` IngressClass for its bundled Traefik controller, so it conflicts with another SkyPilot API server in the cluster or with an existing ingress-nginx controller. Follow the instructions in :ref:`Reusing ingress controller for API server <sky-api-server-helm-multiple-deploy>` to reuse the existing controller.

@@ -140,7 +140,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`enabled <helm-values-ingress-tls-enabled>`: false
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
-    :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
+    :ref:`enabled <helm-values-ingress-nginx-enabled>`: false
     :ref:`controller <helm-values-ingress-nginx-controller>`:
       service:
         type: LoadBalancer
@@ -155,6 +155,16 @@ Below is the available helm value keys and the default value of each key:
               default upgrade;
               ''      close;
           }
+
+  :ref:`traefik <helm-values-traefik>`:
+    enabled: true
+    deployment:
+      replicas: 2
+    rbac:
+      namespaced: true
+    providers:
+      kubernetesIngressNGINX:
+        enabled: true
 
   :ref:`rbac <helm-values-rbac>`:
     :ref:`create <helm-values-rbac-create>`: true
@@ -299,7 +309,7 @@ For example, if ``global.imageRegistry`` is set to ``registry.example.com/custom
 
 .. note::
 
-  This override will only be applied to images defined in the SkyPilot chart; bundled subcharts such as ``ingress-nginx`` keep their own registry configuration. Refer to the documentations of subcharts for how to change them.
+  This override will only be applied to images defined in the SkyPilot chart; bundled subcharts such as ``traefik`` and ``ingress-nginx`` keep their own registry configuration. Refer to the documentations of subcharts for how to change them.
 
 Default: ``null``
 
@@ -356,6 +366,8 @@ Note that sub charts will not inherit the top-level ``fullnameOverride`` value, 
   prometheus:
     # Must use the same fullnameOverride as top-level
     fullnameOverride: custom-name
+  traefik:
+    fullnameOverride: other-name
   ingress-nginx:
     fullnameOverride: other-name
   grafana:
@@ -1771,14 +1783,14 @@ Enable TLS for the ingress. When enabled, either cert-manager annotation should 
 ``ingress-nginx.enabled``
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Enable the ingress-nginx controller for the API server. If you have an existing ingress-nginx controller, you have to set this to ``false`` to avoid conflict.
+Deploy the ingress-nginx controller for the API server instead of the bundled :ref:`Traefik <helm-values-traefik>` controller. ingress-nginx is retired upstream and its nginx no longer gets security fixes. Enable only one of ``ingress-nginx.enabled`` and ``traefik.enabled``.
 
-Default: ``true``
+Default: ``false``
 
 .. code-block:: yaml
 
   ingress-nginx:
-    enabled: true
+    enabled: false
 
 .. _helm-values-ingress-nginx-controller:
 
@@ -1786,6 +1798,8 @@ Default: ``true``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Fields under ``ingress-nginx.controller`` will be mapped to ``controller`` values for the ingress-nginx controller sub-chart. Refer to the `ingress-nginx chart documentation <https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx#values>`_ for more details.
+
+With the bundled Traefik controller, the chart reads the LoadBalancer service's ``type``, ``annotations``, ``loadBalancerIP``, ``loadBalancerSourceRanges``, ``externalTrafficPolicy`` and ``nodePorts`` from ``ingress-nginx.controller.service``.
 
 Default: see the yaml below.
 
@@ -1815,6 +1829,59 @@ Default: see the yaml below.
               default upgrade;
               ''      close;
           }
+
+.. _helm-values-traefik:
+
+``traefik``
+~~~~~~~~~~~
+
+The bundled Traefik ingress controller. Traefik serves the chart's Ingresses through its ingress-nginx provider, which reads the ``nginx.ingress.kubernetes.io`` annotations the chart sets. Fields under ``traefik`` are passed to the Traefik sub-chart; refer to the `Traefik chart documentation <https://github.com/traefik/traefik-helm-chart>`_ for the full list.
+
+The chart renders the IngressClass and the LoadBalancer service in front of Traefik itself (see :ref:`ingress-nginx.controller <helm-values-ingress-nginx-controller>`). Traefik runs with namespaced RBAC: it only watches, and reads Secrets in, the release namespace. To serve API servers in other namespaces from one controller, set ``traefik.rbac.namespaced`` to ``false`` (see :ref:`sky-api-server-helm-multiple-deploy`). Set ``traefik.enabled`` to ``false`` when you use your own ingress controller.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  traefik:
+    enabled: true
+    deployment:
+      replicas: 2
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    rbac:
+      namespaced: true
+    providers:
+      kubernetesCRD:
+        enabled: false
+      kubernetesIngress:
+        enabled: false
+      kubernetesIngressNGINX:
+        enabled: true
+    ingressClass:
+      enabled: false
+    service:
+      enabled: false
+    gateway:
+      enabled: false
+    ports:
+      web:
+        http:
+          aliasHeadersStrategy: delete
+        transport:
+          respondingTimeouts:
+            # Traefik's default (60s) bounds the whole request, which cuts off slow uploads.
+            readTimeout: 3600s
+      websecure:
+        http:
+          aliasHeadersStrategy: delete
+        transport:
+          respondingTimeouts:
+            readTimeout: 3600s
+    global:
+      checkNewVersion: false
+      sendAnonymousUsage: false
 
 .. _helm-values-rbac:
 
