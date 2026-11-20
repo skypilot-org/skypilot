@@ -14,9 +14,10 @@ from sky.utils import subprocess_utils
 logger = logging.getLogger(__name__)
 
 # Warm start lets at most this many workers be starting (spawned, initializer
-# not yet finished) at a time. Each start imports SkyPilot and opens database
-# connections, so a slow start, e.g. on a busy database, slows warm start down
-# instead of piling up starting processes and their connections.
+# not yet finished) at a time. Each start imports SkyPilot, which costs CPU and
+# memory, and runs plugin initializers, some of which connect to the database.
+# Pacing by readiness means a slow start slows warm start down instead of
+# piling up starting processes.
 _WARM_START_MAX_STARTING = 2
 _WARM_START_POLL_SECONDS = 0.1
 # Warm start stops, and the remaining workers start on demand, when no worker
