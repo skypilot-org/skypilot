@@ -59,6 +59,37 @@ class TestParseTimeMinutes(unittest.TestCase):
                     ValueError, msg=f'Should fail for input: {invalid_input}'):
                 resources_utils.parse_time_minutes(invalid_input)
 
+    def test_non_finite_rejected(self):
+        """Non-finite durations raise ValueError, not OverflowError.
+
+        float() accepts 'inf'/'infinity'/'nan', so without an explicit
+        guard math.ceil(inf) would leak an OverflowError past the parser's
+        'except ValueError' handler (crashing callers such as the
+        ``sky jobs queue --since`` CLI flag that catch only ValueError).
+        """
+        non_finite_inputs = [
+            'infm',
+            'infh',
+            'infinityh',
+            'infd',
+            '-infm',
+            'infw',
+            # Finite values whose product with the unit multiplier
+            # overflows to infinity must be rejected the same way.
+            '1e307d',
+            '1e308h',
+        ]
+        for invalid_input in non_finite_inputs:
+            with self.assertRaises(
+                    ValueError, msg=f'Should fail for input: {invalid_input}'):
+                resources_utils.parse_time_minutes(invalid_input)
+            with self.assertRaises(
+                    ValueError, msg=f'Should fail for input: {invalid_input}'):
+                resources_utils.parse_time_seconds(invalid_input)
+        # 'infs' only maps to a unit for the seconds parser.
+        with self.assertRaises(ValueError):
+            resources_utils.parse_time_seconds('infs')
+
     def test_case_insensitive(self):
         """Test that unit parsing is case-insensitive."""
         self.assertEqual(resources_utils.parse_time_minutes('30m'), 30)

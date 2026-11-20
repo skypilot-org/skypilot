@@ -673,7 +673,16 @@ def _parse_time_with_units(time: str, time_units: Dict[str, int]) -> int:
         if time_str_lower.endswith(unit):
             try:
                 value = float(time_str_lower[:-len(unit)])
-                final_value = math.ceil(value * multiplier)
+                scaled = value * multiplier
+                # Reject non-finite results: float() accepts 'inf',
+                # 'infinity' and 'nan', and a huge finite value (e.g.
+                # '1e307d') can overflow to inf when scaled. math.ceil on a
+                # non-finite float raises OverflowError (not ValueError),
+                # which would escape this handler as an uncaught crash
+                # instead of the clean 'Invalid time format' below.
+                if not math.isfinite(scaled):
+                    continue
+                final_value = math.ceil(scaled)
                 if final_value >= 0:
                     return final_value
             except ValueError:
