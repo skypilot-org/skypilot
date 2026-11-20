@@ -251,6 +251,10 @@ EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
 # watching it, long enough that the sweep is negligible next to provisioning.
 LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS = 60
 
+# How often the idle detection daemon asks the metrics source about every UP
+# cluster. Idleness is judged over a window of hours, so minutes are enough.
+IDLE_DETECTION_DAEMON_INTERVAL_SECONDS = 900  # 15 minutes
+
 # Time an API server shutdown may take, matching the pod's
 # terminationGracePeriodSeconds when deployed with the Helm chart.
 try:
