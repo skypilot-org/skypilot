@@ -1440,6 +1440,14 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
+    def refresh_policy(self) -> None:
+        """Bring this process's policy up to the stored version, no lock.
+
+        For a batch of `roles_in_memory` reads: one version read instead of
+        one per `get_user_roles` call.
+        """
+        self._load_policy_no_lock()
+
     def start_policy_version_poller(self) -> None:
         """Publish the stored policy version for this server's workers.
 
