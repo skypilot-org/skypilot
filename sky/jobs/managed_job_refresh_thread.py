@@ -195,14 +195,16 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         _exit_after(drain_seconds + server_constants.GRACE_PERIOD_SECONDS +
                     _STEP_DOWN_EXIT_MARGIN_SECONDS)
         # Re-touch the recovery signal file so no new controllers will be
-        # started
+        # started, and stop the running ones from claiming jobs while they are
+        # killed.
         try:
             signal_file = pathlib.Path(
                 constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
             signal_file.parent.mkdir(parents=True, exist_ok=True)
             signal_file.touch()
+            managed_job_scheduler.drain_local_job_controllers()
         except OSError:
-            logger.warning('Failed to touch recovery signal file on lock-loss')
+            logger.warning('Failed to gate local controllers on lock-loss')
         # The lock is already released, kill job controllers to avoid split
         # brain, e.g. new job controllers might have been launched on the new
         # pod during a rolling update
@@ -237,27 +239,16 @@ def _exit_after(seconds: int) -> None:
 def start_managed_job_refresh_daemon() -> None:
     """Start the refresh thread for this API server process, if needed.
 
-    No-op when consolidation mode is off — mirrors the gating that the
-    historical ``should_skip_managed_job_status_refresh`` provided. Also a
-    no-op in a local API server started by a jobs controller; see below.
+    No-op unless this server runs the host's controller pool; see
+    managed_job_scheduler.runs_local_controller_pool.
     """
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        # This API server was started by a jobs controller process (the local
-        # server of a standalone controller cluster, via sdk.api_start) and
-        # inherited its OVERRIDE_CONSOLIDATION_MODE, so is_consolidation_mode()
-        # is true here even though this server does not own the controller
-        # pool: skylet does. Controllers started from here would be children
-        # of this server and inherit IS_SKYPILOT_SERVER, so they would treat
-        # it as their own process tree and never restart it if it died. The
-        # consolidation-mode API server never has this variable in its own
-        # environment: start_controller() exports it only in the controller's
-        # command.
-        logger.debug('API server started by a jobs controller; not starting '
-                     'the managed-job refresh thread.')
+    if not managed_job_scheduler.runs_local_controller_pool():
+        logger.debug('This API server does not run the job controller pool; '
+                     'not starting the managed-job refresh thread.')
         return
-    if not managed_job_utils.is_consolidation_mode():
-        logger.debug('Consolidation mode is off; not starting the managed-job '
-                     'refresh thread.')
-        return
+    # A container restart keeps ~/.sky but not the controllers, so a previous
+    # server's drain mark would stop the pool this server starts from claiming.
+    pathlib.Path(
+        managed_job_constants.CONTROLLERS_DRAINING_PATH).unlink(missing_ok=True)
     logger.info('Starting the managed-job refresh thread')
     ManagedJobRefreshDaemonThread().start()
