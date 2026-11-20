@@ -672,7 +672,7 @@ def get_active_file_mounts_blob_ids() -> Set[str]:
     with orm.Session(engine) as session:
         rows = session.execute(
             sqlalchemy.select(
-                services_table.c.file_mounts_blob_id.distinct()).where(
+                services_table.c.file_mounts_blob_id).distinct().where(
                     services_table.c.file_mounts_blob_id.is_not(
                         None))).fetchall()
     return {row[0] for row in rows}
@@ -683,7 +683,7 @@ def get_service_versions(service_name: str) -> List[int]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(
-            sqlalchemy.select(version_specs_table.c.version.distinct()).where(
+            sqlalchemy.select(version_specs_table.c.version).distinct().where(
                 version_specs_table.c.service_name == service_name)).fetchall()
     return [row[0] for row in rows]
 

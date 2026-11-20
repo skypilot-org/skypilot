@@ -1734,7 +1734,7 @@ def get_nonterminal_job_ids_by_name(
     with orm.Session(engine) as session:
         # Build the query using SQLAlchemy core
         query = sqlalchemy.select(
-            spot_table.c.spot_job_id.distinct()).select_from(
+            spot_table.c.spot_job_id).distinct().select_from(
                 spot_table.outerjoin(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
@@ -1792,7 +1792,7 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         ]
 
         query = sqlalchemy.select(
-            spot_table.c.spot_job_id.distinct()).select_from(
+            spot_table.c.spot_job_id).distinct().select_from(
                 spot_table.outerjoin(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
@@ -2167,7 +2167,7 @@ def get_active_file_mounts_blob_ids() -> Set[str]:
                     spot_table.c.status.in_(terminal_status_values)),
             )).distinct())
     query = sqlalchemy.select(
-        job_info_table.c.file_mounts_blob_id.distinct()).where(
+        job_info_table.c.file_mounts_blob_id).distinct().where(
             sqlalchemy.and_(
                 job_info_table.c.file_mounts_blob_id.is_not(None),
                 job_info_table.c.spot_job_id.in_(non_terminal_job_ids_subquery),
@@ -3605,7 +3605,7 @@ def get_nonterminal_job_ids_by_pool(pool: str,
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         query = sqlalchemy.select(
-            spot_table.c.spot_job_id.distinct()).select_from(
+            spot_table.c.spot_job_id).distinct().select_from(
                 spot_table.outerjoin(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
@@ -6031,7 +6031,7 @@ def get_all_job_ids_by_name(name: Optional[str],
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         query = sqlalchemy.select(
-            spot_table.c.spot_job_id.distinct()).select_from(
+            spot_table.c.spot_job_id).distinct().select_from(
                 spot_table.outerjoin(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
