@@ -629,3 +629,28 @@ Or via the ``--env`` flag in ``sky launch`` :ref:`CLI <cli>`:
 .. literalinclude:: ../../../examples/admin_policy/slurm_filesystem_routing.yaml
     :language: yaml
     :caption: `Config YAML for using SlurmFilesystemRoutingPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/slurm_filesystem_routing.yaml>`_
+
+.. _criticality-tier-policy:
+
+Choose spot or on-demand by task criticality
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This policy reads a ``criticality`` label on each task and picks capacity for its GPU resources. ``critical`` tasks run on-demand. ``standard`` tasks try spot first and fall back to on-demand when no spot capacity is available. Tasks without the label are unchanged, and so are services and pools, because SkyServe needs all resources of a service to use the same capacity and has its own on-demand fallback. Admins can add tiers through the class attributes, for example a ``preemptible`` tier in ``SPOT_ONLY_TIERS`` for tasks that may wait for spot capacity.
+
+Set the label in a :ref:`task YAML <yaml-spec>`:
+
+.. code-block:: yaml
+
+   resources:
+     accelerators: A100:8
+     labels:
+       criticality: standard
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: CriticalityTierPolicy
+    :caption: `CriticalityTierPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/criticality_tier.yaml
+    :language: yaml
+    :caption: `Config YAML for using CriticalityTierPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/criticality_tier.yaml>`_

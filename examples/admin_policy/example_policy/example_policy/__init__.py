@@ -3,6 +3,7 @@ from example_policy.client_policy import UseLocalGcpCredentialsPolicy
 from example_policy.skypilot_policy import AddLabelsConditionalPolicy
 from example_policy.skypilot_policy import AddLabelsPolicy
 from example_policy.skypilot_policy import AddVolumesPolicy
+from example_policy.skypilot_policy import CriticalityTierPolicy
 from example_policy.skypilot_policy import DisablePublicIpPolicy
 from example_policy.skypilot_policy import DoNothingPolicy
 from example_policy.skypilot_policy import DynamicKubernetesContextsUpdatePolicy
