@@ -1173,6 +1173,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
+    permission.permission_service.start_policy_watcher()
     # Attribute event loop stalls to the code that caused them. Not gated on
     # METRICS_ENABLED: its primary output is a log line, which is the only
     # thing available when debugging a deployment after the fact.
@@ -4958,6 +4959,9 @@ if __name__ == '__main__':
         clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
+        # Before uvicorn spawns its workers: they find the poller's output
+        # through the environment.
+        permission.permission_service.start_policy_version_poller()
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
