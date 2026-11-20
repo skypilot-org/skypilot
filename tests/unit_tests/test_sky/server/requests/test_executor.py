@@ -3440,3 +3440,70 @@ async def test_caller_usage_of_an_inline_request(in_process_env,
                           kind='sync') == 1
     assert _caller_sample(
         metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL) == 0
+
+
+@pytest.mark.parametrize(
+    'flag,db_uri,pool_hostport,expected',
+    [
+        (None, None, None, False),
+        ('0', None, None, False),
+        # SQLite: nothing to exhaust.
+        ('1', None, None, True),
+        ('true', None, None, True),
+        # Postgres without a pooler: stay on demand.
+        ('1', 'postgresql://u:p@db:5432/sky', None, False),
+        # Postgres behind a pooler.
+        ('1', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', True),
+        ('0', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', False),
+    ])
+def test_eager_workers_enabled(monkeypatch, flag, db_uri, pool_hostport,
+                               expected):
+    """Warm start needs the flag and, on Postgres, a connection pooler."""
+    env = {
+        'SKYPILOT_EAGER_EXECUTOR_WORKERS': flag,
+        constants.ENV_VAR_DB_CONNECTION_URI: db_uri,
+        constants.ENV_VAR_DB_POOL_HOSTPORT: pool_hostport,
+        constants.ENV_VAR_DB_POOL_CONNECTION_URI: None,
+    }
+    for name, value in env.items():
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    executor.eager_workers_enabled.cache_clear()
+    try:
+        assert executor.eager_workers_enabled() is expected
+    finally:
+        executor.eager_workers_enabled.cache_clear()
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_request_worker_passes_eager_workers_flag(monkeypatch, enabled):
+    """RequestWorker passes eager_workers_enabled() to its pool."""
+    monkeypatch.setattr(executor, 'eager_workers_enabled', lambda: enabled)
+    captured = {}
+
+    class FakeExecutor:
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(executor.process, 'BurstableExecutor', FakeExecutor)
+    monkeypatch.setattr(executor, '_get_queue',
+                        lambda schedule_type: mock.Mock())
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        config=server_config.WorkerConfig(garanteed_parallelism=2,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+    worker._cancel_event.set()
+    # Run off the main thread so run() leaves signal handlers and the
+    # process title alone.
+    thread = threading.Thread(target=worker.run)
+    thread.start()
+    thread.join(timeout=30)
+    assert not thread.is_alive()
+    assert captured['warm_start'] is enabled
