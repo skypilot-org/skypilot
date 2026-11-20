@@ -374,6 +374,13 @@ To switch to Traefik, upgrade with ``--reset-then-reuse-values`` (Helm 3.14+), w
 
 The services keep their names and addresses, and the settings under ``ingress-nginx.controller.service`` carry over, including an internal service. Settings under ``ingress-nginx.controller.config`` no longer apply, and ``ingress-nginx.tcp`` and ``ingress-nginx.udp`` port mappings are not supported with Traefik. Expect requests to fail briefly (about 20 seconds) while the Traefik pods start.
 
+Traefik does not write the load balancer address into the status of the Ingress unless you point it at the service. If something reads the address from the Ingress, for example external-dns with its ``ingress`` source, add these flags to the upgrade command:
+
+.. code-block:: bash
+
+      --set traefik.providers.kubernetesIngressNGINX.publishService.enabled=true \
+      --set traefik.providers.kubernetesIngressNGINX.publishService.pathOverride=${NAMESPACE}/${RELEASE_NAME}-ingress-nginx-controller
+
 Traefik does not support OAuth2 Proxy on the ingress (``ingress.oauth2-proxy.enabled``). If your API server uses it, follow the :ref:`OAuth migration guide <oauth-migration-guide>` to move those settings to ``auth.oauth`` in the same upgrade.
 
 To keep ingress-nginx for now, add ``--set traefik.enabled=false`` to the upgrade command in Step 2. If you bring your own ingress controller, add ``--set traefik.enabled=false`` as well.

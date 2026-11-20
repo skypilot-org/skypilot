@@ -1839,6 +1839,8 @@ The bundled Traefik ingress controller. Traefik serves the chart's Ingresses thr
 
 The chart renders the IngressClass and the LoadBalancer service in front of Traefik itself (see :ref:`ingress-nginx.controller <helm-values-ingress-nginx-controller>`). Traefik runs with namespaced RBAC: it only watches, and reads Secrets in, the release namespace. To serve API servers in other namespaces from one controller, set ``traefik.rbac.namespaced`` to ``false`` (see :ref:`sky-api-server-helm-multiple-deploy`). Set ``traefik.enabled`` to ``false`` when you use your own ingress controller.
 
+Traefik serves the IngressClass named by ``traefik.providers.kubernetesIngressNGINX.ingressClass`` (default ``nginx``), which must match :ref:`ingress.ingressClassName <helm-values-ingress-ingressClassName>`. Traefik does not write the service's address into the status of the Ingresses unless ``traefik.providers.kubernetesIngressNGINX.publishService`` points at the service; see :ref:`sky-api-server-switch-to-traefik` for the flags.
+
 Default: see the yaml below.
 
 .. code-block:: yaml
