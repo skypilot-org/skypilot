@@ -220,8 +220,10 @@ def _keep_user_filter(context: BrowserContext) -> None:
 
 
 def _jobs_table(page: Page):
-    # The managed jobs table comes before the pools table.
-    return page.locator('table').first
+    # Prefer the managed-jobs table over the pools table on the same page.
+    # Pools has Workers/Worker Details; jobs has Recoveries.
+    return page.locator('table').filter(has=page.get_by_role(
+        'columnheader', name=re.compile(r'^Recoveries\b'))).first
 
 
 def _row(page: Page, name: str):
@@ -649,11 +651,21 @@ def test_pagination_and_page_size(make_user, seed_job, open_as, uid, twist):
     expect(_job_link(page, names[1]),
            'page 1 must not list my second-oldest job').to_have_count(0)
 
+    # Footer/URL can flip from client state while the table is still
+    # mid-refresh (flakes as "page 2 must list my oldest jobs"). Assert
+    # footer/URL first so dom-next-page-dead still fails for that reason,
+    # then wait for the page-2 queue result before row asserts.
+    since = page.recorder.mark()
     page.locator('button:has(path[d="M9 18l6-6-6-6"])').first.click()
     expect(_footer(page, 11, 12, 12),
            'the next page must read "11 – 12 of 12"').to_be_visible()
     expect(page, 'the next page must put page=2 in the URL').to_have_url(
         re.compile(r'[?&]page=2(&|$)'))
+    _wait_table_body(page, since, lambda b: b.get('page') == 2,
+                     'the next page must ask for page 2 of jobs')
+    expect(
+        _jobs_table(page).locator('tbody tr'),
+        'page 2 must show exactly two job rows').to_have_count(2)
     for name in names[:2]:
         expect(_job_link(page, name),
                f'page 2 must list my oldest jobs: {name}').to_be_visible()
@@ -668,6 +680,9 @@ def test_pagination_and_page_size(make_user, seed_job, open_as, uid, twist):
         re.compile(r'[?&]pageSize=30(&|$)'))
     expect(_footer(page, 1, 12, 12),
            '30 per page must read 1 – 12 of 12').to_be_visible()
+    expect(
+        _jobs_table(page).locator('tbody tr'),
+        '30 per page must show all 12 job rows').to_have_count(12)
     for name in names:
         expect(_job_link(page, name),
                f'30 per page must list all 12 jobs: {name}').to_be_visible()
