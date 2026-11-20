@@ -3,12 +3,19 @@
 # This script deploys SkyPilot with OAuth2 Proxy (Okta) authentication on a kind cluster
 # created by 'sky local up'. It includes specific fixes for kind cluster networking issues.
 #
+# It tests both OAuth setups, each through the controller it runs with:
+# - ingress.oauth2-proxy (legacy): the chart's controllers are disabled and the
+#   ingress-nginx from 'sky local up' serves the release on NodePort $NODEPORT.
+#   The chart refuses ingress.oauth2-proxy with its bundled Traefik controller.
+# - auth.oauth: the ingress-nginx from 'sky local up' is removed, and the chart
+#   installs its bundled Traefik controller, IngressClass and Service, with the
+#   Service on NodePort $NODEPORT. The cleanup reinstalls the ingress-nginx.
+#
 # Key modifications for kind cluster compatibility:
-# 1. Disables ingress-nginx subchart to avoid conflicts with the existing nginx from 'sky local up'
-# 2. Disables nginx admission webhook to allow OAuth2 proxy snippet annotations
-# 3. Patches OAuth2 proxy ingress annotations to use internal cluster service URLs
-# 4. Uses localhost with NodePort for accessing the API server
-# 5. Supports automated login for testing (when test credentials are provided)
+# 1. Disables nginx admission webhook to allow OAuth2 proxy snippet annotations
+# 2. Patches OAuth2 proxy ingress annotations to use internal cluster service URLs
+# 3. Uses localhost with NodePort for accessing the API server
+# 4. Supports automated login for testing (when test credentials are provided)
 #
 # Prerequisites:
 # - Run 'sky local up' first to create the kind cluster with nginx ingress
@@ -36,6 +43,36 @@ NAMESPACE=skypilot
 NODEPORT=30082
 HTTPS_NODEPORT=30099
 RELEASE_NAME=skypilot
+# The ingress-nginx manifest 'sky local up' applies (sky/utils/kubernetes/create_cluster.sh).
+LOCAL_UP_INGRESS_NGINX_MANIFEST=https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+LOCAL_UP_INGRESS_NGINX_REMOVED=false
+
+# Remove the ingress-nginx from 'sky local up', so the chart can install its
+# bundled Traefik controller with the default IngressClass and NodePort $NODEPORT.
+remove_local_up_ingress_nginx() {
+    echo "Removing the ingress-nginx controller installed by 'sky local up'..."
+    LOCAL_UP_INGRESS_NGINX_REMOVED=true
+    kubectl delete namespace ingress-nginx --ignore-not-found=true --wait=true
+    kubectl delete ingressclass nginx --ignore-not-found=true
+    kubectl delete validatingwebhookconfigurations ingress-nginx-admission --ignore-not-found=true
+    echo "✅ ingress-nginx from 'sky local up' removed"
+}
+
+# Reinstall the ingress-nginx from 'sky local up' if this script removed it.
+restore_local_up_ingress_nginx() {
+    if [[ "$LOCAL_UP_INGRESS_NGINX_REMOVED" != "true" ]]; then
+        return
+    fi
+    echo "Reinstalling the ingress-nginx controller from 'sky local up'..."
+    kubectl delete ingressclass nginx --ignore-not-found=true
+    if kubectl apply -f "$LOCAL_UP_INGRESS_NGINX_MANIFEST" && \
+        kubectl wait --namespace ingress-nginx --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller --timeout=300s; then
+        echo "✅ ingress-nginx from 'sky local up' reinstalled"
+    else
+        echo "⚠️  Could not reinstall ingress-nginx from 'sky local up'"
+    fi
+}
 
 # Uninstall helm release and delete namespace, waiting for full cleanup.
 # Reused by the trap handler, deploy_and_login pre-deploy, and between-tests.
@@ -63,6 +100,7 @@ cleanup() {
     echo ""
     echo "🧹 Cleaning up resources..."
     cleanup_helm_release
+    restore_local_up_ingress_nginx
 
     # Restore sky/server/common.py to original state
     echo "Restoring sky/server/common.py..."
@@ -238,6 +276,7 @@ fi
 # Add required Helm repositories for dependencies
 echo "Adding required Helm repositories..."
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo add traefik https://traefik.github.io/charts
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
@@ -291,8 +330,10 @@ deploy_and_login() {
             --set ingress.oauth2-proxy.oidc-issuer-url="$OKTA_ISSUER_URL" \
             --set ingress.oauth2-proxy.client-id="$OKTA_CLIENT_ID" \
             --set ingress.oauth2-proxy.client-secret="$OKTA_CLIENT_SECRET" \
-            --set ingress-nginx.enabled=false
+            --set ingress-nginx.enabled=false \
+            --set traefik.enabled=false
     else
+        remove_local_up_ingress_nginx
         helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
             --namespace $NAMESPACE \
             --create-namespace \
@@ -307,7 +348,11 @@ deploy_and_login() {
             --set auth.oauth.oidc-issuer-url="$OKTA_ISSUER_URL" \
             --set auth.oauth.client-id="$OKTA_CLIENT_ID" \
             --set auth.oauth.client-secret="$OKTA_CLIENT_SECRET" \
-            --set ingress-nginx.enabled=false
+            --set ingress-nginx.enabled=false \
+            --set traefik.enabled=true \
+            --set ingress-nginx.controller.service.type=NodePort \
+            --set ingress-nginx.controller.service.nodePorts.http=$NODEPORT \
+            --set ingress-nginx.controller.service.nodePorts.https=$HTTPS_NODEPORT
     fi
 
     if [ $? -ne 0 ]; then
@@ -332,6 +377,16 @@ deploy_and_login() {
         exit 1
     fi
     echo "✅ Deployment rollout completed"
+
+    if [[ "$mode" != "legacy" ]]; then
+        echo "Waiting for the bundled Traefik controller..."
+        if ! kubectl rollout status deployment/skypilot-traefik -n $NAMESPACE --timeout=300s; then
+            kubectl describe deployment skypilot-traefik -n $NAMESPACE
+            kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=traefik -o wide
+            exit 1
+        fi
+        echo "✅ Traefik controller ready"
+    fi
 
     # Wait for pods to be ready
     echo "Waiting for pods to be ready..."
