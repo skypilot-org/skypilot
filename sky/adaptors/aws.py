@@ -87,7 +87,7 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], T],
     """Create an AWS object.
 
     Args:
-        creation_fn: The function to create the AWS object.
+        creation_fn_or_cls: The function to create the AWS object.
 
     Returns:
         The created AWS object.

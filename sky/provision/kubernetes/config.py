@@ -401,7 +401,7 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
     Args:
         namespace: The namespace to create the role in.
         provider_config: The provider config.
-        role_field: The field in the provider config that contains the role.
+        resource_field: The field in the provider config with the role.
     """
     log_prefix = '_configure_autoscaler_role'
     if resource_field not in provider_config:
@@ -446,7 +446,7 @@ def _configure_autoscaler_role_binding(
     Args:
         namespace: The namespace to create the role binding in.
         provider_config: The provider config.
-        binding_field: The field in the provider config that contains the role
+        resource_field: The field in the provider config with the role
     """
     log_prefix = '_configure_autoscaler_role_binding'
     if resource_field not in provider_config:

@@ -531,7 +531,6 @@ def client(service_name: str):
 
     Args:
         service_name: Nebius service name (e.g., 's3').
-        kwargs: Other options.
     """
     # Need to use the client retrieved from the per-thread session
     # to avoid thread-safety issues (Directly creating the client
