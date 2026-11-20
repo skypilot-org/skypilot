@@ -626,6 +626,13 @@
                                 },
                                 "use-gzip": {
                                     "type": "string"
+                                },
+                                "use-http2": {
+                                    "type": [
+                                        "string",
+                                        "boolean",
+                                        "null"
+                                    ]
                                 }
                             }
                         },

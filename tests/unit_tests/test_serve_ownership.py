@@ -75,12 +75,13 @@ def _backend():
 
 
 def _status_of(records):
-    """A status lookup over ``records``: exact names, no expansion."""
+    """A status lookup over ``records``: exact names, no expansion. A record
+    without a workspace is in the default one."""
 
     def _status(*, handle, service_names, pool):
         del handle
         return [
-            dict(r)
+            dict({'workspace': constants.SKYPILOT_DEFAULT_WORKSPACE}, **r)
             for r in records
             if (service_names is None or r['name'] in service_names) and
             r.get('pool', pool) == pool
@@ -216,6 +217,114 @@ class TestDown:
         with _caller(roles=('admin',)), _down_env() as terminate:
             impl.down(all=True)
         assert _terminated(terminate) == sorted(r['name'] for r in _RECORDS)
+
+    def test_all_and_patterns_reach_only_the_active_workspace(self):
+        records = _RECORDS + [
+            {
+                'name': 'alice-svc-b',
+                'user_hash': 'alice-hash',
+                'workspace': 'ws-b'
+            },
+            {
+                'name': 'bob-svc-b',
+                'user_hash': 'bob-hash',
+                'workspace': 'ws-b'
+            },
+        ]
+        with _caller(), _down_env(records) as terminate:
+            impl.down(all=True)
+        assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
+        with _caller(), _down_env(records) as terminate:
+            impl.down(service_names=['alice-*'])
+        assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
+        with _caller(roles=('admin',)), _down_env(records) as terminate:
+            impl.down(all=True)
+        assert _terminated(terminate) == sorted(r['name'] for r in _RECORDS)
+        # An exact name reaches its service wherever it is.
+        with _caller(), _down_env(records) as terminate:
+            impl.down(service_names=['alice-svc-b', 'alice-svc-2*'])
+        assert _terminated(terminate) == ['alice-svc-2', 'alice-svc-b']
+
+    def test_all_skips_a_service_whose_workspace_is_unknown(self):
+        """Its config is gone (a consolidation pod restart); an exact name
+        still reaches it."""
+        records = [
+            {
+                'name': 'alice-svc',
+                'user_hash': 'alice-hash'
+            },
+            {
+                'name': 'alice-lost',
+                'user_hash': 'alice-hash',
+                'workspace': None
+            },
+        ]
+        with _caller(), _down_env(records) as terminate:
+            impl.down(all=True)
+        assert _terminated(terminate) == ['alice-svc']
+        with _caller(), _down_env(records) as terminate:
+            impl.down(service_names=['alice-lost'])
+        assert _terminated(terminate) == ['alice-lost']
+
+    def test_controller_without_workspace_field_is_not_scoped(self):
+        """A controller older than the records' `workspace` field: --all and
+        patterns behave as before rather than reaching nothing."""
+        records = [{k: v for k, v in r.items()} for r in _RECORDS]
+        with _caller(), _down_env() as terminate:
+            serve_runner.current().get_service_status.side_effect = (
+                lambda **kwargs: [dict(r) for r in records])
+            impl.down(all=True)
+        assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
+
+    def test_unknown_workspace_is_reported(self):
+        records = [{
+            'name': 'alice-lost',
+            'user_hash': 'alice-hash',
+            'workspace': None
+        }]
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(all=True)
+        terminate.assert_not_called()
+        assert any('alice-lost' in str(call) for call in info.call_args_list)
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(service_names=['alice-*'])
+        terminate.assert_not_called()
+        assert any('alice-lost' in str(call) for call in info.call_args_list)
+        # Named exactly, it is reached, so nothing is reported as skipped.
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(service_names=['alice-lost'])
+        assert _terminated(terminate) == ['alice-lost']
+        assert not any('unknown' in str(call) for call in info.call_args_list)
+
+    def test_workspace_stored_as_a_name_is_resolved(self):
+        records = [
+            {
+                'name': 'alice-named',
+                'user_hash': 'alice-hash',
+                'workspace': 'team'
+            },
+            {
+                'name': 'alice-dup',
+                'user_hash': 'alice-hash',
+                'workspace': 'dup'
+            },
+        ]
+
+        def _resolve(ref):
+            if ref == 'dup':
+                raise ValueError('More than one workspace is named')
+            return {'team': 'ws-team'}.get(ref, ref)
+
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.skypilot_config.'
+                        'get_active_workspace', return_value='ws-team'), \
+             mock.patch('sky.serve.server.impl.skypilot_config.'
+                        'resolve_workspace_ref', side_effect=_resolve):
+            impl.down(all=True)
+        assert _terminated(terminate) == ['alice-named']
 
     def test_record_without_creator_is_explained(self):
         """To its creator the denial would otherwise read as someone else
@@ -364,6 +473,28 @@ def _seed(engine, records):
     with engine.begin() as conn:
         conn.execute(serve_state.services_table.insert(),
                      [dict(r, status='READY') for r in records])
+
+
+def test_workspace_falls_back_to_the_one_recorded_at_up(serve_db):
+    """The config file next to the service YAML may be gone."""
+    _seed(serve_db, [{
+        'name': 'svc',
+        'user_hash': 'alice-hash',
+        'workspace': 'ws-a',
+        'pool': False
+    }])
+    with serve_db.begin() as conn:
+        conn.execute(serve_state.version_specs_table.insert(), [{
+            'service_name': 'svc',
+            'version': 1,
+            'spec': pickle.dumps(None)
+        }])
+    with mock.patch('sky.serve.serve_utils.get_service_workspace',
+                    return_value=None):
+        record = serve_utils._get_service_status('svc',
+                                                 pool=False,
+                                                 with_replica_info=False)
+    assert record['workspace'] == 'ws-a'
 
 
 class TestGlobServiceNames:

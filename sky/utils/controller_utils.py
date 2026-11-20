@@ -1558,6 +1558,8 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     used += ((config.short_worker_config.garanteed_parallelism +
               config.short_worker_config.burstable_parallelism) *
              server_config.SHORT_WORKER_MEM_GB * 1024)
+    used += (config.heavy_worker_config.burstable_parallelism *
+             server_config.HEAVY_WORKER_MEM_GB * 1024)
     if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
         # Server workers are resident too, and the parent process with them.
         used += ((config.num_server_workers + 1) *

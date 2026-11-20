@@ -36,43 +36,45 @@ async code so a deadline can never be (silently ineffectively) imposed
 around async DB calls.
 """
 import asyncio
+import functools
 import logging
 import threading
 import time
-from typing import FrozenSet, Optional, Tuple
+import types
+from typing import Optional, Tuple
 import weakref
-
-from sqlalchemy import event
 
 logger = logging.getLogger(__name__)
 
-# psycopg2 is a server-only dependency; this module is imported by
-# ``db_utils.get_engine`` which also runs in client-only (sqlite) installs.
-# Import lazily-at-module-load and degrade: without psycopg2 no Postgres
-# engine exists for the listener to attach to, and ``_STATUS_READY`` is None
-# so ``_bounded_statement`` passes every statement through unchanged.
-try:
-    import psycopg2  # pylint: disable=import-outside-toplevel
-    import psycopg2.extensions as _psycopg2_ext
-    _OperationalErrorBase: type = psycopg2.OperationalError
-    # psycopg2's exported steady connection states. While the connection
-    # handshake runs, ``conn.status`` holds an internal, unexported value
-    # (CONN_STATUS_SETUP before the first poll, then CONN_STATUS_CONNECTING);
-    # ``STATUS_SETUP`` itself is never observable after the first ``poll()``.
-    _STEADY_STATUSES: FrozenSet[int] = frozenset(
-        (_psycopg2_ext.STATUS_READY, _psycopg2_ext.STATUS_BEGIN,
-         _psycopg2_ext.STATUS_PREPARED))
-    # "No transaction open": psycopg2 sends its implicit BEGIN together with
-    # the first statement (status READY -> BEGIN) and is back to READY after
-    # COMMIT/ROLLBACK. Read by the SET LOCAL listener to find the first
-    # statement of each transaction.
-    _STATUS_READY: Optional[int] = _psycopg2_ext.STATUS_READY
-except ImportError:  # pragma: no cover - exercised only in sqlite-only installs
-    psycopg2 = None  # type: ignore
-    _psycopg2_ext = None  # type: ignore
-    _OperationalErrorBase = Exception
-    _STEADY_STATUSES = frozenset()
-    _STATUS_READY = None
+# SQLAlchemy and psycopg2 are server-only dependencies, and this module is
+# imported by `db_utils` and `global_user_state`, which client installs import
+# too. So neither is imported at module load: `install` imports SQLAlchemy's
+# event API when it attaches the listener, and psycopg2 is resolved on first
+# use below. Without psycopg2 no Postgres engine exists for the listener to
+# attach to, so the listener and the classification simply see no psycopg2.
+
+
+@functools.lru_cache(maxsize=1)
+def _psycopg2() -> Optional[types.ModuleType]:
+    """The psycopg2 module, or None where it is not installed."""
+    try:
+        import psycopg2  # pylint: disable=import-outside-toplevel
+        import psycopg2.extensions  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return None
+    return psycopg2
+
+
+def _status_ready() -> Optional[int]:
+    """psycopg2's "no transaction open" connection status, or None.
+
+    psycopg2 sends its implicit BEGIN together with the first statement
+    (status READY -> BEGIN) and is back to READY after COMMIT/ROLLBACK. Read
+    by the SET LOCAL listener to find the first statement of each transaction.
+    """
+    psycopg2 = _psycopg2()
+    return None if psycopg2 is None else psycopg2.extensions.STATUS_READY
+
 
 # Margin between the server-side bounds and the client deadline, so the
 # server's error (which carries a SQLSTATE) normally arrives first.
@@ -199,6 +201,7 @@ def is_transient_driver_error(exc: BaseException) -> bool:
     covers schema errors ("no such table"), which are programming errors
     and propagate unchanged.
     """
+    psycopg2 = _psycopg2()
     if psycopg2 is None:
         return False
     orig = getattr(exc, 'orig', exc)
@@ -236,8 +239,9 @@ def _bounded_statement(conn, cursor, statement: str, executemany: bool) -> str:
     if deadline is None:
         return statement
     dbapi_conn = conn.connection.dbapi_connection
-    if _STATUS_READY is None or getattr(dbapi_conn, 'status',
-                                        None) != _STATUS_READY:
+    status_ready = _status_ready()
+    if status_ready is None or getattr(dbapi_conn, 'status',
+                                       None) != status_ready:
         # A transaction is already open (or this is not a psycopg2
         # connection): the transaction's first statement carried the prefix.
         return statement
@@ -284,6 +288,8 @@ def install(engine) -> None:
         return
     if engine in _installed:
         return
+    # Server-only dependency; see the note at the top of this module.
+    from sqlalchemy import event  # pylint: disable=import-outside-toplevel
 
     @event.listens_for(engine, 'before_cursor_execute', retval=True)
     def _before_cursor_execute(  # pylint: disable=unused-variable

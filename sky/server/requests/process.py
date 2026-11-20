@@ -1,5 +1,6 @@
 """ProcessPoolExecutor with additional supports for skypilot."""
 import concurrent.futures
+import concurrent.futures.process
 import logging
 import multiprocessing
 import threading
@@ -128,8 +129,12 @@ class DisposableExecutor:
                         else:
                             future.set_result(result)
                     else:
-                        # Process ended but no result
-                        future.set_result(None)
+                        # The worker puts a result or an exception unless it
+                        # was killed.
+                        future.set_exception(
+                            concurrent.futures.process.BrokenProcessPool(
+                                f'Worker process {process.pid} exited with '
+                                f'code {process.exitcode} without a result.'))
                 except (multiprocessing.TimeoutError, BrokenPipeError,
                         EOFError) as e:
                     future.set_exception(e)

@@ -1,22 +1,29 @@
 """REST API for storage management."""
 
+import asyncio
 import contextlib
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import fastapi
 
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.users import permission
+from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import registry
 from sky.utils import volume as volume_utils
 from sky.volumes import volume as volume_lib
 from sky.volumes.server import core
+from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
 
@@ -52,10 +59,49 @@ async def volume_list(
     )
 
 
+def _check_volumes_writable(auth_user: models.User, names: List[str]) -> None:
+    for name in names:
+        workspaces_core.check_volume_write_permission(auth_user, name)
+    # Deleting one can wipe its host path on every node.
+    hostpath_names = [
+        name for name in names
+        if _is_hostpath(global_user_state.get_volume_by_name(name))
+    ]
+    if hostpath_names and not permission.is_admin(auth_user.id):
+        raise exceptions.PermissionDeniedError(
+            'Only an admin can delete k8s-hostpath volumes: '
+            f'{", ".join(hostpath_names)}')
+
+
+def _is_hostpath(record: Optional[Dict[str, Any]]) -> bool:
+    return (record is not None and
+            record['handle'].type == volume_utils.VolumeType.HOSTPATH.value)
+
+
+def _check_hostpath_registrable(auth_user: Optional[models.User],
+                                volume_type: Optional[str]) -> None:
+    """Only an admin may register a volume exposing a node directory."""
+    if (auth_user is not None and
+            volume_type == volume_utils.VolumeType.HOSTPATH.value and
+            not permission.is_admin(auth_user.id)):
+        raise exceptions.PermissionDeniedError(
+            'k8s-hostpath volumes can only be registered by an admin.')
+
+
 @router.post('/delete')
 async def volume_delete(request: fastapi.Request,
                         volume_delete_body: payloads.VolumeDeleteBody) -> None:
     """Deletes a volume."""
+    # Gated by each volume's own workspace, not the caller's active one, as
+    # for clusters. In-process callers do their own checks.
+    auth_user = request.state.auth_user
+    if auth_user is not None:
+        try:
+            await context_utils.to_thread_with_executor(
+                None, _check_volumes_writable, auth_user,
+                volume_delete_body.names)
+        except exceptions.PermissionDeniedError as e:
+            raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_DELETE,
@@ -82,8 +128,10 @@ def _volume_errors_as_400() -> Iterator[None]:
     except fastapi.HTTPException:
         # Already a chosen HTTP response; do not re-wrap it as a volume error.
         raise
-    except ValueError as e:
-        # The common case: the volume really is malformed. No stack trace.
+    except (ValueError, exceptions.PermissionDeniedError,
+            exceptions.InvalidUserIdError) as e:
+        # The common cases: the volume really is malformed, or the requester
+        # may not use it. No stack trace.
         logger.debug(f'Rejecting invalid volume: {e}')
         requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
@@ -99,27 +147,56 @@ def _volume_errors_as_400() -> Iterator[None]:
 
 @router.post('/validate')
 async def volume_validate(
-        _: fastapi.Request,
+        request: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
+    # A 400, not a 403: the SDK only surfaces a synchronous 400 from here.
     with _volume_errors_as_400():
-        volume_config = {
-            'name': volume_validate_body.name,
-            'type': volume_validate_body.volume_type,
-            'infra': volume_validate_body.infra,
-            'size': volume_validate_body.size,
-            'labels': volume_validate_body.labels,
-            'config': volume_validate_body.config,
-            'use_existing': volume_validate_body.use_existing,
-        }
-        volume = volume_lib.Volume.from_yaml_config(volume_config)
-        volume.validate()
+        await context_utils.to_thread_with_executor(
+            None, _check_hostpath_registrable, request.state.auth_user,
+            volume_validate_body.volume_type)
+    volume_config = {
+        'name': volume_validate_body.name,
+        'type': volume_validate_body.volume_type,
+        'infra': volume_validate_body.infra,
+        'size': volume_validate_body.size,
+        'labels': volume_validate_body.labels,
+        'config': volume_validate_body.config,
+        'use_existing': volume_validate_body.use_existing,
+    }
+
+    def validate() -> None:
+        # The infra check needs the requester's workspace, resolved as for a
+        # scheduled request, as /validate does for tasks.
+        with executor.override_request_env_and_config(
+                volume_validate_body,
+                request.state.request_id,
+                request_names.AdminPolicyRequestName.VALIDATE.value,
+                sync_refresh=True):
+            volume = volume_lib.Volume.from_yaml_config(volume_config)
+            volume.validate()
+            # As in /volumes/apply: re-applying an existing volume is not
+            # held to infra the workspace may have dropped since.
+            if (volume.cloud is not None and
+                    global_user_state.get_volume_by_name(volume.name) is None):
+                core.check_volume_infra_allowed(volume.cloud, volume.region)
+
+    with _volume_errors_as_400():
+        context.initialize()
+        executor.stamp_request_body(volume_validate_body,
+                                    request.state.auth_user)
+        # Off the event loop: the override swaps the process environment.
+        await asyncio.to_thread(validate)
 
 
 @router.post('/apply')
 async def volume_apply(request: fastapi.Request,
                        volume_apply_body: payloads.VolumeApplyBody) -> None:
     """Creates or registers a volume."""
+    with _volume_errors_as_400():
+        await context_utils.to_thread_with_executor(
+            None, _check_hostpath_registrable, request.state.auth_user,
+            volume_apply_body.volume_type)
     volume_cloud = volume_apply_body.cloud
     volume_type = volume_apply_body.volume_type
     volume_config = volume_apply_body.config

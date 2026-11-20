@@ -10,6 +10,7 @@ Also covers the federation observability helpers: FederationStats.summary()
 (the per-context success/timeout/error classification).
 """
 import asyncio
+import re
 import subprocess
 import threading
 import time
@@ -39,6 +40,24 @@ def test_gpu_metrics_keeps_gpu_semantics():
     assert 'kube_deployment_' not in joined
     assert 'kube_horizontalpodautoscaler' not in joined
     assert 'litellm_' not in joined
+
+
+def test_gpu_metrics_federates_node_rdma_throughput():
+    # The GPU dashboard's node network panel reads node-exporter's two RDMA
+    # byte counters, and no other infiniband series.
+    name_regexes = [
+        m.group(1)
+        for m in (re.fullmatch(r'\{__name__=~"(.+)"\}', p)
+                  for p in metrics_utils.GPU_METRICS_MATCH_PATTERNS)
+        if m
+    ]
+
+    def federated(name):
+        return any(re.fullmatch(r, name) for r in name_regexes)
+
+    assert federated('node_infiniband_port_data_transmitted_bytes_total')
+    assert federated('node_infiniband_port_data_received_bytes_total')
+    assert not federated('node_infiniband_port_packets_received_total')
 
 
 def test_endpoint_metrics_federates_litellm(monkeypatch):
