@@ -21,10 +21,11 @@ JWT_ISSUER = 'sky'  # Shortened for compact tokens
 JWT_SECRET_DB_KEY = 'jwt_secret'
 
 # Deliberately below `db_retries` default of 5. This read happens on the
-# request path, and the deadline in `db_lookup.call_with_deadline` releases the
-# caller but never the executor thread, so every extra attempt is another
-# multiple of the DB layer's own timeout that the thread stays held. Two
-# attempts ride out a single blip without turning one lookup into minutes.
+# request path, under the auth deadline of `db_lookup.call_with_deadline`.
+# The retry loop stops at that deadline (see `db_retries._stop_for_deadline`):
+# a timeout the deadline caused is not retried, and no backoff sleeps past it.
+# Every attempt that does run still holds the executor thread, so two attempts
+# ride out a single blip without stretching a lookup.
 _SECRET_READ_MAX_RETRIES = 2
 
 # How long a thread waits for another thread's in-flight secret load. A healthy
