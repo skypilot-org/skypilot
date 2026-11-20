@@ -372,7 +372,7 @@ To switch to Traefik, upgrade with ``--reset-then-reuse-values`` (Helm 3.14+), w
       --set traefik.enabled=true \
       --set apiService.image=${IMAGE_REPO}:${VERSION}
 
-The LoadBalancer service keeps its name and external address, and the settings under ``ingress-nginx.controller.service`` carry over. Settings under ``ingress-nginx.controller.config`` no longer apply. Expect requests to fail briefly (about 20 seconds) while the Traefik pods start.
+The services keep their names and addresses, and the settings under ``ingress-nginx.controller.service`` carry over, including an internal service. Settings under ``ingress-nginx.controller.config`` no longer apply, and ``ingress-nginx.tcp`` and ``ingress-nginx.udp`` port mappings are not supported with Traefik. Expect requests to fail briefly (about 20 seconds) while the Traefik pods start.
 
 Traefik does not support OAuth2 Proxy on the ingress (``ingress.oauth2-proxy.enabled``). If your API server uses it, follow the :ref:`OAuth migration guide <oauth-migration-guide>` to move those settings to ``auth.oauth`` in the same upgrade.
 

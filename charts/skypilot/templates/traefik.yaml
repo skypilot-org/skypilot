@@ -21,6 +21,9 @@
 {{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
 {{- fail "\nThe bundled Traefik controller does not support ingress.oauth2-proxy: requests with service account tokens would not reach the API server. Move the settings from ingress.oauth2-proxy.* to auth.oauth.*, where the API server checks logins itself: https://docs.skypilot.co/en/latest/reference/auth.html#oauth-migration-guide\nTo keep ingress.oauth2-proxy, use ingress-nginx instead: --set traefik.enabled=false --set ingress-nginx.enabled=true" }}
 {{- end }}
+{{- if or $ingressNginx.tcp $ingressNginx.udp }}
+{{- fail "\ningress-nginx.tcp and ingress-nginx.udp port mappings are not supported with the bundled Traefik controller. To keep them, use ingress-nginx instead: --set traefik.enabled=false --set ingress-nginx.enabled=true" }}
+{{- end }}
 {{- $svc := $ingressNginx.controller.service | default dict }}
 # Traefik's ingress-nginx provider serves Ingresses of this class.
 apiVersion: networking.k8s.io/v1
@@ -32,58 +35,43 @@ metadata:
     app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" . }}
 spec:
   controller: {{ $nginxProvider.controllerClass | default "k8s.io/ingress-nginx" }}
+{{- if dig "enabled" true $svc }}
+{{- if dig "external" "enabled" true $svc }}
 ---
-# The LoadBalancer Service in front of Traefik. It keeps the ingress-nginx
-# controller Service's name, labels and ports, so a release that switches
-# controllers keeps its external address.
+# The Service in front of Traefik. It keeps the ingress-nginx controller
+# Service's name, labels and settings, so a release that switches controllers
+# keeps its address.
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "skypilot.ingressControllerServiceName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    app.kubernetes.io/name: ingress-nginx
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: controller
+    {{- include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc) | nindent 4 }}
   {{- with $svc.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ $svc.type | default "LoadBalancer" }}
-  ipFamilyPolicy: {{ $svc.ipFamilyPolicy | default "SingleStack" }}
-  ipFamilies:
-    {{- toYaml ($svc.ipFamilies | default (list "IPv4")) | nindent 4 }}
-  {{- with $svc.loadBalancerIP }}
-  loadBalancerIP: {{ . }}
-  {{- end }}
-  {{- with $svc.loadBalancerSourceRanges }}
-  loadBalancerSourceRanges:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with $svc.externalTrafficPolicy }}
-  externalTrafficPolicy: {{ . }}
-  {{- end }}
-  selector:
-    app.kubernetes.io/name: {{ include "skypilot.traefikName" . }}
-    app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" . }}
-  ports:
-    - name: http
-      port: 80
-      protocol: TCP
-      targetPort: web
-      appProtocol: http
-      {{- with ($svc.nodePorts).http }}
-      nodePort: {{ . }}
-      {{- end }}
-    - name: https
-      port: 443
-      protocol: TCP
-      targetPort: websecure
-      appProtocol: https
-      {{- with ($svc.nodePorts).https }}
-      nodePort: {{ . }}
-      {{- end }}
+  {{- include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $svc "internal" false) | nindent 2 }}
+{{- end }}
+{{- $internal := $svc.internal | default dict }}
+{{- if and $internal.enabled $internal.annotations }}
+---
+# The ingress-nginx chart's internal controller Service, in front of Traefik.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skypilot.ingressControllerServiceName" . }}-internal
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc) | nindent 4 }}
+  annotations:
+    {{- toYaml $internal.annotations | nindent 4 }}
+spec:
+  {{- include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $internal "internal" true) | nindent 2 }}
+{{- end }}
+{{- end }}
 ---
 # Traefik runs with namespaced RBAC; IngressClasses are cluster-scoped.
 apiVersion: rbac.authorization.k8s.io/v1

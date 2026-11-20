@@ -115,7 +115,7 @@ Once the API server is deployed, we can fetch the API server URL. The chart expo
 
         .. tip::
 
-            The chart reads the LoadBalancer service's ``type``, ``annotations``, ``loadBalancerIP``, ``loadBalancerSourceRanges``, ``externalTrafficPolicy`` and ``nodePorts`` from ``ingress-nginx.controller.service``. The service keeps the ``-ingress-nginx-controller`` name from chart versions that bundled ingress-nginx, so existing deployments keep their address.
+            The chart renders the services in front of Traefik from ``ingress-nginx.controller.service`` the same way the ingress-nginx chart does, including the internal service (``ingress-nginx.controller.service.internal``). The services keep the ``-ingress-nginx-controller`` names from chart versions that bundled ingress-nginx, so existing deployments keep their addresses.
 
     .. tab-item:: NodePort
         :sync: nodeport-tab

@@ -269,3 +269,102 @@ selector labels and the ServiceAccount name.
 {{- end -}}
 {{- default $fullname (($traefik.serviceAccount).name) -}}
 {{- end -}}
+
+{{/*
+Labels of the Services in front of Traefik: the ingress-nginx controller
+Service's labels plus ingress-nginx.controller.service.labels.
+Usage: include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc)
+*/}}
+{{- define "skypilot.traefikServiceLabels" -}}
+app.kubernetes.io/name: ingress-nginx
+app.kubernetes.io/instance: {{ .root.Release.Name }}
+app.kubernetes.io/component: controller
+{{- with .svc.labels }}
+{{ toYaml . }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Spec of a Service in front of Traefik. It renders the fields of the
+ingress-nginx chart's controller Service templates (controller-service.yaml
+and controller-service-internal.yaml, chart 4.11.8) with that chart's
+defaults, so a release that switches controllers keeps its Services as they
+were; only the selector and target ports change.
+Usage: include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $settings "internal" bool)
+where $svc is ingress-nginx.controller.service and $settings is $svc itself
+or $svc.internal.
+*/}}
+{{- define "skypilot.traefikServiceSpec" -}}
+{{- $svc := .svc -}}
+{{- $s := .s | default dict -}}
+{{- $mainType := $svc.type | default "LoadBalancer" -}}
+{{- $type := $mainType -}}
+{{- if .internal }}{{- $type = $s.type | default $mainType -}}{{- end -}}
+type: {{ $type }}
+{{- with $s.clusterIP }}
+clusterIP: {{ . }}
+{{- end }}
+{{- with $s.externalIPs }}
+externalIPs:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $s.loadBalancerIP }}
+loadBalancerIP: {{ . }}
+{{- end }}
+{{- with $s.loadBalancerSourceRanges }}
+loadBalancerSourceRanges:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $s.loadBalancerClass }}
+loadBalancerClass: {{ . }}
+{{- end }}
+{{- if hasKey $s "allocateLoadBalancerNodePorts" }}
+allocateLoadBalancerNodePorts: {{ $s.allocateLoadBalancerNodePorts }}
+{{- end }}
+{{- with $s.externalTrafficPolicy }}
+externalTrafficPolicy: {{ . }}
+{{- end }}
+{{- with $s.sessionAffinity }}
+sessionAffinity: {{ . }}
+{{- end }}
+{{- with $s.healthCheckNodePort }}
+healthCheckNodePort: {{ . }}
+{{- end }}
+ipFamilyPolicy: {{ $s.ipFamilyPolicy | default "SingleStack" }}
+ipFamilies:
+  {{- toYaml ($s.ipFamilies | default (list "IPv4")) | nindent 2 }}
+selector:
+  app.kubernetes.io/name: {{ include "skypilot.traefikName" .root }}
+  app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" .root }}
+{{- /* ingress-nginx decides node ports from the main Service type for both Services. */}}
+{{- $setNodePorts := or (eq $mainType "NodePort") (eq $mainType "LoadBalancer") }}
+{{- $ports := $s.ports | default dict }}
+{{- $mainPorts := $svc.ports | default dict }}
+{{- $nodePorts := $s.nodePorts | default dict }}
+{{- $appProtocol := dig "appProtocol" true $s }}
+ports:
+{{- if dig "enableHttp" true $svc }}
+  - name: http
+    port: {{ $ports.http | default $mainPorts.http | default 80 }}
+    protocol: TCP
+    targetPort: web
+    {{- if $appProtocol }}
+    appProtocol: http
+    {{- end }}
+    {{- if and $setNodePorts $nodePorts.http }}
+    nodePort: {{ $nodePorts.http }}
+    {{- end }}
+{{- end }}
+{{- if dig "enableHttps" true $svc }}
+  - name: https
+    port: {{ $ports.https | default $mainPorts.https | default 443 }}
+    protocol: TCP
+    targetPort: websecure
+    {{- if $appProtocol }}
+    appProtocol: https
+    {{- end }}
+    {{- if and $setNodePorts $nodePorts.https }}
+    nodePort: {{ $nodePorts.https }}
+    {{- end }}
+{{- end }}
+{{- end -}}

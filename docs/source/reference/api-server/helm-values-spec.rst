@@ -1799,7 +1799,7 @@ Default: ``false``
 
 Fields under ``ingress-nginx.controller`` will be mapped to ``controller`` values for the ingress-nginx controller sub-chart. Refer to the `ingress-nginx chart documentation <https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx#values>`_ for more details.
 
-With the bundled Traefik controller, the chart reads the LoadBalancer service's ``type``, ``annotations``, ``loadBalancerIP``, ``loadBalancerSourceRanges``, ``externalTrafficPolicy`` and ``nodePorts`` from ``ingress-nginx.controller.service``.
+With the bundled Traefik controller, the chart renders the services in front of Traefik from ``ingress-nginx.controller.service`` the same way the ingress-nginx chart does, including the internal service. ``ingress-nginx.tcp`` and ``ingress-nginx.udp`` port mappings are not supported with Traefik.
 
 Default: see the yaml below.
 
