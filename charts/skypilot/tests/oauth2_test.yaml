@@ -8,6 +8,10 @@ templates:
   - templates/oauth2-proxy-redis.yaml
   - templates/oauth2-proxy-service.yaml
   - templates/oauth2-proxy-ingress.yaml
+# ingress.oauth2-proxy is only supported with ingress-nginx.
+set:
+  ingress-nginx.enabled: true
+  traefik.enabled: false
 tests:
   - it: should not create oauth2 resources when both configs are disabled
     set:

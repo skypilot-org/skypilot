@@ -374,6 +374,8 @@ To switch to Traefik, upgrade with ``--reset-then-reuse-values`` (Helm 3.14+), w
 
 The LoadBalancer service keeps its name and external address, and the settings under ``ingress-nginx.controller.service`` carry over. Settings under ``ingress-nginx.controller.config`` no longer apply. Expect requests to fail briefly (about 20 seconds) while the Traefik pods start.
 
+Traefik does not support OAuth2 Proxy on the ingress (``ingress.oauth2-proxy.enabled``). If your API server uses it, follow the :ref:`OAuth migration guide <oauth-migration-guide>` to move those settings to ``auth.oauth`` in the same upgrade.
+
 To keep ingress-nginx for now, add ``--set traefik.enabled=false`` to the upgrade command in Step 2. If you bring your own ingress controller, add ``--set traefik.enabled=false`` as well.
 
 .. _sky-api-server-vm-upgrade:

@@ -548,6 +548,9 @@ traefik:
       enabled: false
     kubernetesIngressNGINX:
       enabled: true
+      # The Grafana Ingress uses configuration-snippet. Without this, Traefik
+      # skips it.
+      allowSnippetAnnotations: true
   # The chart renders the IngressClass and the LoadBalancer Service.
   ingressClass:
     enabled: false

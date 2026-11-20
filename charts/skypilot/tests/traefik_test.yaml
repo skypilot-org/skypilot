@@ -23,6 +23,10 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: --entryPoints.websecure.transport.respondingTimeouts.readTimeout=3600s
+      # The Grafana Ingress uses configuration-snippet; without this Traefik skips it.
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --providers.kubernetesingressnginx.allowSnippetAnnotations=true
 
   - it: should render the IngressClass that Traefik's ingress-nginx provider serves
     template: templates/traefik.yaml
@@ -123,6 +127,41 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: --reset-then-reuse-values --set ingress-nginx.enabled=false
+
+  - it: should refuse ingress-level OAuth2 proxy with Traefik
+    template: templates/traefik.yaml
+    set:
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: https://accounts.google.com
+      ingress.oauth2-proxy.client-id: client-id
+      ingress.oauth2-proxy.client-secret: client-secret
+    asserts:
+      - failedTemplate:
+          errorPattern: Move the settings from ingress.oauth2-proxy.\* to auth.oauth.\*
+
+  - it: should allow API server OAuth with Traefik
+    template: templates/traefik.yaml
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: https://accounts.google.com
+      auth.oauth.client-id: client-id
+      auth.oauth.client-secret: client-secret
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: should keep ingress-level OAuth2 proxy working with ingress-nginx
+    template: templates/traefik.yaml
+    set:
+      traefik.enabled: false
+      ingress-nginx.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: https://accounts.google.com
+      ingress.oauth2-proxy.client-id: client-id
+      ingress.oauth2-proxy.client-secret: client-secret
+    asserts:
+      - hasDocuments:
+          count: 0
 
   - it: should point ingress-nginx releases at the Traefik switch
     template: templates/NOTES.txt

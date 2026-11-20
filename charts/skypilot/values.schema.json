@@ -1013,6 +1013,9 @@
                         "kubernetesIngressNGINX": {
                             "type": "object",
                             "properties": {
+                                "allowSnippetAnnotations": {
+                                    "type": "boolean"
+                                },
                                 "enabled": {
                                     "type": "boolean"
                                 }

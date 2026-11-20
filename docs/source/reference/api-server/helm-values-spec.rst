@@ -1542,7 +1542,7 @@ Default: ``null``
 
 Configuration for the OAuth2 Proxy authentication for the API server.
 
-Deprecated: use :ref:`auth.oauth <helm-values-auth-oauth>` instead.
+Deprecated: use :ref:`auth.oauth <helm-values-auth-oauth>` instead. The bundled :ref:`Traefik <helm-values-traefik>` controller does not support ``ingress.oauth2-proxy``; it requires ``ingress-nginx.enabled=true`` and ``traefik.enabled=false``. Refer to the :ref:`OAuth migration guide <oauth-migration-guide>` to move to ``auth.oauth``.
 
 Default: see the yaml below.
 
@@ -1859,6 +1859,8 @@ Default: see the yaml below.
         enabled: false
       kubernetesIngressNGINX:
         enabled: true
+        # Needed for the configuration-snippet annotation of the Grafana Ingress.
+        allowSnippetAnnotations: true
     ingressClass:
       enabled: false
     service:
