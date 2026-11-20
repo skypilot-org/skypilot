@@ -34,6 +34,37 @@ def test_setup_gcp_authentication():
             auth.setup_gcp_authentication(mock_config)
 
 
+def test_setup_gcp_authentication_oslogin_firewall_rule_uses_project():
+    mock_config = {'provider': {'project_id': 'launch-project'}, 'auth': {}}
+    oslogin_project = {
+        'commonInstanceMetadata': {
+            'items': [{
+                'key': 'enable-oslogin',
+                'value': 'True'
+            }]
+        }
+    }
+    profile = MagicMock(returncode=0,
+                        stdout=b'posixAccounts:\n- username: test_user\n',
+                        stderr=b'')
+
+    with patch('sky.adaptors.gcp.build') as mock_build, \
+            patch('sky.authentication.auth_utils.get_or_generate_keys',
+                  return_value=('/tmp/key', '/tmp/key.pub')), \
+            patch('sky.authentication.subprocess.run',
+                  return_value=profile) as mock_run, \
+            patch('sky.authentication.configure_ssh_info',
+                  side_effect=lambda config: config):
+        get_project = mock_build.return_value.projects.return_value.get
+        get_project.return_value.execute.return_value = oslogin_project
+        auth.setup_gcp_authentication(mock_config)
+
+    commands = [call.args[0] for call in mock_run.call_args_list]
+    firewall_cmds = [c for c in commands if 'firewall-rules create' in c]
+    assert len(firewall_cmds) == 1
+    assert '--project=launch-project' in firewall_cmds[0]
+
+
 def test_gcp_project_metadata_parsing_normal():
     """Test normal GCP project metadata parsing."""
     # Normal project response with OS Login enabled
