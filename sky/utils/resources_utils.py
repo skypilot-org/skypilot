@@ -146,10 +146,18 @@ def normalize_local_disk(local_disk: str) -> str:
     parts = local_disk.split(':')
 
     def _check_size(size_str: str) -> None:
-        size_to_check = size_str.rstrip('+')
+        # Strip a single trailing '+', matching parse_local_disk_str(); rstrip
+        # here would peel off every '+', so 'size++' passed validation and then
+        # crashed parse_local_disk_str() (which only drops one '+') downstream.
+        size_to_check = size_str[:-1] if size_str.endswith('+') else size_str
         try:
             size = float(size_to_check)
-            if size <= 0:
+            # Reject non-finite sizes (nan/inf). float() happily parses
+            # 'nan', 'inf' and overflowing literals like '1e400' (-> inf);
+            # 'size <= 0' does not catch these (nan comparisons are always
+            # False), so they would silently become an unsatisfiable disk
+            # requirement downstream.
+            if not math.isfinite(size) or size <= 0:
                 raise ValueError()
         except ValueError:
             with ux_utils.print_exception_no_traceback():
@@ -674,7 +682,16 @@ def _parse_time_with_units(time: str, time_units: Dict[str, int]) -> int:
         if time_str_lower.endswith(unit):
             try:
                 value = float(time_str_lower[:-len(unit)])
-                final_value = math.ceil(value * multiplier)
+                scaled = value * multiplier
+                # Reject non-finite results: float() accepts 'inf',
+                # 'infinity' and 'nan', and a huge finite value (e.g.
+                # '1e307d') can overflow to inf when scaled. math.ceil on a
+                # non-finite float raises OverflowError (not ValueError),
+                # which would escape this handler as an uncaught crash
+                # instead of the clean 'Invalid time format' below.
+                if not math.isfinite(scaled):
+                    continue
+                final_value = math.ceil(scaled)
                 if final_value >= 0:
                     return final_value
             except ValueError:
