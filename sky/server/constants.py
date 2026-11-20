@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 68  # service account impersonation header
+API_VERSION = 70  # no_cleanup for volume delete
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -81,6 +81,14 @@ MIN_BATCH_API_VERSION = 49
 # only exists to fetch credentials for SSH config setup.
 MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
 MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
+# Minimum server API version that accepts `accelerator_args.multi_host` (a
+# multi-host TPU slice on Kubernetes). An older server rejects the field in
+# its schema, and dropping it on the client would launch different hardware
+# (one 8-chip VM instead of a 2x4 slice), so the client raises instead.
+MIN_TPU_MULTI_HOST_API_VERSION = 69
+# Minimum server API version that accepts `no_cleanup` on volume delete. An
+# older server ignores the field and would wipe the host path anyway.
+MIN_VOLUME_NO_CLEANUP_API_VERSION = 70
 
 # Servers >= this version omit the bulky pickled `handle` from each replica
 # in serve/pool status responses, shipping pre-computed `infra` /
@@ -151,6 +159,13 @@ AUTH_SESSION_TIMEOUT_SECONDS = 300  # 5 minutes
 
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
+
+# Sync calls. A client sends this header with value '1' to ask for the result
+# in the response itself. A response carrying it with value '1' was answered
+# that way: 200 and 500 have the /api/get body, 400 means the arguments do not
+# allow a sync call, and 429 means the server is busy (see Retry-After). Without
+# it, the response is the usual one and the client gets the result via /api/get.
+SYNC_CALL_HEADER = 'X-SkyPilot-Sync'
 
 # Valid empty values for pickled fields (base64-encoded pickled None)
 # base64.b64encode(pickle.dumps(None)).decode('utf-8')

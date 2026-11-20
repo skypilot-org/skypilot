@@ -32,7 +32,13 @@ _DRIVER = textwrap.dedent("""
     exec(code, {'__name__': '__main__'})
 """)
 
-_FIRST_LINES = [f'{log_lib.LOG_FILE_START_STREAMING_AT}node', 'hello']
+# The streamed line must be unique to this log. The test waits for it as
+# proof the tail (and so the watchdog started before it) is running; a word
+# that can also appear in earlier output, such as a debug log of a config a
+# previous test left in the environment, would let the test close stdin
+# before the watchdog's startup check, which then reads it as /dev/null.
+_STREAMED_LINE = 'tail-orphan-test-streamed-line'
+_FIRST_LINES = [f'{log_lib.LOG_FILE_START_STREAMING_AT}node', _STREAMED_LINE]
 
 
 def _follow_tail_argv(tmp_path):
@@ -66,7 +72,7 @@ def test_follow_tail_exits_when_stdin_closes(tmp_path):
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT)
     try:
-        _wait_for_output(proc, 'hello')
+        _wait_for_output(proc, _STREAMED_LINE)
         proc.stdin.close()
         assert proc.wait(timeout=10) == -signal.SIGTERM
     finally:

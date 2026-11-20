@@ -34,6 +34,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import types
 from unittest import mock
 
 import pytest
@@ -67,15 +68,21 @@ class _RecordingSession:
 
     A query issued through `session.query(...)` is recorded as the string
     'QUERY' so its position relative to the SET LOCAL statements is visible.
+    A SELECT returns `select_row`; the default `None` is a user with no row
+    yet, so `add_or_update_user` goes on to the upsert.
     """
 
     def __init__(self):
         self.statements = []
         self.commit_after = None
+        self.select_row = None
 
     def execute(self, statement):
         self.statements.append(statement)
         result = mock.Mock()
+        if isinstance(statement, sqlalchemy.sql.expression.Select):
+            result.fetchone.return_value = self.select_row
+            return result
         result.fetchone.return_value = mock.Mock(id='u-1',
                                                  name='tester',
                                                  password=None,
@@ -133,13 +140,15 @@ class TestPostgresUpsertIsBounded:
         statements = postgres_session.statements
         # Exactly the three SET LOCALs, first, in this order.
         assert _set_local_texts(statements[:3]) == _expected_set_local()
-        # Then the upsert itself, then COMMIT -- all on the same session, so
-        # SQLAlchemy's autobegin puts the SET LOCALs and the INSERT in one
-        # transaction and COMMIT resets the timeouts.
-        assert len(statements) == 4
-        assert isinstance(statements[3], postgresql.Insert)
-        assert statements[3].table is global_user_state.user_table
-        assert postgres_session.commit_after == 4
+        # Then the read of the user's row, the upsert, then COMMIT -- all on
+        # the same session, so SQLAlchemy's autobegin puts the SET LOCALs,
+        # the SELECT and the INSERT in one transaction and COMMIT resets the
+        # timeouts.
+        assert len(statements) == 5
+        assert isinstance(statements[3], sqlalchemy.sql.expression.Select)
+        assert isinstance(statements[4], postgresql.Insert)
+        assert statements[4].table is global_user_state.user_table
+        assert postgres_session.commit_after == 5
 
     def test_set_local_comes_before_the_duplicate_name_check_too(
             self, postgres_session):
@@ -153,7 +162,29 @@ class TestPostgresUpsertIsBounded:
         statements = postgres_session.statements
         assert _set_local_texts(statements[:3]) == _expected_set_local()
         assert statements[3] == 'QUERY'
-        assert isinstance(statements[4], postgresql.Insert)
+        assert isinstance(statements[4], sqlalchemy.sql.expression.Select)
+        assert isinstance(statements[5], postgresql.Insert)
+
+    def test_set_local_precedes_the_read_of_an_unchanged_user(
+            self, postgres_session):
+        """A user whose row already matches gets only the bounded read: the
+        SET LOCALs, then the SELECT, and no write or COMMIT."""
+        postgres_session.select_row = types.SimpleNamespace(
+            id='u-1',
+            name='tester',
+            password=None,
+            created_at=1,
+            type=None,
+            preferred_workspace=None)
+        newly_added = global_user_state.add_or_update_user(
+            models.User(id='u-1', name='tester'))
+
+        statements = postgres_session.statements
+        assert newly_added is False
+        assert _set_local_texts(statements[:3]) == _expected_set_local()
+        assert len(statements) == 4
+        assert isinstance(statements[3], sqlalchemy.sql.expression.Select)
+        assert postgres_session.commit_after is None
 
     def test_set_local_is_issued_through_the_session_not_a_hook(
             self, postgres_session):

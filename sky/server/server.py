@@ -65,6 +65,7 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
@@ -96,6 +97,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.skylet import runtime_utils
@@ -779,6 +781,7 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
                     f'{user.name!r} ({user.id}): {request.method} '
                     f'{request.url.path} (request ID: {request_id})')
         request.state.impersonator = caller
+        caller_usage.set_impersonator(caller)
         request.state.auth_user = models.User(id=user.id, name=user.name)
         return None
 
@@ -1154,6 +1157,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Unused: the middleware-order check that used to live here runs at
     # import instead, right after the metrics middleware registration.
     del app
+    threads.count_thread_starts()
+    threads.keep_anyio_worker_threads()
+    await asyncio.to_thread(executor.warm_thread_executors)
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.
@@ -1167,6 +1173,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
+    permission.permission_service.start_policy_watcher()
     # Attribute event loop stalls to the code that caused them. Not gated on
     # METRICS_ENABLED: its primary output is a log line, which is the only
     # thing available when debugging a deployment after the fact.
@@ -3300,8 +3307,9 @@ async def api_get(request: fastapi.Request,
     # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
     if request_task.should_retry:
         # Interrupted by a server version that recorded no error object —
         # including the very rolling update that ships this code, whose
@@ -3313,9 +3321,12 @@ async def api_get(request: fastapi.Request,
                 f'Request {request_id!r} was interrupted by an API server '
                 'restart and will not be resumed. Please re-submit the '
                 'original request.'))
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
-    return request_task.encode()
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
+    if request_task.has_stored_result:
+        return await asyncio.to_thread(request_task.encode_for_client)
+    return request_task.encode_for_client()
 
 
 @app.get('/api/stream')
@@ -3555,7 +3566,7 @@ async def api_cancel(
     )
 
 
-@app.get('/api/status')
+@app.get('/api/status', response_model=List[payloads.RequestPayload])
 async def api_status(
     request: fastapi.Request,
     request_ids: Optional[List[str]] = fastapi.Query(
@@ -3570,12 +3581,8 @@ async def api_status(
                      'return_value and error. Ignored if request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
-) -> List[payloads.RequestPayload]:
+) -> Union[List[payloads.RequestPayload], fastapi.Response]:
     """Gets the list of requests."""
-    # Scope the request body to the caller: the owner sees it, others get null
-    # (see _request_body_for_display).
-    auth_user = request.state.auth_user
-    caller_user_id = auth_user.id if auth_user is not None else None
     # `fields` is caller-supplied and ends up in the SQL column list. Reject an
     # unknown column here so the client gets a 400 instead of a 500 from the
     # query layer.
@@ -3590,21 +3597,21 @@ async def api_status(
         statuses = None
         if not all_status:
             statuses = requests_lib.RequestStatus.active_statuses()
-        request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=statuses,
-                cluster_names=[cluster_name] if cluster_name else None,
-                user_id=scope_user_id,
-                exclude_request_names=[
-                    server_constants.REQUEST_NAME_PREFIX + d.value
-                    for d in daemons.HIDDEN_REQUEST_NAMES
-                ],
-                limit=limit,
-                fields=fields or requests_lib.DISPLAY_COLUMNS,
-                sort=True,
-            ))
-        return requests_lib.encode_requests(request_tasks,
-                                            caller_user_id=caller_user_id)
+        req_filter = requests_lib.RequestTaskFilter(
+            status=statuses,
+            cluster_names=[cluster_name] if cluster_name else None,
+            user_id=scope_user_id,
+            exclude_request_names=[
+                server_constants.REQUEST_NAME_PREFIX + d.value
+                for d in daemons.HIDDEN_REQUEST_NAMES
+            ],
+            limit=limit,
+            fields=fields or requests_lib.DISPLAY_COLUMNS,
+            sort=True,
+        )
+        content = await asyncio.to_thread(requests_lib.list_requests_json,
+                                          req_filter)
+        return fastapi.Response(content=content, media_type='application/json')
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
@@ -3617,8 +3624,7 @@ async def api_status(
                 if (scope_user_id is not None and
                         request_task.user_id != scope_user_id):
                     continue
-                encoded_request_tasks.append(
-                    request_task.readable_encode(caller_user_id=caller_user_id))
+                encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 
@@ -3822,6 +3828,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         # Whether GET /workspaces/config is restricted to admins (so the
         # dashboard can hide the config UI for non-admins when enabled)
         restrict_config_to_admins=rbac.restrict_config_to_admins(),
+        sync_call_max_limit=executor.get_sync_call_max_limit(),
     )
 
 
@@ -4406,13 +4413,15 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
 
 @app.get('/all_contexts')
 async def all_contexts(request: fastapi.Request) -> None:
-    """Gets all Kubernetes and SSH node pool contexts."""
+    """Gets the Kubernetes and SSH node pool contexts the caller can read."""
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
         request_body=payloads.RequestBody(),
-        func=core.get_all_contexts,
+        # Without an authenticated user nothing is scoped.
+        func=(core.get_all_contexts if request.state.auth_user is None else
+              core.get_workspace_contexts),
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -4467,22 +4476,75 @@ async def download_debug_dump(
 
 
 # === Internal APIs ===
+def _completion_workspaces_filter(
+        auth_user: Optional[models.User]) -> Optional[Set[str]]:
+    """Workspaces whose names `sky status` / `sky volumes ls` would show.
+
+    None (no authenticated user) means every workspace.
+    """
+    if auth_user is None:
+        return None
+    # Read-only visibility comes from the workspace config, which this
+    # process does not reload per request.
+    common.refresh_workspace_state_for_sync_handler()
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}))
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return permission.permission_service.get_accessible_workspace_names(
+        auth_user.id,
+        workspaces,
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def _readable_cluster_names_start_with(auth_user: Optional[models.User],
+                                       incomplete: str) -> List[str]:
+    """Cluster names to complete: only those `sky status -u` would show."""
+    return global_user_state.get_cluster_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
+
+
 @app.get('/api/completion/cluster_name')
-async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_cluster_names_start_with, incomplete)
+async def complete_cluster_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_cluster_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/storage_name')
-async def complete_storage_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_storage_names_start_with, incomplete)
+async def complete_storage_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    # Completion is a listing: it shows only what `sky storage ls` would.
+    # Without an authenticated user the server has no identity to scope to
+    # (a single-user server, or auth terminated upstream), as for
+    # `role_filter.request_owner_scope`.
+    auth_user = request.state.auth_user
+
+    def _complete() -> List[str]:
+        workspaces_filter = None
+        if auth_user is not None:
+            # This process does not get the executor's per-request config
+            # reload; without it a workspace created after boot is missing.
+            common.refresh_workspace_state_for_sync_handler()
+            workspaces_filter = (
+                workspaces_core.readable_workspace_names_for_user(auth_user.id))
+        return global_user_state.get_storage_names_start_with(
+            incomplete, workspaces_filter)
+
+    return await asyncio.to_thread(_complete)
+
+
+def _readable_volume_names_start_with(auth_user: Optional[models.User],
+                                      incomplete: str) -> List[str]:
+    """Volume names to complete: only those `sky volumes ls` would show."""
+    return global_user_state.get_volume_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
 
 
 @app.get('/api/completion/volume_name')
-async def complete_volume_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_volume_names_start_with, incomplete)
+async def complete_volume_name(request: fastapi.Request,
+                               incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_volume_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/api_request')
@@ -4900,6 +4962,9 @@ if __name__ == '__main__':
         clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
+        # Before uvicorn spawns its workers: they find the poller's output
+        # through the environment.
+        permission.permission_service.start_policy_version_poller()
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request

@@ -14,12 +14,15 @@ from typing import List, Optional
 from unittest import mock
 import weakref
 
+import prometheus_client as prom
 import pytest
 
 from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import skypilot_config
+from sky.metrics import utils as metrics_utils
+from sky.server import caller_usage
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
@@ -1806,6 +1809,7 @@ async def test_wrapper_releases_result_before_release_memory(
 
     monkeypatch.setattr(executor.common_utils, 'release_memory',
                         _check_release_memory)
+    monkeypatch.setattr(executor, '_rss_after_release', None)
     result_alive_at_rss_sample = []
 
     class _Process(executor.psutil.Process):
@@ -1826,6 +1830,148 @@ async def test_wrapper_releases_result_before_release_memory(
     assert requests_lib.get_request('result-released').get_return_value() == [
         'x' * 1024
     ]
+
+
+_MB = 1024 * 1024
+
+
+class _FakeProcess:
+
+    def __init__(self, rss: int):
+        self.rss = rss
+
+    def memory_info(self):
+        return mock.Mock(rss=self.rss)
+
+
+@pytest.fixture
+def release_memory_harness(monkeypatch):
+    """Fake RSS, count release_memory() calls, default threshold."""
+    monkeypatch.delenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       raising=False)
+    executor._release_memory_threshold_bytes.cache_clear()
+    monkeypatch.setattr(executor, '_rss_after_release', None)
+    proc = _FakeProcess(rss=300 * _MB)
+    calls = []
+    monkeypatch.setattr(executor.common_utils, 'release_memory',
+                        lambda: calls.append(proc.rss))
+    yield proc, calls
+    executor._release_memory_threshold_bytes.cache_clear()
+
+
+def _releases(result: str) -> float:
+    return prom.REGISTRY.get_sample_value('sky_apiserver_memory_releases_total',
+                                          {'result': result}) or 0.0
+
+
+def test_release_memory_on_first_request(release_memory_harness):
+    proc, calls = release_memory_harness
+    released_before = _releases('released')
+
+    executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB]
+    assert executor._rss_after_release == 300 * _MB
+    assert _releases('released') - released_before == 1
+
+
+def test_release_memory_skipped_below_threshold(release_memory_harness):
+    proc, calls = release_memory_harness
+    executor._maybe_release_memory(proc)
+    skipped_before = _releases('skipped')
+
+    proc.rss += 31 * _MB
+    executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB]
+    assert _releases('skipped') - skipped_before == 1
+
+
+def test_release_memory_after_growth_across_requests(release_memory_harness):
+    proc, calls = release_memory_harness
+    executor._maybe_release_memory(proc)
+
+    for _ in range(3):
+        proc.rss += 11 * _MB
+        executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB, 333 * _MB]
+
+
+def test_release_memory_measures_growth_from_rss_after_release(
+        release_memory_harness, monkeypatch):
+    proc, calls = release_memory_harness
+
+    def _release():
+        calls.append(proc.rss)
+        proc.rss -= 100 * _MB
+
+    monkeypatch.setattr(executor.common_utils, 'release_memory', _release)
+    proc.rss = 400 * _MB
+    executor._maybe_release_memory(proc)
+    assert executor._rss_after_release == 300 * _MB
+
+    proc.rss = 340 * _MB
+    executor._maybe_release_memory(proc)
+
+    assert calls == [400 * _MB, 340 * _MB]
+
+
+@pytest.mark.parametrize('value', ['0', '-5'])
+def test_release_memory_every_request_without_threshold(release_memory_harness,
+                                                        monkeypatch, value):
+    proc, calls = release_memory_harness
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       value)
+
+    for _ in range(3):
+        executor._maybe_release_memory(proc)
+
+    assert len(calls) == 3
+
+
+def test_release_memory_threshold_from_env(release_memory_harness, monkeypatch):
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       '0.5')
+    assert executor._release_memory_threshold_bytes() == 512 * 1024
+
+
+def test_release_memory_invalid_threshold_uses_default(release_memory_harness,
+                                                       monkeypatch):
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       'lots')
+    assert executor._release_memory_threshold_bytes() == (
+        constants.DEFAULT_RELEASE_MEMORY_THRESHOLD_MB * _MB)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_clears_request_cache_when_release_is_skipped(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    req = requests_lib.Request(request_id='release-skipped',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    release_memory = mock.Mock()
+    clear_cache = mock.Mock()
+    monkeypatch.setattr(executor.common_utils, 'release_memory', release_memory)
+    monkeypatch.setattr(executor.annotations, 'clear_request_level_cache',
+                        clear_cache)
+    monkeypatch.setattr(executor, '_rss_after_release',
+                        executor.psutil.Process().memory_info().rss)
+    monkeypatch.setattr(executor, '_release_memory_threshold_bytes',
+                        lambda: 1024 * _MB)
+
+    executor._request_execution_wrapper('release-skipped',
+                                        ignore_return_value=False)
+
+    assert mock.call() in clear_cache.mock_calls
+    release_memory.assert_not_called()
+    assert requests_lib.get_request('release-skipped').status == (
+        requests_lib.RequestStatus.SUCCEEDED)
 
 
 def _install_gated_handler_in_worker():
@@ -2058,6 +2204,8 @@ def test_auth_and_request_executors_are_distinct():
         auth_executor = executor.get_auth_thread_executor()
         assert request_executor is not auth_executor
         assert request_executor.name != auth_executor.name
+        assert auth_executor.max_queued > 0
+        assert request_executor.max_queued == 0
         # Each getter still memoizes per process.
         assert executor.get_request_thread_executor() is request_executor
         assert executor.get_auth_thread_executor() is auth_executor
@@ -2485,6 +2633,50 @@ def test_stamp_overwrites_client_from_loopback():
     assert body.from_loopback is True
 
 
+def _body_with_server_env(monkeypatch) -> payloads.RequestBody:
+    """A body built on the server: env_vars captured from os.environ."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    monkeypatch.setenv(constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+                       'postgresql://pool-secret')
+    body = payloads.RequestBody()
+    assert body.env_vars['SKYPILOT_UT_ENV_CANARY'] == 'server-canary'
+    body.env_vars.update(_REMOTE_CLIENT_ENV_VARS)
+    body.env_vars['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] = 'client-token'
+    return body
+
+
+def test_stamp_keeps_only_remote_env_for_remote_request(monkeypatch):
+    body = _body_with_server_env(monkeypatch)
+    executor.stamp_request_body(body,
+                                auth_user=models.User(id='abcd1234',
+                                                      name='alice'))
+    assert body.from_loopback is False
+    assert set(body.env_vars) <= executor._REMOTE_REQUEST_ENV_VARS
+    assert body.env_vars[constants.USER_ID_ENV_VAR] == 'abcd1234'
+    assert body.env_vars[constants.USER_ENV_VAR] == 'alice'
+    assert body.env_vars['SKYPILOT_CLIENT_TYPE'] == 'cli'
+    for value in ('server-canary', 'postgresql://pool-secret', 'client-token'):
+        assert value not in body.model_dump_json()
+
+
+@pytest.mark.parametrize('enforce_containment', [True, False])
+def test_stamp_keeps_loopback_env(monkeypatch, enforce_containment):
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: enforce_containment)
+    monkeypatch.setenv('KUBECONFIG', '/tmp/local-kubeconfig')
+    body = _body_with_server_env(monkeypatch)
+    token = loopback._request_from_loopback.set(True)
+    try:
+        executor.stamp_request_body(body, auth_user=None)
+    finally:
+        loopback._request_from_loopback.reset(token)
+    assert body.from_loopback is True
+    assert body.env_vars['SKYPILOT_UT_ENV_CANARY'] == 'server-canary'
+    assert body.env_vars['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] == 'client-token'
+    assert constants.ENV_VAR_DB_POOL_CONNECTION_URI not in body.env_vars
+    assert ('KUBECONFIG' in body.env_vars) is (not enforce_containment)
+
+
 def test_to_kwargs_drops_from_loopback():
     body = payloads.RequestBody(env_vars={}, from_loopback=True)
     assert 'from_loopback' not in body.to_kwargs()
@@ -2905,6 +3097,38 @@ async def test_policy_handled_request_writes_no_row(in_process_env):
 
 
 @pytest.mark.asyncio
+async def test_policy_sees_sanitized_env(in_process_env, monkeypatch):
+    """The policy may answer the request itself, so the env must already be
+    reduced to what a remote caller may see."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    seen = []
+
+    async def policy(request):
+        seen.append(dict(request.request_body.env_vars))
+        return executor.ExecutionMode.HANDLED
+
+    executor.set_execution_policy(policy)
+    body = _InProcessBody(value='v')
+    assert 'SKYPILOT_UT_ENV_CANARY' in body.env_vars
+    token = loopback._request_from_loopback.set(False)
+    try:
+        await executor.schedule_request_async(
+            request_id='policy-env',
+            request_name='test.in_process',
+            request_body=body,
+            func=_in_process_entrypoint,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            auth_user=models.User(id='abcd1234', name='alice'))
+    finally:
+        loopback._request_from_loopback.reset(token)
+
+    (env,) = seen
+    assert set(env) <= executor._REMOTE_REQUEST_ENV_VARS
+    assert env[constants.USER_ID_ENV_VAR] == 'abcd1234'
+    assert 'server-canary' not in env.values()
+
+
+@pytest.mark.asyncio
 async def test_policy_in_process_request_runs_in_process(
         in_process_env, monkeypatch):
     """IN_PROCESS from the policy records the request and runs it here."""
@@ -2930,11 +3154,12 @@ def _replacement_entrypoint(value: str):
 
 
 @pytest.mark.asyncio
-async def test_policy_replaced_entrypoint_is_recorded(in_process_env):
+async def test_policy_replaced_entrypoint_is_recorded(in_process_env,
+                                                      monkeypatch):
     """The entrypoint the policy sets is what the queued request runs."""
 
     async def policy(request):
-        request.func = _replacement_entrypoint
+        request.func = functools.partial(_replacement_entrypoint)
         return executor.ExecutionMode.QUEUE
 
     await _schedule_with_policy('policy-replaced', policy)
@@ -2943,7 +3168,11 @@ async def test_policy_replaced_entrypoint_is_recorded(in_process_env):
     queued = requests_lib.get_request('policy-replaced')
     assert queued is not None
     assert queued.status == requests_lib.RequestStatus.PENDING
-    assert queued.entrypoint is _replacement_entrypoint
+    assert queued.entrypoint.func is _replacement_entrypoint
+    # Request listings name a wrapper without __name__ by its type.
+    assert queued.readable_encode().entrypoint == 'partial'
+    monkeypatch.setattr(global_user_state, 'get_all_users', lambda: [])
+    assert requests_lib.encode_requests([queued])[0].entrypoint == 'partial'
 
 
 @pytest.mark.asyncio
@@ -3083,8 +3312,8 @@ def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
                         lambda *args: True)
     resolved_for = []
 
-    def fake_resolve(user, action):
-        del action
+    def fake_resolve(user, action, pick_for_read):
+        del action, pick_for_read
         resolved_for.append(user.preferred_workspace)
         return mock.Mock(workspace=constants.SKYPILOT_DEFAULT_WORKSPACE,
                          source='explicit')
@@ -3121,3 +3350,93 @@ def test_stamp_sets_authenticated_from_auth_user():
 def test_to_kwargs_drops_authenticated():
     body = payloads.RequestBody(env_vars={}, authenticated=True)
     assert 'authenticated' not in body.to_kwargs()
+
+
+_CALLER_COUNTERS = (
+    metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+    metrics_utils.SKY_APISERVER_CALLER_EXECUTION_SECONDS_TOTAL,
+    metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL)
+
+
+@pytest.fixture()
+def caller_usage_enabled(monkeypatch):
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(caller_usage, '_caller_names',
+                        caller_usage._Admitted(caller_usage.MAX_CALLER_NAMES))  # pylint: disable=protected-access
+    for counter in _CALLER_COUNTERS:
+        counter.clear()
+    yield
+    for counter in _CALLER_COUNTERS:
+        counter.clear()
+
+
+def _caller_sample(counter, **labels) -> float:
+    return sum(sample.value
+               for family in counter.collect()
+               for sample in family.samples
+               if sample.name.endswith('_total') and all(
+                   sample.labels.get(k) == v for k, v in labels.items()))
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_a_queued_request(mock_fd_operations,
+                                                mock_global_user_state,
+                                                mock_skypilot_config,
+                                                caller_usage_enabled):
+    body = payloads.RequestBody()
+    body.env_vars[constants.USER_ENV_VAR] = 'alice'
+    req = requests_lib.Request(request_id='caller-usage-queued',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=body,
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    executor._request_execution_wrapper('caller-usage-queued',
+                                        ignore_return_value=False)
+
+    labels = dict(caller='alice', caller_id='test-user', name='test')
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          kind='long',
+                          **labels) == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL,
+        **labels) == len('"success"')
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_an_in_process_request(in_process_env,
+                                                     caller_usage_enabled):
+    request = await _prepare_in_process('caller-usage-in-process')
+    await executor.schedule_prepared_request(request, in_process=True)
+    await _wait_in_process_tasks()
+
+    labels = dict(caller_id='user-1', name='sky.test.in_process')
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          kind='short',
+                          **labels) == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL, **
+        labels) > 0
+
+
+@pytest.mark.asyncio
+async def test_caller_usage_of_an_inline_request(in_process_env,
+                                                 caller_usage_enabled):
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    async def policy(request):
+        await executor.run_request_inline(request, pool)
+        return executor.ExecutionMode.HANDLED
+
+    await _schedule_with_policy('caller-usage-inline', policy)
+    pool.shutdown(wait=True)
+
+    assert _caller_sample(metrics_utils.SKY_APISERVER_CALLER_CALLS_TOTAL,
+                          caller_id='user-1',
+                          name='sky.test.in_process',
+                          kind='sync') == 1
+    assert _caller_sample(
+        metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL) == 0

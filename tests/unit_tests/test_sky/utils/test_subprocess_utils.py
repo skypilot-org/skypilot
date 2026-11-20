@@ -2,6 +2,7 @@
 import contextvars
 import logging
 import multiprocessing
+import os
 import signal
 import subprocess
 import sys
@@ -166,6 +167,20 @@ def test_with_low_cpu_count(mock_startable, mock_sleep, mock_cpu_count):
     # Start 1 at a time
     expected_started_counts = [1, 2, 3, 4]
     assert batch_sizes == expected_started_counts
+
+
+def test_parallel_threads_follow_the_cpu_limit(mock_cpu_count):
+    # A 22-CPU container on a 32-core host gets 21 threads, not 31.
+    mock_cpu_count.return_value = 22
+    with mock.patch('os.cpu_count', return_value=32):
+        assert subprocess_utils.get_parallel_threads() == 21
+        assert subprocess_utils.get_parallel_threads('kubernetes') == 84
+
+
+def test_parallel_threads_keep_the_floor_of_four(mock_cpu_count):
+    # get_cpu_count() floors a fractional limit, so 0.5 CPU reports 0.
+    mock_cpu_count.return_value = 0
+    assert subprocess_utils.get_parallel_threads() == 4
 
 
 def _ignore_sigterm():
@@ -477,6 +492,63 @@ class TestFallbackChildren(unittest.TestCase):
         with mock.patch.object(subprocess_utils.sys, 'platform', 'darwin'):
             self.assertEqual(
                 subprocess_utils._fallback_children(1, parent_ctime=0.0), [])
+
+
+class TestDescendantPidsFromProcfs(unittest.TestCase):
+
+    def test_matches_psutil_on_a_process_tree(self):
+        if not subprocess_utils._procfs_lists_children():
+            self.skipTest('kernel has no /proc/<pid>/task/<tid>/children')
+        proc = subprocess.Popen(
+            ['bash', '-c', '(sleep 60 & wait) & sleep 60 & wait'])
+        try:
+            parent = psutil.Process(proc.pid)
+            deadline = time.time() + 10
+            # bash, its subshell and two sleeps.
+            while (len(parent.children(recursive=True)) < 3 and
+                   time.time() < deadline):
+                time.sleep(0.05)
+            expected = {p.pid for p in parent.children(recursive=True)}
+            self.assertEqual(len(expected), 3)
+            self.assertEqual(
+                set(subprocess_utils._descendant_pids_from_procfs(proc.pid)),
+                expected)
+        finally:
+            subprocess_utils.kill_children_processes([proc.pid], force=True)
+            proc.wait()
+
+    def test_none_without_children_file(self):
+        with mock.patch.object(subprocess_utils,
+                               '_procfs_lists_children',
+                               return_value=False):
+            self.assertIsNone(
+                subprocess_utils._descendant_pids_from_procfs(os.getpid()))
+
+
+class TestKillProcessDaemonInitialChildren(unittest.TestCase):
+
+    def _daemon_cmd(self, procfs_pids, safe_children):
+        with mock.patch.object(subprocess_utils,
+                               '_descendant_pids_from_procfs',
+                               return_value=procfs_pids), \
+             mock.patch.object(subprocess_utils,
+                               '_safe_children',
+                               return_value=safe_children) as safe, \
+             mock.patch.object(subprocess_utils.subprocess, 'Popen') as popen:
+            subprocess_utils.kill_process_daemon(os.getpid())
+        cmd = popen.call_args.args[0]
+        return cmd[cmd.index('--initial-children') + 1], safe
+
+    def test_uses_the_procfs_snapshot(self):
+        children, safe = self._daemon_cmd([11, 12], [])
+        self.assertEqual(children, '11,12')
+        safe.assert_not_called()
+
+    def test_falls_back_to_psutil(self):
+        children, safe = self._daemon_cmd(
+            None, [mock.MagicMock(spec=psutil.Process, pid=13)])
+        self.assertEqual(children, '13')
+        safe.assert_called_once()
 
 
 class TestKillProcessDaemonTolerates(unittest.TestCase):

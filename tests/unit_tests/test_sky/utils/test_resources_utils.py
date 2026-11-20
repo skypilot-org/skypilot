@@ -219,6 +219,36 @@ def test_get_readable_resources_repr_old_pickled_cluster_info():
     assert 'mem=4' in simple
 
 
+@pytest.mark.parametrize('accelerators,accelerator_args,launched_nodes,prefix',
+                         [
+                             ('tpu-v6e-16', None, 4, '1x'),
+                             ('tpu-v6e-16', None, 8, '2x'),
+                             ('tpu-v6e-8', {
+                                 'multi_host': True
+                             }, 2, '1x'),
+                             ('tpu-v6e-8', None, 2, '2x'),
+                         ])
+def test_get_readable_resources_repr_counts_tpu_slices(accelerators,
+                                                       accelerator_args,
+                                                       launched_nodes, prefix):
+    """A multi-host TPU slice has one pod per VM, but launched_resources
+    describes the whole slice: the count shown is the number of slices."""
+    from sky import resources as resources_lib
+    handle = types.SimpleNamespace(launched_resources=resources_lib.Resources(
+        infra='k8s/ctx',
+        instance_type=f'16CPU--64GB--{accelerators}:1',
+        accelerators=accelerators,
+        accelerator_args=accelerator_args),
+                                   launched_nodes=launched_nodes,
+                                   cached_cluster_info=None)
+
+    simple, full = resources_utils.get_readable_resources_repr(
+        handle, simplified_only=False)
+
+    assert simple.startswith(prefix), simple
+    assert full.startswith(prefix), full
+
+
 class TestNormalizeLocalDisk:
     """Tests for normalize_local_disk function."""
 

@@ -21,6 +21,14 @@ from sky.utils import status_lib
 from sky.utils import yaml_utils
 
 
+@pytest.fixture(autouse=True)
+def _restore_environ():
+    """Some tests point ENV_VAR_SKYPILOT_CONFIG at a test YAML; without this
+    it leaks into later tests in the same worker."""
+    with mock.patch.dict(os.environ):
+        yield
+
+
 # Set env var to test config file.
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())

@@ -1,5 +1,6 @@
 """The casbin policy is reloaded only when its stored version moved, and a
-reload, hung or not, never holds up the readers that run on the event loop.
+reload or policy write, hung or not, never holds up the readers that run on
+the event loop.
 
 Every service here is built through `_lazy_initialize` on a database migrated
 by the real global_user_state migrations, so the triggers are the real ones.
@@ -9,6 +10,8 @@ Each test runs on SQLite, and on PostgreSQL when SKYPILOT_TEST_PG_URL is set.
 import asyncio
 import contextlib
 import os
+import subprocess
+import sys
 import threading
 import time
 import types
@@ -259,9 +262,16 @@ def test_local_write_during_a_reload_is_kept(new_service, engine, monkeypatch,
         # Another writer moves the version; the local write lands mid-reload.
         _grant(engine, 'zed', 'user')
         start_reader()
-        service.enforcer.remove_filtered_grouping_policy(0, 'alice')
-        service.enforcer.add_grouping_policy('alice', 'admin')
+        write = threading.Thread(target=service._add_user_if_not_exists_no_lock,
+                                 args=('newbie', 'admin'))
+        write.start()
+        # Unguarded, the write finishes here, into the model about to go.
+        write.join(timeout=0.5)
         resume.set()
+        write.join(timeout=10)
+        for reader in readers:
+            reader.join(timeout=10)
+        assert service.roles_in_memory('newbie') == ['admin']
     else:
         # The first commit of update_role starts a reload before its second.
         synced_class = permission.casbin.SyncedEnforcer
@@ -276,24 +286,28 @@ def test_local_write_during_a_reload_is_kept(new_service, engine, monkeypatch,
         monkeypatch.setattr(synced_class, 'remove_filtered_grouping_policy',
                             remove_then_reload)
         service.update_role('alice', 'admin')
-    for reader in readers:
-        reader.join(timeout=10)
-
-    assert service.roles_in_memory('alice') == ['admin']
+        for reader in readers:
+            reader.join(timeout=10)
+        assert service.roles_in_memory('alice') == ['admin']
 
 
 class _WriteFirst:
-    """A write lock whose first acquire by `thread` lets `write` run first."""
+    """A write lock whose first acquire by `thread` lets `write` run first.
+
+    Waits only briefly for it: a write that is made to wait for the reload
+    finishes after the swap instead.
+    """
 
     def __init__(self, real, thread, write):
         self.real, self.thread, self.write = real, thread, write
+        self.writer = None
 
     def __enter__(self):
         if threading.current_thread().name == self.thread and self.write:
-            writer = threading.Thread(target=self.write)
+            self.writer = threading.Thread(target=self.write)
             self.write = None
-            writer.start()
-            writer.join(timeout=10)
+            self.writer.start()
+            self.writer.join(timeout=0.5)
         return self.real.__enter__()
 
     def __exit__(self, *args):
@@ -302,52 +316,62 @@ class _WriteFirst:
 
 def test_local_write_just_before_the_swap_lock_is_kept(new_service, engine,
                                                        monkeypatch):
-    """The swap decides on a version read while it holds the write lock."""
+    """A local write waits for the reload instead of landing in the old model.
+    """
     service = new_service()
-    service.update_role('alice', 'user')
     service.get_user_roles('alice')
     _grant(engine, 'zed', 'user')  # Forces a reload.
     synced = service.enforcer
-
-    def demote():
-        synced.remove_filtered_grouping_policy(0, 'alice')
-        synced.add_grouping_policy('alice', 'admin')
-
-    monkeypatch.setattr(synced, '_wl',
-                        _WriteFirst(synced._wl, 'reloader', demote))
+    lock = _WriteFirst(
+        synced._wl, 'reloader',
+        lambda: service._add_user_if_not_exists_no_lock('newbie', 'admin'))
+    monkeypatch.setattr(synced, '_wl', lock)
     reloader = threading.Thread(target=service._load_policy_no_lock,
                                 name='reloader')
     reloader.start()
     reloader.join(timeout=10)
-    assert not reloader.is_alive()
+    lock.writer.join(timeout=10)
+    assert not reloader.is_alive() and not lock.writer.is_alive()
 
-    assert service.roles_in_memory('alice') == ['admin']
+    assert service.roles_in_memory('newbie') == ['admin']
 
 
-def test_write_during_the_in_place_load_is_seen_next(new_service, engine,
-                                                     monkeypatch):
-    """The in-place load records the version read before it, not after."""
+def test_slow_database_does_not_hold_the_write_lock(new_service, engine,
+                                                    monkeypatch):
+    """Readers, some on the event loop, never wait on the database."""
     service = new_service()
-    service.get_user_roles('carol')
-    _grant(engine, 'zed', 'user')  # Forces a reload.
-    adapter = service._policy_version.adapter
-    original = adapter.load_policy
-    after_load = [
-        # During the build: sends the swap down the in-place branch.
-        lambda: _grant(engine, 'other', 'user'),
-        # During the in-place load, after its rows were read.
-        lambda: _grant(engine, 'carol', 'viewer'),
-    ]
+    service.get_user_roles('alice')
+    _grant(engine, 'alice', 'viewer')
+    state = service._policy_version
+    adapter = state.adapter
+    original_load, original_read = adapter.load_policy, state.read
+    built, release = threading.Event(), threading.Event()
 
-    def load_then_write(model):
-        original(model)
-        if after_load:
-            after_load.pop(0)()
+    def load(model):
+        original_load(model)
+        if threading.current_thread().name == 'reloader':
+            built.set()
 
-    monkeypatch.setattr(adapter, 'load_policy', load_then_write)
-    service._load_policy_no_lock()
-    assert not after_load
-    assert service.get_user_roles('carol') == ['viewer']
+    def read():
+        if threading.current_thread().name == 'reloader' and built.is_set():
+            release.wait(timeout=5)  # A slow database, after the build.
+        return original_read()
+
+    monkeypatch.setattr(adapter, 'load_policy', load)
+    monkeypatch.setattr(state, 'read', read)
+    reloader = threading.Thread(target=service._load_policy_no_lock,
+                                name='reloader')
+    reloader.start()
+    assert built.wait(timeout=5)
+    time.sleep(0.3)  # Lets the reloader reach the swap.
+    started = time.monotonic()
+    service.roles_in_memory('alice')
+    elapsed = time.monotonic() - started
+    release.set()
+    reloader.join(timeout=10)
+
+    assert elapsed < 0.5
+    assert service.roles_in_memory('alice') == ['viewer']
 
 
 def test_concurrent_stale_readers_load_once(new_service, engine, monkeypatch):
@@ -461,35 +485,34 @@ def test_swapped_enforcer_serves_every_read(new_service, engine):
 
 
 @contextlib.contextmanager
-def _hung_in_place_load(service, engine, monkeypatch):
-    """A policy load that never returns while it holds the write lock.
+def _hung_role_write(service, monkeypatch):
+    """A role write that never returns while it holds the write lock.
 
-    An unreadable version sends every reload down the in-place path, which
-    holds the enforcer's write lock across its read of casbin_rule. Here that
-    read hangs, as one on a dead database connection does, until the test
-    ends.
+    Writes made through the enforcer API (a new user's role seed, the initial
+    basic-auth user) commit to the database inside the enforcer's write lock.
+    Here that commit hangs, as one on a dead database connection does, until
+    the test ends.
     """
-    _execute(engine, 'DELETE FROM rbac_policy_version')
     adapter = service._policy_version.adapter
-    original = adapter.load_policy
-    loading, release = threading.Event(), threading.Event()
+    original = adapter.add_policy
+    writing, release = threading.Event(), threading.Event()
 
-    def hung_load(model):
-        loading.set()
+    def hung_add(*args):
+        writing.set()
         release.wait(timeout=60)
-        original(model)
+        return original(*args)
 
-    monkeypatch.setattr(adapter, 'load_policy', hung_load)
-    loader = threading.Thread(target=service.get_user_roles,
-                              args=('someone',),
+    monkeypatch.setattr(adapter, 'add_policy', hung_add)
+    writer = threading.Thread(target=service.add_user_if_not_exists,
+                              args=('newcomer',),
                               daemon=True)
-    loader.start()
+    writer.start()
     try:
-        assert loading.wait(timeout=5)
+        assert writing.wait(timeout=5)
         yield
     finally:
         release.set()
-        loader.join(timeout=10)
+        writer.join(timeout=10)
 
 
 def _finishes(func, timeout=2.0):
@@ -502,19 +525,18 @@ def _finishes(func, timeout=2.0):
     return result[0]
 
 
-def test_roles_in_memory_does_not_wait_for_a_hung_load(new_service, engine,
-                                                       monkeypatch):
+def test_roles_in_memory_does_not_wait_for_a_hung_write(new_service,
+                                                        monkeypatch):
     service = new_service()
     service.update_role('alice', 'admin')
-    with _hung_in_place_load(service, engine, monkeypatch):
+    with _hung_role_write(service, monkeypatch):
         assert _finishes(lambda: service.roles_in_memory('alice')) == ['admin']
         assert _finishes(lambda: service.roles_in_memory('nobody')) == []
 
 
-def test_event_loop_keeps_serving_while_a_load_hangs(new_service, engine,
-                                                     monkeypatch):
+def test_event_loop_keeps_serving_while_a_write_hangs(new_service, monkeypatch):
     """The request scope of /api/get, /api/stream and /api/status is decided
-    on the event loop. If deciding it waits for a policy load, every request
+    on the event loop. If deciding it waits for a policy write, every request
     on the worker waits with it."""
     service = new_service()
     service.update_role('alice', 'admin')
@@ -533,7 +555,7 @@ def test_event_loop_keeps_serving_while_a_load_hangs(new_service, engine,
         await probe
         return scopes
 
-    with _hung_in_place_load(service, engine, monkeypatch):
+    with _hung_role_write(service, monkeypatch):
         assert _finishes(lambda: asyncio.run(serve())) == [None, 'bob']
 
 
@@ -619,3 +641,253 @@ def test_policy_load_keeps_a_tighter_statement_timeout(new_service, engine,
         if sqlalchemy.event.contains(engine, 'connect', tighter_default):
             sqlalchemy.event.remove(engine, 'connect', tighter_default)
     assert seen == ['1min', '3s']
+
+
+# The background refresh: a poller publishes the stored version to a file, and
+# each serving process's watcher reloads when it moved.
+
+
+@pytest.fixture
+def published(tmp_path, monkeypatch):
+    """Points watchers at a file; returns a function that publishes to it."""
+    path = str(tmp_path / 'policy_version')
+    monkeypatch.setenv(permission._POLICY_VERSION_FILE_ENV, path)
+
+    def _publish(value, age=0.0):
+        permission._publish_policy_version(path, str(value))
+        if age:
+            with open(path, encoding='utf-8') as f:
+                value, beat = f.read().split()
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(f'{value} {float(beat) - age}\n')
+
+    _publish.path = path
+    return _publish
+
+
+def _poller(service):
+    service._poll_engine = permission._poller_engine(
+        service._policy_version.engine)
+    return service
+
+
+_EXPORT = ('/users/export', 'GET')
+
+
+@pytest.mark.parametrize('before,after', [('admin', 'user'), ('user', 'admin')])
+def test_watcher_applies_a_role_changed_elsewhere(new_service, engine,
+                                                  published, before, after):
+    _execute(
+        engine, 'INSERT INTO casbin_rule (ptype, v0, v1, v2) '
+        f'VALUES (\'p\', \'user\', \'{_EXPORT[0]}\', \'{_EXPORT[1]}\')')
+    a = new_service()
+    a.update_role('alice', before)
+    b = new_service()
+    b.update_role('alice', after)
+    # Nothing on the request path reloads: `a` still holds the old role.
+    assert a.roles_in_memory('alice') == [before]
+    assert a.check_endpoint_permission('alice', *_EXPORT) == (before == 'user')
+
+    published(_poller(b)._poll_policy_version_once())
+    a._watch_policy_once()
+
+    assert a.roles_in_memory('alice') == [after]
+    assert a.check_endpoint_permission('alice', *_EXPORT) == (after == 'user')
+
+
+def test_watcher_reads_no_database_while_the_version_holds(
+        new_service, engine, published):
+    service = new_service()
+    service.get_user_roles('alice')
+    published(service._policy_version.loaded)
+    with _count_statements(engine) as counts:
+        service._watch_policy_once()
+    assert counts == {'version': 0, 'load': 0}
+
+    _grant(engine, 'alice', 'viewer')
+    published(_stored_version(engine))
+    with _count_statements(engine) as counts:
+        service._watch_policy_once()
+    assert counts['load'] == 1
+    assert service.roles_in_memory('alice') == ['viewer']
+
+
+def test_poller_publishes_a_number_or_why_not(new_service, engine):
+    service = _poller(new_service())
+    assert service._poll_policy_version_once() == str(_stored_version(engine))
+
+    service._poll_engine = sqlalchemy.create_engine(
+        'sqlite:////nonexistent-dir/state.db')
+    with mock.patch.object(permission.logger, 'warning') as warning:
+        assert service._poll_policy_version_once() == permission._READ_ERROR
+        assert service._poll_policy_version_once() == permission._READ_ERROR
+    warning.assert_called_once()
+
+    service = _poller(new_service())
+    if engine.dialect.name == 'sqlite':
+        _execute(engine, 'DROP TRIGGER casbin_rule_bump_policy_version_insert')
+        service = _poller(new_service())  # SQLite checks once, at build.
+    else:
+        _execute(
+            engine, 'ALTER TABLE casbin_rule DISABLE TRIGGER '
+            'casbin_rule_bump_policy_version')
+    assert service._poll_policy_version_once() == permission._UNVERSIONED
+
+
+def test_watcher_keeps_its_model_on_a_read_error(new_service, engine,
+                                                 published):
+    service = new_service()
+    service.get_user_roles('alice')
+    _grant(engine, 'alice', 'viewer')
+    published(permission._READ_ERROR)
+    with _count_statements(engine) as counts:
+        service._watch_policy_once()
+    assert counts == {'version': 0, 'load': 0}
+    assert service.roles_in_memory('alice') == []
+
+    # Only the poller may be failing: past the stale bound, read it here.
+    service._error_since -= permission._POLLER_STALE_SECONDS + 1
+    service._watch_policy_once()
+    assert service.roles_in_memory('alice') == ['viewer']
+
+    # A recovered poller restarts the clock for the next stretch of errors.
+    published(_stored_version(engine))
+    service._watch_policy_once()
+    _grant(engine, 'alice', 'admin')
+    published(permission._READ_ERROR)
+    service._watch_policy_once()
+    assert service.roles_in_memory('alice') == ['viewer']
+
+
+def test_watcher_reloads_an_unversioned_policy_once_a_minute(
+        new_service, engine, published):
+    service = new_service()
+    service.get_user_roles('alice')
+    _execute(engine, 'DELETE FROM rbac_policy_version')
+    _grant(engine, 'alice', 'viewer')
+    published(permission._UNVERSIONED)
+    # Built off the write lock like any other reload, not loaded in place.
+    in_place = mock.Mock(side_effect=AssertionError('in-place load'))
+    with _count_statements(engine) as counts, mock.patch.object(
+            permission.casbin.SyncedEnforcer, 'load_policy', in_place):
+        service._watch_policy_once()
+        service._watch_policy_once()
+    assert counts['load'] == 1
+    assert service.roles_in_memory('alice') == ['viewer']
+
+
+def test_watcher_uses_the_published_version_if_its_own_read_fails(
+        new_service, engine, published, monkeypatch):
+    """A worker that cannot read the version converges on the poller's."""
+    service = new_service()
+    service.get_user_roles('alice')
+    _grant(engine, 'alice', 'viewer')
+    published(_stored_version(engine))
+    monkeypatch.setattr(service._policy_version, 'read', lambda: None)
+    service._watch_policy_once()
+    assert service.roles_in_memory('alice') == ['viewer']
+    # Labelled with the published version, so the next tick has nothing to do.
+    with _count_statements(engine) as counts:
+        service._watch_policy_once()
+    assert counts['load'] == 0
+
+
+@pytest.mark.parametrize('missing', ['stale', 'no_file', 'no_env'])
+def test_watcher_reads_the_database_without_a_live_poller(
+        new_service, engine, published, monkeypatch, missing):
+    service = new_service()
+    service.get_user_roles('alice')
+    _grant(engine, 'alice', 'viewer')
+    if missing == 'stale':
+        published(_stored_version(engine),
+                  age=permission._POLLER_STALE_SECONDS + 1)
+    elif missing == 'no_env':
+        monkeypatch.delenv(permission._POLICY_VERSION_FILE_ENV)
+    with mock.patch.object(permission.logger, 'warning') as warning:
+        service._watch_policy_once()
+        service._watch_policy_once()
+    warning.assert_called_once()
+    assert service.roles_in_memory('alice') == ['viewer']
+
+    monkeypatch.setenv(permission._POLICY_VERSION_FILE_ENV, published.path)
+    published(_stored_version(engine))
+    with mock.patch.object(permission.logger, 'info') as info:
+        service._watch_policy_once()
+    info.assert_called_once()
+
+
+def test_watcher_survives_a_failed_reload(new_service, engine, published,
+                                          monkeypatch):
+    service = new_service()
+    service.get_user_roles('alice')
+    _grant(engine, 'alice', 'viewer')
+    published(_stored_version(engine))
+    real = service._load_policy_no_lock
+    monkeypatch.setattr(service, '_load_policy_no_lock',
+                        mock.Mock(side_effect=RuntimeError('db down')))
+    with mock.patch.object(permission.logger, 'warning') as warning:
+        service._watch_policy_once()
+        service._watch_policy_once()
+    warning.assert_called_once()
+
+    monkeypatch.setattr(service, '_load_policy_no_lock', real)
+    with mock.patch.object(permission.logger, 'info') as info:
+        service._watch_policy_once()
+    info.assert_called_once()
+    assert service.roles_in_memory('alice') == ['viewer']
+
+
+def test_refresh_never_takes_the_policy_lock(new_service, engine, published,
+                                             monkeypatch):
+    service = _poller(new_service())
+    service.get_user_roles('alice')
+    _grant(engine, 'alice', 'viewer')
+    monkeypatch.setattr(permission, '_policy_lock',
+                        mock.Mock(side_effect=AssertionError('policy lock')))
+    published(service._poll_policy_version_once())
+    service._watch_policy_once()
+    assert service.roles_in_memory('alice') == ['viewer']
+
+
+def test_poller_gives_up_on_a_slow_database(new_service, engine, monkeypatch):
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('statement_timeout is PostgreSQL only')
+    monkeypatch.setattr(permission, '_POLLER_DB_TIMEOUT_SECONDS', 1)
+    service = _poller(new_service())
+    result = []
+    with engine.connect() as holder:
+        holder.execute(
+            sqlalchemy.text('LOCK TABLE rbac_policy_version IN ACCESS '
+                            'EXCLUSIVE MODE'))
+        # In a thread, so a poll that never gives up fails here, not hangs.
+        poll = threading.Thread(
+            target=lambda: result.append(service._poll_policy_version_once()),
+            daemon=True)
+        poll.start()
+        poll.join(timeout=10)
+        holder.rollback()
+    assert result == [permission._READ_ERROR]
+
+
+def test_refresh_threads_start_once(new_service, engine, monkeypatch):
+    service = new_service()
+    thread = mock.Mock()
+    monkeypatch.setattr(permission.threading, 'Thread', thread)
+    with mock.patch.dict(os.environ):
+        os.environ.pop(permission._POLICY_VERSION_FILE_ENV, None)
+        for _ in range(2):
+            service.start_policy_version_poller()
+            service.start_policy_watcher()
+        assert thread.call_count == 2
+
+        path = os.environ[permission._POLICY_VERSION_FILE_ENV]
+        assert os.stat(os.path.dirname(path)).st_mode & 0o777 == 0o700
+        assert permission._read_published_policy_version() == str(
+            _stored_version(engine))
+
+
+def test_import_starts_no_refresh_thread():
+    code = ('import threading, sky.users.permission; '
+            'assert not [t for t in threading.enumerate() '
+            'if t.name.startswith("rbac-policy")]')
+    subprocess.run([sys.executable, '-c', code], check=True, timeout=120)
