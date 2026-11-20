@@ -685,7 +685,7 @@ def _resolve_conn_string(direct: bool) -> Optional[str]:
     return base
 
 
-def _pooler_configured() -> bool:
+def pooler_configured() -> bool:
     """Whether a connection pooler is configured for non-direct engines."""
     return bool(
         os.environ.get(constants.ENV_VAR_DB_POOL_CONNECTION_URI) or
@@ -936,8 +936,8 @@ def get_engine(
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
                             async_creator=_make_asyncpg_creator(conn_string)))
-                elif pool_size == 0 or (direct and _pooler_configured()):
-                    if direct and _pooler_configured():
+                elif pool_size == 0 or (direct and pooler_configured()):
+                    if direct and pooler_configured():
                         role = sql_metrics.DB_STATE_DIRECT
                     # NullPool: no persistent connections. Used when no pool
                     # size is configured, and — crucially — for the direct

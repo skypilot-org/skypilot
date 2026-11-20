@@ -365,6 +365,29 @@ class RequestQueue:
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
+@functools.lru_cache(maxsize=1)
+def eager_workers_enabled() -> bool:
+    """Whether executor pools start every worker at boot (warm start).
+
+    On with SKYPILOT_EAGER_EXECUTOR_WORKERS, except when the server reaches a
+    Postgres state DB without a connection pooler: every worker would then
+    hold its own database connections, and a full pool can exhaust a database
+    shared with other servers. Decided once per process.
+    """
+    if not env_options.Options.EAGER_EXECUTOR_WORKERS.get():
+        return False
+    if (os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) and
+            not db_utils.pooler_configured()):
+        logger.warning(
+            f'{env_options.Options.EAGER_EXECUTOR_WORKERS.env_key} is set, '
+            'but the Postgres state DB is not behind a connection pooler '
+            f'({constants.ENV_VAR_DB_POOL_HOSTPORT} or '
+            f'{constants.ENV_VAR_DB_POOL_CONNECTION_URI}); executor workers '
+            'will start on demand.')
+        return False
+    return True
+
+
 def executor_initializer(proc_group: str,
                          clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
@@ -806,7 +829,7 @@ class RequestWorker:
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
-                warm_start=env_options.Options.EAGER_EXECUTOR_WORKERS.get(),
+                warm_start=eager_workers_enabled(),
                 initializer=executor_initializer,
                 initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors

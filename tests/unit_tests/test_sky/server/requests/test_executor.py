@@ -3442,15 +3442,45 @@ async def test_caller_usage_of_an_inline_request(in_process_env,
         metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL) == 0
 
 
-@pytest.mark.parametrize('env_value,expected', [(None, False), ('1', True),
-                                                ('true', True), ('0', False)])
-def test_request_worker_passes_eager_workers_flag(monkeypatch, env_value,
-                                                  expected):
-    """SKYPILOT_EAGER_EXECUTOR_WORKERS turns on warm start for the pool."""
-    if env_value is None:
-        monkeypatch.delenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', raising=False)
-    else:
-        monkeypatch.setenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', env_value)
+@pytest.mark.parametrize(
+    'flag,db_uri,pool_hostport,expected',
+    [
+        (None, None, None, False),
+        ('0', None, None, False),
+        # SQLite: nothing to exhaust.
+        ('1', None, None, True),
+        ('true', None, None, True),
+        # Postgres without a pooler: stay on demand.
+        ('1', 'postgresql://u:p@db:5432/sky', None, False),
+        # Postgres behind a pooler.
+        ('1', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', True),
+        ('0', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', False),
+    ])
+def test_eager_workers_enabled(monkeypatch, flag, db_uri, pool_hostport,
+                               expected):
+    """Warm start needs the flag and, on Postgres, a connection pooler."""
+    env = {
+        'SKYPILOT_EAGER_EXECUTOR_WORKERS': flag,
+        constants.ENV_VAR_DB_CONNECTION_URI: db_uri,
+        constants.ENV_VAR_DB_POOL_HOSTPORT: pool_hostport,
+        constants.ENV_VAR_DB_POOL_CONNECTION_URI: None,
+    }
+    for name, value in env.items():
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    executor.eager_workers_enabled.cache_clear()
+    try:
+        assert executor.eager_workers_enabled() is expected
+    finally:
+        executor.eager_workers_enabled.cache_clear()
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_request_worker_passes_eager_workers_flag(monkeypatch, enabled):
+    """RequestWorker passes eager_workers_enabled() to its pool."""
+    monkeypatch.setattr(executor, 'eager_workers_enabled', lambda: enabled)
     captured = {}
 
     class FakeExecutor:
@@ -3476,4 +3506,4 @@ def test_request_worker_passes_eager_workers_flag(monkeypatch, env_value,
     thread.start()
     thread.join(timeout=30)
     assert not thread.is_alive()
-    assert captured['warm_start'] is expected
+    assert captured['warm_start'] is enabled

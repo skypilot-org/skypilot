@@ -13,9 +13,24 @@ from sky.utils import subprocess_utils
 
 logger = logging.getLogger(__name__)
 
-# Warm start starts one worker per interval, so that workers importing SkyPilot
-# do not all compete for CPU when the server starts.
-_WARM_START_INTERVAL_SECONDS = 0.5
+# Warm start lets at most this many workers be starting (spawned, initializer
+# not yet finished) at a time. Each start imports SkyPilot and opens database
+# connections, so a slow start, e.g. on a busy database, slows warm start down
+# instead of piling up starting processes and their connections.
+_WARM_START_MAX_STARTING = 2
+_WARM_START_POLL_SECONDS = 0.1
+# Warm start stops, and the remaining workers start on demand, when no worker
+# becomes ready for this long.
+_WARM_START_STALL_SECONDS = 120
+
+
+def _initializer_with_ready_count(ready, initializer: Optional[Callable],
+                                  initargs: Tuple) -> None:
+    """Runs the pool's initializer, then counts this worker as ready."""
+    if initializer is not None:
+        initializer(*initargs)
+    with ready.get_lock():
+        ready.value += 1
 
 
 class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
@@ -27,11 +42,19 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
     2. Idle check: support check if there are any idle workers.
     3. Proactive shutdown: SIGTERM worker processes when the executor is
        shutting down instead of indefinitely waiting.
-    4. Warm start (opt-in): start every worker in the background, one per
-       interval, instead of on the first submits that find no idle worker.
+    4. Warm start (opt-in): start every worker in the background, a few at a
+       time, instead of on the first submits that find no idle worker.
     """
 
     def __init__(self, max_workers: int, warm_start: bool = False, **kwargs):
+        if warm_start:
+            # Every worker, including ones submits start, counts itself ready
+            # once its initializer has run.
+            context = kwargs.get('mp_context') or multiprocessing.get_context()
+            self._ready = context.Value('i', 0)
+            kwargs['initargs'] = (self._ready, kwargs.get('initializer'),
+                                  kwargs.get('initargs', ()))
+            kwargs['initializer'] = _initializer_with_ready_count
         super().__init__(max_workers=max_workers, **kwargs)
         self.max_workers: int = max_workers
         # The number of workers that are handling tasks, atomicity across
@@ -59,26 +82,40 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                                'demand.')
 
     def _warm_up(self) -> None:
-        """Starts one worker per interval until the pool is full.
+        """Starts workers, at most _WARM_START_MAX_STARTING at a time, until
+        the pool is full.
 
         The lock is held only while starting each process, so workers that are
-        up take tasks while the rest start.
+        up take tasks while the rest start. Stops, leaving the rest to start on
+        demand, if no worker becomes ready for _WARM_START_STALL_SECONDS.
         """
         # ProcessPoolExecutor has no public way to add a worker without
         # occupying the idle ones, so this uses its private state.
         # pylint: disable=protected-access
         pool: Any = self
-        while True:
+        progress_at = time.monotonic()
+        last_ready = 0
+        while not self._warm_start_stop.wait(_WARM_START_POLL_SECONDS):
+            ready = self._ready.value
+            if ready != last_ready:
+                last_ready, progress_at = ready, time.monotonic()
             with pool._shutdown_lock:
                 if pool._broken or pool._shutdown_thread:
                     return
-                if len(pool._processes) >= self.max_workers:
+                started = len(pool._processes)
+                if started >= self.max_workers:
                     break
-                pool._start_executor_manager_thread()
-                pool._spawn_process()
-                # Let the manager thread watch the new worker right away.
-                pool._executor_manager_thread_wakeup.wakeup()
-            if self._warm_start_stop.wait(_WARM_START_INTERVAL_SECONDS):
+                if started - ready < _WARM_START_MAX_STARTING:
+                    pool._start_executor_manager_thread()
+                    pool._spawn_process()
+                    # Let the manager thread watch the new worker right away.
+                    pool._executor_manager_thread_wakeup.wakeup()
+                    continue
+            if time.monotonic() - progress_at > _WARM_START_STALL_SECONDS:
+                logger.warning(
+                    f'Warm start stopped: no executor worker became ready in '
+                    f'{_WARM_START_STALL_SECONDS}s ({ready} of '
+                    f'{self.max_workers} ready). The rest start on demand.')
                 return
         # pylint: enable=protected-access
         logger.info(f'Warm start: {self.max_workers} workers started.')
