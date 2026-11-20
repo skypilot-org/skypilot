@@ -1,4 +1,6 @@
 """Permission service for SkyPilot API Server."""
+from __future__ import annotations
+
 import atexit
 import contextlib
 import hashlib
@@ -9,14 +11,29 @@ import shutil
 import tempfile
 import threading
 import time
+import typing
 from typing import (ContextManager, Dict, Generator, Iterable, List, Optional,
                     Set, Tuple)
 
-import casbin
-from casbin import util as casbin_util
-import sqlalchemy
-import sqlalchemy_adapter
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+if typing.TYPE_CHECKING:
+    import casbin
+    import casbin.util as casbin_util
+    import sqlalchemy
+    import sqlalchemy_adapter
+else:
+    casbin = adaptors_common.LazyImport('casbin', import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+    casbin_util = adaptors_common.LazyImport('casbin.util',
+                                             import_error_message=_SA_MSG)
+    sqlalchemy_adapter = adaptors_common.LazyImport(
+        'sqlalchemy_adapter', import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -203,12 +220,13 @@ _POLICY_VERSION_SQLITE_TRIGGERS = (
     'casbin_rule_bump_policy_version_delete',
 )
 # Health is read with the version: a disabled trigger is caught on next call.
-_POLICY_VERSION_PG_QUERY = sqlalchemy.text(
+# Plain SQL, wrapped in sqlalchemy.text() at use: SQLAlchemy is not installed
+# on a client-only install, so nothing here may touch it at import.
+_POLICY_VERSION_PG_SQL = (
     'SELECT v.version, t.tgenabled FROM rbac_policy_version v '
     'LEFT JOIN pg_trigger t ON t.tgrelid = to_regclass(\'casbin_rule\') '
-    'AND t.tgname = :trigger WHERE v.id = 1').bindparams(
-        trigger=_POLICY_VERSION_PG_TRIGGER)
-_POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
+    'AND t.tgname = :trigger WHERE v.id = 1')
+_POLICY_VERSION_SQLITE_SQL = (
     'SELECT version FROM rbac_policy_version WHERE id = 1')
 
 # Fields per rule: `g` is (user, role), `p` is (subject, object, action).
@@ -322,8 +340,12 @@ class _PolicyVersion:
         """Like `read`, on the caller's connection, and raising on error."""
         if not self._is_postgres and not self._is_sqlite:
             return None
-        row = conn.execute(_POLICY_VERSION_PG_QUERY if self._is_postgres else
-                           _POLICY_VERSION_SQLITE_QUERY).first()
+        if self._is_postgres:
+            query = sqlalchemy.text(_POLICY_VERSION_PG_SQL).bindparams(
+                trigger=_POLICY_VERSION_PG_TRIGGER)
+        else:
+            query = sqlalchemy.text(_POLICY_VERSION_SQLITE_SQL)
+        row = conn.execute(query).first()
         if row is None:
             return None
         # 'O' and 'A' fire in normal sessions; 'D' is disabled and 'R' fires

@@ -18,6 +18,8 @@ while the variable is being switched. On SQLite (single-node) there are no
 other server instances to coordinate with, and both backends fall back to the
 local advisory/file lock path.
 """
+from __future__ import annotations
+
 import abc
 import logging
 import os
@@ -25,8 +27,14 @@ import socket
 from typing import Optional
 import uuid
 
-import sqlalchemy
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                        import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky.utils import locks
 from sky.utils.db import db_utils
@@ -120,6 +128,23 @@ def _execute_bounded(sql, params, fetch):
         row = result.fetchone() if fetch else None
         conn.commit()
     return row
+
+
+class _LazyText:
+    """A ``sqlalchemy.text`` class attribute built on first access.
+
+    SQLAlchemy is not installed on a client-only install, and this module is
+    imported there, so nothing may call into it at import time.
+    """
+
+    def __init__(self, sql: str):
+        self._sql = sql
+        self._text = None
+
+    def __get__(self, obj, owner):
+        if self._text is None:
+            self._text = sqlalchemy.text(self._sql)
+        return self._text
 
 
 class LeaderElector(abc.ABC):
@@ -266,7 +291,7 @@ class PgLeaseElector(LeaderElector):
     #
     # The bid fails while any session holds the advisory lock for the same
     # lock id (see ``AdvisoryLockElector.try_acquire``).
-    _ACQUIRE_SQL = sqlalchemy.text(f"""
+    _ACQUIRE_SQL = _LazyText(f"""
         INSERT INTO {_LEASE_TABLE} (lock_id, holder, epoch, expires_at)
         SELECT :lock_id, :holder, 1, now() + make_interval(secs => :ttl)
          WHERE pg_try_advisory_xact_lock(:advisory_key)
@@ -292,7 +317,7 @@ class PgLeaseElector(LeaderElector):
     # Like the bid, the renew fails while any session holds the advisory lock
     # for the lock id: ``now()`` is the transaction start, so a renew delayed
     # past the expiry must not extend a lease an advisory leader saw expire.
-    _RENEW_SQL = sqlalchemy.text(f"""
+    _RENEW_SQL = _LazyText(f"""
         UPDATE {_LEASE_TABLE}
            SET expires_at = now() + make_interval(secs => :ttl)
          WHERE lock_id = :lock_id
@@ -305,12 +330,12 @@ class PgLeaseElector(LeaderElector):
     # Immediate handoff: expire our own lease now so a follower can take over
     # without waiting out the TTL. Scoped to our holder so we never expire a
     # lease another candidate has already taken from us.
-    _RELEASE_SQL = sqlalchemy.text(f"""
+    _RELEASE_SQL = _LazyText(f"""
         UPDATE {_LEASE_TABLE} SET expires_at = now()
         WHERE lock_id = :lock_id AND holder = :holder
     """)
 
-    _IS_HELD_SQL = sqlalchemy.text(f"""
+    _IS_HELD_SQL = _LazyText(f"""
         SELECT 1 FROM {_LEASE_TABLE}
          WHERE lock_id = :lock_id AND expires_at >= now()
     """)
