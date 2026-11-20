@@ -2373,6 +2373,7 @@ def get_managed_jobs_with_filters(
     sort_order: Optional[str] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
     tree_root_ids: Optional[List[int]] = None,
+    after_job_id: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Get managed jobs from the database with filters.
 
@@ -2402,6 +2403,9 @@ def get_managed_jobs_with_filters(
             'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
             'cloud', 'infra'.
         sort_order: Sort direction, 'asc' or 'desc'. Defaults to 'desc'.
+        after_job_id: With pagination, only the trees whose root comes after
+            this job id in job id order. The total ignores it. The caller
+            sorts by job id (see ``utils.check_queue_cursor``).
 
     Returns:
         A tuple containing
@@ -2481,6 +2485,16 @@ def get_managed_jobs_with_filters(
             # Default sort: root id desc (newest top-level job first)
             job_ids_subquery = job_ids_subquery.order_by(tree_root.desc())
 
+        if after_job_id is not None:
+            # sort_order applies only with sort_by; without it the order is
+            # descending.
+            if sort_by and sort_order == 'asc':
+                job_ids_subquery = job_ids_subquery.where(
+                    tree_root > after_job_id)
+            else:
+                job_ids_subquery = job_ids_subquery.where(
+                    tree_root < after_job_id)
+
         job_ids_subquery = job_ids_subquery.offset(
             (page - 1) * limit).limit(limit)
 
@@ -2507,6 +2521,8 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
             status_expr=status_expr,
         )
     else:
