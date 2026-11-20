@@ -239,7 +239,7 @@ external address. Mirrors the ingress-nginx chart's controller fullname.
 {{- $base = printf "%s-%s" .Release.Name $name -}}
 {{- end -}}
 {{- end -}}
-{{- printf "%s-controller" ($base | trunc 63 | trimSuffix "-") | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-%s" ($base | trunc 63 | trimSuffix "-") (default "controller" $ingressNginx.controller.name) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
@@ -347,9 +347,19 @@ sessionAffinity: {{ . }}
 {{- with $s.healthCheckNodePort }}
 healthCheckNodePort: {{ . }}
 {{- end }}
-ipFamilyPolicy: {{ $s.ipFamilyPolicy | default "SingleStack" }}
+{{- /* ingress-nginx defaults these to SingleStack and [IPv4], and omits a field
+       that is set empty, so Kubernetes picks the IP families. */}}
+{{- $ipFamilyPolicy := "SingleStack" }}
+{{- if hasKey $s "ipFamilyPolicy" }}{{- $ipFamilyPolicy = $s.ipFamilyPolicy }}{{- end }}
+{{- with $ipFamilyPolicy }}
+ipFamilyPolicy: {{ . }}
+{{- end }}
+{{- $ipFamilies := list "IPv4" }}
+{{- if hasKey $s "ipFamilies" }}{{- $ipFamilies = $s.ipFamilies }}{{- end }}
+{{- with $ipFamilies }}
 ipFamilies:
-  {{- toYaml ($s.ipFamilies | default (list "IPv4")) | nindent 2 }}
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 selector:
   app.kubernetes.io/name: {{ include "skypilot.traefikName" .root }}
   app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" .root }}

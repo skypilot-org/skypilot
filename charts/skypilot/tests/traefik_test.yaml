@@ -195,6 +195,136 @@ tests:
       - failedTemplate:
           errorPattern: has no Traefik equivalent
 
+  - it: should keep the Service names of a custom ingress-nginx controller name
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.controller.name: edge
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        networking.gke.io/load-balancer-type: Internal
+    asserts:
+      - containsDocument:
+          kind: Service
+          apiVersion: v1
+          name: skypilot-ingress-nginx-edge
+          any: true
+      - containsDocument:
+          kind: Service
+          apiVersion: v1
+          name: skypilot-ingress-nginx-edge-internal
+          any: true
+
+  # ingress-nginx quoted each annotation value and ran it through tpl;
+  # Kubernetes rejects a Service whose annotation values are not strings.
+  - it: should render Service annotations as strings, with templates expanded
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller
+    set:
+      ingress-nginx.controller.service.annotations:
+        example.com/flag: true
+        example.com/timeout: 3600
+        example.com/name: "{{ .Release.Name }}-lb"
+    asserts:
+      - equal:
+          path: metadata.annotations["example.com/flag"]
+          value: "true"
+      - equal:
+          path: metadata.annotations["example.com/timeout"]
+          value: "3600"
+      - equal:
+          path: metadata.annotations["example.com/name"]
+          value: skypilot-lb
+
+  - it: should render internal Service annotations as strings
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller-internal
+    set:
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        service.beta.kubernetes.io/azure-load-balancer-internal: true
+    asserts:
+      - equal:
+          path: metadata.annotations["service.beta.kubernetes.io/azure-load-balancer-internal"]
+          value: "true"
+
+  - it: should leave IP families to Kubernetes when they are set empty
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller
+    set:
+      ingress-nginx.controller.service.ipFamilies: []
+    asserts:
+      - notExists:
+          path: spec.ipFamilies
+      - equal:
+          path: spec.ipFamilyPolicy
+          value: SingleStack
+
+  - it: should leave the internal Service's IP family policy to Kubernetes when it is set empty
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller-internal
+    set:
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        networking.gke.io/load-balancer-type: Internal
+      ingress-nginx.controller.service.internal.ipFamilyPolicy: ""
+    asserts:
+      - notExists:
+          path: spec.ipFamilyPolicy
+      - equal:
+          path: spec.ipFamilies
+          value: [IPv4]
+
+  - it: should refuse an API server Ingress class that Traefik does not serve
+    template: templates/traefik.yaml
+    set:
+      ingress.ingressClassName: custom-ingress-class
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress.ingressClassName is "custom-ingress-class", but the bundled Traefik controller serves the IngressClass "nginx"
+
+  - it: should refuse a Grafana Ingress class that Traefik does not serve
+    template: templates/traefik.yaml
+    set:
+      grafana.enabled: true
+      grafana.ingress.ingressClassName: custom-ingress-class
+    asserts:
+      - failedTemplate:
+          errorPattern: grafana.ingress.ingressClassName is "custom-ingress-class"
+
+  - it: should ignore the Ingress class when the API server Ingress is disabled
+    template: templates/traefik.yaml
+    set:
+      ingress.enabled: false
+      ingress.ingressClassName: custom-ingress-class
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: should serve a custom Ingress class that Traefik is set to
+    set:
+      ingress.ingressClassName: sky-private
+      traefik.providers.kubernetesIngressNGINX.ingressClass: sky-private
+    asserts:
+      - equal:
+          path: metadata.name
+          value: sky-private
+        template: templates/traefik.yaml
+        documentSelector:
+          path: kind
+          value: IngressClass
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --providers.kubernetesingressnginx.ingressClass=sky-private
+        template: charts/traefik/templates/deployment.yaml
+
   - it: should refuse ingress-nginx TCP and UDP port mappings
     template: templates/traefik.yaml
     set:

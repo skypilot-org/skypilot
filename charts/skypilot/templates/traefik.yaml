@@ -24,12 +24,25 @@
 {{- if or $ingressNginx.tcp $ingressNginx.udp }}
 {{- fail "\ningress-nginx.tcp and ingress-nginx.udp port mappings are not supported with the bundled Traefik controller. To keep them, use ingress-nginx instead: --set traefik.enabled=false --set ingress-nginx.enabled=true" }}
 {{- end }}
+{{- $traefikClass := $nginxProvider.ingressClass | default "nginx" }}
+{{- $ingressClasses := dict }}
+{{- if .Values.ingress.enabled }}
+{{- $_ := set $ingressClasses "ingress.ingressClassName" .Values.ingress.ingressClassName }}
+{{- end }}
+{{- if and (not .Values.ingress.unified) .Values.grafana.enabled .Values.grafana.ingress.enableAuthedIngress }}
+{{- $_ := set $ingressClasses "grafana.ingress.ingressClassName" .Values.grafana.ingress.ingressClassName }}
+{{- end }}
+{{- range $key, $class := $ingressClasses }}
+{{- if ne (toString $class) $traefikClass }}
+{{- fail (printf "\n%s is %q, but the bundled Traefik controller serves the IngressClass %q, so that Ingress would not be served. If another ingress controller serves %q, add --set traefik.enabled=false. To have Traefik serve it, add --set traefik.providers.kubernetesIngressNGINX.ingressClass=%s" $key (toString $class) $traefikClass (toString $class) (toString $class)) }}
+{{- end }}
+{{- end }}
 {{- $svc := $ingressNginx.controller.service | default dict }}
 # Traefik's ingress-nginx provider serves Ingresses of this class.
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
 metadata:
-  name: {{ $nginxProvider.ingressClass | default "nginx" }}
+  name: {{ $traefikClass }}
   labels:
     app.kubernetes.io/name: {{ include "skypilot.traefikName" . }}
     app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" . }}
@@ -50,7 +63,9 @@ metadata:
     {{- include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc) | nindent 4 }}
   {{- with $svc.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- range $key, $value := . }}
+    {{ $key }}: {{ tpl ($value | toString) $ | quote }}
+    {{- end }}
   {{- end }}
 spec:
   {{- include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $svc "internal" false) | nindent 2 }}
@@ -67,7 +82,9 @@ metadata:
   labels:
     {{- include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc) | nindent 4 }}
   annotations:
-    {{- toYaml $internal.annotations | nindent 4 }}
+    {{- range $key, $value := $internal.annotations }}
+    {{ $key }}: {{ tpl ($value | toString) $ | quote }}
+    {{- end }}
 spec:
   {{- include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $internal "internal" true) | nindent 2 }}
 {{- end }}
