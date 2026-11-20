@@ -31,6 +31,7 @@ import tempfile
 import textwrap
 import time
 from typing import Dict, List, Optional
+import uuid
 
 import jinja2
 import pytest
@@ -2073,6 +2074,80 @@ def test_managed_jobs_remote_identity_none(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60)
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # Restarts the API server.
+def test_managed_jobs_admin_local_credentials_default_role_user():
+    """An admin's managed job may set remote_identity: LOCAL_CREDENTIALS
+    while rbac.default_role is user.
+
+    The controller's own API server seeds the job's user with the default
+    role, so it must not re-check the admin-only setting there; that was done
+    at submit. Otherwise the job retries forever and never starts. The new
+    user is seeded as admin on this server before the restart.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    user_name = f'lc-admin-{uuid.uuid4().hex[:8]}'
+    user_hash = uuid.uuid4().hex[:common_utils.USER_HASH_LENGTH]
+    as_user = (f'export {constants.USER_ID_ENV_VAR}="{user_hash}"; '
+               f'export {constants.USER_ENV_VAR}="{user_name}"; ')
+    low_resource_config = smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV[
+        skypilot_config.ENV_VAR_GLOBAL_CONFIG]
+    server_config = yaml_utils.read_yaml(low_resource_config)
+    server_config['rbac'] = {'default_role': 'user'}
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     suffix='.yaml',
+                                     delete=False,
+                                     mode='w') as f:
+        server_config_path = f.name
+    yaml_utils.dump_yaml(server_config_path, server_config)
+    # Only the controller's decision is under test, not what gets uploaded.
+    with tempfile.NamedTemporaryFile(prefix='task_',
+                                     suffix='.yaml',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(
+            textwrap.dedent("""\
+                config:
+                  kubernetes:
+                    remote_identity: LOCAL_CREDENTIALS
+                run: echo ok
+                """))
+        task_yaml = f.name
+    wait_succeeded = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=600))
+    test = smoke_tests_utils.Test(
+        'managed_jobs_admin_local_credentials_default_role_user',
+        [
+            # Seeded with the default role, which is admin until the restart.
+            smoke_tests_utils.restart_api_server_with_config(
+                low_resource_config) + f' && {as_user}sky status',
+            smoke_tests_utils.restart_api_server_with_config(
+                server_config_path),
+            f'{as_user}sky jobs launch -n {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            # On failure, show why: a refusal is only in the controller log.
+            # A subshell, since the wait exits on its timeout.
+            f'{as_user}( {wait_succeeded} ) || '
+            f'{{ sky jobs logs --controller -n {name} --no-follow | tail -40; '
+            'false; }',
+        ],
+        (f'{as_user}sky jobs cancel -y -n {name}; '
+         f'{smoke_tests_utils.RESTORE_API_SERVER_CONFIG}'),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60)
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        os.unlink(server_config_path)
+        os.unlink(task_yaml)
 
 
 # Only run this test on Kubernetes since this test relies on

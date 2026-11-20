@@ -15,7 +15,8 @@ Run only Kubernetes-specific tests::
 
 Run a single test::
 
-    pytest tests/smoke_tests/test_lifecycle_hooks.py::test_hook_lifecycle_combined
+    pytest tests/smoke_tests/test_lifecycle_hooks.py \\
+        -k test_hook_lifecycle_combined
 
 Test layout — these tests are intentionally aggregated to amortize
 launch/teardown cycles. Each combined test calls out the sub-features
@@ -31,6 +32,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky.skylet import constants
 from sky.utils import yaml_utils
 
 # Clouds that don't support autostop/idle-timer semantics — mirrors the
@@ -44,6 +46,19 @@ _NO_AUTOSTOP_MARKS = [
     pytest.mark.no_shadeform,
     pytest.mark.no_seeweb,
 ]
+
+# Prints the lifecycle hooks stored in the skylet config DB on the cluster.
+# Uses Python's built-in sqlite3 module from the SkyPilot runtime env rather
+# than the `sqlite3` CLI, which is not installed on every cloud's default
+# image (e.g. Nebius). Contains no single quotes, so callers can wrap it in
+# single quotes for `sky exec`.
+_INSPECT_STORED_HOOKS_CMD = (
+    f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/python -c '
+    '"import os, sqlite3; '
+    'db = sqlite3.connect(os.path.expanduser(\\"~/.sky/skylet_config.db\\")); '
+    'rows = db.execute(\\"SELECT value FROM config WHERE key=?\\", '
+    '(\\"lifecycle_hooks\\",)); '
+    '[print(row[0]) for row in rows]"')
 
 
 def _no_autostop(fn):
@@ -150,8 +165,7 @@ def test_hook_lifecycle_combined(generic_cloud: str):
             },
         ],
     })
-    inspect = ('sqlite3 ~/.sky/skylet_config.db '
-               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    inspect = _INSPECT_STORED_HOOKS_CMD
     test = smoke_tests_utils.Test(
         'test_hook_lifecycle_combined',
         [
@@ -342,8 +356,7 @@ def test_hook_clear_via_relaunch(generic_cloud: str):
         }],
     })
     yaml_without_hook = _write_yaml({})  # empty resources, no hooks
-    inspect = ('sqlite3 ~/.sky/skylet_config.db '
-               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    inspect = _INSPECT_STORED_HOOKS_CMD
     test = smoke_tests_utils.Test(
         'test_hook_clear_via_relaunch',
         [
@@ -401,8 +414,7 @@ def test_hook_sky_exec_does_not_clear_stored_hooks(generic_cloud: str):
             'timeout': 30,
         }],
     })
-    inspect = ('sqlite3 ~/.sky/skylet_config.db '
-               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    inspect = _INSPECT_STORED_HOOKS_CMD
     test = smoke_tests_utils.Test(
         'test_hook_sky_exec_does_not_clear_stored_hooks',
         [
@@ -466,8 +478,7 @@ def test_hook_relaunch_propagates_after_stop(generic_cloud: str):
             'timeout': 50,
         }],
     })
-    inspect = ('sqlite3 ~/.sky/skylet_config.db '
-               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    inspect = _INSPECT_STORED_HOOKS_CMD
     test = smoke_tests_utils.Test(
         'test_hook_relaunch_propagates_after_stop',
         [
@@ -550,7 +561,8 @@ def test_hook_relaunch_preserves_autostop(generic_cloud: str):
             # (2) Verify the cluster's autostop is set + autodown enabled.
             # `sky status` formats AUTOSTOP as "10 min(down)" when both
             # idle_minutes and down are set.
-            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)"',
+            f'out=$(sky status {name}) && '
+            'echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)"',
             # (3) Re-launch with hooks-only change — autostop block omitted.
             # Don't use VALIDATE_LAUNCH_OUTPUT here: with `--fast` on a
             # re-launch the setup/run markers it expects are suppressed.
@@ -558,14 +570,14 @@ def test_hook_relaunch_preserves_autostop(generic_cloud: str):
             f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast {updated_yaml}',
             # (4) Critical assertion: autostop is STILL "10 min(down)".
             # Pre-fix this would have been "-" (unset).
-            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)" || '
+            f'out=$(sky status {name}) && '
+            'echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)" || '
             f'(echo "REGRESSION: autostop was wiped by hooks-only re-launch. '
             f'sky status output:" && echo "$out" && false)',
             # (5) Sanity: the new hook actually replaced the old one in the
             # stored hooks list (so we're sure the re-launch path actually
             # ran, not just no-oped).
-            f'inspect=\'sqlite3 ~/.sky/skylet_config.db '
-            f'"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"\' && '
+            f'inspect={chr(39)}{_INSPECT_STORED_HOOKS_CMD}{chr(39)} && '
             f'out=$(sky exec {name} "$inspect") && '
             f'echo "$out" | grep updated-hook && '
             f'! echo "$out" | grep initial-hook',
@@ -653,7 +665,9 @@ def test_hook_grace_capped_at_autoscaler_limit():
             f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
             f'val=$({_kc(name)} get "$pod" '
-            f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
+            f'-o jsonpath={chr(39)}'
+            '{.spec.terminationGracePeriodSeconds}'
+            f'{chr(39)}) && '
             f'[ "$val" = "600" ]',
         ],
         f'sky down -y {name}',
@@ -703,7 +717,9 @@ def test_hook_k8s_relaunch_warns_when_preemption_grace_increases():
             f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
             f'val=$({_kc(name)} get "$pod" '
-            f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
+            f'-o jsonpath={chr(39)}'
+            '{.spec.terminationGracePeriodSeconds}'
+            f'{chr(39)}) && '
             f'[ "$val" = "60" ]',
             # (3) Re-launch with larger timeout. Warning expected on
             # stderr — message comes from
@@ -712,7 +728,8 @@ def test_hook_k8s_relaunch_warns_when_preemption_grace_increases():
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
             f'--infra kubernetes --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {large_yaml} 2>&1) && '
-            f'echo "$s" | grep -E "preemption-hook grace requirement|terminationGracePeriodSeconds.*fixed at pod creation" && '
+            'echo "$s" | grep -E "preemption-hook grace requirement|'
+            'terminationGracePeriodSeconds.*fixed at pod creation" && '
             f'echo "$s" | grep -i "sky down"',
             # (4) Confirm the existing pod's grace is STILL 60 — re-launch
             # cannot mutate the pod spec; warning is the only thing the
@@ -720,7 +737,9 @@ def test_hook_k8s_relaunch_warns_when_preemption_grace_increases():
             f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
             f'val=$({_kc(name)} get "$pod" '
-            f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
+            f'-o jsonpath={chr(39)}'
+            '{.spec.terminationGracePeriodSeconds}'
+            f'{chr(39)}) && '
             f'[ "$val" = "60" ]',
         ],
         f'sky down -y {name}',
@@ -766,8 +785,6 @@ def test_hook_k8s_sky_down_does_not_fire_preemption():
             },
         ],
     })
-    pod_query = (f'{_kc(name)} get pods -o name '
-                 f'2>/dev/null | grep {name} | head -n1')
     # Capture per-event log contents into a temp file BEFORE teardown
     # completes (pod will be gone after sky down). We use a job
     # submitted to the cluster that copies the markers off the pod;
@@ -781,8 +798,7 @@ def test_hook_k8s_sky_down_does_not_fire_preemption():
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Confirm the cluster is up and the hooks are stored.
-            f'inspect=\'sqlite3 ~/.sky/skylet_config.db '
-            f'"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"\' && '
+            f'inspect={chr(39)}{_INSPECT_STORED_HOOKS_CMD}{chr(39)} && '
             f'out=$(sky exec {name} "$inspect") && '
             f'echo "$out" | grep down && '
             f'echo "$out" | grep preemption',
@@ -794,7 +810,7 @@ def test_hook_k8s_sky_down_does_not_fire_preemption():
             f'[ "$elapsed" -lt 60 ] || '
             f'(echo "REGRESSION: sky down took ${{elapsed}}s (>=60s). '
             f'The preemption hook likely fired during teardown — the '
-            f"'down' claim or grace_period_seconds=0 didn't block "
+            f'down claim or grace_period_seconds=0 did not block '
             f'kubelet preStop." && false)',
         ],
         # No teardown command — sky down is part of the test itself.
@@ -841,7 +857,9 @@ def test_hook_k8s_prestop_pgrep_is_skylet_only():
             f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
             f'cmd=$({_kc(name)} get "$pod" '
-            f'-o jsonpath={chr(39)}{{.spec.containers[0].lifecycle.preStop.exec.command}}{chr(39)}) && '
+            f'-o jsonpath={chr(39)}'
+            '{.spec.containers[0].lifecycle.preStop.exec.command}'
+            f'{chr(39)}) && '
             f'echo "preStop: $cmd" && '
             f'echo "$cmd" | grep -q "pgrep -of" && '
             f'! echo "$cmd" | grep -q "worker_hook_handler" || '

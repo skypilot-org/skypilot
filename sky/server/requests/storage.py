@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import contextlib
-from typing import (AsyncGenerator, Generator, List, Optional, Set, Tuple,
+from typing import (Any, Dict, Generator, List, Optional, Set, Tuple,
                     TYPE_CHECKING)
 
 if TYPE_CHECKING:
@@ -17,6 +18,10 @@ if TYPE_CHECKING:
 
 class RequestBackend(abc.ABC):
     """Abstract interface for request persistence and lifecycle."""
+
+    # Whether several API server instances read and write these rows. If so,
+    # the retention cleanup deletes expired rows from one instance at a time.
+    shared_across_servers: bool = False
 
     @abc.abstractmethod
     def get_request(self,
@@ -45,13 +50,36 @@ class RequestBackend(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
-    @contextlib.asynccontextmanager
-    async def update_request_async(
-            self, request_id: str) -> AsyncGenerator[Optional[Request], None]:
-        """Async version of update_request."""
-        del request_id
-        yield None
+    async def update_if_status_async(self, request_id: str,
+                                     from_statuses: List[RequestStatus],
+                                     values: Dict[str, Any]) -> bool:
+        """Atomically set columns of a request while it is in from_statuses.
+
+        Backends are expected to override this with a native conditional
+        write, e.g. ``UPDATE ... WHERE request_id = ? AND status IN (...)``.
+        The default is a compatibility fallback for backends that only
+        implement update_request: it reads, decodes, re-encodes and writes
+        back the whole row for every call.
+
+        Args:
+            request_id: The request to update.
+            from_statuses: The statuses the request must be in to be updated.
+            values: Column name to stored value, in the form Request.to_row()
+                writes it.
+
+        Returns:
+            True if the request was updated; False if it does not exist or is
+            in another status.
+        """
+
+        def _update() -> bool:
+            with self.update_request(request_id) as request:
+                if request is None or request.status not in from_statuses:
+                    return False
+                request.apply_stored_values(values)
+                return True
+
+        return await asyncio.to_thread(_update)
 
     @abc.abstractmethod
     async def create_if_not_exists_async(self, request: Request) -> bool:

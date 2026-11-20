@@ -1178,7 +1178,6 @@ LABEL_FORMATTER_REGISTRY = [
 ]
 
 
-@annotations.lru_cache(scope='request')
 def detect_gpu_label_formatter(
     context: Optional[str]
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
@@ -1189,8 +1188,21 @@ def detect_gpu_label_formatter(
         Dict[str, List[Tuple[str, str]]]: A mapping of nodes and the list of
              labels on each node. E.g., {'node1': [('label1', 'value1')]}
     """
+    return _detect_gpu_label_formatter(context,
+                                       _allowed_nodes_cache_key(context))
+
+
+@annotations.lru_cache(scope='request')
+def _detect_gpu_label_formatter(
+    context: Optional[str], allowed_nodes_key: str
+) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
+    del allowed_nodes_key  # Only part of the cache key.
     return detect_gpu_label_formatter_from_nodes(
         get_kubernetes_nodes(context=context))
+
+
+detect_gpu_label_formatter.cache_clear = (  # type: ignore[attr-defined]
+    _detect_gpu_label_formatter.cache_clear)
 
 
 def detect_gpu_label_formatter_from_nodes(
@@ -1707,7 +1719,6 @@ def get_autoscaler(autoscaler_type: kubernetes_enums.KubernetesAutoscalerType):
     return AUTOSCALER_TYPE_TO_AUTOSCALER.get(autoscaler_type, Autoscaler)
 
 
-@annotations.lru_cache(scope='request', maxsize=10)
 def detect_accelerator_resource(
         context: Optional[str]) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has GPU/TPU resource.
@@ -2041,6 +2052,18 @@ def has_untolerated_taint(taints: Optional[List[Dict[str, Any]]]) -> bool:
     return any(not t.get('tolerated', False) for t in taints)
 
 
+def _allowed_nodes_cache_key(context: Optional[str]) -> str:
+    """The allowed_nodes config that get_kubernetes_nodes applies to context.
+
+    Caches of results derived from the filtered nodes include it in their key.
+    """
+    if context is None:
+        context = get_current_kube_config_context_name()
+    return json.dumps(get_allowed_nodes_config(context),
+                      sort_keys=True,
+                      default=str)
+
+
 def _filter_allowed_nodes(nodes: List[V1Node],
                           context: Optional[str] = None) -> List[V1Node]:
     """Filter nodes based on the allowed_nodes config.
@@ -2223,8 +2246,6 @@ def inject_allowed_nodes_affinity(
     return pod_spec
 
 
-@annotations.lru_cache(scope='request', maxsize=10)
-@_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     """Gets the kubernetes nodes in the context.
 
@@ -2234,6 +2255,17 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     is filtered to only include nodes matching the config. All criteria
     (labels, names, IPs) are OR'd.
     """
+    nodes = _get_unfiltered_kubernetes_nodes(context=context)
+    if context is None:
+        context = get_current_kube_config_context_name()
+    # allowed_nodes is part of the request's config, so the cached list is
+    # filtered on every call.
+    return _filter_allowed_nodes(nodes, context)
+
+
+@annotations.lru_cache(scope='request', maxsize=10)
+@_retry_on_error(resource_type='node')
+def _get_unfiltered_kubernetes_nodes(*, context: Optional[str]) -> List[V1Node]:
     if context is None:
         context = get_current_kube_config_context_name()
 
@@ -2242,17 +2274,16 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     response = kubernetes.core_api(context).list_node(
         _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
     try:
-        nodes = [
+        return [
             V1Node.from_dict(item_dict) for item_dict in ijson.items(
                 response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
         ]
     finally:
         response.release_conn()
 
-    # Apply allowed_nodes filtering if configured.
-    nodes = _filter_allowed_nodes(nodes, context)
 
-    return nodes
+get_kubernetes_nodes.cache_clear = (  # type: ignore[attr-defined]
+    _get_unfiltered_kubernetes_nodes.cache_clear)
 
 
 def _iter_terminated_states(cs):
@@ -5508,7 +5539,7 @@ def _get_kubernetes_node_info(
         for label_key in label_keys:
             if lf is not None and label_key in node.metadata.labels:
                 accelerator_name = lf.get_accelerator_from_label_value(
-                    node.metadata.labels.get(label_key))
+                    node.metadata.labels[label_key])
                 break
 
         # Extract IP address from node addresses (prefer external, fallback to internal)

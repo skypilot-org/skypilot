@@ -363,7 +363,7 @@ async def test_get_raises_typed_error_from_500_detail():
             'make_authenticated_request_async',
             side_effect=fake_request), \
          mock.patch(
-            'sky.client.sdk_async.requests_lib.Request.decode',
+            'sky.client.common.requests_lib.Request.decode',
             return_value=decoded) as mock_decode:
         with pytest.raises(exceptions.StorageSpecError, match='bad storage'):
             await sdk_async.get('req-1')
