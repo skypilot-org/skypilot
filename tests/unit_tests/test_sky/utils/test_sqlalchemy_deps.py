@@ -2,6 +2,7 @@
 import ast
 import importlib
 from pathlib import Path
+import re
 import subprocess
 import sys
 import textwrap
@@ -197,3 +198,34 @@ def test_server_start_without_db_stack_shows_only_the_install_hint():
             raise AssertionError('expected the install hint')
     """)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _requirement_names(requirements):
+    return {
+        re.split(r'[<>=!~;\[ ]', req, maxsplit=1)[0].strip().lower()
+        for req in requirements
+    }
+
+
+def test_every_cloud_extra_installs_the_server_dependencies():
+    """A cluster installs ``skypilot[<str(cloud).lower()>, remote]`` (see
+    SKYPILOT_WHEEL_INSTALLATION_COMMANDS), and a jobs/serve controller on it
+    needs the DB stack. A cloud whose name is not an extra, or whose extra
+    lacks the server packages, would launch controllers that cannot start."""
+    # pylint: disable=import-outside-toplevel
+    from sky.setup_files import dependencies
+    from sky.utils import registry
+
+    server = _requirement_names(dependencies.server_dependencies)
+    assert {'sqlalchemy', 'alembic', 'casbin', 'sqlalchemy_adapter'} <= server
+    assert not server & _requirement_names(dependencies.install_requires) - {
+        'passlib', 'pyjwt', 'aiohttp', 'anyio'
+    }, 'the DB stack must stay out of the base install'
+    for name, cloud in registry.CLOUD_REGISTRY.items():
+        extra = str(cloud).lower()
+        assert extra in dependencies.extras_require, (
+            f'{name}: clusters install skypilot[{extra}], which is not an '
+            'extra')
+        missing = server - _requirement_names(
+            dependencies.extras_require[extra])
+        assert not missing, f'skypilot[{extra}] lacks {missing}'
