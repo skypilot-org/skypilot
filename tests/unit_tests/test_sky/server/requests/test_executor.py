@@ -3331,6 +3331,22 @@ def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
     assert not counted_user_upsert
 
 
+def test_authenticated_request_user_carries_user_type(counted_user_upsert,
+                                                      monkeypatch):
+    """Admin policies read user_type to tell authenticated users apart."""
+    monkeypatch.setattr(
+        'sky.global_user_state.get_user',
+        mock.Mock(return_value=models.User(
+            id='user-1', name='alice', user_type=models.UserType.SSO.value)))
+    reload = mock.Mock()
+    monkeypatch.setattr(executor.server_common, 'reload_for_new_request',
+                        reload)
+    _run_override_as_user(authenticated=True)
+    assert reload.call_args.kwargs['user'].user_type == (
+        models.UserType.SSO.value)
+    assert not counted_user_upsert
+
+
 def test_stamp_sets_authenticated_from_auth_user():
     """A client cannot claim to be authenticated."""
     body = payloads.RequestBody(env_vars={
