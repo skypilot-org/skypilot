@@ -4394,15 +4394,17 @@ class CloudFilter(enum.Enum):
     LOCAL = 'local'
 
 
-def _get_glob_clusters(
-        clusters: List[str],
-        silent: bool = False,
-        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+def _get_glob_clusters(clusters: List[str],
+                       silent: bool = False,
+                       workspaces_filter: Optional[Set[str]] = None,
+                       exclude_managed_clusters: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(
-            cluster, workspaces_filter=workspaces_filter)
+            cluster,
+            workspaces_filter=workspaces_filter,
+            exclude_managed_clusters=exclude_managed_clusters)
         if len(glob_cluster) == 0 and not silent:
             logger.info(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
@@ -4648,6 +4650,8 @@ def get_clusters(
             logger.debug('Suppressing include_credentials for viewer caller')
             include_credentials = False
 
+    exclude_managed_clusters = not (_include_is_managed or
+                                    env_options.Options.SHOW_DEBUG_INFO.get())
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -4660,14 +4664,14 @@ def get_clusters(
                 non_glob_cluster_names.append(cluster_name)
         cluster_names = non_glob_cluster_names
         if glob_cluster_names:
+            # Otherwise a pattern also matching a managed cluster would
+            # report it as not found below.
             cluster_names += _get_glob_clusters(
                 glob_cluster_names,
                 silent=True,
-                workspaces_filter=accessible_workspaces)
+                workspaces_filter=accessible_workspaces,
+                exclude_managed_clusters=exclude_managed_clusters)
 
-    exclude_managed_clusters = False
-    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
-        exclude_managed_clusters = True
     user_hashes_filter = None
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
