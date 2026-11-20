@@ -856,13 +856,22 @@ def _slurm_capacity_id(cluster: str) -> str:
     return f'slurm/{cluster}'
 
 
+# No physical node carries more accelerators than this. Serverless
+# virtual-kubelet nodes advertise a placeholder allocatable far above it.
+_MAX_PHYSICAL_ACCELERATORS_PER_NODE = 256
+
+
 def _gpu_capacity_from_nodes(
         nodes_info: 'models.KubernetesNodesInfo') -> Dict[str, int]:
-    """Reduce a context's node inventory to GPU counts per accelerator type."""
+    """Reduce a context's node inventory to GPU counts per accelerator type.
+
+    Virtual nodes (placeholder allocatable above any physical host) are
+    skipped.
+    """
     counts: Dict[str, int] = {}
     for node_info in nodes_info.node_info_dict.values():
         count = int(node_info.total.get('accelerator_count', 0) or 0)
-        if count <= 0:
+        if count <= 0 or count > _MAX_PHYSICAL_ACCELERATORS_PER_NODE:
             continue
         acc_type = str(node_info.accelerator_type or 'gpu')
         counts[acc_type] = counts.get(acc_type, 0) + count
