@@ -8,7 +8,8 @@ import subprocess
 import sys
 import tempfile
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 
@@ -30,6 +31,7 @@ from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator
 from sky.skylet import constants
+from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
@@ -329,10 +331,90 @@ class Kubernetes(clouds.Cloud):
             override_configs=resources.cluster_config_overrides)
         return _match_remote_identity(merged, context) == none
 
+    @staticmethod
+    def uploads_kubeconfig(excluded_clouds: Iterable[clouds.Cloud]) -> bool:
+        """Whether the kubeconfig is uploaded with these clouds excluded.
+
+        Kubernetes and SSH share it. Same membership test as
+        sky_check.get_cloud_credential_file_mounts.
+        """
+        excluded = list(excluded_clouds)
+        return not all(
+            clouds.cloud_in_iterable(c, excluded)
+            for c in (Kubernetes(), clouds.SSH()))
+
     @classmethod
-    def check_request_keeps_server_none(cls) -> None:
+    def _refuse_loosening_kubeconfig_upload(
+            cls, cluster_config_overrides: Optional[Dict[str, Any]]) -> None:
+        """Raises if a non-admin's config would upload the API server's
+        kubeconfig where the server's own config would not.
+
+        Submit-time counterpart of the launch-time check in
+        backend_utils.write_cluster_config, which cannot tell the layers apart
+        on a controller.
+        """
+        lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+        no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
+
+        def server_and_requested(
+                cloud: str, context: Optional[str],
+                overrides: Optional[Dict[str, Any]]) -> Tuple[Any, Any]:
+            default = schemas.get_default_remote_identity(cloud)
+            server = skypilot_config.get_server_workspace_region_config(
+                cloud=cloud,
+                region=context,
+                keys=('remote_identity',),
+                default_value=default)
+            requested = skypilot_config.get_effective_workspace_region_config(
+                cloud=cloud,
+                region=context,
+                keys=('remote_identity',),
+                default_value=default,
+                override_configs=overrides)
+            return (_match_remote_identity(server, context),
+                    _match_remote_identity(requested, context))
+
+        # Worded as the launch-time check in backend_utils words it.
+        refusal = None
+        # Clusters on another cloud get the kubeconfig unless NO_UPLOAD
+        # excludes it. As at launch, a task's own overrides do not count here.
+        both = {'kubernetes': cls(), 'ssh': clouds.SSH()}
+        values = {
+            cloud: server_and_requested(cloud, None, None) for cloud in both
+        }
+        if (not cls.uploads_kubeconfig(obj for cloud, obj in both.items()
+                                       if values[cloud][0] == no_upload) and
+                cls.uploads_kubeconfig(obj for cloud, obj in both.items()
+                                       if values[cloud][1] == no_upload)):
+            refusal = ('`remote_identity: NO_UPLOAD` is set for Kubernetes on '
+                       'the API server, so its kubeconfig is not uploaded to '
+                       'clusters; your config cannot override it.')
+        for cloud_cls in (cls, clouds.SSH):
+            if refusal is not None:
+                break
+            cloud = str(cloud_cls()).lower()
+            try:
+                contexts = cloud_cls.existing_allowed_contexts(silent=True)
+            except Exception:  # pylint: disable=broad-except
+                continue  # e.g. no kubernetes package: nothing to upload.
+            for context in contexts:
+                server, requested = server_and_requested(
+                    cloud, context, cluster_config_overrides)
+                if requested == lc and server != lc:
+                    refusal = (
+                        '`remote_identity: LOCAL_CREDENTIALS` would upload the '
+                        'API server\'s kubeconfig to your clusters on '
+                        f'{cloud} ({context}); only an admin can set it, in '
+                        'the API server\'s config.')
+                    break
+        if refusal is not None and not permission.caller_is_admin():
+            raise exceptions.InvalidCloudConfigs(refusal)
+
+    @classmethod
+    def check_request_keeps_server_identity(cls) -> None:
         """Raises if the request's own config loosens a NONE the server's
-        config set for an allowed context.
+        config set for an allowed context, or uploads the server's kubeconfig
+        where the server's config does not.
 
         For managed jobs and services, checked when they are submitted: the
         request's config travels with them to their controller, which reads
@@ -340,6 +422,7 @@ class Kubernetes(clouds.Cloud):
         there. Whatever the task's resources are, since that config applies to
         every cluster the controller launches.
         """
+        cls._refuse_loosening_kubeconfig_upload(None)
         try:
             contexts = cls.existing_allowed_contexts()
         except Exception:  # pylint: disable=broad-except
@@ -359,15 +442,20 @@ class Kubernetes(clouds.Cloud):
                 cls._refuse_undoing_none(context, requested, {})
 
     @classmethod
-    def check_task_keeps_server_none(cls, task: 'task_lib.Task') -> None:
+    def check_task_keeps_server_identity(cls, task: 'task_lib.Task') -> None:
         """Raises if every resource alternative of `task` would loosen a NONE
-        the server's config set.
+        the server's config set, or if any would upload the server's
+        kubeconfig where the server's config does not.
 
         For managed jobs and services, checked when they are submitted: their
         cluster launch would be refused anyway, and the controller would retry
         it forever instead of failing. An alternative that may land elsewhere
-        is left to the launch, which fails over to it.
+        is left to the launch, which fails over to it. The kubeconfig check
+        is not: on a controller it is no longer refused at launch.
         """
+        for resources in task.resources:
+            cls._refuse_loosening_kubeconfig_upload(
+                resources.cluster_config_overrides)
         errors = []
         for resources in task.resources:
             try:
@@ -1862,6 +1950,18 @@ class Kubernetes(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Kubernetes."""
+        return cls.check_contexts_compute_credentials(None)
+
+    @classmethod
+    def check_contexts_compute_credentials(
+        cls, contexts: Optional[List[str]]
+    ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        """Checks compute access to `contexts`, or to every allowed context.
+
+        Returns whether any checked context is usable, and a dict mapping each
+        checked context to its status, or a string reason when the check
+        cannot run. An empty `contexts` checks no context.
+        """
         # Check for port forward dependencies
         logger.debug(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
@@ -1871,26 +1971,27 @@ class Kubernetes(clouds.Cloud):
                 [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
             return (False, formatted)
 
-        # Test using python API
-        try:
-            existing_allowed_contexts = cls.existing_allowed_contexts()
-        except ImportError as e:
-            return (False,
-                    f'{common_utils.format_exception(e, use_bracket=True)}')
-        if not existing_allowed_contexts:
-            if skypilot_config.loaded_config_path() is None:
-                check_skypilot_config_msg = ''
-            else:
-                check_skypilot_config_msg = (
-                    ' and check "allowed_contexts" in your '
-                    f'{skypilot_config.loaded_config_path()} file.')
-            return (False, 'No available context found in kubeconfig. '
-                    'Check if you have a valid kubeconfig file' +
-                    check_skypilot_config_msg)
+        if contexts is None:
+            # Test using python API
+            try:
+                contexts = cls.existing_allowed_contexts()
+            except ImportError as e:
+                return (False,
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+            if not contexts:
+                if skypilot_config.loaded_config_path() is None:
+                    check_skypilot_config_msg = ''
+                else:
+                    check_skypilot_config_msg = (
+                        ' and check "allowed_contexts" in your '
+                        f'{skypilot_config.loaded_config_path()} file.')
+                return (False, 'No available context found in kubeconfig. '
+                        'Check if you have a valid kubeconfig file' +
+                        check_skypilot_config_msg)
 
         ctx2text = {}
         success = False
-        for context in existing_allowed_contexts:
+        for context in contexts:
             suc, text = cls._check_single_context(context)
             success = success or suc
             ctx2text[context] = text

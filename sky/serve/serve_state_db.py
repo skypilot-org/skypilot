@@ -76,6 +76,9 @@ services_table = sqlalchemy.Table(
     sqlalchemy.Column('file_mounts_blob_id',
                       sqlalchemy.Text,
                       server_default=None),
+    # Workspace id the service/pool runs in. NULL for rows created before the
+    # column existed.
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
 )
 
 replicas_table = sqlalchemy.Table(

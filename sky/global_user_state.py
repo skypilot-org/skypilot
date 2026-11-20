@@ -398,6 +398,25 @@ def add_or_update_user(
             if existing_user is not None:
                 return (False, user) if return_user else False
 
+        # Read first: the upsert below locks the row until COMMIT even when
+        # nothing changes, which serializes concurrent requests of one user.
+        row = session.execute(
+            sqlalchemy.select(user_table).where(
+                user_table.c.id == user.id)).fetchone()
+        if (row is not None and row.name == user.name and
+            (not user.password or row.password == user.password) and
+            (not user.user_type or row.type == user.user_type)):
+            if return_user:
+                return False, models.User(
+                    id=row.id,
+                    name=row.name,
+                    password=row.password,
+                    created_at=row.created_at,
+                    user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
+                )
+            return False
+
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
             # vs existing
@@ -998,6 +1017,13 @@ def add_cluster_event(cluster_name: str,
         return
     if transitioned_at is None:
         transitioned_at = int(time.time())
+    if nop_if_duplicate:
+        last_event = get_last_cluster_event(cluster_hash, event_type=event_type)
+        if duplicate_regex is not None and last_event is not None:
+            if re.search(duplicate_regex, last_event):
+                return
+        elif last_event == reason:
+            return
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
@@ -1008,17 +1034,8 @@ def add_cluster_event(cluster_name: str,
             session.rollback()
             raise ValueError('Unsupported database dialect')
 
-        cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
-        last_status = cluster_row.first(
-        ).status if cluster_row and cluster_row.first() is not None else None
-        if nop_if_duplicate:
-            last_event = get_last_cluster_event(cluster_hash,
-                                                event_type=event_type)
-            if duplicate_regex is not None and last_event is not None:
-                if re.search(duplicate_regex, last_event):
-                    return
-            elif last_event == reason:
-                return
+        last_status = session.query(
+            cluster_table.c.status).filter_by(name=cluster_name).scalar()
         try:
             request_id = common_utils.get_current_request_id()
             session.execute(
@@ -1621,13 +1638,18 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
     provision_log_path = get_cluster_provision_log_path(cluster_name)
 
     with orm.Session(engine) as session:
-        # usage_intervals is not None and not empty
-        if usage_intervals:
+        # Close the running interval. A closed one ended when the cluster
+        # stopped; a stopped cluster does not accrue usage until it starts.
+        if usage_intervals and usage_intervals[-1][1] is None:
             assert cluster_hash is not None, cluster_name
             start_time = usage_intervals.pop()[0]
             end_time = int(time.time())
             usage_intervals.append((start_time, end_time))
             _set_cluster_usage_intervals(cluster_hash, usage_intervals)
+        elif terminate and cluster_hash is not None:
+            # Keeps a stopped cluster that was just torn down in history views
+            # filtered by recent activity.
+            _set_cluster_last_activity_time(cluster_hash, int(time.time()))
 
         if provision_log_path:
             assert cluster_hash is not None, cluster_name
@@ -2093,6 +2115,17 @@ def _set_cluster_usage_intervals(
     assert count <= 1, count
     if count == 0:
         raise ValueError(f'Cluster hash {cluster_hash} not found.')
+
+
+def _set_cluster_last_activity_time(cluster_hash: str,
+                                    last_activity_time: int) -> None:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.query(cluster_history_table).filter_by(
+            cluster_hash=cluster_hash).update({
+                cluster_history_table.c.last_activity_time: last_activity_time,
+            })
+        session.commit()
 
 
 @metrics_lib.time_me
@@ -2863,11 +2896,18 @@ def iter_clusters_from_history(
 
 
 @metrics_lib.time_me
-def get_cluster_names_start_with(starts_with: str) -> List[str]:
+def get_cluster_names_start_with(
+        starts_with: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+    """``workspaces_filter``: None means every workspace."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(cluster_table.c.name).filter(
-            cluster_table.c.name.like(f'{starts_with}%')).all()
+        query = session.query(cluster_table.c.name).filter(
+            cluster_table.c.name.like(f'{starts_with}%'))
+        if workspaces_filter is not None:
+            query = query.filter(
+                cluster_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
     return [row[0] for row in rows]
 
 
@@ -3097,6 +3137,8 @@ def add_or_update_storage(storage_name: str,
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
     last_use = common_utils.get_current_command()
+    user_hash = common_utils.get_current_user().id
+    active_workspace = skypilot_config.get_active_workspace()
 
     def status_check(status):
         return status in status_lib.StorageStatus
@@ -3117,14 +3159,22 @@ def add_or_update_storage(storage_name: str,
             handle=handle,
             last_use=last_use,
             launched_at=storage_launched_at,
-            status=storage_status.value)
+            status=storage_status.value,
+            user_hash=user_hash,
+            workspace=active_workspace)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[storage_table.c.name],
             set_={
                 storage_table.c.handle: handle,
                 storage_table.c.last_use: last_use,
                 storage_table.c.launched_at: storage_launched_at,
-                storage_table.c.status: storage_status.value
+                storage_table.c.status: storage_status.value,
+                # A re-registration keeps the original creator and
+                # workspace: only a row that never had a creator takes the
+                # current user, so authorization cannot be reassigned by
+                # writing the same name again.
+                storage_table.c.user_hash: sqlalchemy.func.coalesce(
+                    storage_table.c.user_hash, user_hash),
             })
         session.execute(do_update_stmt)
         session.commit()
@@ -3209,38 +3259,81 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
 
 
 @metrics_lib.time_me
-def get_storage_names_start_with(starts_with: str) -> List[str]:
+def get_storage_names_start_with(
+        starts_with: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+    """Storage names with the given prefix, optionally in some workspaces.
+
+    ``workspaces_filter`` works as in ``get_storage``: None means every
+    workspace, an empty set matches nothing.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(storage_table).filter(
-            storage_table.c.name.like(f'{starts_with}%')).all()
+        query = session.query(storage_table.c.name).filter(
+            storage_table.c.name.like(f'{starts_with}%'))
+        if workspaces_filter is not None:
+            query = query.filter(
+                storage_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
     return [row.name for row in rows]
 
 
-@metrics_lib.time_me
-def get_storage() -> List[Dict[str, Any]]:
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        rows = session.query(storage_table).all()
-    records = []
-    for row in rows:
-        # TODO: use namedtuple instead of dict
-        records.append({
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'last_use': row.last_use,
-            'status': status_lib.StorageStatus[row.status],
-        })
-    return records
+def _storage_record_from_row(row: Any) -> Dict[str, Any]:
+    # TODO: use namedtuple instead of dict
+    return {
+        'name': row.name,
+        'launched_at': row.launched_at,
+        'handle': pickle.loads(row.handle),
+        'last_use': row.last_use,
+        'status': status_lib.StorageStatus[row.status],
+        'user_hash': row.user_hash,
+        'workspace': row.workspace,
+    }
 
 
 @metrics_lib.time_me
-def get_volume_names_start_with(starts_with: str) -> List[str]:
+def get_storage(
+        workspaces_filter: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+    """Gets storage records, optionally limited to some workspaces.
+
+    Args:
+        workspaces_filter: If given, only storage in these workspaces is
+            returned. An empty set therefore returns nothing, while None
+            means the whole table.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(volume_table).filter(
-            volume_table.c.name.like(f'{starts_with}%')).all()
+        query = session.query(storage_table)
+        if workspaces_filter is not None:
+            query = query.filter(
+                storage_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
+    return [_storage_record_from_row(row) for row in rows]
+
+
+@metrics_lib.time_me
+def get_storage_by_name(storage_name: str) -> Optional[Dict[str, Any]]:
+    """The record for one storage, in the same shape as ``get_storage``."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(storage_table).filter_by(name=storage_name).first()
+    if row is None:
+        return None
+    return _storage_record_from_row(row)
+
+
+@metrics_lib.time_me
+def get_volume_names_start_with(
+        starts_with: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = session.query(volume_table.c.name).filter(
+            volume_table.c.name.like(f'{starts_with}%'))
+        if workspaces_filter is not None:
+            query = query.filter(
+                volume_table.c.workspace.in_(workspaces_filter))
+        rows = query.all()
     return [row.name for row in rows]
 
 
@@ -3351,6 +3444,25 @@ def get_volume_names(
         row.name for row in _query_volumes([volume_table.c.name], is_ephemeral,
                                            workspaces_filter, volume_names)
     ]
+
+
+def get_volume_owners(
+    is_ephemeral: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Name, workspace and user_hash of each volume the filters allow.
+
+    Like `get_volume_names`, it skips unpickling the handle, so a corrupt
+    handle cannot fail the caller.
+    """
+    columns = [
+        volume_table.c.name, volume_table.c.workspace, volume_table.c.user_hash
+    ]
+    return [{
+        'name': row.name,
+        'workspace': row.workspace,
+        'user_hash': row.user_hash,
+    } for row in _query_volumes(columns, is_ephemeral, workspaces_filter, None)]
 
 
 @metrics_lib.time_me
@@ -3509,6 +3621,24 @@ def update_volume_status(name: str,
             update_dict[volume_table.c.usedby_clusters] = json.dumps(
                 usedby_clusters)
         session.query(volume_table).filter_by(name=name).update(update_dict)
+        session.commit()
+
+
+@metrics_lib.time_me
+def set_volume_workspace(names: List[str], workspace: str) -> None:
+    """Move volumes to ``workspace``, e.g. along with the resource using them.
+
+    Names with no row, and rows already in ``workspace``, are left alone.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        for offset in range(0, len(names), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            session.query(volume_table).filter(
+                volume_table.c.name.in_(batch),
+                volume_table.c.workspace.is_distinct_from(workspace)).update(
+                    {volume_table.c.workspace: workspace},
+                    synchronize_session=False)
         session.commit()
 
 

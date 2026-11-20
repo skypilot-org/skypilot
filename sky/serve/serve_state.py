@@ -11,6 +11,7 @@ import uuid
 
 import colorama
 
+from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import sqlalchemy_deps
@@ -247,7 +248,8 @@ def add_service(name: str,
                 entrypoint: str,
                 controller_ip: Optional[str] = None,
                 user_hash: Optional[str] = None,
-                file_mounts_blob_id: Optional[str] = None) -> bool:
+                file_mounts_blob_id: Optional[str] = None,
+                workspace: Optional[str] = None) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -279,7 +281,8 @@ def add_service(name: str,
                 hash=str(uuid.uuid4()),
                 entrypoint=entrypoint,
                 user_hash=user_hash,
-                file_mounts_blob_id=file_mounts_blob_id)
+                file_mounts_blob_id=file_mounts_blob_id,
+                workspace=workspace)
             session.execute(insert_stmt)
             session.commit()
 
@@ -460,6 +463,10 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
         'entrypoint': r['entrypoint'],
         'user_hash': r['user_hash'],
         'yaml_content': r.get('yaml_content'),
+        # The protocol version of the controller that produced the record,
+        # so the API server can tell what the controller does with the
+        # names it is handed. Records from older controllers carry none.
+        'serve_version': constants.SERVE_VERSION,
     }
     latest_spec = get_spec(r['name'], current_version)
     if latest_spec is not None:
@@ -515,6 +522,30 @@ def get_services() -> List[Dict[str, Any]]:
         # pylint: disable=protected-access
         records.append(_get_service_from_row(row._mapping))
     return records
+
+
+def get_live_services_in_workspaces(
+        workspaces: Optional[Set[str]]) -> List[Dict[str, Any]]:
+    """Services and pools in the given workspaces (all when None).
+
+    Skips rows being torn down and rows with no recorded workspace.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = session.query(
+            services_table.c.name, services_table.c.pool,
+            services_table.c.workspace, services_table.c.user_hash).filter(
+                services_table.c.workspace.isnot(None),
+                services_table.c.status != ServiceStatus.SHUTTING_DOWN.value)
+        if workspaces is not None:
+            query = query.filter(services_table.c.workspace.in_(workspaces))
+        rows = query.all()
+    return [{
+        'name': row.name,
+        'pool': bool(row.pool),
+        'workspace': row.workspace,
+        'user_hash': row.user_hash,
+    } for row in rows]
 
 
 def get_num_services() -> int:
@@ -604,12 +635,30 @@ def get_glob_service_names(
         else:
             rows = []
             for service_name in service_names:
+                if '*' not in service_name:
+                    # An exact name matches itself only. As a LIKE pattern
+                    # it would read `_` as a one-character wildcard and, on
+                    # SQLite, compare case-insensitively, so one name could
+                    # reach another service.
+                    condition = services_table.c.name == service_name
+                else:
+                    condition = services_table.c.name.like(
+                        _glob_to_like_pattern(service_name), escape='\\')
                 pattern_rows = session.execute(
-                    sqlalchemy.select(services_table.c.name).where(
-                        services_table.c.name.like(
-                            service_name.replace('*', '%')))).fetchall()
+                    sqlalchemy.select(
+                        services_table.c.name).where(condition)).fetchall()
                 rows.extend(pattern_rows)
     return list({row[0] for row in rows})
+
+
+def _glob_to_like_pattern(glob: str) -> str:
+    """Turns a glob, where only `*` is a wildcard, into a LIKE pattern.
+
+    `_` and `%` are literal in the glob but wildcards in LIKE, so they are
+    escaped, as is the escape character itself.
+    """
+    escaped = glob.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return escaped.replace('*', '%')
 
 
 # === Replica functions ===

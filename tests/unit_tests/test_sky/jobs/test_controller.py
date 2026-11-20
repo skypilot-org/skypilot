@@ -1013,6 +1013,30 @@ class TestTaskCleanup:
             teardown.call_count == controller_module._STORAGE_TEARDOWN_ATTEMPTS)
 
     @pytest.mark.asyncio
+    async def test_one_unconstructable_mount_does_not_stop_the_rest(
+            self, cleanup_patches):
+        """Each non-persistent mount is constructed on its own: one that
+        raises does not keep the next from being constructed for teardown."""
+        refused = MagicMock(persistent=False)
+        refused.construct.side_effect = exceptions.StorageWorkspaceError('no')
+        mine = MagicMock(persistent=False)
+        kept = MagicMock(persistent=True)
+        task = self._make_task()
+        task.metadata = {}
+        task.storage_mounts = {'/a': refused, '/b': mine, '/c': kept}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag):
+            await manager._cleanup(job_id=1)
+
+        mine.construct.assert_called_once_with()
+        kept.construct.assert_not_called()
+        (cleanup_patches['backend'].return_value.teardown_ephemeral_storage.
+         assert_called_once_with(task))
+
+    @pytest.mark.asyncio
     async def test_record_gone_pool_job_cancels_the_known_submission(
             self, cleanup_patches):
         """A pool job's worker and pool-side job ID live in the missing
@@ -2046,6 +2070,36 @@ class TestJobGroupReleasesLaunchSlot:
             managed_job_state.ManagedJobStatus.RUNNING)
         assert held_during_launch == []
         assert starting == {2}
+
+
+class TestJobGroupMemberFailsPrecheck:
+    """A member whose recovery hits a terminal precheck ends FAILED_PRECHECKS.
+
+    The group only records a member's exception, so without this the member
+    stays RECOVERING until the group cancels it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_member_marked_failed_prechecks(self):
+        jc = object.__new__(JobController)
+        jc._job_id = 1
+        jc._update_failed_task_state = AsyncMock()
+        error = exceptions.StorageSpecError('bad storage')
+        executor = MagicMock()
+        executor.monitor_task = AsyncMock(
+            side_effect=exceptions.ProvisionPrechecksError(reasons=[error]))
+
+        result = await jc._monitor_job_group_task(task_id=1,
+                                                  task=MagicMock(),
+                                                  cluster_name='b-1',
+                                                  executor=executor,
+                                                  job_group_name='group',
+                                                  all_tasks_handles=[])
+
+        assert result is False
+        jc._update_failed_task_state.assert_awaited_once_with(
+            1, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
+            common_utils.format_exception(error, use_bracket=True))
 
 
 class TestRootJobIdEnvMarker:

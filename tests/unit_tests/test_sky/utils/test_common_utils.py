@@ -358,6 +358,34 @@ class TestGetPrettyEntrypointCmd:
             assert common_utils.get_pretty_entrypoint_cmd() == expected
 
 
+class TestRedactFlagValues:
+    """Per-token redaction of the value of ``--env``-like flags."""
+
+    def test_only_the_named_flags_are_redacted(self):
+        argv = [
+            'sky', 'serve', 'up', '--env', 'A=1', '--env=B=2', '--secret',
+            'S=3', '--name', 'n=4', 'svc.yaml'
+        ]
+        assert common_utils.redact_flag_values(argv, ('--env',)) == [
+            'sky', 'serve', 'up', '--env', 'A=<redacted>', '--env=B=<redacted>',
+            '--secret', 'S=3', '--name', 'n=4', 'svc.yaml'
+        ]
+
+    def test_values_with_spaces_quotes_and_newlines_are_redacted_whole(self):
+        argv = [
+            '--env=HF=a b secret', '--env', "PW=it's-secret", '--env',
+            'ML=line1\nsecret'
+        ]
+        assert common_utils.redact_flag_values(argv, ('--env',)) == [
+            '--env=HF=<redacted>', '--env', 'PW=<redacted>', '--env',
+            'ML=<redacted>'
+        ]
+
+    def test_bare_key_and_trailing_flag_are_kept(self):
+        argv = ['--env', 'HOME', '--env=PATH', '--env']
+        assert common_utils.redact_flag_values(argv, ('--env',)) == argv
+
+
 class TestRedactSecretsValues:
     """Test secret value redaction in command lines."""
 

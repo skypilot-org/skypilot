@@ -146,9 +146,16 @@ def _resolve_context_for_new_volume() -> Optional[str]:
     current_context = kubernetes_utils.get_current_kube_config_context_name()
     allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
     if not allowed_contexts:
-        # Nothing to cross-check against: no kubeconfig, or Kubernetes is not
-        # enabled. Fall back to the previous behavior rather than failing
-        # here -- the K8s API call that follows raises a clearer error.
+        if current_context is not None:
+            # The kubeconfig has contexts, but the workspace allows none of
+            # them: no pod in this workspace could ever mount the volume.
+            raise ValueError(
+                'No Kubernetes context is allowed in the active workspace, '
+                'so the volume has nowhere to be created. Use a workspace '
+                'that allows one, or ask an administrator to allow one.')
+        # Nothing to cross-check against: no kubeconfig. Fall back to the
+        # previous behavior rather than failing here -- the K8s API call
+        # that follows raises a clearer error.
         return current_context
     if current_context in allowed_contexts:
         return current_context

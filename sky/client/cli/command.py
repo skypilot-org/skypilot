@@ -339,6 +339,45 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
+def _is_glob_pattern(name: str) -> bool:
+    return any(c in name for c in '*?[')
+
+
+def _drop_unwritable_volumes(listed: List[responses.VolumeRecord],
+                             names: List[str]) -> List[str]:
+    """Drops the volumes in workspaces the user cannot modify.
+
+    The listing also shows read-only workspaces' volumes, and the server
+    refuses a delete request naming any of them as a whole.
+    """
+    if not names:
+        return names
+    workspaces = sdk.get(sdk.workspaces())
+    # A server too old to report `writable` cannot be filtered against.
+    unwritable = {
+        ws for ws, ws_config in workspaces.items()
+        if ws_config.get('writable') is False
+    }
+    skipped = sorted(
+        volume['name']
+        for volume in listed
+        if volume['name'] in names and (volume.get(
+            'workspace') or constants.SKYPILOT_DEFAULT_WORKSPACE) in unwritable)
+    if skipped:
+        click.echo(f'Skipping {len(skipped)} volume(s) in workspaces you '
+                   f'cannot modify: {", ".join(skipped)}')
+    names = [name for name in names if name not in skipped]
+    hostpath = sorted(
+        volume['name'] for volume in listed if volume['name'] in names and
+        volume.get('type') == volume_utils.VolumeType.HOSTPATH.value)
+    if hostpath and server_common.make_authenticated_request(
+            'GET', '/users/role').json().get('role') != 'admin':
+        click.echo(f'Skipping {len(hostpath)} k8s-hostpath volume(s) only an '
+                   f'admin can delete: {", ".join(hostpath)}')
+        names = [name for name in names if name not in hostpath]
+    return names
+
+
 def _async_call_or_wait(request_id: server_common.RequestId[T],
                         async_call: bool, request_name: str) -> Any:
     short_request_id = request_id[:8]
@@ -952,7 +991,7 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
             # Make API request to fetch recipe from server
             body = payloads.RecipeGetBody(recipe_name=recipe_name)
             response = server_common.make_authenticated_request(
-                'POST', '/recipes/get', json=body.model_dump())
+                'POST', '/recipes/get', json=body.model_dump(), sync_call=True)
             request_id: server_common.RequestId[Optional[Dict[
                 str, Any]]] = server_common.get_request_id(response)
             recipe = sdk.get(request_id)
@@ -5791,6 +5830,12 @@ def volumes_ls(names: List[str],
               required=False,
               help=('Forcibly delete the volume from the volumes table even '
                     'if the deletion API fails.'))
+@click.option('--no-cleanup',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Keep the files of k8s-hostpath volumes registered with '
+                    'cleanup_on_deletion.'))
 @click.option('--yes',
               '-y',
               default=False,
@@ -5803,6 +5848,7 @@ def volumes_delete(
         names: List[str],
         all: bool,  # pylint: disable=redefined-builtin
         purge: bool,
+        no_cleanup: bool,
         yes: bool,
         async_call: bool):
     """Delete volumes.
@@ -5822,6 +5868,9 @@ def volumes_delete(
         \b
         # Forcibly delete a volume.
         sky volumes delete pvc1 -p
+        \b
+        # Delete a k8s-hostpath volume but keep its files on the nodes.
+        sky volumes delete hostpath1 --no-cleanup
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
@@ -5830,26 +5879,51 @@ def volumes_delete(
         if not all_volumes:
             click.echo('No volumes to delete.')
             return
-        names = [volume['name'] for volume in all_volumes]
+        names = _drop_unwritable_volumes(
+            all_volumes, [volume['name'] for volume in all_volumes])
     else:
         existing_volume_names = [volume['name'] for volume in all_volumes]
-        names = _get_glob_matches(existing_volume_names,
-                                  names,
-                                  resource_type='Volume')
+        # A name given exactly is left to the server, which says why it
+        # cannot be deleted; only pattern matches are narrowed.
+        exact_names = [n for n in names if not _is_glob_pattern(n)]
+        patterns = [n for n in names if _is_glob_pattern(n)]
+        names = list(
+            set(
+                _get_glob_matches(
+                    existing_volume_names, exact_names, resource_type='Volume')
+                + _drop_unwritable_volumes(
+                    all_volumes,
+                    _get_glob_matches(existing_volume_names,
+                                      patterns,
+                                      resource_type='Volume'))))
     if names:
         if not yes:
             volume_names = ', '.join(names)
             volume_str = 'volumes' if len(names) > 1 else 'volume'
-            click.confirm(
-                f'Deleting {len(names)} {volume_str}: '
-                f'{volume_names}. Proceed?',
-                default=True,
-                abort=True,
-                show_default=True)
+            # A k8s-hostpath volume with cleanup wipes its host path on every
+            # node: say where, and default to no.
+            wiped = [] if no_cleanup else [
+                f'  {volume["name"]}: {volume["config"].get("host_path")} on '
+                f'every node of {volume.get("region")}'
+                for volume in all_volumes
+                if volume['name'] in names and
+                volume.get('type') == volume_utils.VolumeType.HOSTPATH.value and
+                volume['config'].get('cleanup_on_deletion')
+            ]
+            prompt = f'Deleting {len(names)} {volume_str}: {volume_names}.'
+            if wiped:
+                prompt += ('\nThis also deletes everything under:\n' +
+                           '\n'.join(wiped) +
+                           '\n(use --no-cleanup to keep the files)')
+            click.confirm(f'{prompt}\nProceed?',
+                          default=not wiped,
+                          abort=True,
+                          show_default=True)
 
         try:
-            _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
-                                async_call, 'sky.volumes.delete')
+            _async_call_or_wait(
+                volumes_sdk.delete(names, purge=purge, no_cleanup=no_cleanup),
+                async_call, 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')

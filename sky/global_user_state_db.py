@@ -116,6 +116,13 @@ storage_table = sqlalchemy.Table(
     sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
+    # Who created the storage and in which workspace, recorded the same way
+    # as for volumes. Rows written before these columns existed have no
+    # creator and sit in the default workspace.
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('workspace',
+                      sqlalchemy.Text,
+                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
 )
 
 volume_table = sqlalchemy.Table(

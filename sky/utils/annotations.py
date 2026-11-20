@@ -135,7 +135,10 @@ def lru_cache(scope: Literal['global', 'request'],
 
     Args:
         scope: Whether the cache is global or request-specific, i.e. needs to be
-            reloaded for a new request.
+            reloaded for a new request. A request-scoped cache is still shared
+            by the requests that run concurrently in one process, so every
+            input that can differ between requests (e.g. the request's config
+            or user) must be part of the key.
         keep_if: Request scope only. A sync handler's refresh
             (``clear_request_level_cache(sync_refresh=True)``) keeps the cache
             while this returns True; the executor's per-request clear does not
@@ -163,17 +166,19 @@ def ttl_cache(scope: Literal['global', 'request'], *ttl_cache_args,
     """TTLCache decorator for functions.
 
     This decorator allows us to track which functions need to be reloaded for a
-    new request using the scope argument.
+    new request using the scope argument. As with lru_cache, a request-scoped
+    cache is shared by the requests that run concurrently in one process.
     """
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
+        # TTLCache is not thread-safe: concurrent misses or a concurrent clear
+        # raise KeyError.
+        cached_func = cachetools.cached(cachetools.TTLCache(
+            *ttl_cache_args, **ttl_cache_kwargs),
+                                        lock=threading.Lock())(func)
         if scope == 'global':
-            return cachetools.cached(
-                cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
-        else:
-            cached_func = cachetools.cached(
-                cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
-            return _register_functions_need_reload_cache(cached_func)
+            return cached_func
+        return _register_functions_need_reload_cache(cached_func)
 
     return decorator
 

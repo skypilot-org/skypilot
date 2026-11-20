@@ -216,7 +216,7 @@ def test_non_admins_are_kept_out_of_config(make_user, open_as, twist):
     viewer = make_user('viewer', role='viewer')
     for ident in (user, viewer):
         page = open_as(ident, '/dashboard/clusters')
-        expect(page.get_by_role('link', name='Sky Clusters'),
+        expect(page.get_by_text('Sky Clusters', exact=True),
                'the clusters page must load').to_be_visible()
         # The link renders once the role resolves; wait for the role first.
         expect(page.locator('button[title="User Profile"]'),
