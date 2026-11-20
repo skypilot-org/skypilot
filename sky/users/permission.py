@@ -1,6 +1,9 @@
 """Permission service for SkyPilot API Server."""
+from __future__ import annotations
+
 import atexit
 import contextlib
+import functools
 import hashlib
 import logging
 import os
@@ -9,15 +12,34 @@ import shutil
 import tempfile
 import threading
 import time
+import typing
 from typing import Dict, Generator, Iterable, List, Optional, Set, Tuple
 
-import casbin
-from casbin import persist
-from casbin import util as casbin_util
-import sqlalchemy
-from sqlalchemy import orm
-import sqlalchemy_adapter
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+if typing.TYPE_CHECKING:
+    import casbin
+    import casbin.persist as casbin_persist
+    import casbin.util as casbin_util
+    import sqlalchemy
+    import sqlalchemy.orm as sqlalchemy_orm
+    import sqlalchemy_adapter
+else:
+    casbin = adaptors_common.LazyImport('casbin', import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+    casbin_persist = adaptors_common.LazyImport('casbin.persist',
+                                                import_error_message=_SA_MSG)
+    casbin_util = adaptors_common.LazyImport('casbin.util',
+                                             import_error_message=_SA_MSG)
+    sqlalchemy_orm = adaptors_common.LazyImport('sqlalchemy.orm',
+                                                import_error_message=_SA_MSG)
+    sqlalchemy_adapter = adaptors_common.LazyImport(
+        'sqlalchemy_adapter', import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -204,12 +226,13 @@ _POLICY_VERSION_SQLITE_TRIGGERS = (
     'casbin_rule_bump_policy_version_delete',
 )
 # Health is read with the version: a disabled trigger is caught on next call.
-_POLICY_VERSION_PG_QUERY = sqlalchemy.text(
+# Plain SQL, wrapped in sqlalchemy.text() at use: SQLAlchemy is not installed
+# on a client-only install, so nothing here may touch it at import.
+_POLICY_VERSION_PG_SQL = (
     'SELECT v.version, t.tgenabled FROM rbac_policy_version v '
     'LEFT JOIN pg_trigger t ON t.tgrelid = to_regclass(\'casbin_rule\') '
-    'AND t.tgname = :trigger WHERE v.id = 1').bindparams(
-        trigger=_POLICY_VERSION_PG_TRIGGER)
-_POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
+    'AND t.tgname = :trigger WHERE v.id = 1')
+_POLICY_VERSION_SQLITE_SQL = (
     'SELECT version FROM rbac_policy_version WHERE id = 1')
 
 # Fields per rule: `g` is (user, role), `p` is (subject, object, action).
@@ -304,26 +327,40 @@ def _policy_load_bound_sql() -> str:
             f'::interval > interval \'{bound} ms\'')
 
 
-class _PolicyAdapter(sqlalchemy_adapter.Adapter):
+@functools.lru_cache(maxsize=1)
+def _policy_adapter_class() -> type:
     """casbin's SQLAlchemy adapter, with the full policy read bounded.
 
-    The read opens its own session rather than the base class's, whose
-    session helper is private, so a change in the adapter cannot silently
-    drop the bound.
+    Defined on first use: the adapter needs SQLAlchemy, which a client-only
+    install does not have, so nothing here may load it at import. The read
+    opens its own session rather than the base class's, whose session helper
+    is private, so a change in the adapter cannot silently drop the bound.
     """
 
-    def __init__(self, engine: sqlalchemy.engine.Engine):
-        super().__init__(engine, db_class=sqlalchemy_adapter.CasbinRule)
-        self._load_engine = engine
-        self._bounded = (
-            engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value)
+    class PolicyAdapter(sqlalchemy_adapter.Adapter):
+        """See `_policy_adapter_class`."""
 
-    def load_policy(self, model) -> None:
-        with orm.Session(self._load_engine) as session, session.begin():
-            if self._bounded:
-                session.execute(sqlalchemy.text(_policy_load_bound_sql()))
-            for rule in session.query(sqlalchemy_adapter.CasbinRule).all():
-                persist.load_policy_line(str(rule), model)
+        def __init__(self, engine: sqlalchemy.engine.Engine):
+            super().__init__(engine, db_class=sqlalchemy_adapter.CasbinRule)
+            self._load_engine = engine
+            self._bounded = (engine.dialect.name ==
+                             db_utils.SQLAlchemyDialect.POSTGRESQL.value)
+
+        def load_policy(self, model) -> None:
+            with sqlalchemy_orm.Session(self._load_engine) as session, \
+                    session.begin():
+                if self._bounded:
+                    session.execute(sqlalchemy.text(_policy_load_bound_sql()))
+                for rule in session.query(sqlalchemy_adapter.CasbinRule).all():
+                    casbin_persist.load_policy_line(str(rule), model)
+
+    return PolicyAdapter
+
+
+def _new_policy_adapter(
+        engine: sqlalchemy.engine.Engine) -> sqlalchemy_adapter.Adapter:
+    """The adapter `_lazy_initialize` gives the enforcer."""
+    return _policy_adapter_class()(engine)
 
 
 class _PolicyVersion:
@@ -385,8 +422,12 @@ class _PolicyVersion:
         """Like `read`, on the caller's connection, and raising on error."""
         if not self._is_postgres and not self._is_sqlite:
             return None
-        row = conn.execute(_POLICY_VERSION_PG_QUERY if self._is_postgres else
-                           _POLICY_VERSION_SQLITE_QUERY).first()
+        if self._is_postgres:
+            query = sqlalchemy.text(_POLICY_VERSION_PG_SQL).bindparams(
+                trigger=_POLICY_VERSION_PG_TRIGGER)
+        else:
+            query = sqlalchemy.text(_POLICY_VERSION_SQLITE_SQL)
+        row = conn.execute(query).first()
         if row is None:
             return None
         # 'O' and 'A' fire in normal sessions; 'D' is disabled and 'R' fires
@@ -516,7 +557,7 @@ class PermissionService:
                 if full_initialize:
                     db_utils.add_all_tables_to_db_sqlalchemy(
                         sqlalchemy_adapter.Base.metadata, engine)
-                adapter = _PolicyAdapter(engine)
+                adapter = _new_policy_adapter(engine)
                 # Use SyncedEnforcer for thread safety. It uses a
                 # read-write lock internally: concurrent reads (enforce,
                 # get_roles_for_user) take a shared read lock, while

@@ -2079,6 +2079,7 @@ def test_managed_jobs_remote_identity_none(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # Restarts the API server.
 def test_managed_jobs_admin_local_credentials_default_role_user():
     """An admin's managed job may set remote_identity: LOCAL_CREDENTIALS
     while rbac.default_role is user.
