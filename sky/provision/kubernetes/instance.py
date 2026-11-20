@@ -2384,6 +2384,108 @@ def inject_ephemeral_volumes(
             volume_mounts.append(volume_mount)
 
 
+# Resource keys the thin head may keep; everything else (GPU/TPU/Neuron/EFA/
+# RDMA, …) is stripped so the extra head pod does not consume accelerators.
+_THIN_HEAD_KEEP_RESOURCE_KEYS = frozenset(
+    {'cpu', 'memory', 'ephemeral-storage'})
+
+# nodeSelector keys that pin pods onto accelerator / flex-start nodes.
+_THIN_HEAD_DROP_NODESELECTOR_KEYS = frozenset({
+    kubernetes_utils.GKELabelFormatter.GPU_LABEL_KEY,
+    kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY,
+    kubernetes_utils.GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY,
+    kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY,
+    'cloud.google.com/gke-flex-start',
+})
+
+
+def _apply_head_resources_to_pod_spec(pod_spec: Dict[str, Any],
+                                      head_resources: Dict[str, Any]) -> None:
+    """Resize the head pod to CPU/memory only for a dedicated thin head.
+
+    Always sets both requests and limits so the head is Guaranteed QoS and
+    callers can size the head independently of workers (packing / Ray
+    control-plane tuning). When ``cpu_limit`` / ``memory_limit`` are omitted,
+    limits match requests.
+
+    The head is cloned from the worker template, so this also strips inherited
+    accelerator requests/limits, placement selectors, nvidia runtimeClass, and
+    GPUDirect/Multus sidecars — otherwise the extra pod would consume another
+    GPU/TPU allocation.
+
+    Args:
+        pod_spec: Pod dict cloned for the head (i==0).
+        head_resources: Provider ``head_resources`` with ``cpus`` / ``memory``
+            (GiB) and optional ``cpu_limit`` / ``memory_limit``.
+    """
+    spec = pod_spec.get('spec') or {}
+    containers = spec.get('containers') or []
+    if not containers:
+        return
+    # Drop GPUDirect / RDMA sidecars; the thin head is CPU-only.
+    if len(containers) > 1:
+        spec['containers'] = containers[:1]
+        containers = spec['containers']
+
+    resources = containers[0].setdefault('resources', {})
+    cpu = head_resources['cpus']
+    memory = head_resources['memory']
+    cpu_limit = head_resources.get('cpu_limit')
+    memory_limit = head_resources.get('memory_limit')
+    if cpu_limit is None:
+        cpu_limit = cpu
+    if memory_limit is None:
+        memory_limit = memory
+
+    for section, cpu_val, mem_val in (
+        ('requests', cpu, f'{memory}G'),
+        ('limits', cpu_limit, f'{memory_limit}G'),
+    ):
+        bucket = resources.setdefault(section, {})
+        for key in list(bucket):
+            if key not in _THIN_HEAD_KEEP_RESOURCE_KEYS:
+                del bucket[key]
+        bucket['cpu'] = cpu_val
+        bucket['memory'] = mem_val
+
+    # Worker template may have set nvidia runtimeClass for GPU jobs.
+    if spec.get('runtimeClassName') == 'nvidia':
+        del spec['runtimeClassName']
+
+    # Required accelerator nodeAffinity would force the CPU head onto GPU/TPU
+    # nodes; drop it. Preferred terms (binpack / avoid) are left alone.
+    affinity = spec.get('affinity') or {}
+    node_affinity = affinity.get('nodeAffinity') or {}
+    if 'requiredDuringSchedulingIgnoredDuringExecution' in node_affinity:
+        del node_affinity['requiredDuringSchedulingIgnoredDuringExecution']
+        if not node_affinity:
+            affinity.pop('nodeAffinity', None)
+        if not affinity:
+            spec.pop('affinity', None)
+        elif 'nodeAffinity' in affinity:
+            affinity['nodeAffinity'] = node_affinity
+            spec['affinity'] = affinity
+
+    node_selector = spec.get('nodeSelector') or {}
+    if node_selector:
+        for key in list(node_selector):
+            if key in _THIN_HEAD_DROP_NODESELECTOR_KEYS:
+                del node_selector[key]
+        if node_selector:
+            spec['nodeSelector'] = node_selector
+        else:
+            spec.pop('nodeSelector', None)
+
+    # Multus / GPUDirect annotations assume accelerator NICs or devices.
+    annotations = pod_spec.get('metadata', {}).get('annotations') or {}
+    if annotations:
+        for key in list(annotations):
+            if (key.startswith('devices.gke.io/') or
+                    key.startswith('networking.gke.io/') or
+                    key == 'k8s.v1.cni.cncf.io/networks'):
+                del annotations[key]
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -2633,6 +2735,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
 
+        head_resources = provider_config.get('head_resources')
+        if head_resources and i == 0:
+            _apply_head_resources_to_pod_spec(pod_spec_copy, head_resources)
+
         if tpu_slice_placement:
             # Pod i is in slice i // VMs per slice, the same split the task
             # nodes use (num_nodes slices of VMs-per-slice pods each).
@@ -2708,14 +2814,18 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 existing_rules)
             pod_spec_copy['spec']['affinity'] = pod_spec_config
 
+        # Thin head is CPU-only: do not add accelerator tolerations that would
+        # pull it onto tainted GPU/TPU/Neuron nodes (workers still get them).
+        thin_head_pod = bool(head_resources) and i == 0
+
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
         # This is to prevent from non-TPU workloads from being scheduled on TPU
         # slice nodes. We need this toleration to allow the pod to be scheduled
         # on TPU nodes.
         # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
         tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
-        if tpu_label in config.node_config.get('spec',
-                                               {}).get('nodeSelector', {}):
+        if (not thin_head_pod and tpu_label in config.node_config.get(
+                'spec', {}).get('nodeSelector', {})):
             tpu_toleration = {
                 'key': kubernetes_utils.TPU_RESOURCE_KEY,
                 'operator': 'Equal',
@@ -2733,7 +2843,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # mode have the GPU taint, so we have to add the GPU toleration.
         # No need to check if DWS is enabled here since this has no side effect
         # to the non-DWS case.
-        if needs_gpus:
+        if needs_gpus and not thin_head_pod:
             gpu_toleration = {
                 'key': kubernetes_utils.get_gpu_resource_key(context),
                 'operator': 'Exists',
@@ -2748,7 +2858,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # Add Neuron toleration if AWS Neuron (Trainium/Inferentia) is requested.
         # The Neuron device plugin taints nodes aws.amazon.com/neuron:NoSchedule
         # to keep non-Neuron workloads off them; tolerate it like the GPU case.
-        if needs_neuron:
+        if needs_neuron and not thin_head_pod:
             neuron_toleration = {
                 'key': kubernetes_utils.NEURON_RESOURCE_KEY,
                 'operator': 'Exists',
@@ -3549,6 +3659,7 @@ def get_cluster_info(
     head_pod_name = None
     cpu_request = None
     memory_request = None
+    worker_cpu_request = None
     for pod_name, pod in running_pods.items():
         # Under hostNetwork the pod's network namespace is the host's, so
         # pod_ip is the K8s node's host IP. SkyPilot injects a required
@@ -3572,19 +3683,20 @@ def get_cluster_info(
                 node_name=k8s_node_name,
             )
         ]
+        primary_container = kubernetes_utils.get_pod_primary_container(pod)
+        resources = getattr(primary_container, 'resources', None)
+        requests = (getattr(resources, 'requests', None) if resources else None)
+        limits = (getattr(resources, 'limits', None) if resources else None)
+        pod_cpu = ((requests or {}).get('cpu') or (limits or {}).get('cpu'))
         if _is_head(pod):
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
-            primary_container = kubernetes_utils.get_pod_primary_container(pod)
-            resources = getattr(primary_container, 'resources', None)
-            requests = (getattr(resources, 'requests', None)
-                        if resources else None)
-            limits = (getattr(resources, 'limits', None) if resources else None)
-            cpu_request = ((requests or {}).get('cpu') or
-                           (limits or {}).get('cpu'))
+            cpu_request = pod_cpu
             memory_request = ((requests or {}).get('memory') or
                               (limits or {}).get('memory'))
+        elif worker_cpu_request is None and pod_cpu is not None:
+            worker_cpu_request = pod_cpu
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
@@ -3622,10 +3734,22 @@ def get_cluster_info(
 
     # cpu_request may be a string like `100m`, need to parse and convert
     num_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(cpu_request)
-    # 'num-cpus' for ray must be an integer, but we should not set it to 0 if
-    # cpus is <1.
-    # Keep consistent with the logic in clouds/kubernetes.py
-    str_cpus = str(max(int(num_cpus), 1))
+    # Keep consistent with clouds/kubernetes.py: dedicated thin head advertises
+    # THIN_HEAD_RAY_NUM_CPUS ('0'; pod CPU still from head_resources).
+    # Workers keep their own CPU count — do not share head num-cpus=0.
+    # Homogeneous / worker 'num-cpus' stays an integer >=1 when cpus <1.
+    worker_custom_ray_options = None
+    if provider_config.get('head_resources'):
+        str_cpus = k8s_constants.THIN_HEAD_RAY_NUM_CPUS
+        worker_cpu_src = worker_cpu_request or cpu_request
+        worker_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(
+            worker_cpu_src)
+        worker_custom_ray_options = {
+            'object-store-memory': 500000000,
+            'num-cpus': str(max(int(worker_cpus), 1)),
+        }
+    else:
+        str_cpus = str(max(int(num_cpus), 1))
 
     # Record the pod's actual resource requests so display paths can show
     # what the scheduler sees, even when an admin policy has overridden
@@ -3646,6 +3770,7 @@ def get_cluster_info(
             'object-store-memory': 500000000,
             'num-cpus': str_cpus,
         },
+        worker_custom_ray_options=worker_custom_ray_options,
         provider_name='kubernetes',
         provider_config=provider_config,
         actual_cpus=num_cpus,

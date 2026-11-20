@@ -24,6 +24,15 @@ provider:
     # The kubecontext used to connect to the Kubernetes cluster.
     context: {{k8s_context}}
 
+{%- if head_cpus is defined and head_cpus is not none %}
+    # Opt-in dedicated thin head: _create_pods patches i==0 requests+limits.
+    head_resources:
+        cpus: {{head_cpus}}
+        memory: {{head_memory}}
+        cpu_limit: {{head_cpu_limit}}
+        memory_limit: {{head_memory_limit}}
+{%- endif %}
+
 {%- if k8s_cluster_uid %}
     # UID of the kube-system namespace of the cluster `context` pointed at
     # on launch; checked against the context on later operations.

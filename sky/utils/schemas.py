@@ -425,6 +425,20 @@ def _get_single_resources_schema():
                     'type': 'number',
                 }],
             },
+            'head_node_cpus': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
+            'head_node_memory': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',

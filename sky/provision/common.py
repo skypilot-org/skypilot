@@ -197,6 +197,10 @@ class ClusterInfo:
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
     custom_ray_options: Optional[Dict[str, Any]] = None
+    # When set (e.g. Kubernetes dedicated thin head), worker ``ray start``
+    # uses these options instead of ``custom_ray_options`` so the head can
+    # advertise ``num-cpus=0`` while workers keep a normal CPU count.
+    worker_custom_ray_options: Optional[Dict[str, Any]] = None
     # Actual per-node CPU/memory requests observed on the provisioned
     # instances (e.g., Kubernetes pod resources.requests). These can diverge
     # from the launched resources spec when the final node config is mutated

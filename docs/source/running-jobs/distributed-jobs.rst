@@ -51,6 +51,14 @@ In the above,
 
 .. note::
 
+   On **Kubernetes**, you can optionally give the Ray head a different
+   CPU/memory shape than the workers with ``resources.head_node_cpus`` and
+   ``resources.head_node_memory``. In that mode, ``num_nodes`` is the
+   **worker** count and SkyPilot adds one thin head pod. See
+   :ref:`kubernetes-thin-head`.
+
+.. note::
+
     If you encounter the error :code:`[Errno 24] Too many open files`, this indicates that your process has exceeded the maximum number of open file descriptors allowed by the system. This often occurs in high-load scenarios, e.g., launching significant amount number of nodes, such as 100.
 
     To resolve this issue, run the following command, and try again:
