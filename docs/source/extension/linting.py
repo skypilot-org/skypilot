@@ -38,6 +38,7 @@ ALLOWED_TERMS = {
     'Slurm',
     'LoadBalancer',
     'Nginx',
+    'Traefik',
     'Kubernetes',
     'Kubectl',
     'Kueue',
