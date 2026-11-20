@@ -2242,9 +2242,9 @@ def get_status_from_cluster_name(
 
 
 @metrics_lib.time_me
-def get_glob_cluster_names(
-        cluster_name: str,
-        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+def get_glob_cluster_names(cluster_name: str,
+                           workspaces_filter: Optional[Set[str]] = None,
+                           exclude_managed_clusters: bool = False) -> List[str]:
     engine = _db_manager.get_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(engine) as session:
@@ -2261,6 +2261,8 @@ def get_glob_cluster_names(
         if workspaces_filter is not None:
             query = query.filter(
                 cluster_table.c.workspace.in_(workspaces_filter))
+        if exclude_managed_clusters:
+            query = query.filter(cluster_table.c.is_managed == int(False))
         rows = query.all()
     return [row.name for row in rows]
 
