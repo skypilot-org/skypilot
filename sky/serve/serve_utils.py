@@ -893,7 +893,10 @@ def _get_service_status(
     if record['pool'] != pool:
         return None
 
-    record['workspace'] = get_service_workspace(service_name)
+    # The config file can be gone (a consolidation pod restart); then fall
+    # back to the workspace recorded at `up`.
+    record['workspace'] = (get_service_workspace(service_name) or
+                           record.get('workspace'))
     record['pool_yaml'] = ''
     if record['pool']:
         version = record['version']

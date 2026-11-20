@@ -2079,7 +2079,7 @@ def test_managed_jobs_remote_identity_none(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 @pytest.mark.no_remote_server
-@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
+@pytest.mark.no_dependency  # Restarts the API server.
 def test_managed_jobs_admin_local_credentials_default_role_user():
     """An admin's managed job may set remote_identity: LOCAL_CREDENTIALS
     while rbac.default_role is user.
@@ -5302,7 +5302,6 @@ def test_dynamic_job_group_parallel_appends(generic_cloud: str):
 # Mutates the managed-jobs DB directly on the API server host, so it cannot
 # run against a remote API server (skip at collection, not just runtime).
 @pytest.mark.no_remote_server
-@pytest.mark.no_dependency  # Reads the managed-jobs DB in-process.
 def test_managed_jobs_emergency_recovery(generic_cloud: str):
     """An externally mutated schedule state triggers emergency recovery.
 

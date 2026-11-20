@@ -3047,10 +3047,14 @@ def get_pending_jobs_count_by_pool(pool: str) -> int:
         return result[0] if result else 0
 
 
-def get_nonterminal_job_ids_by_pool(pool: str,
-                                    cluster_name: Optional[str] = None
-                                   ) -> List[int]:
-    """Get nonterminal job ids in a pool."""
+def get_nonterminal_job_ids_by_pool(
+        pool: str,
+        cluster_name: Optional[str] = None,
+        workspaces: Optional[Set[str]] = None) -> List[int]:
+    """Get nonterminal job ids in a pool.
+
+    If workspaces is not None, only jobs in those workspaces.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         query = sqlalchemy.select(
@@ -3067,6 +3071,9 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         if cluster_name is not None:
             and_conditions.append(
                 job_info_table.c.current_cluster_name == cluster_name)
+        if workspaces is not None:
+            and_conditions.append(
+                job_info_table.c.workspace.in_(list(workspaces)))
         query = query.where(sqlalchemy.and_(*and_conditions)).order_by(
             spot_table.c.spot_job_id.asc())
         rows = session.execute(query).fetchall()
