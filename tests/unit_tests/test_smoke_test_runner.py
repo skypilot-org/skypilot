@@ -1,10 +1,12 @@
-"""Tests for smoke_tests_utils.run_one_test() status tracking.
+"""Tests for smoke test utility helpers.
 
 Keep 'smoke_tests' out of this file's path: tests/conftest.py treats a session
 as a smoke-test session when any collected item's path contains it, which
 wraps the whole session in a config override.
 """
+import json
 import os
+import subprocess
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -104,3 +106,27 @@ def test_success_runs_teardown(quiet_reporting, tmp_path):
                                   teardown=f'touch {sentinel}')
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
     assert sentinel.exists()
+
+
+@pytest.mark.parametrize('controller_name',
+                         [None, 'sky-jobs-controller-deadbeef'])
+def test_jobs_controller_lookup_uses_status_records(monkeypatch,
+                                                    controller_name):
+    monkeypatch.setenv('SKYPILOT_DEBUG', '1')
+
+    def fake_run(command, *, env, **kwargs):
+        assert command[:4] == ['sky', 'status', '-o', 'json']
+        assert '-u' in command
+        assert env['SKYPILOT_DEBUG'] == '0'
+        assert kwargs['check']
+        records = [{'name': 'workload-sky-jobs-controller-example'}]
+        if controller_name is not None:
+            records.append({'name': controller_name})
+        return subprocess.CompletedProcess(command,
+                                           0,
+                                           stdout=json.dumps(records))
+
+    monkeypatch.setattr(smoke_tests_utils.subprocess, 'run', fake_run)
+    assert smoke_tests_utils.get_jobs_controller_name(
+        all_users=True) == controller_name
+    assert os.environ['SKYPILOT_DEBUG'] == '1'

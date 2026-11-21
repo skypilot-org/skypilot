@@ -38,6 +38,7 @@ from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
@@ -1656,6 +1657,28 @@ def kill_and_wait_controller(test_cluster_name: str,
     )
 
 
+def get_jobs_controller_name(*, all_users: bool = False) -> Optional[str]:
+    """Find the jobs controller and refresh its SSH alias via status."""
+    command = [
+        'sky', 'status', '-o', 'json', '--no-show-managed-jobs',
+        '--no-show-services', '--no-show-pools'
+    ]
+    if all_users:
+        command.append('-u')
+    # Debug logs can reach stdout during startup, before JSON output is set up.
+    env = {**os.environ, 'SKYPILOT_DEBUG': '0'}
+    result = subprocess.run(command,
+                            env=env,
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                            check=True)
+    return next((record['name']
+                 for record in json.loads(result.stdout)
+                 if record['name'].startswith(common.JOB_CONTROLLER_PREFIX)),
+                None)
+
+
 def server_side_is_consolidation_mode() -> bool:
     """Returns whether consolidation mode is active on the server side.
 
@@ -1671,16 +1694,8 @@ def server_side_is_consolidation_mode() -> bool:
         # For remote servers, we can't check the signal file directly.
         # Instead, check if a jobs controller cluster exists. If it does,
         # we're not in consolidation mode.
-        result = subprocess.run(
-            ['sky', 'status', '-u'],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        # If we see a jobs controller cluster, consolidation is off.
-        for line in result.stdout.splitlines():
-            if 'sky-jobs-controller-' in line:
-                return False
+        if get_jobs_controller_name(all_users=True) is not None:
+            return False
         # No controller cluster found. Check if managed jobs work (i.e.
         # consolidation mode is active) by checking if jobs queue succeeds.
         result = subprocess.run(

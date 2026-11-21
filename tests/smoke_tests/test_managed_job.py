@@ -4061,17 +4061,6 @@ def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
 
     name = smoke_tests_utils.get_cluster_name()
 
-    def _get_controller_name() -> str:
-        result = subprocess.run(['sky', 'status'],
-                                capture_output=True,
-                                text=True,
-                                timeout=60,
-                                check=False)
-        for line in result.stdout.splitlines():
-            if 'sky-jobs-controller-' in line:
-                return line.split()[0]
-        raise RuntimeError('No jobs controller found in sky status.')
-
     def _count_stream_logs(controller: str) -> int:
         result = subprocess.run(
             ['ssh', controller, 'ps aux | grep "[s]tream_logs" | wc -l'],
@@ -4091,7 +4080,9 @@ def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
         return result.stdout.strip()
 
     def check_log_tail_cleanup():
-        controller = _get_controller_name()
+        controller = smoke_tests_utils.get_jobs_controller_name()
+        if controller is None:
+            raise RuntimeError('No jobs controller found in sky status.')
         yield f'Controller: {controller}'
 
         # Count baseline stream_logs processes
@@ -5370,16 +5361,7 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
 
     def _run_sql_on_controller(sql: str) -> int:
         """Run sql against ~/.sky/spot_jobs.db on the jobs controller."""
-        controller = None
-        status_out = subprocess.run(['sky', 'status'],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=60,
-                                    check=False).stdout
-        for line in status_out.splitlines():
-            if 'sky-jobs-controller-' in line:
-                controller = line.split()[0]
-                break
+        controller = smoke_tests_utils.get_jobs_controller_name()
         if controller is None:
             raise RuntimeError('ENVIRONMENT FAILURE: no jobs controller '
                                'found in sky status; recovery NOT exercised.')
