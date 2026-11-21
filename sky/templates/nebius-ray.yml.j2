@@ -55,6 +55,9 @@ available_node_types:
       network_tier: {{network_tier}}
       disk_tier: {{disk_tier}}
       disk_encrypted: {{disk_encrypted}}
+      {%- if spot_pricing_policy_name is not none %}
+      spot_pricing_policy_name: {{ spot_pricing_policy_name | tojson }}
+      {%- endif %}
       filesystems:
         {%- for fs in filesystems %}
         - filesystem_id: {{ fs.filesystem_id }}
