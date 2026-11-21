@@ -5,6 +5,7 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import tempfile
 import threading
 import time
@@ -934,168 +935,135 @@ def _wait_for_job_ready(
     """
     poll_interval_seconds = 1
 
-    while True:
-        rc, _ = _run_on_login_node(login_node_runner,
-                                   _file_exists_command(login_node_runner,
-                                                        ready_signal),
-                                   'Failed to inspect Slurm startup readiness.',
-                                   tolerate_returncodes=(1,))
-        if rc == 0:
-            return
+    try:
+        while True:
+            rc, _ = _run_on_login_node(
+                login_node_runner,
+                _file_exists_command(login_node_runner, ready_signal),
+                'Failed to inspect Slurm startup readiness.',
+                tolerate_returncodes=(1,))
+            if rc == 0:
+                return
 
-        job_state = client.get_job_state(job_id)
-        # Job states that indicate the job is still initializing
-        # See: https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
-        if job_state not in ('PENDING', 'RUNNING', 'CONFIGURING'):
-            raise RuntimeError(f'Slurm job {job_id} exited ({job_state}) '
-                               'before initialization completed. See sbatch '
-                               f'logs for details: {slurm_log}')
+            job_state = client.get_job_state(job_id)
+            # These states can still complete initialization.
+            if job_state not in ('PENDING', 'RUNNING', 'CONFIGURING'):
+                raise RuntimeError(
+                    f'Slurm job {job_id} exited ({job_state}) '
+                    'before initialization completed. See sbatch '
+                    f'logs for details: {slurm_log}')
+            time.sleep(poll_interval_seconds)
+    except (RuntimeError, exceptions.CommandError) as error:
+        stdout = ''
+        try:
+            _, stdout, _ = login_node_runner.run(['cat', '--', slurm_log],
+                                                 require_outputs=True,
+                                                 stream_logs=False)
+        except (exceptions.CommandError, OSError, RuntimeError,
+                subprocess.SubprocessError) as log_error:
+            logger.debug(f'Failed to read Slurm startup log: {log_error}')
+        if stdout:
+            logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
+                         f'{stdout}'
+                         f'=== End of Slurm job logs ===')
+        raise exceptions.SlurmStartupError(str(error), job_id,
+                                           stdout) from error
 
-        time.sleep(poll_interval_seconds)
+
+def get_accelerator_count(resources: Dict[str, Any]) -> int:
+    """Normalize the count used by allocation rendering and container policy."""
+    raw = resources.get('accelerator_count')
+    try:
+        return int(raw) if raw is not None else 0
+    except (TypeError, ValueError):
+        logger.warning(f'Invalid accelerator_count value: {raw!r}. '
+                       'Defaulting to 0 (no accelerators).')
+        return 0
 
 
-@timeline.event
-def _create_virtual_instance(
-        region: str, cluster_name: str, cluster_name_on_cloud: str,
-        config: common.ProvisionConfig) -> common.ProvisionRecord:
-    """Creates a Slurm virtual instance from the config.
+def prepare_provision_script_inputs(
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    *,
+    client: Optional['slurm.SlurmClient'] = None,
+    partition_info: Optional['slurm.SlurmPartition'] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Resolve common launch/preview inputs and the native submission argv.
 
-    A Slurm virtual instance is created by submitting a long-running
-    job with sbatch, to mimic a cloud VM.
+    This may query the login node. It does not upload files, read or consume a
+    saved snapshot, submit a job, or replace client/runner classes.
     """
-    provider_config = config.provider_config
-    partition = slurm_utils.get_partition_from_config(provider_config)
-    client = _make_slurm_client(provider_config)
-    submit_user = provider_config.get('slurm_user')
-    if submit_user is not None:
-        client.validate_submit_user(region, submit_user)
-
-    slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
-
-    proctrack_type = slurm_utils.get_proctrack_type(slurm_cluster)
-    partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
+    provider = config.provider_config
+    cluster = slurm_utils.get_slurm_cluster_from_config(provider)
+    partition = slurm_utils.get_partition_from_config(provider)
+    if partition_info is None:
+        partition_info = slurm_utils.get_partition_info(cluster, partition)
     if partition_info is None:
         raise ValueError(f'Partition info for {partition} not found '
-                         f'for SLURM cluster {slurm_cluster}')
+                         f'for SLURM cluster {cluster}')
+    if client is None:
+        client = _make_slurm_client(provider)
+    home = client.get_remote_home_dir()
+    base = _resolve_sky_base_dir(client, provider)
+    inputs = {
+        'cluster_name_on_cloud': cluster_name_on_cloud,
+        'resources': config.node_config,
+        'num_nodes': config.count,
+        'partition': partition,
+        'partition_info': partition_info,
+        'proctrack_type': slurm_utils.get_proctrack_type(cluster),
+        'remote_home_dir': home,
+        'sky_base_dir': base,
+        'skypilot_runtime_dir': _resolve_skypilot_runtime_dir(
+            client, provider, cluster_name_on_cloud),
+        'snapshot_dir': _snapshot_dir(base, cluster_name_on_cloud,
+                                      provider.get('snapshot_id')),
+    }
+    submit_argv = slurm.SlurmClient.build_submit_command(
+        partition, _sbatch_provision_script_path(base, cluster_name_on_cloud),
+        home)
+    return inputs, submit_argv
 
-    # COMPLETING state occurs when a job is being terminated - during this
-    # phase, slurmd sends SIGTERM to tasks, waits for KillWait period, sends
-    # SIGKILL if needed, runs epilog scripts, and notifies slurmctld. This
-    # typically happens when a previous job with the same name is being
-    # cancelled or has finished. Jobs can get stuck in COMPLETING if epilog
-    # scripts hang or tasks don't respond to signals, so we wait with a
-    # timeout.
-    completing_jobs = client.query_jobs(
-        cluster_name_on_cloud,
-        ['completing'],
-    )
-    start_time = time.time()
-    while (completing_jobs and
-           time.time() - start_time < _JOB_TERMINATION_TIMEOUT_SECONDS):
-        logger.debug(f'Found {len(completing_jobs)} completing jobs. '
-                     f'Waiting for them to finish: {completing_jobs}')
-        time.sleep(POLL_INTERVAL_SECONDS)
-        completing_jobs = client.query_jobs(
-            cluster_name_on_cloud,
-            ['completing'],
-        )
-    if completing_jobs:
-        # TODO(kevin): Automatically handle this, following the suggestions in
-        # https://slurm.schedmd.com/troubleshoot.html#completing
-        raise RuntimeError(f'Found {len(completing_jobs)} jobs still in '
-                           'completing state after '
-                           f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s. '
-                           'This is typically due to non-killable processes '
-                           'associated with the job.')
 
-    # Check if job already exists
-    existing_jobs = client.query_jobs(
-        cluster_name_on_cloud,
-        ['pending', 'configuring', 'running'],
-    )
+def render_provision_script(
+    *,
+    cluster_name_on_cloud: str,
+    resources: Dict[str, Any],
+    num_nodes: int,
+    partition: str,
+    partition_info: 'slurm.SlurmPartition',
+    proctrack_type: Optional[str],
+    remote_home_dir: str,
+    sky_base_dir: str,
+    skypilot_runtime_dir: str,
+    snapshot_dir: str,
+    snapshot_manifest: Optional[Dict[str, Any]] = None,
+    extra_container_mounts: Tuple[str, ...] = (),
+    container_prolog: str = '',
+    container_init_prefix: str = '',
+    container_init_suffix: str = '',
+    apt_install: str = '  apt-get update\n  apt-get install -y $missing\n',
+    runtime_setup: str = '',
+) -> str:
+    """Render an allocation without SSH or lifecycle I/O.
 
-    provision_timeout: int = provider_config['provision_timeout']
-    wait_str = ('indefinitely'
-                if provision_timeout < 0 else f'for {provision_timeout}s')
-    logger.debug(f'Waiting {wait_str} for '
-                 f'job to be allocated on partition {partition}')
-
-    num_nodes = config.count
-    on_pending = _make_pending_callback(cluster_name, partition)
-
-    if existing_jobs:
-        assert len(existing_jobs) == 1, (
-            f'Multiple jobs found with name {cluster_name_on_cloud}: '
-            f'{existing_jobs}')
-
-        job_id = existing_jobs[0]
-        logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
-                     f'(JOBID: {job_id})')
-        _record_allocation(cluster_name, slurm_cluster, job_id)
-
-        # Wait for nodes to be allocated (job might be in PENDING state)
-        _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                            on_pending)
-        _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
-        nodes, _ = client.get_job_nodes(job_id)
-        # Reset spinner since nodes are now allocated
-        rich_utils.force_update_status(
-            ux_utils.spinner_message('Launching', cluster_name=cluster_name))
-        return common.ProvisionRecord(provider_name='slurm',
-                                      region=region,
-                                      zone=partition,
-                                      cluster_name=cluster_name_on_cloud,
-                                      head_instance_id=slurm_utils.instance_id(
-                                          job_id, nodes[0]),
-                                      resumed_instance_ids=[],
-                                      created_instance_ids=[])
-
-    resources = config.node_config
-
-    # Note: By default Slurm terminates the entire job allocation if any node
-    # fails in its range of allocated nodes.
-    # In the future we can consider running sbatch with --no-kill to not
-    # automatically terminate a job if one of the nodes it has been
-    # allocated fails.
-    accelerator_type = resources.get('accelerator_type')
-    accelerator_count_raw = resources.get('accelerator_count')
-    try:
-        accelerator_count = int(
-            accelerator_count_raw) if accelerator_count_raw is not None else 0
-    except (TypeError, ValueError):
-        logger.warning(
-            f'Invalid accelerator_count value: {accelerator_count_raw!r}. '
-            'Defaulting to 0 (no accelerators).')
-        accelerator_count = 0
-
-    # To bootstrap things, we need to do it with SSHCommandRunner first.
-    # SlurmCommandRunner is for after the virtual instances are created.
-    login_node_runner = _make_login_node_runner(provider_config)
-    remote_home_dir = login_node_runner.get_remote_home_dir()
-
-    sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    sbatch_log_base_dir = sky_base_dir
-
-    provision_script_path = _sbatch_provision_script_path(
-        sky_base_dir, cluster_name_on_cloud)
-    provision_scripts_dir = os.path.dirname(provision_script_path)
-
-    skypilot_runtime_dir = _resolve_skypilot_runtime_dir(
-        client, provider_config, cluster_name_on_cloud)
+    Trusted shell fragments must end with a newline. The apt_install fragment
+    receives $missing, the list of required packages not already installed.
+    """
+    for name, fragment in (('container_prolog', container_prolog),
+                           ('container_init_prefix', container_init_prefix),
+                           ('container_init_suffix', container_init_suffix),
+                           ('apt_install', apt_install), ('runtime_setup',
+                                                          runtime_setup)):
+        assert not fragment or fragment.endswith('\n'), (
+            f'{name} must end with a newline')
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
-                                 provider_config.get('snapshot_id'))
+    sbatch_log_base_dir = sky_base_dir
     snapshot_manifest_path = _snapshot_manifest_path(snapshot_dir)
-    snapshot_manifest = None
-    if config.prev_cluster_ever_up:
-        snapshot_manifest = _read_snapshot_manifest(
-            login_node_runner, snapshot_dir, expected_num_nodes=num_nodes)
-    if snapshot_manifest is not None:
-        _validate_snapshot_files(login_node_runner, snapshot_dir,
-                                 snapshot_manifest)
     ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
-
+    accelerator_type = resources.get('accelerator_type')
+    accelerator_count = get_accelerator_count(resources)
     # For non-Docker Hub registries, pyxis/enroot requires '#' separator
     # between registry and path. See:
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
@@ -1157,6 +1125,7 @@ def _create_virtual_instance(
             # The host python symlink is invalid inside the container.
             f'{skypilot_runtime_dir}/.sky:{skypilot_runtime_dir}/.sky',
         ]
+        mount_paths.extend(extra_container_mounts)
         # The cluster state directory may be outside the remote home directory.
         if sky_base_dir != remote_home_dir:
             mount_paths.append(f'{sky_base_dir}:{sky_base_dir}')
@@ -1176,15 +1145,20 @@ def _create_virtual_instance(
         # This allows scripts with 'sudo' commands to work without modification.
         # For containers, ~ is /root which is isolated inside the container,
         # so modifying bashrc doesn't affect non-containerized sessions.
-        container_init_script = """\
+        container_init_script = container_init_prefix + """\
 set -e
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
-apt-get update
-apt-get install -y ca-certificates rsync curl git wget fuse
+missing=""
+for package in ca-certificates rsync curl git wget fuse; do
+  dpkg -s "$package" >/dev/null 2>&1 || missing="$missing $package"
+done
+if [ -n "$missing" ]; then
+""" + apt_install + """\
+fi
 echo 'alias sudo=""' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
-"""
+""" + container_init_suffix
         container_init_done_dir = (
             f'{sky_cluster_home_dir}/.sky_container_init_done')
         pyxis_args = (f'--container-name={shlex.quote(container_name)}:create '
@@ -1218,6 +1192,7 @@ done < <(enroot list)
                 f'srun --overlap '
                 f'--job-name={_CONTAINER_KEEPER_STEP_NAME} '
                 f'{"--label " if num_nodes > 1 else ""}--unbuffered '
+                f'--kill-on-bad-exit=1 '
                 f'--nodes={num_nodes} --ntasks-per-node=1 '
                 f'--container-image={shlex.quote(container_image)} '
                 f'{pyxis_args} bash -c {container_cmd} &\n'
@@ -1298,6 +1273,7 @@ exit 1
                 'fi\n')
         container_block = (
             f'srun --nodes={num_nodes} mkdir -p {host_ccache_dir}\n'
+            f'{container_prolog}'
             f'CONTAINER_START=$SECONDS\n'
             f'echo "[container] Initializing {container_name} on all nodes"\n'
             f'rm -rf {container_init_done_dir}\n'
@@ -1445,7 +1421,7 @@ mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky
 srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}/.sky
 # Marker file to indicate we're in a Slurm cluster.
 srun --nodes={num_nodes} touch {skypilot_runtime_dir}/.sky/{slurm_utils.SLURM_MARKER_FILE}
-# Store proctrack type for task executor to read.
+{runtime_setup}# Store proctrack type for task executor to read.
 echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
@@ -1457,6 +1433,147 @@ touch {sky_cluster_home_dir}/.hushlogin
 """
     # fmt: on
     # pylint: enable=line-too-long
+    return provision_script
+
+
+@timeline.event
+def create_virtual_instance(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    *,
+    client: Optional['slurm.SlurmClient'] = None,
+    render_script: Optional[Callable[..., str]] = None,
+    stage_files: Optional[Callable[[command_runner.CommandRunner, str],
+                                   None]] = None,
+    wait_for_job_nodes: Optional[Callable[..., None]] = None,
+    partition_info: Optional['slurm.SlurmPartition'] = None,
+) -> common.ProvisionRecord:
+    """Creates a Slurm virtual instance from the config.
+
+    A Slurm virtual instance is created by submitting a long-running
+    job with sbatch, to mimic a cloud VM.
+
+    Registered provisioners can supply rendering, file staging, and wait
+    callables. Staging runs only for a new allocation, after snapshot cleanup
+    and before submission. Node waiters use the native five-argument contract;
+    registered provisioners bind any additional policy context.
+    """
+    provider_config = config.provider_config
+    partition = slurm_utils.get_partition_from_config(provider_config)
+    if client is None:
+        client = _make_slurm_client(provider_config)
+    if render_script is None:
+        render_script = render_provision_script
+    if wait_for_job_nodes is None:
+        wait_for_job_nodes = _wait_for_job_nodes
+    submit_user = provider_config.get('slurm_user')
+    if submit_user is not None:
+        client.validate_submit_user(region, submit_user)
+
+    slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+
+    # COMPLETING state occurs when a job is being terminated - during this
+    # phase, slurmd sends SIGTERM to tasks, waits for KillWait period, sends
+    # SIGKILL if needed, runs epilog scripts, and notifies slurmctld. This
+    # typically happens when a previous job with the same name is being
+    # cancelled or has finished. Jobs can get stuck in COMPLETING if epilog
+    # scripts hang or tasks don't respond to signals, so we wait with a
+    # timeout.
+    completing_jobs = client.query_jobs(
+        cluster_name_on_cloud,
+        ['completing'],
+    )
+    start_time = time.time()
+    while (completing_jobs and
+           time.time() - start_time < _JOB_TERMINATION_TIMEOUT_SECONDS):
+        logger.debug(f'Found {len(completing_jobs)} completing jobs. '
+                     f'Waiting for them to finish: {completing_jobs}')
+        time.sleep(POLL_INTERVAL_SECONDS)
+        completing_jobs = client.query_jobs(
+            cluster_name_on_cloud,
+            ['completing'],
+        )
+    if completing_jobs:
+        # TODO(kevin): Automatically handle this, following the suggestions in
+        # https://slurm.schedmd.com/troubleshoot.html#completing
+        raise RuntimeError(f'Found {len(completing_jobs)} jobs still in '
+                           'completing state after '
+                           f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s. '
+                           'This is typically due to non-killable processes '
+                           'associated with the job.')
+
+    # Check if job already exists
+    existing_jobs = client.query_jobs(
+        cluster_name_on_cloud,
+        ['pending', 'configuring', 'running'],
+    )
+
+    provision_timeout: int = provider_config['provision_timeout']
+    wait_str = ('indefinitely'
+                if provision_timeout < 0 else f'for {provision_timeout}s')
+    logger.debug(f'Waiting {wait_str} for '
+                 f'job to be allocated on partition {partition}')
+
+    num_nodes = config.count
+    on_pending = _make_pending_callback(cluster_name, partition)
+
+    if existing_jobs:
+        assert len(existing_jobs) == 1, (
+            f'Multiple jobs found with name {cluster_name_on_cloud}: '
+            f'{existing_jobs}')
+
+        job_id = existing_jobs[0]
+        logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
+                     f'(JOBID: {job_id})')
+        _record_allocation(cluster_name, slurm_cluster, job_id)
+
+        # Wait for nodes to be allocated (job might be in PENDING state)
+        wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                           on_pending)
+        _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
+        nodes, _ = client.get_job_nodes(job_id)
+        # Reset spinner since nodes are now allocated
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Launching', cluster_name=cluster_name))
+        base_dir = _resolve_sky_base_dir(client, provider_config)
+        _wait_for_job_ready(
+            _make_login_node_runner(provider_config), client, job_id,
+            f'{_sky_cluster_home_dir(base_dir, cluster_name_on_cloud)}'
+            '/.sky_sbatch_ready', _sbatch_log_path(base_dir, job_id))
+        return common.ProvisionRecord(provider_name='slurm',
+                                      region=region,
+                                      zone=partition,
+                                      cluster_name=cluster_name_on_cloud,
+                                      head_instance_id=slurm_utils.instance_id(
+                                          job_id, nodes[0]),
+                                      resumed_instance_ids=[],
+                                      created_instance_ids=[])
+
+    inputs, submit_argv = prepare_provision_script_inputs(
+        cluster_name_on_cloud,
+        config,
+        client=client,
+        partition_info=partition_info)
+    login_node_runner = _make_login_node_runner(provider_config)
+    sky_base_dir = inputs['sky_base_dir']
+    sbatch_log_base_dir = sky_base_dir
+    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                                 cluster_name_on_cloud)
+    provision_script_path = submit_argv[-1]
+    provision_scripts_dir = os.path.dirname(provision_script_path)
+    snapshot_dir = inputs['snapshot_dir']
+    snapshot_manifest = None
+    if config.prev_cluster_ever_up:
+        snapshot_manifest = _read_snapshot_manifest(
+            login_node_runner, snapshot_dir, expected_num_nodes=num_nodes)
+    if snapshot_manifest is not None:
+        _validate_snapshot_files(login_node_runner, snapshot_dir,
+                                 snapshot_manifest)
+    ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
+    provision_script = render_script(**inputs,
+                                     snapshot_manifest=snapshot_manifest)
 
     cmd = ['mkdir', '-p', '--', provision_scripts_dir]
     rc, stdout, stderr = login_node_runner.run(cmd,
@@ -1492,6 +1609,8 @@ touch {sky_cluster_home_dir}/.hushlogin
         src_path = f.name
         tgt_path = provision_script_path
         login_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
+    if stage_files is not None:
+        stage_files(login_node_runner, sky_cluster_home_dir)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
@@ -1499,8 +1618,7 @@ touch {sky_cluster_home_dir}/.hushlogin
                  f'with {num_nodes} nodes')
     _record_allocation(cluster_name, slurm_cluster, job_id)
 
-    _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                        on_pending)
+    wait_for_job_nodes(client, job_id, provision_timeout, partition, on_pending)
     _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
     nodes, _ = client.get_job_nodes(job_id)
     # Reset spinner since nodes are now allocated
@@ -1532,23 +1650,13 @@ touch {sky_cluster_home_dir}/.hushlogin
         log_thread = threading.Thread(target=_stream_logs, daemon=True)
         log_thread.start()
 
-    try:
-        _wait_for_job_ready(
-            login_node_runner,
-            client,
-            job_id,
-            ready_signal,
-            slurm_log,
-        )
-    except (RuntimeError, exceptions.CommandError) as e:
-        _, stdout, _ = login_node_runner.run(['cat', '--', slurm_log],
-                                             require_outputs=True,
-                                             stream_logs=False)
-        if stdout:
-            logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
-                         f'{stdout}'
-                         f'=== End of Slurm job logs ===')
-        raise e
+    _wait_for_job_ready(
+        login_node_runner,
+        client,
+        job_id,
+        ready_signal,
+        slurm_log,
+    )
 
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,
@@ -1668,8 +1776,8 @@ def query_instances(
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
-    return _create_virtual_instance(region, cluster_name, cluster_name_on_cloud,
-                                    config)
+    return create_virtual_instance(region, cluster_name, cluster_name_on_cloud,
+                                   config)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
