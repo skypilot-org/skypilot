@@ -1543,7 +1543,7 @@ class TestGetCommandRunners:
 
 
 class TestQueryInstances:
-    """Tests manifest-backed Slurm stopped status."""
+    """Tests Slurm allocation and snapshot status."""
 
     def test_manifest_reports_each_rank_stopped(self, monkeypatch):
         client = mock.MagicMock()
@@ -1631,6 +1631,23 @@ class TestQueryInstances:
         assert statuses == {
             instance.slurm_utils.instance_id('booting-job', 'node-a'):
                 (instance.status_lib.ClusterStatus.INIT, None)
+        }
+
+    @pytest.mark.parametrize('retry_if_missing', [False, True])
+    def test_configuring_job_without_nodes_is_init(self, mock_client,
+                                                   retry_if_missing):
+        mock_client.query_jobs.side_effect = (
+            lambda job_name, states: ['booting-job']
+            if states == ['configuring'] else [])
+        mock_client.get_job_nodes.return_value = ([], [])
+
+        statuses = instance.query_instances('test-cluster',
+                                            _CLUSTER,
+                                            provider_config=_PROVIDER_CONFIG,
+                                            retry_if_missing=retry_if_missing)
+
+        assert statuses == {
+            'booting-job': (instance.status_lib.ClusterStatus.INIT, None)
         }
 
     def test_container_snapshot_denial_keeps_status_unknown(self, mock_client):

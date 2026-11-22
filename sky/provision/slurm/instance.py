@@ -1620,6 +1620,10 @@ def query_instances(
                     statuses[job_id] = (sky_status, reason)
                 else:
                     nodes, _ = client.get_job_nodes(job_id)
+                    if state == 'configuring' and not nodes:
+                        # Until Slurm assigns nodes, keep the allocation visible
+                        # under its job ID, as with pending jobs.
+                        statuses[job_id] = (sky_status, None)
                     for node in nodes:
                         instance_id = slurm_utils.instance_id(job_id, node)
                         statuses[instance_id] = (sky_status, None)
