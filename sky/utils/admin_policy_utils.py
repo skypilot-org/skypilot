@@ -214,7 +214,7 @@ def _check_requested_queues(
                     skypilot_config.check_active_workspace_queue(cloud, queue)
                 except ValueError as e:
                     with ux_utils.print_exception_no_traceback():
-                        raise exceptions.PermissionDeniedError(
+                        raise exceptions.QueueNotAllowedError(
                             f'Task {task.name or ""!r}: {e}') from None
 
 

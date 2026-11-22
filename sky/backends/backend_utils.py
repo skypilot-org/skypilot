@@ -870,7 +870,7 @@ def _check_cluster_queue(cloud: str, queue: Optional[str]) -> None:
         skypilot_config.check_active_workspace_queue(cloud, queue)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.PermissionDeniedError(str(e)) from None
+            raise exceptions.QueueNotAllowedError(str(e)) from None
 
 
 def _credential_upload_identity(

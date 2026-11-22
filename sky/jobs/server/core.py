@@ -1604,8 +1604,12 @@ def _maybe_restart_controller(
             jobs_controller_type.value.cluster_name,
             status_lib.ClusterStatus.INIT, 'Jobs controller restarted.',
             global_user_state.ClusterEventType.STATUS_CHANGE)
-        handle = core.start(
-            cluster_name=jobs_controller_type.value.cluster_name)
+        # Job controller is not placed in kueue, as the controller pod is
+        # considered a "system" pod and is not subject to queue limits or
+        # preemption.
+        with skypilot_config.remove_queue_name_from_config():
+            handle = core.start(
+                cluster_name=jobs_controller_type.value.cluster_name)
 
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
