@@ -1,18 +1,39 @@
 """Permission service for SkyPilot API Server."""
+from __future__ import annotations
+
+import atexit
 import contextlib
 import hashlib
 import logging
 import os
 import queue
+import shutil
+import tempfile
 import threading
 import time
-from typing import Dict, Generator, Iterable, List, Optional, Set, Tuple
+import typing
+from typing import (ContextManager, Dict, Generator, Iterable, List, Optional,
+                    Set, Tuple)
 
-import casbin
-from casbin import util as casbin_util
-import sqlalchemy
-import sqlalchemy_adapter
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+if typing.TYPE_CHECKING:
+    import casbin
+    import casbin.util as casbin_util
+    import sqlalchemy
+    import sqlalchemy_adapter
+else:
+    casbin = adaptors_common.LazyImport('casbin', import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+    casbin_util = adaptors_common.LazyImport('casbin.util',
+                                             import_error_message=_SA_MSG)
+    sqlalchemy_adapter = adaptors_common.LazyImport(
+        'sqlalchemy_adapter', import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -76,6 +97,25 @@ _PROBE_DUTY_CYCLE = 0.1
 # rate; this bounds a burst, so one bulk change that strands hundreds cannot
 # grow an unbounded queue behind a single worker thread.
 _REPAIR_MAX_IN_FLIGHT = 64
+
+# How often the server's poller reads the policy version, and each worker reads
+# what it published. One database read per server, not per worker: deploy mode
+# runs a worker per CPU, and the policy changes a few times a day.
+_POLICY_REFRESH_INTERVAL_SECONDS = 5
+# A published version older than this means the poller is gone; workers then
+# read the database themselves.
+_POLLER_STALE_SECONDS = 30
+# Bounds connecting and the query on the read. Not a wait in a pooler's queue
+# or on a dead socket: the stale check above covers those.
+_POLLER_DB_TIMEOUT_SECONDS = 5
+# How often a worker rebuilds while the stored version cannot be trusted.
+_UNVERSIONED_RELOAD_INTERVAL_SECONDS = 60
+# Where the poller publishes, inherited by the workers it spawns.
+_POLICY_VERSION_FILE_ENV = 'SKYPILOT_SERVER_RBAC_POLICY_VERSION_FILE'
+# Published when the read worked but the version cannot be trusted (no row, or
+# the trigger is disabled), and when the read failed.
+_UNVERSIONED = 'unversioned'
+_READ_ERROR = 'error'
 
 # Materialized once: the role set is a static enum, and this is consulted on
 # every request.
@@ -180,12 +220,13 @@ _POLICY_VERSION_SQLITE_TRIGGERS = (
     'casbin_rule_bump_policy_version_delete',
 )
 # Health is read with the version: a disabled trigger is caught on next call.
-_POLICY_VERSION_PG_QUERY = sqlalchemy.text(
+# Plain SQL, wrapped in sqlalchemy.text() at use: SQLAlchemy is not installed
+# on a client-only install, so nothing here may touch it at import.
+_POLICY_VERSION_PG_SQL = (
     'SELECT v.version, t.tgenabled FROM rbac_policy_version v '
     'LEFT JOIN pg_trigger t ON t.tgrelid = to_regclass(\'casbin_rule\') '
-    'AND t.tgname = :trigger WHERE v.id = 1').bindparams(
-        trigger=_POLICY_VERSION_PG_TRIGGER)
-_POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
+    'AND t.tgname = :trigger WHERE v.id = 1')
+_POLICY_VERSION_SQLITE_SQL = (
     'SELECT version FROM rbac_policy_version WHERE id = 1')
 
 # Fields per rule: `g` is (user, role), `p` is (subject, object, action).
@@ -263,7 +304,8 @@ class _PolicyVersion:
         self.adapter = adapter
         self.engine = engine
         # One stale reader builds while the others wait for its result,
-        # instead of each building a copy of the policy.
+        # instead of each building a copy of the policy. Local writes hold it
+        # too, so a build never misses one (see `_local_write`).
         self.reload_lock = threading.Lock()
         self.loaded: Optional[int] = None
         self._is_postgres = (
@@ -287,15 +329,23 @@ class _PolicyVersion:
 
     def read(self) -> Optional[int]:
         """The stored version, or None when it cannot be trusted."""
-        if not self._is_postgres and not self._is_sqlite:
-            return None
         try:
             with self.engine.connect() as conn:
-                row = conn.execute(_POLICY_VERSION_PG_QUERY if self._is_postgres
-                                   else _POLICY_VERSION_SQLITE_QUERY).first()
+                return self.read_on(conn)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read the policy version: {e}')
             return None
+
+    def read_on(self, conn: sqlalchemy.engine.Connection) -> Optional[int]:
+        """Like `read`, on the caller's connection, and raising on error."""
+        if not self._is_postgres and not self._is_sqlite:
+            return None
+        if self._is_postgres:
+            query = sqlalchemy.text(_POLICY_VERSION_PG_SQL).bindparams(
+                trigger=_POLICY_VERSION_PG_TRIGGER)
+        else:
+            query = sqlalchemy.text(_POLICY_VERSION_SQLITE_SQL)
+        row = conn.execute(query).first()
         if row is None:
             return None
         # 'O' and 'A' fire in normal sessions; 'D' is disabled and 'R' fires
@@ -304,7 +354,8 @@ class _PolicyVersion:
                       if self._is_postgres else self._sqlite_triggers_ok)
         if not trigger_ok and self._trigger_ok:
             logger.warning('The casbin_rule version trigger is missing or '
-                           'disabled; reloading the policy on every call.')
+                           'disabled; changes to the policy are picked up '
+                           'only by full reloads.')
         self._trigger_ok = trigger_ok
         return row[0] if trigger_ok else None
 
@@ -316,27 +367,24 @@ def _swap_enforcer(synced: casbin.SyncedEnforcer, fresh: casbin.Enforcer,
                    state: _PolicyVersion, version: Optional[int]) -> None:
     """Make `synced` serve `fresh`, built from the policy at `version`.
 
-    Under the write lock, readers wait for one version read, plus a full load
-    in place if the version moved during the build or cannot be read. casbin
-    has no public API for this, so if its private names change, reload in
-    place as before.
+    Caller holds `state.reload_lock` and read `version` before the build.
+    Under the write lock this only swaps a pointer: no database I/O, so a
+    slow database never holds up readers, some of which run on the event
+    loop. A write from another process that landed during the build leaves
+    the model newer than `version`, which costs one extra rebuild later.
+    casbin has no public API for this, so if its private names change,
+    reload in place as before, which does read the database under the lock.
     """
     # pylint: disable=protected-access
     if not (isinstance(getattr(synced, '_e', None), casbin.Enforcer) and
             hasattr(synced, '_wl')):
-        current = state.read()
         synced.load_policy()
-        state.loaded = current
+        state.loaded = version
         return
     with synced._wl:
-        # A write that committed during the build has moved the version;
-        # then load in place.
-        current = state.read()
-        if current is not None and current == version:
-            synced._e = fresh
-        else:
-            synced._e.load_policy()
-        state.loaded = current
+        synced._e = fresh
+        # After the model: no reader sees a version its model lacks.
+        state.loaded = version
 
 
 class PermissionService:
@@ -381,6 +429,20 @@ class PermissionService:
         self._repair_in_flight: Set[str] = set()
         self._repair_worker: Optional[threading.Thread] = None
         self._repair_lock = threading.Lock()
+        # Background policy refresh: the poller (one per server) and the
+        # watcher (one per process that serves requests). See
+        # `start_policy_version_poller` and `start_policy_watcher`.
+        self._poller_started = False
+        self._watcher_started = False
+        self._refresh_start_lock = threading.Lock()
+        self._poll_engine: Optional[sqlalchemy.engine.Engine] = None
+        self._poller_failing = False
+        self._poller_read_failing = False
+        self._watcher_failing = False
+        # When this watcher first saw the poller publish a read error.
+        self._error_since: Optional[float] = None
+        self._watcher_falling_back = False
+        self._unversioned_reload_at = float('-inf')
         # When the in-flight cap warning was last emitted. A timestamp, not one
         # of the TTL caches: the condition is global, so there is nothing to key
         # by and no cache to bound. Read and written under `_repair_lock`.
@@ -559,7 +621,9 @@ class PermissionService:
             # The mutator below decides against this model, which predates the
             # lock unless refreshed.
             self._load_policy_no_lock()
-            enforcer.add_grouping_policy(user_hash, rbac.RoleName.ADMIN.value)
+            with self._local_write():
+                enforcer.add_grouping_policy(user_hash,
+                                             rbac.RoleName.ADMIN.value)
             _clear_legacy_member_cache()
             logger.info(f'Basic auth user {username} initialized')
 
@@ -677,8 +741,9 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         user_roles = enforcer.get_roles_for_user(user_id)
         if not user_roles:
-            enforcer.add_grouping_policy(user_id, role or
-                                         rbac.get_default_role())
+            with self._local_write():
+                enforcer.add_grouping_policy(user_id, role or
+                                             rbac.get_default_role())
             _clear_legacy_member_cache()
             return True
         return False
@@ -1215,12 +1280,9 @@ class PermissionService:
         at all, which `enforce` reads as permitted everywhere -- so the
         unconfigured case must not be the permissive one.
         """
-        # We intentionally don't load the policy here, as it is a hot path, and
-        # we don't support updating the policy.
-        # We don't hold the lock for checking permission, as it is read only and
-        # it is a hot path in every request. It is ok to have a stale policy,
-        # as long as it is eventually consistent.
-        # self._load_policy_no_lock()
+        # No reload here: this runs on every request. The policy watcher keeps
+        # this process within a few seconds of the database
+        # (`start_policy_watcher`).
         enforcer = self._ensure_enforcer()
         system_role = _system_role(user_id)
         if system_role is not None:
@@ -1330,8 +1392,12 @@ class PermissionService:
                 return True
         return False
 
-    def _load_policy_no_lock(self):
-        """Load policy from storage, unless its stored version is unchanged."""
+    def _load_policy_no_lock(self, known_version: Optional[int] = None):
+        """Load policy from storage, unless its stored version is unchanged.
+
+        `known_version` is a version read before this call, used if this
+        process cannot read one, so the load is still labelled and converges.
+        """
         enforcer = self._ensure_enforcer()
         state = self._policy_version
         if state is None or state.enforcer is not enforcer:
@@ -1341,20 +1407,28 @@ class PermissionService:
             return
         with state.reload_lock:
             # Read before loading, so a write that lands during the load moves
-            # the version past it and the swap below reloads in place.
+            # the version past it and the next call loads again.
             version = state.read()
-            if state.is_loaded(version):
-                return
             if version is None:
-                # Nothing to compare a build against: reload in place.
-                enforcer.load_policy()
-                state.loaded = None
+                version = known_version
+            if state.is_loaded(version):
                 return
             # Built without the enforcer's lock, so readers keep the old model
             # for the whole load instead of waiting for it.
             _swap_enforcer(enforcer, casbin.Enforcer(_MODEL_PATH,
                                                      state.adapter), state,
                            version)
+
+    def _local_write(self) -> ContextManager:
+        """Hold while changing the in-memory model through the enforcer API.
+
+        Such a write changes the model a build in progress is about to
+        replace; excluding builds keeps the swap from discarding it.
+        """
+        state = self._policy_version
+        if state is None:
+            return contextlib.nullcontext()
+        return state.reload_lock
 
     @contextlib.contextmanager
     def _policy_transaction(self) -> Generator[_PolicyRows, None, None]:
@@ -1387,6 +1461,149 @@ class PermissionService:
         """Load policy from storage with lock."""
         with _policy_lock():
             self._load_policy_no_lock()
+
+    def start_policy_version_poller(self) -> None:
+        """Publish the stored policy version for this server's workers.
+
+        Call once in the server's main process, before it spawns them: the
+        file's path reaches them through the environment. Writes the first
+        value before returning, so no worker starts without one.
+        """
+        with self._refresh_start_lock:
+            if self._poller_started:
+                return
+            self._ensure_enforcer()
+            state = self._policy_version
+            if state is None:
+                return
+            self._poll_engine = _poller_engine(state.engine)
+            try:
+                # Private, unpredictable, and on the container's own disk:
+                # ~/.sky can be a shared volume.
+                directory = tempfile.mkdtemp(prefix='sky-rbac-')
+                atexit.register(shutil.rmtree, directory, ignore_errors=True)
+                path = os.path.join(directory, 'policy_version')
+                _publish_policy_version(path, self._poll_policy_version_once())
+            except OSError as e:
+                logger.warning('Cannot publish the RBAC policy version; '
+                               'workers will read it from the database: '
+                               f'{common_utils.format_exception(e)}')
+                return
+            os.environ[_POLICY_VERSION_FILE_ENV] = path
+            threading.Thread(target=self._poll_policy_version_forever,
+                             args=(path,),
+                             name='rbac-policy-poller',
+                             daemon=True).start()
+            self._poller_started = True
+            logger.debug(f'RBAC policy version poller started: {path}')
+
+    def _poll_policy_version_forever(self, path: str) -> None:
+        while True:
+            time.sleep(_POLICY_REFRESH_INTERVAL_SECONDS)
+            try:
+                _publish_policy_version(path, self._poll_policy_version_once())
+            except Exception as e:  # pylint: disable=broad-except
+                if not self._poller_failing:
+                    logger.warning('Failed to publish the RBAC policy version; '
+                                   'workers will read it from the database: '
+                                   f'{common_utils.format_exception(e)}')
+                self._poller_failing = True
+                continue
+            if self._poller_failing:
+                logger.info('Publishing the RBAC policy version again.')
+            self._poller_failing = False
+
+    def _poll_policy_version_once(self) -> str:
+        """The stored version as published: the number, or a state word."""
+        state = self._policy_version
+        assert state is not None and self._poll_engine is not None
+        try:
+            value = _read_policy_version_word(state, self._poll_engine)
+        except Exception as e:  # pylint: disable=broad-except
+            if not self._poller_read_failing:
+                logger.warning('Failed to read the RBAC policy version; '
+                               'workers keep their policy until it reads '
+                               'again: '
+                               f'{common_utils.format_exception(e)}')
+            self._poller_read_failing = True
+            return _READ_ERROR
+        if self._poller_read_failing:
+            logger.info('Reading the RBAC policy version again.')
+        self._poller_read_failing = False
+        return value
+
+    def start_policy_watcher(self) -> None:
+        """Keep this process's policy within a few seconds of the database.
+
+        Call in each process that serves requests. The in-memory readers (the
+        RBAC middleware, `roles_in_memory`) never reload on their own, so
+        without this a role changed by another process would not reach them.
+        """
+        with self._refresh_start_lock:
+            if self._watcher_started:
+                return
+            threading.Thread(target=self._watch_policy_forever,
+                             name='rbac-policy-watcher',
+                             daemon=True).start()
+            self._watcher_started = True
+            logger.debug('RBAC policy watcher started.')
+
+    def _watch_policy_forever(self) -> None:
+        while True:
+            time.sleep(_POLICY_REFRESH_INTERVAL_SECONDS)
+            self._watch_policy_once()
+
+    def _watch_policy_once(self) -> None:
+        """Reload if the published version moved. Never raises."""
+        try:
+            # Not before the first request initializes this process: nothing
+            # has read the model yet, and that first load is current.
+            enforcer = self.enforcer
+            state = self._policy_version
+            if (enforcer is None or state is None or
+                    state.enforcer is not enforcer):
+                return
+            published = _read_published_policy_version()
+            if published != _READ_ERROR:
+                self._error_since = None
+            elif self._error_since is None:
+                self._error_since = time.monotonic()
+            elif time.monotonic() - self._error_since > _POLLER_STALE_SECONDS:
+                # Only the poller's connections may be failing.
+                published = None
+            if published is None:
+                if not self._watcher_falling_back:
+                    logger.warning('No current RBAC policy version from the '
+                                   'server\'s poller; reading it from the '
+                                   'database instead.')
+                self._watcher_falling_back = True
+                published = _read_policy_version_word(state, state.engine)
+            elif self._watcher_falling_back and published != _READ_ERROR:
+                logger.info('The server\'s RBAC policy version poller is '
+                            'back.')
+                self._watcher_falling_back = False
+            if published == _READ_ERROR:
+                # Keep the model: rebuilding now would only add load to a
+                # database that is already failing.
+                pass
+            elif published == _UNVERSIONED:
+                now = time.monotonic()
+                if now - self._unversioned_reload_at >= (
+                        _UNVERSIONED_RELOAD_INTERVAL_SECONDS):
+                    self._unversioned_reload_at = now
+                    self._load_policy_no_lock()
+            elif not state.is_loaded(int(published)):
+                self._load_policy_no_lock(known_version=int(published))
+        except Exception as e:  # pylint: disable=broad-except
+            if not self._watcher_failing:
+                logger.warning('Failed to refresh the RBAC policy; roles '
+                               'changed elsewhere may not apply here: '
+                               f'{common_utils.format_exception(e)}')
+            self._watcher_failing = True
+            return
+        if self._watcher_failing:
+            logger.info('Refreshing the RBAC policy again.')
+        self._watcher_failing = False
 
     def check_workspace_permission(
             self,
@@ -1676,8 +1893,62 @@ class PermissionService:
             # and the caller is told the workspace was cleared.
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            enforcer.remove_filtered_policy(1, workspace_name)
+            with self._local_write():
+                enforcer.remove_filtered_policy(1, workspace_name)
             _clear_legacy_member_cache()
+
+
+def _poller_engine(
+        engine: sqlalchemy.engine.Engine) -> sqlalchemy.engine.Engine:
+    """A connection-per-read engine for the poller, off the request pool."""
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        return sqlalchemy.create_engine(
+            engine.url,
+            poolclass=sqlalchemy.NullPool,
+            connect_args={'connect_timeout': _POLLER_DB_TIMEOUT_SECONDS})
+    return sqlalchemy.create_engine(engine.url, poolclass=sqlalchemy.NullPool)
+
+
+def _read_policy_version_word(state: _PolicyVersion,
+                              engine: sqlalchemy.engine.Engine) -> str:
+    """The stored version as published: the number, or `_UNVERSIONED`.
+
+    Raises if the read fails.
+    """
+    with engine.begin() as conn:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+            # Scoped to the transaction, so it also works through a
+            # transaction-mode pooler.
+            conn.execute(
+                sqlalchemy.text('SET LOCAL statement_timeout = '
+                                f'{_POLLER_DB_TIMEOUT_SECONDS * 1000}'))
+        version = state.read_on(conn)
+    return _UNVERSIONED if version is None else str(version)
+
+
+def _publish_policy_version(path: str, value: str) -> None:
+    """Atomically write `value` and a heartbeat for the watchers."""
+    tmp = f'{path}.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        # Monotonic is system-wide, so it compares across processes and a
+        # wall-clock step cannot make a dead poller look alive.
+        f.write(f'{value} {time.monotonic()}\n')
+    os.replace(tmp, path)
+
+
+def _read_published_policy_version() -> Optional[str]:
+    """What the poller published, or None if it is missing or stale."""
+    path = os.environ.get(_POLICY_VERSION_FILE_ENV)
+    if not path:
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            value, beat = f.read().split()
+        if time.monotonic() - float(beat) > _POLLER_STALE_SECONDS:
+            return None
+    except (OSError, ValueError):
+        return None
+    return value
 
 
 @contextlib.contextmanager

@@ -6,10 +6,22 @@ from unittest import mock
 from click import testing as cli_testing
 import pytest
 
+from sky import exceptions
 from sky.client.cli import command
 from sky.client.cli import table_utils
 from sky.schemas.api import responses
 from sky.utils import volume as volume_utils
+
+
+@pytest.fixture(autouse=True)
+def _server_without_workspace_api(monkeypatch):
+    """A server too old to name the active workspace: -a and patterns are
+    not narrowed (covered in test_cli_bulk_selectors.py)."""
+    monkeypatch.setattr(
+        'sky.client.sdk.get_user_workspace',
+        mock.MagicMock(side_effect=exceptions.APINotSupportedError('old')))
+    monkeypatch.setattr('sky.client.sdk.api_info',
+                        mock.MagicMock(return_value=mock.Mock(user=None)))
 
 
 def _mock_ls_and_workspaces(monkeypatch, volumes, workspaces):

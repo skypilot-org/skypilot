@@ -125,6 +125,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.utils.kubernetes import exec_auth_cache
 from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
@@ -1173,6 +1174,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
+    permission.permission_service.start_policy_watcher()
     # Attribute event loop stalls to the code that caused them. Not gated on
     # METRICS_ENABLED: its primary output is a log line, which is the only
     # thing available when debugging a deployment after the fact.
@@ -4833,6 +4835,8 @@ if __name__ == '__main__':
 
     # Initialize global user state db
     db_utils.set_max_connections(1)
+    # Fail with install hint before ORM init (not TypeError on missing SA).
+    sqlalchemy_deps.require_server_dependencies()
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')
@@ -4958,6 +4962,9 @@ if __name__ == '__main__':
         clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
+        # Before uvicorn spawns its workers: they find the poller's output
+        # through the environment.
+        permission.permission_service.start_policy_version_poller()
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
