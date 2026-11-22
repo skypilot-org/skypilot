@@ -1181,7 +1181,8 @@ def test_ssh_into_cluster_in_new_workspace(generic_cloud: str):
 def test_workspace_allowed_queues(generic_cloud: str):
     """A job that names a queue outside its workspace's allowed queues is
     rejected at submission; an allowed queue, or no queue, is not. On
-    Kubernetes, a queue set on the pod some other way is rejected too."""
+    Kubernetes, a queue set on the pod some other way is rejected too, both
+    for a cluster and for a managed job."""
     # Overlaid onto the existing server config by override_sky_config.
     config_dict = {
         'workspaces': {
@@ -1243,15 +1244,29 @@ def test_workspace_allowed_queues(generic_cloud: str):
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'--config active_workspace=queues-ws {task_yamls["label"]} 2>&1) '
             f'&& exit 1; echo "$s"; {rejected}')
+        # A managed job: its cluster is refused on the controller, which
+        # fails the job instead of retrying.
+        commands += [
+            f'sky jobs launch -y -n {name}-job --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace=queues-ws {task_yamls["label"]}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-job',
+                job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
+                timeout=10 * 60),
+            f's=$(sky jobs logs --controller -n {name}-job --no-follow); '
+            f'echo "$s"; {rejected}',
+        ]
     test = smoke_tests_utils.Test(
         'test_workspace_allowed_queues',
         commands,
         teardown=(f'sky down -y {name} --config active_workspace=queues-ws '
-                  f'|| true; '
+                  f'|| true; sky jobs cancel -y -n {name}-job || true; '
                   f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
                   f'{smoke_tests_utils.SKY_API_RESTART}'),
         config_dict=config_dict,
-        timeout=10 * 60,
+        timeout=20 * 60,
     )
     try:
         smoke_tests_utils.run_one_test(test)
