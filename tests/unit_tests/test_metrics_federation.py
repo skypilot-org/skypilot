@@ -42,9 +42,11 @@ def test_gpu_metrics_keeps_gpu_semantics():
     assert 'litellm_' not in joined
 
 
-def test_gpu_metrics_federates_node_rdma_throughput():
-    # The GPU dashboard's node network panel reads node-exporter's two RDMA
-    # byte counters, and no other infiniband series.
+def test_gpu_metrics_federates_node_rdma_series():
+    # node-exporter's RDMA byte counters (the GPU dashboard's node network
+    # panel) plus its NIC error, link and link-rate series, and none of the
+    # infiniband collector's other series. Names as node-exporter 1.11 exports
+    # them on a RoCE mlx5 node.
     name_regexes = [
         m.group(1)
         for m in (re.fullmatch(r'\{__name__=~"(.+)"\}', p)
@@ -55,9 +57,32 @@ def test_gpu_metrics_federates_node_rdma_throughput():
     def federated(name):
         return any(re.fullmatch(r, name) for r in name_regexes)
 
-    assert federated('node_infiniband_port_data_transmitted_bytes_total')
-    assert federated('node_infiniband_port_data_received_bytes_total')
-    assert not federated('node_infiniband_port_packets_received_total')
+    for name in (
+            'node_infiniband_port_data_transmitted_bytes_total',
+            'node_infiniband_port_data_received_bytes_total',
+            'node_infiniband_req_cqes_errors_total',
+            'node_infiniband_req_cqes_flush_errors_total',
+            'node_infiniband_resp_cqes_errors_total',
+            'node_infiniband_resp_cqes_flush_errors_total',
+            'node_infiniband_req_remote_invalid_request_errors_total',
+            'node_infiniband_link_downed_total',
+            'node_infiniband_link_error_recovery_total',
+            'node_infiniband_symbol_error_total',
+            'node_infiniband_port_errors_received_total',
+            'node_infiniband_local_link_integrity_errors_total',
+            'node_infiniband_roce_adp_retransmits_total',
+            'node_infiniband_local_ack_timeout_errors_total',
+            'node_infiniband_rate_bytes_per_second',
+    ):
+        assert federated(name), name
+    for name in (
+            'node_infiniband_port_packets_received_total',
+            'node_infiniband_multicast_packets_received_total',
+            'node_infiniband_rx_write_requests_total',
+            'node_infiniband_np_cnp_packets_sent_total',
+            'node_infiniband_vl',
+    ):
+        assert not federated(name), name
 
 
 def test_endpoint_metrics_federates_litellm(monkeypatch):
