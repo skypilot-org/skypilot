@@ -1634,12 +1634,28 @@ class TestQueryInstances:
         }
 
     @pytest.mark.parametrize('retry_if_missing', [False, True])
-    def test_configuring_job_without_nodes_is_init(self, mock_client,
+    def test_configuring_job_without_nodes_is_init(self, monkeypatch,
                                                    retry_if_missing):
-        mock_client.query_jobs.side_effect = (
-            lambda job_name, states: ['booting-job']
-            if states == ['configuring'] else [])
-        mock_client.get_job_nodes.return_value = ([], [])
+        client = instance.slurm.SlurmClient('localhost', 22, 'testuser', None)
+        monkeypatch.setattr(instance, '_make_slurm_client',
+                            mock.MagicMock(return_value=client))
+        monkeypatch.setattr(
+            client, 'query_jobs', lambda name, states:
+            (['booting-job'] if states == ['configuring'] else []))
+        monkeypatch.setattr(instance.time, 'sleep', mock.MagicMock())
+
+        def run_slurm_command(cmd):
+            # Execute the real adapter command with an empty squeue NodeList.
+            # A hostlist lookup is unexpected when Slurm assigned no nodes.
+            shell = ('squeue() { printf "\\n"; }; '
+                     'scontrol() { return 1; }; ')
+            result = subprocess.run(['sh', '-c', shell + cmd],
+                                    check=False,
+                                    capture_output=True,
+                                    text=True)
+            return result.returncode, result.stdout, result.stderr
+
+        monkeypatch.setattr(client, '_run_slurm_cmd', run_slurm_command)
 
         statuses = instance.query_instances('test-cluster',
                                             _CLUSTER,

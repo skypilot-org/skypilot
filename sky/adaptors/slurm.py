@@ -63,6 +63,7 @@ _DEFAULT_TIME_REGEX = re.compile(
 hostlist = hostlist_utils
 
 _UNRESOLVED_HOSTNAME_MARKER = 'UNRESOLVED'
+_NO_JOB_NODES_MARKER = 'SKYPILOT_NO_SLURM_JOB_NODES'
 
 
 class SlurmPartition(NamedTuple):
@@ -979,13 +980,20 @@ class SlurmClient:
         return bool(stdout.strip())
 
     @timeline.event
-    def get_job_nodes(self, job_id: str) -> Tuple[List[str], List[str]]:
+    def get_job_nodes(
+        self,
+        job_id: str,
+        *,
+        allow_empty: bool = False,
+    ) -> Tuple[List[str], List[str]]:
         """Get the list of nodes and their IPs for a given job ID.
 
         The ordering is guaranteed to be stable for the lifetime of the job.
 
         Args:
             job_id: The Slurm job ID.
+            allow_empty: Return empty lists when squeue succeeds without a
+                NodeList. Failed commands and node lookups still raise.
 
         Returns:
             A tuple of (nodes, node_ips) where nodes is a list of node names
@@ -994,12 +1002,18 @@ class SlurmClient:
 
         query = self._command_as_user(
             ['squeue', '-h', '--jobs', job_id, '-o', '%N'])
+        # Only a successful squeue lookup with no NodeList is provisional.
+        # Empty output from a failed hostlist or address lookup must still raise.
+        empty_nodelist_check = (
+            f'if [ -z "$nodelist" ]; then echo {_NO_JOB_NODES_MARKER}; '
+            'exit 0; fi; ' if allow_empty else '')
         cmd = (
             # Use scontrol show hostnames to expand both compact Slurm
             # hostlist notation (e.g. ml-16-node-[001-002]) and
             # comma-separated nodes into individual node names.
             # TODO(kevin): Use json output for more robust parsing.
             f'nodelist=$({query}) || exit $?; '
+            f'{empty_nodelist_check}'
             f'scontrol show hostnames $nodelist | while read -r node; do '
             f'node_addr=$(scontrol show node=$node | grep NodeAddr= | '
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
@@ -1013,6 +1027,8 @@ class SlurmClient:
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
+        if allow_empty and stdout.strip() == _NO_JOB_NODES_MARKER:
+            return [], []
 
         node_info = {}
         nodes_to_resolve: List[Tuple[str, str]] = []
