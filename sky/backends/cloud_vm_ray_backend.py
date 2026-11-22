@@ -1168,9 +1168,8 @@ class RetryingVmProvisioner(object):
                                     keep_launch_fields_in_existing_config=
                                     cluster_exists,
                                     volume_mounts=volume_mounts,
-                                    storage_mounts=(task.storage_mounts
-                                                    if task is not None else
-                                                    None),
+                                    storage_mounts=(task.storage_mounts if task
+                                                    is not None else None),
                                     cloud_specific_failover_overrides=
                                     failover_overrides,
                                     extra_template_variables=extra_vars,
@@ -5679,6 +5678,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        if terminate:
+            cluster_name_lib.check_kubernetes_teardown(handle)
         try:
             handle.close_skylet_ssh_tunnel()
         except Exception as e:  # pylint: disable=broad-except
@@ -5928,6 +5929,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
         """
+        if terminate:
+            cluster_name_lib.check_kubernetes_teardown(handle)
+
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         cloud = handle.launched_resources.cloud
 

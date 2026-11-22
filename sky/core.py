@@ -24,6 +24,7 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.backends import cluster_name as cluster_name_lib
 from sky.backends import task_codegen
 from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
@@ -988,6 +989,8 @@ def down(cluster_name: str,
     Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
           exist.
+        sky.exceptions.ClusterNameCollisionError: the cluster may share its
+            Kubernetes resources with another cluster record.
         RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
           jobs controller.
@@ -996,6 +999,11 @@ def down(cluster_name: str,
     if handle is None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
+
+    if isinstance(handle, cloud_vm_ray_backend.CloudVmRayResourceHandle):
+        # Graceful cancellation and lifecycle hooks may act on the head before
+        # the backend checks again when it holds the cluster lock.
+        cluster_name_lib.check_kubernetes_teardown(handle)
 
     if user_initiated:
         # Record the event before teardown, while the cluster row still exists

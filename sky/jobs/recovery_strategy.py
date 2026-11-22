@@ -74,6 +74,7 @@ PRECHECK_FAILURES = (
 # will succeed. Recovery keeps retrying the others, which can clear on their
 # own (a failed upload, expired cloud credentials, a volume not ready yet).
 TERMINAL_PRECHECK_FAILURES = (
+    exceptions.ClusterNameCollisionError,
     exceptions.InvalidClusterNameError,
     exceptions.ResourcesMismatchError,
     exceptions.StorageSpecError,

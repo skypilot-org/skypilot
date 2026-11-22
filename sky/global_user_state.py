@@ -2511,20 +2511,26 @@ def cluster_with_name_exists(cluster_name: str) -> bool:
 
 
 @metrics_lib.time_me
-def get_cluster_name_reservations() -> List[Dict[str, Any]]:
-    """Return live cluster handles and their persisted provisioning scope."""
+def get_cluster_name_reservations(cloud_name: str,
+                                  exclude_name: str) -> List[Dict[str, Any]]:
+    """Return other live handles with the given saved cloud name."""
+    # Cloud names are stored in handles. Fetch YAML only for matches so each
+    # allocation does not have to transfer every running cluster's config.
+    name, handle, owner = (cluster_table.c.name, cluster_table.c.handle,
+                           cluster_table.c.owner)
     with orm.Session(_db_manager.get_engine()) as session:
-        rows = session.query(cluster_table.c.name, cluster_table.c.handle,
-                             cluster_table.c.owner,
-                             cluster_yaml_table.c.yaml).outerjoin(
-                                 cluster_yaml_table, cluster_table.c.name ==
-                                 cluster_yaml_table.c.cluster_name).all()
-    return [{
-        'name': row.name,
-        'handle': pickle.loads(row.handle),
-        'owner': _load_owner(row.owner),
-        'yaml': row.yaml,
-    } for row in rows]
+        records = []
+        for row in session.query(name, handle,
+                                 owner).filter(name != exclude_name):
+            decoded_handle = pickle.loads(row.handle)
+            if getattr(decoded_handle, 'cluster_name_on_cloud',
+                       None) == cloud_name:
+                records.append({
+                    'name': row.name,
+                    'handle': decoded_handle,
+                    'owner': _load_owner(row.owner),
+                })
+    return records
 
 
 @metrics_lib.time_me

@@ -336,12 +336,9 @@ async def test_cloud_name_collision_never_cleans_up_or_retries(
     collision = exceptions.ClusterNameCollisionError('Already owned')
     executor._await_launch_request = mock.AsyncMock(side_effect=collision)
 
-    if raise_on_failure:
-        with pytest.raises(exceptions.ProvisionPrechecksError) as error:
-            await executor._launch(raise_on_failure=True)
-        assert error.value.reasons == [collision]
-    else:
-        assert await executor._launch(raise_on_failure=False) is None
+    with pytest.raises(exceptions.ProvisionPrechecksError) as error:
+        await executor._launch(raise_on_failure=raise_on_failure)
+    assert error.value.reasons == [collision]
 
     patches.sdk_launch.assert_called_once()
     executor._cleanup_cluster.assert_not_called()

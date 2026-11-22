@@ -1040,6 +1040,8 @@ class TestKubeconfigUploadNeedsAdmin:
         to_provision.region = _CTX
         setattr(to_provision, 'assert_launchable', lambda: to_provision)
         to_provision.cloud.check_quota_available.return_value = True
+        to_provision.cloud.max_cluster_name_length.return_value = (
+            _K8S.max_cluster_name_length())
         to_provision.cloud.yield_cloud_specific_failover_overrides.return_value = [
             None
         ]

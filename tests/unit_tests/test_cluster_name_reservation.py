@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy
 
 from sky import clouds
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import models
@@ -71,21 +72,23 @@ def reserve(name: str, rendered: Dict[str, Any],
     return cluster_name.reserve(name, rendered, cloud_for(rendered), owner)
 
 
-def save_cluster(name: str,
-                 rendered: Dict[str, Any],
-                 ready: bool = False,
-                 owner: Optional[List[str]] = None) -> None:
-    handle = SimpleNamespace(
+def save_cluster(
+    name: str,
+    rendered: Dict[str, Any],
+    ready: bool = False,
+    owner: Optional[List[str]] = None
+) -> cloud_vm_ray_backend.CloudVmRayResourceHandle:
+    handle = cloud_vm_ray_backend.CloudVmRayResourceHandle(
         cluster_name=name,
         cluster_name_on_cloud=rendered['cluster_name'],
         cluster_yaml=f'/unused/{name}.yml',
-        launched_resources=SimpleNamespace(cloud=cloud_for(rendered),
-                                           region='eastus',
-                                           zone=None),
+        launched_nodes=1,
+        launched_resources=Resources(cloud=cloud_for(rendered)),
     )
     global_user_state.set_cluster_yaml(name, yaml_utils.dump_yaml_str(rendered))
     global_user_state.add_or_update_cluster(name, handle, None, ready=ready)
     global_user_state.set_owner_identity_for_cluster(name, owner)
+    return handle
 
 
 @pytest.mark.parametrize('status', [
@@ -212,6 +215,58 @@ def test_kubernetes_context_aliases_do_not_prove_disjoint_namespaces(
                        context='b',
                        namespace='same'), None):
             pytest.fail('Kubeconfig contexts may refer to the same cluster')
+
+
+def test_kubernetes_distinct_cluster_uids_reserve_independently(
+        state: None) -> None:
+    first = config(module='sky.provision.kubernetes',
+                   cluster_uid='a',
+                   namespace='same')
+    second = config(module='sky.provision.kubernetes',
+                    cluster_uid='b',
+                    namespace='same')
+    first_handle = save_cluster('first', first)
+    with reserve('second', second, None):
+        second_handle = save_cluster('second', second)
+
+    cluster_name.check_kubernetes_teardown(first_handle)
+    cluster_name.check_kubernetes_teardown(second_handle)
+
+
+@pytest.mark.parametrize('operation', ['down', 'teardown', 'cleanup'])
+def test_kubernetes_teardown_refuses_shared_resources(
+        state: None, monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    rendered = config(module='sky.provision.kubernetes',
+                      namespace='same',
+                      cluster_uid='shared')
+    handle = save_cluster('first', rendered, ready=True)
+    save_cluster('second', rendered, ready=True)
+
+    before_teardown = mock.Mock()
+    delete = mock.Mock()
+    monkeypatch.setattr(core, '_graceful_job_cancel', before_teardown)
+    monkeypatch.setattr(core, '_maybe_run_down_hooks', before_teardown)
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_status_handle',
+                        before_teardown)
+    monkeypatch.setattr(cloud_vm_ray_backend.provisioner, 'teardown_cluster',
+                        delete)
+    monkeypatch.setattr(cloud_vm_ray_backend.provision_lib,
+                        'cleanup_cluster_resources', delete)
+
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    with pytest.raises(exceptions.ClusterNameCollisionError,
+                       match='may own the same Kubernetes resources'):
+        if operation == 'down':
+            core.down('first', purge=True, graceful=True, user_initiated=True)
+        elif operation == 'teardown':
+            backend.teardown_no_lock(handle, terminate=True, purge=True)
+        else:
+            backend.post_teardown_cleanup(handle, terminate=True, purge=True)
+    before_teardown.assert_not_called()
+    delete.assert_not_called()
+    for name in ('first', 'second'):
+        assert global_user_state.get_status_from_cluster_name(
+            name) == status_lib.ClusterStatus.UP
 
 
 def test_missing_legacy_namespace_fails_closed(state: None) -> None:

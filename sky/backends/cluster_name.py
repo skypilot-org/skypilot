@@ -2,6 +2,7 @@
 import contextlib
 import hashlib
 import json
+import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
@@ -10,6 +11,9 @@ from sky import global_user_state
 from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    from sky.backends import cloud_vm_ray_backend
 
 
 def candidates(display_name: str, cloud: clouds.Cloud) -> List[str]:
@@ -51,15 +55,54 @@ def _namespace(cloud: Optional[clouds.Cloud], provider: Dict[str, Any],
     if isinstance(cloud, clouds.GCP):
         return ('gcp', provider.get('project_id'))
     if isinstance(cloud, clouds.Kubernetes):
-        # Different contexts (and API URLs) may address the same cluster.
-        # Without an authoritative cluster identity, only namespaces prove
-        # that identically named pods cannot be the same resource.
-        # An omitted namespace is resolved from kubeconfig, not necessarily
-        # "default", so leave it unknown here.
-        return ('kubernetes', provider.get('namespace'))
+        # Context aliases may refer to the same Kubernetes cluster. The
+        # recorded cluster UID identifies it when available. An omitted
+        # namespace is resolved from kubeconfig, so keep it unknown here.
+        return ('kubernetes', provider.get('namespace'),
+                provider.get('cluster_uid'))
     if isinstance(cloud, clouds.AWS):
         return ('aws', owner[-1] if owner else None, provider.get('region'))
     return (cloud.canonical_name(),)
+
+
+def _provider_config(cluster_yaml: Optional[str]) -> Dict[str, Any]:
+    if cluster_yaml is None:
+        return {}
+    content = global_user_state.get_cluster_yaml_str(cluster_yaml)
+    return yaml_utils.safe_load(content).get('provider', {}) if content else {}
+
+
+def _find_conflict(cluster_name: str, cloud_name: str,
+                   namespace: Tuple[Optional[str], ...]) -> Optional[str]:
+    """Return a conflicting live record, treating missing scope as unknown."""
+    for record in global_user_state.get_cluster_name_reservations(
+            cloud_name, cluster_name):
+        handle = record['handle']
+        resources = getattr(handle, 'launched_resources', None)
+        existing_scope = _namespace(getattr(resources, 'cloud', None),
+                                    _provider_config(handle.cluster_yaml),
+                                    record['owner'])
+        if not any(left is not None and right is not None and left != right
+                   for left, right in zip(namespace, existing_scope)):
+            return record['name']
+    return None
+
+
+def check_kubernetes_teardown(
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle') -> None:
+    """Refuse teardown when another live record could own the same resources."""
+    resources = getattr(handle, 'launched_resources', None)
+    cloud = getattr(resources, 'cloud', None)
+    if not isinstance(cloud, clouds.Kubernetes):
+        return
+    conflict = _find_conflict(
+        handle.cluster_name, handle.cluster_name_on_cloud,
+        _namespace(cloud, _provider_config(handle.cluster_yaml), None))
+    if conflict is not None:
+        raise exceptions.ClusterNameCollisionError(
+            f'Cannot tear down {handle.cluster_name!r}: another SkyPilot '
+            'cluster record may own the same Kubernetes resources. Contact '
+            'your SkyPilot administrator to resolve the duplicate records.')
 
 
 @contextlib.contextmanager
@@ -99,28 +142,11 @@ def reserve(cluster_name: str, config: Dict[str, Any], cloud: clouds.Cloud,
             continue_condition=locks.LockAcquirableCondition(
                 lock_id)) from error
     try:
-        for record in global_user_state.get_cluster_name_reservations():
-            if record['name'] == cluster_name:
-                continue
-            handle = record['handle']
-            if getattr(handle, 'cluster_name_on_cloud', None) != cloud_name:
-                continue
-            yaml = record['yaml']
-            if yaml is None:
-                yaml = global_user_state.get_cluster_yaml_str(
-                    handle.cluster_yaml)
-            if yaml is not None:
-                existing = yaml_utils.safe_load(yaml)
-                resources = getattr(handle, 'launched_resources', None)
-                existing_namespace = _namespace(
-                    getattr(resources, 'cloud', None), existing['provider'],
-                    record['owner'])
-                if any(left is not None and right is not None and left != right
-                       for left, right in zip(namespace, existing_namespace)):
-                    continue
+        conflict = _find_conflict(cluster_name, cloud_name, namespace)
+        if conflict is not None:
             raise exceptions.ClusterNameCollisionError(
                 f'Cluster {cluster_name!r} maps to cloud name {cloud_name!r}, '
-                f'which is already used by cluster {record["name"]!r}. '
+                f'which is already used by cluster {conflict!r}. '
                 'Choose a different cluster name.')
         yield
     finally:

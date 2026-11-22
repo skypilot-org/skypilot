@@ -1048,6 +1048,9 @@ def write_cluster_config(
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
+    Provisioning callers pass a name_reservation stack and hold it until
+    the initial cluster record is committed.
+
     Returns:
         Dict with the following keys:
         - 'ray': Path to the generated Ray yaml config file
@@ -1626,20 +1629,18 @@ def write_cluster_config(
             logger.warning(f'Failed to calculate config_hash: {e}')
             logger.debug('Full exception:', exc_info=e)
         return config_dict
-    with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
-        reservation_yaml = f.read()
-    if old_yaml_content is not None and keep_launch_fields_in_existing_config:
-        reservation_yaml = _replace_yaml_dicts(
-            reservation_yaml, old_yaml_content,
-            _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
-            _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
-    if name_reservation is None:
-        raise ValueError('Provisioning must reserve the cloud name until the '
-                         'initial cluster handle is committed.')
-    name_reservation.enter_context(
-        cluster_name_lib.reserve(cluster_name,
-                                 yaml_utils.safe_load(reservation_yaml), cloud,
-                                 cloud_user_identity))
+    if name_reservation is not None:
+        with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
+            reservation_yaml = f.read()
+        if old_yaml_content is not None and keep_launch_fields_in_existing_config:
+            reservation_yaml = _replace_yaml_dicts(
+                reservation_yaml, old_yaml_content,
+                _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+                _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+        name_reservation.enter_context(
+            cluster_name_lib.reserve(cluster_name,
+                                     yaml_utils.safe_load(reservation_yaml),
+                                     cloud, cloud_user_identity))
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
     # Auth setup must precede restoration: it can overwrite persisted SSH
