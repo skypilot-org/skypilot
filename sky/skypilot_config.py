@@ -1706,9 +1706,11 @@ def check_queue_allowed(workspace: str,
         raise ValueError(
             f'Workspace {name!r} has allowed queues {allowed} but no default '
             'queue. Set a default queue from the allowed queues.')
+    # A queue read back from rendered YAML can be a number.
+    queue = str(queue)
     # Slurm takes a comma-separated list of QoS names.
     queues = queue.split(',') if cloud == 'slurm' else [queue]
-    if all(q.strip() in allowed for q in queues):
+    if all(q in allowed for q in queues):
         return
     if is_default:
         raise ValueError(

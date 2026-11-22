@@ -3072,6 +3072,23 @@ def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
             'allowed_queues': ['q', 'other']
         }, "Default queue 'q,other' of workspace 'team-a' is not in its allowed"
         ),
+        # Names are compared exactly; Slurm would read a padded name as a
+        # separate argument.
+        ('slurm', {
+            'queue': 'q, other',
+            'allowed_queues': ['q', 'other']
+        },
+         "Default queue 'q, other' of workspace 'team-a' is not in its allowed"
+        ),
+        # A queue read back from rendered YAML can be a number.
+        ('kubernetes', {
+            'queue': 123,
+            'allowed_queues': ['123']
+        }, None),
+        ('slurm', {
+            'queue': 123,
+            'allowed_queues': ['other']
+        }, "Default queue '123' of workspace 'team-a' is not in its allowed"),
     ])
 def test_check_queue_allowed_for_default_queue(cloud, quota, error) -> None:
     """A workspace's default queue must be in its allowed queues."""
