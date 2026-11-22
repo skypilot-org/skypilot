@@ -1699,14 +1699,17 @@ def check_queue_allowed(workspace: str,
     """Checks that `queue` is one of the workspace's allowed queues."""
     allowed = ((workspace_config.get(cloud) or {}).get('quota') or
                {}).get('allowed_queues')
-    if allowed is None or queue in allowed or (queue is None and
-                                               not is_default):
+    if allowed is None or (queue is None and not is_default):
         return
     name = workspace_config.get('name') or workspace
-    if is_default and queue is None:
+    if queue is None:
         raise ValueError(
             f'Workspace {name!r} has allowed queues {allowed} but no default '
             'queue. Set a default queue from the allowed queues.')
+    # Slurm takes a comma-separated list of QoS names.
+    queues = queue.split(',') if cloud == 'slurm' else [queue]
+    if all(q.strip() in allowed for q in queues):
+        return
     if is_default:
         raise ValueError(
             f'Default queue {queue!r} of workspace {name!r} is not in its '

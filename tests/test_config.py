@@ -3032,24 +3032,47 @@ def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
         ]
 
 
-@pytest.mark.parametrize('cloud,quota,error', [
-    ('kubernetes', {
-        'queue': 'q',
-        'allowed_queues': ['q', 'other']
-    }, None),
-    ('kubernetes', {
-        'allowed_queues': ['q']
-    }, "Workspace 'team-a' has allowed queues \\['q'\\] but no default queue"),
-    ('kubernetes', {}, None),
-    ('kubernetes', {
-        'queue': 'q',
-        'allowed_queues': ['other']
-    }, "Default queue 'q' of workspace 'team-a' is not in its allowed queues"),
-    ('slurm', {
-        'queue': 'q',
-        'allowed_queues': ['other']
-    }, "Default queue 'q' of workspace 'team-a' is not in its allowed queues"),
-])
+@pytest.mark.parametrize(
+    'cloud,quota,error',
+    [
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('kubernetes', {
+            'allowed_queues': ['q']
+        },
+         "Workspace 'team-a' has allowed queues \\['q'\\] but no default queue"
+        ),
+        ('kubernetes', {}, None),
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        ('slurm', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        # A Slurm QoS can be a comma-separated list; each name must be allowed.
+        ('slurm', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('slurm', {
+            'queue': 'q,bad',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,bad' of workspace 'team-a' is not in its allowed"),
+        # A Kueue queue is a single name.
+        ('kubernetes', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,other' of workspace 'team-a' is not in its allowed"
+        ),
+    ])
 def test_check_queue_allowed_for_default_queue(cloud, quota, error) -> None:
     """A workspace's default queue must be in its allowed queues."""
     workspace_config = {cloud: {'quota': quota}}

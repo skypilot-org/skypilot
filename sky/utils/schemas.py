@@ -1644,7 +1644,8 @@ _ALLOWED_QUEUES_SCHEMA = {
     'type': 'array',
     'items': {
         'type': 'string',
-        'minLength': 1,
+        # One queue name per entry.
+        'pattern': r'^[^,\s]+$',
     },
 }
 
