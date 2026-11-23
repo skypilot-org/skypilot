@@ -795,12 +795,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
             is_primary_in_job_groups=(is_primary_in_job_groups),
             is_batch=is_batch)
     except exceptions.PoolRefusedError as e:
-        storage_clouds = (
-            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
-        # Without a cloud bucket nothing was uploaded, and constructing the
-        # storage mounts would create them.
-        if _stages_through_cloud_bucket(storage_clouds):
-            _teardown_uploaded_storage(dag, backend)
+        _teardown_uploaded_storage(dag, backend)
         _raise_pool_refused(pool or '', e.exists, e.workspace)
     return job_ids
 
@@ -809,6 +804,17 @@ def _teardown_uploaded_storage(dag: 'sky.Dag',
                                backend: backends.CloudVmRayBackend) -> None:
     """Removes the files uploaded for a job that will not run, as the
     controller does when a job finishes. Best effort."""
+    try:
+        storage_clouds = (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+        # Without a cloud bucket nothing was uploaded, and constructing the
+        # storage mounts would create them.
+        if not _stages_through_cloud_bucket(storage_clouds):
+            return
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to check where a refused job\'s files were '
+                       f'uploaded: {e}')
+        return
     for task in dag.tasks:
         # A storage replaced by its spec on upload is constructed first.
         for storage in task.storage_mounts.values():

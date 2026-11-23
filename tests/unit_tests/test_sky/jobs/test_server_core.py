@@ -482,11 +482,13 @@ def test_refusal_of_the_active_workspace_is_not_a_switch():
 
 @pytest.mark.parametrize(('uploaded', 'cleanup_fails'), [(True, False),
                                                          (True, True),
-                                                         (False, False)])
+                                                         (False, False),
+                                                         (None, False)])
 def test_submission_refused_by_the_controller(uploaded, cleanup_fails):
     """The files uploaded for the job are removed: it never runs, and only a
     finished job removes them. Without a cloud bucket nothing was uploaded,
-    and the storage mounts are left alone."""
+    and the storage mounts are left alone. A failed check (None) leaves
+    them alone too, and still reports the refusal."""
     backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
     backend.set_job_info_without_job_id.side_effect = (
         exceptions.PoolRefusedError(True, 'ws-a'))
@@ -510,8 +512,12 @@ def test_submission_refused_by_the_controller(uploaded, cleanup_fails):
          mock.patch.object(jobs_core.storage_lib,
                            'get_cached_enabled_storage_cloud_names_or_refresh',
                            return_value=['gcp']), \
-         mock.patch.object(jobs_core, '_stages_through_cloud_bucket',
-                           return_value=uploaded) as stages, \
+         mock.patch.object(
+             jobs_core,
+             '_stages_through_cloud_bucket',
+             return_value=uploaded,
+             side_effect=None if uploaded is not None else RuntimeError('db'),
+         ) as stages, \
          mock.patch.object(jobs_core, '_raise_pool_refused',
                            side_effect=ValueError('refused')) as refuse:
         with pytest.raises(ValueError, match='refused'):
@@ -529,6 +535,27 @@ def test_submission_refused_by_the_controller(uploaded, cleanup_fails):
     # Built like the controller does, so a spec-only storage is deleted;
     # never a persistent one, which construct() would create if missing.
     ephemeral.construct.assert_called_once_with()
+
+
+@pytest.mark.parametrize('uploaded', [True, False])
+def test_upload_shares_the_cleanup_condition(uploaded):
+    """The refusal cleanup relies on uploads taking the same branch."""
+    task = sky.Task(name='t', run='echo')
+    with dag_lib.Dag() as dag:
+        dag.add(task)
+    with mock.patch.object(jobs_core.storage_lib,
+                           'get_cached_enabled_storage_cloud_names_or_refresh',
+                           return_value=['gcp']), \
+         mock.patch.object(jobs_core, '_stages_through_cloud_bucket',
+                           return_value=uploaded), \
+         mock.patch.object(jobs_core.controller_utils,
+                           'maybe_translate_local_file_mounts_and_sync_up'
+                          ) as sync_up, \
+         mock.patch.object(jobs_core.controller_utils,
+                           'translate_local_file_mounts_to_two_hop',
+                           return_value={}):
+        jobs_core._upload_files_to_controller(dag)
+    assert sync_up.called == uploaded
 
 
 def test_pool_taken_down_after_the_check(tmp_path):
