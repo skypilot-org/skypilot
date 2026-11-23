@@ -246,8 +246,22 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
         context: grpc.ServicerContext
     ) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:
+        pool = request.pool if request.HasField('pool') else None
+        refusal = None
         try:
-            pool = request.pool if request.HasField('pool') else None
+            if pool is not None:
+                refusal = serve_utils.get_pool_refusal(pool, request.workspace)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+        # Outside the `try`, which would turn these into INTERNAL.
+        if refusal is not None:
+            exists, pool_workspace = refusal
+            if not exists:
+                context.abort(grpc.StatusCode.NOT_FOUND,
+                              f'Pool {pool!r} not found.')
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, pool_workspace or
+                          '')
+        try:
             pool_hash = request.pool_hash if request.HasField(
                 'pool_hash') else None
             user_hash = request.user_hash if request.HasField(
