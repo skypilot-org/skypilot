@@ -300,12 +300,6 @@ _SELF_EXIT_CODES = {
 }
 
 
-def ignore_sigterm_until(marker):
-    """Ignores SIGTERM, like an idle request worker, until `marker` exists."""
-    if not os.path.exists(marker):
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-
 def raise_in_init():
     """Initializer that fails the way a broken import or plugin would."""
     raise RuntimeError('start-up failed')
@@ -325,10 +319,6 @@ def _pool_broken(pool, phase):
     return _sample('sky_apiserver_executor_pool_broken_total',
                    pool=pool,
                    phase=phase)
-
-
-def _warm_start_disabled(pool):
-    return _sample('sky_apiserver_executor_warm_start_disabled', pool=pool)
 
 
 def _peak_overlap(log_path):
@@ -483,9 +473,10 @@ def test_pool_executor_warm_start_off_with_fork():
 
 
 @requires_warm_start
-def test_burstable_executor_rebuilt_pool_warm_starts():
-    """When a warm-started pool breaks after warm start, its replacement also
-    warm-starts, and the break counts as a serving-phase break."""
+def test_burstable_executor_rebuilt_pool_starts_workers_on_demand():
+    """When a warm-started pool breaks after warm start, the break counts as a
+    serving-phase break and its replacement does not warm-start: it starts
+    only the workers its tasks need."""
     before = _pool_broken('rebuild-test', 'serving')
     executor = BurstableExecutor(garanteed_workers=2,
                                  warm_start=True,
@@ -498,8 +489,9 @@ def test_burstable_executor_rebuilt_pool_warm_starts():
         assert executor.submit_until_success(dummy_task).result(timeout=60)
         rebuilt = executor._executor
         assert rebuilt is not original
-        assert rebuilt._warm_start_done.wait(60)
-        assert len(rebuilt._processes) == 2
+        assert rebuilt._warm_start_thread is None
+        time.sleep(2)  # A warm start would have started the second worker.
+        assert len(rebuilt._processes) == 1
         assert _pool_broken('rebuild-test', 'serving') == before + 1
     finally:
         executor.shutdown()
@@ -750,13 +742,12 @@ def test_starting_worker_exiting_while_another_is_ready_is_a_start_failure(
 
 
 @requires_warm_start
-def test_starting_worker_aborts_keep_counting_toward_turning_warm_start_off(
+def test_starting_worker_abort_while_another_is_ready_counts_as_warm_start_break(
         tmp_path):
-    """Starting workers that abort while another worker is ready count as
-    warm-start breaks: they do not reset the consecutive count, so the pool
-    that keeps failing this way has warm start turned off."""
+    """A starting worker that aborts while another worker is ready breaks the
+    pool as a warm-start break and a worker that died starting, not as a
+    serving break; the replacement starts its workers on demand."""
     pool = 'abort-while-ready-test'
-    limit = requests_process._WARM_START_MAX_CONSECUTIVE_FAILURES
     warm_before = _pool_broken(pool, 'warm_start')
     serving_before = _pool_broken(pool, 'serving')
     died_before = _start_failures(pool, 'died')
@@ -767,8 +758,6 @@ def test_starting_worker_aborts_keep_counting_toward_turning_warm_start_off(
                                  initializer=first_fast_rest_exit,
                                  initargs=(marker, 3, 'exit1'))
     try:
-        # Earlier pools of this executor already broke while starting.
-        executor._warm_start_failures = limit - 1
         original = executor._executor
         assert _wait_until(lambda: original.drain_start_signals() >= 0 and
                            original._ready_count == 1)
@@ -785,9 +774,7 @@ def test_starting_worker_aborts_keep_counting_toward_turning_warm_start_off(
         assert _pool_broken(pool, 'warm_start') == warm_before + 1
         assert _pool_broken(pool, 'serving') == serving_before
         assert _start_failures(pool, 'died') == died_before + 1
-        assert executor._warm_start_failures == limit
-        assert executor._guaranteed_pool_kwargs['warm_start'] is False
-        assert _warm_start_disabled(pool) == 1
+        assert executor._executor._warm_start_thread is None
     finally:
         executor.shutdown()
 
@@ -852,163 +839,29 @@ def test_warns_when_start_up_installs_a_sigterm_handler():
         signal.signal(signal.SIGTERM, previous)
 
 
-def _break_pool_leaving_a_survivor(executor):
-    """Kills one worker of the warm pool; the other ignores the stdlib's
-    SIGTERM and keeps running. Returns the survivor."""
-    original = executor._executor
-    assert original._warm_start_done.wait(60)
-    victim, survivor = list(original._processes.values())
-    os.kill(victim.pid, signal.SIGKILL)
-    assert _wait_until(lambda: original._broken)
-    time.sleep(1)  # The stdlib has sent its SIGTERM by now.
-    assert survivor.is_alive()
-    return survivor
-
-
 @requires_warm_start
-def test_replacement_pool_waits_for_surviving_workers_before_warm_start(
-        tmp_path):
-    """A pool replacing a broken one only starts the worker a submit needs
-    while the broken pool's workers are still running, and warm-starts the
-    rest once they exit, so both pools never hold all their workers."""
-    marker = str(tmp_path / 'stop-ignoring')
-    executor = BurstableExecutor(garanteed_workers=2,
-                                 warm_start=True,
-                                 name='survivor-test',
-                                 initializer=ignore_sigterm_until,
-                                 initargs=(marker,))
-    try:
-        survivor = _break_pool_leaving_a_survivor(executor)
-        open(marker, 'w', encoding='utf-8').close()
-        assert executor.submit_until_success(get_pid).result(timeout=60)
-        replacement = executor._executor
-        for _ in range(20):
-            assert survivor.is_alive()
-            assert len(replacement._processes) == 1
-            time.sleep(0.1)
-        os.kill(survivor.pid, signal.SIGKILL)
-        assert replacement._warm_start_done.wait(60)
-        assert len(replacement._processes) == 2
-    finally:
-        executor.shutdown()
-
-
-@requires_warm_start
-def test_replacement_pool_wait_for_surviving_workers_is_bounded(
-        tmp_path, monkeypatch):
-    """If the broken pool's workers do not exit in time, the replacement
-    warm-starts anyway."""
-    monkeypatch.setattr(requests_process, '_WARM_START_PREDECESSOR_SECONDS', 1)
-    marker = str(tmp_path / 'stop-ignoring')
-    executor = BurstableExecutor(garanteed_workers=2,
-                                 warm_start=True,
-                                 name='survivor-bound-test',
-                                 initializer=ignore_sigterm_until,
-                                 initargs=(marker,))
-    try:
-        survivor = _break_pool_leaving_a_survivor(executor)
-        open(marker, 'w', encoding='utf-8').close()
-        assert executor.submit_until_success(get_pid).result(timeout=60)
-        replacement = executor._executor
-        assert replacement._warm_start_done.wait(60)
-        assert len(replacement._processes) == 2
-        assert survivor.is_alive()
-    finally:
-        executor.shutdown()
-
-
-class _PoolThatBrokeInWarmStart:
-    """Stands in for a pool that broke before warm start finished."""
-
-    start_failures = 0
-
-    def broke_during_warm_start(self):
-        return True
-
-    def drain_start_signals(self):
-        return 0
-
-
-def test_burstable_executor_turns_warm_start_off_after_repeated_failures():
-    """After _WARM_START_MAX_CONSECUTIVE_FAILURES pools in a row break during
-    warm start, rebuilt pools start their workers on demand."""
-    executor = BurstableExecutor(garanteed_workers=1,
-                                 warm_start=True,
-                                 name='failing-test')
-    try:
-        limit = requests_process._WARM_START_MAX_CONSECUTIVE_FAILURES
-        for _ in range(limit - 1):
-            executor._record_broken_pool(_PoolThatBrokeInWarmStart())
-        assert executor._guaranteed_pool_kwargs['warm_start'] is True
-        assert _warm_start_disabled('failing-test') == 0
-        executor._record_broken_pool(_PoolThatBrokeInWarmStart())
-        assert executor._guaranteed_pool_kwargs['warm_start'] is False
-        assert _warm_start_disabled('failing-test') == 1
-    finally:
-        executor.shutdown()
-
-
-class _PoolThatBrokeServing(_PoolThatBrokeInWarmStart):
-    """Stands in for a pool that broke after warm start finished."""
-
-    def broke_during_warm_start(self):
-        return False
-
-
-def test_serving_break_resets_consecutive_warm_start_failures():
-    """Warm start is turned off only after consecutive warm-start breaks; a
-    serving break in between starts the count again."""
-    pool = 'reset-test'
-    executor = BurstableExecutor(garanteed_workers=1,
-                                 warm_start=True,
-                                 name=pool)
-    try:
-        limit = requests_process._WARM_START_MAX_CONSECUTIVE_FAILURES
-        warm_before = _pool_broken(pool, 'warm_start')
-        serving_before = _pool_broken(pool, 'serving')
-        for _ in range(limit - 1):
-            executor._record_broken_pool(_PoolThatBrokeInWarmStart())
-        executor._record_broken_pool(_PoolThatBrokeServing())
-        for _ in range(limit - 1):
-            executor._record_broken_pool(_PoolThatBrokeInWarmStart())
-        assert executor._guaranteed_pool_kwargs['warm_start'] is True
-        assert _warm_start_disabled(pool) == 0
-        assert _pool_broken(pool, 'warm_start') == warm_before + 2 * (limit - 1)
-        assert _pool_broken(pool, 'serving') == serving_before + 1
-        executor._record_broken_pool(_PoolThatBrokeInWarmStart())
-        assert executor._guaranteed_pool_kwargs['warm_start'] is False
-        assert _warm_start_disabled(pool) == 1
-    finally:
-        executor.shutdown()
-
-
-@requires_warm_start
-def test_workers_crashing_at_start_turn_warm_start_off():
-    """Workers that always die starting break every warm-started pool. Each
-    rebuild on submit counts a warm-start break and a worker that died, and
-    after the limit the rebuilt pool starts its workers on demand."""
+def test_workers_crashing_at_start_break_only_the_warm_started_pool():
+    """Workers that always die starting break the warm-started pool once: a
+    warm-start break and a worker that died. Its replacement does not
+    warm-start, so the crash is not repeated for every worker."""
     pool = 'crash-loop-test'
-    limit = requests_process._WARM_START_MAX_CONSECUTIVE_FAILURES
     warm_before = _pool_broken(pool, 'warm_start')
     died_before = _start_failures(pool, 'died')
-    executor = BurstableExecutor(garanteed_workers=1,
+    executor = BurstableExecutor(garanteed_workers=2,
                                  warm_start=True,
                                  name=pool,
                                  initializer=die_in_init)
     try:
-        for i in range(limit):
-            current = executor._executor
-            assert current._warm_start_thread is not None
-            assert _wait_until(lambda p=current: p._broken)
-            # The submit finds the pool broken and replaces it.
-            executor.submit_until_success(dummy_task)
-            assert executor._executor is not current
-            assert _pool_broken(pool, 'warm_start') == warm_before + i + 1
-            assert _start_failures(pool, 'died') == died_before + i + 1
-        assert executor._guaranteed_pool_kwargs['warm_start'] is False
-        assert _warm_start_disabled(pool) == 1
-        # The pool built after the limit does not warm-start.
-        assert executor._executor._warm_start_thread is None
+        original = executor._executor
+        assert original._warm_start_thread is not None
+        assert _wait_until(lambda: original._broken)
+        # The submit finds the pool broken and replaces it.
+        executor.submit_until_success(dummy_task)
+        rebuilt = executor._executor
+        assert rebuilt is not original
+        assert rebuilt._warm_start_thread is None
+        assert _pool_broken(pool, 'warm_start') == warm_before + 1
+        assert _start_failures(pool, 'died') == died_before + 1
     finally:
         executor.shutdown()
 
@@ -1016,8 +869,8 @@ def test_workers_crashing_at_start_turn_warm_start_off():
 @requires_warm_start
 def test_serving_crash_is_counted_as_serving_break(tmp_path):
     """A ready worker that crashes while another is still starting counts as a
-    serving break when the pool is replaced: no start failure, no warm-start
-    break, and the consecutive warm-start count stays at zero."""
+    serving break when the pool is replaced: no start failure and no
+    warm-start break."""
     pool = 'serving-crash-test'
     serving_before = _pool_broken(pool, 'serving')
     warm_before = _pool_broken(pool, 'warm_start')
@@ -1042,19 +895,18 @@ def test_serving_crash_is_counted_as_serving_break(tmp_path):
         assert _pool_broken(pool, 'warm_start') == warm_before
         assert _start_failures(pool, 'died') == died_before
         assert _start_failures(pool, 'error') == error_before
-        assert executor._warm_start_failures == 0
     finally:
         executor.shutdown()
 
 
 @requires_warm_start
 def test_burstable_executor_warm_start_applies_to_guaranteed_pool():
-    """Warm start reaches the guaranteed pool, including a rebuilt one."""
+    """Warm start reaches the first guaranteed pool, not the burst pool."""
     executor = BurstableExecutor(garanteed_workers=2,
                                  burst_workers=1,
                                  warm_start=True)
     try:
-        assert executor._guaranteed_pool_kwargs['warm_start'] is True
+        assert executor._executor._warm_start_thread is not None
         assert _wait_until(lambda: len(executor._executor._processes) == 2)
     finally:
         executor.shutdown()

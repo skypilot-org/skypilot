@@ -7,7 +7,7 @@ import os
 import signal
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from sky import exceptions
 from sky.metrics import utils as metrics_utils
@@ -26,16 +26,9 @@ _WARM_START_POLL_SECONDS = 0.1
 # Warm start stops, and the remaining workers start on demand, when no worker
 # becomes ready for this long.
 _WARM_START_STALL_SECONDS = 120
-# BurstableExecutor turns warm start off for a pool after this many pools in a
-# row broke before warm start finished (a worker kept dying while starting).
-_WARM_START_MAX_CONSECUTIVE_FAILURES = 5
 # How long shutdown waits for the warm-start thread, which checks for a stop
 # every _WARM_START_POLL_SECONDS.
 _WARM_START_JOIN_SECONDS = 10
-# How long warm start of a pool that replaces a broken one waits for the broken
-# pool's workers to exit first. Idle workers ignore SIGTERM, so they last until
-# shutdown kills them after its grace period (10 s).
-_WARM_START_PREDECESSOR_SECONDS = 30
 # How long replacing a pool that broke while warm start ran waits for the
 # stdlib to reap its workers, when telling a start-up failure from a serving
 # crash needs their exit codes.
@@ -110,13 +103,9 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                  max_workers: int,
                  warm_start: bool = False,
                  name: str = 'guaranteed',
-                 wait_for: Optional[List[multiprocessing.Process]] = None,
                  **kwargs):
         # Labels this pool's metrics, e.g. the request schedule type.
         self.name = name
-        # Workers of the pool this one replaces, still exiting; warm start
-        # waits for them so the two pools do not hold memory at the same time.
-        self._wait_for = list(wait_for or [])
         # Every worker reports on this pipe whether its initializer ran: warm
         # start paces itself on it, and start-up failures are counted from it.
         context = kwargs.get('mp_context') or multiprocessing.get_context()
@@ -175,7 +164,6 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         # occupying the idle ones, so this uses its private state.
         # pylint: disable=protected-access
         pool: Any = self
-        self._wait_for_predecessor()
         progress_at = time.monotonic()
         while not self._warm_start_stop.wait(_WARM_START_POLL_SECONDS):
             if self.drain_start_signals():
@@ -228,22 +216,6 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         self._warm_start_end = 'done'
         self._warm_start_done.set()
         logger.info(f'Warm start: {self.max_workers} workers started.')
-
-    def _wait_for_predecessor(self) -> None:
-        """Waits, up to _WARM_START_PREDECESSOR_SECONDS, for the workers of the
-        broken pool this one replaces to exit. Submits can still start this
-        pool's first worker meanwhile."""
-        deadline = time.monotonic() + _WARM_START_PREDECESSOR_SECONDS
-        while any(p.is_alive() for p in self._wait_for):
-            if time.monotonic() > deadline:
-                logger.warning(
-                    f'[{self.name}] Workers of the replaced executor pool are '
-                    f'still running after {_WARM_START_PREDECESSOR_SECONDS}s; '
-                    'warm-starting anyway.')
-                break
-            if self._warm_start_stop.wait(_WARM_START_POLL_SECONDS):
-                break
-        self._wait_for = []
 
     def broke_during_warm_start(self) -> bool:
         """Whether this broken pool broke because workers failed to start.
@@ -569,17 +541,16 @@ class BurstableExecutor:
                  **kwargs):
         # Labels this executor's metrics, e.g. the request schedule type.
         self._name = name
-        # Pools in a row that broke before warm start finished.
-        self._warm_start_failures = 0
         if garanteed_workers > 0:
             self._guaranteed_workers = garanteed_workers
-            # Warm start applies to the guaranteed pool, including a pool
-            # rebuilt after it broke; burst workers stay one-off.
-            self._guaranteed_pool_kwargs = dict(kwargs,
-                                                warm_start=warm_start,
-                                                name=name)
+            self._guaranteed_pool_kwargs = dict(kwargs, name=name)
             self._guaranteed_pool_lock = threading.Lock()
+            # Only the first guaranteed pool warm-starts. A pool rebuilt after
+            # a worker died starts its workers on demand, so a crash does not
+            # start every worker again while the broken pool's workers are
+            # still exiting; burst workers stay one-off.
             self._executor = PoolExecutor(max_workers=garanteed_workers,
+                                          warm_start=warm_start,
                                           **self._guaranteed_pool_kwargs)
         if burst_workers > 0:
             # Burst workers next to a guaranteed pool get their own label.
@@ -657,44 +628,27 @@ class BurstableExecutor:
                                f'replacing the pool and retrying. Error: {e}')
                 broken_pool = self._executor
                 self._record_broken_pool(broken_pool)
-                # Workers the stdlib could not stop (idle ones ignore SIGTERM)
-                # live until shutdown kills them.
-                survivors = list((broken_pool._processes or {}).values())  # pylint: disable=protected-access
                 threading.Thread(target=broken_pool.shutdown,
                                  daemon=True).start()
                 self._executor = PoolExecutor(
                     max_workers=self._guaranteed_workers,
-                    wait_for=survivors,
                     **self._guaranteed_pool_kwargs)
         return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
 
     def _record_broken_pool(self, broken_pool: PoolExecutor) -> None:
-        """Counts a broken pool, and turns warm start off for the pools that
-        replace it once it keeps failing. Call with _guaranteed_pool_lock held.
-        """
+        """Counts a broken pool by whether it broke while warm start was
+        starting workers. Call with _guaranteed_pool_lock held."""
         # A worker whose initializer raised reported it on the start-up pipe.
         broken_pool.drain_start_signals()
         if not broken_pool.broke_during_warm_start():
-            self._warm_start_failures = 0
             metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
                 pool=self._name, phase='serving').inc()
             return
-        self._warm_start_failures += 1
         metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
             pool=self._name, phase='warm_start').inc()
         if broken_pool.start_failures == 0:
-            # No worker was ready and none reported an error: a starting worker
-            # was killed.
+            # No start-up error was reported: a starting worker exited first.
             _count_start_failure(self._name, 'died')
-        if (self._warm_start_failures >= _WARM_START_MAX_CONSECUTIVE_FAILURES
-                and self._guaranteed_pool_kwargs.get('warm_start')):
-            self._guaranteed_pool_kwargs['warm_start'] = False
-            metrics_utils.SKY_APISERVER_EXECUTOR_WARM_START_DISABLED.labels(
-                pool=self._name).set(1)
-            logger.warning(
-                f'[{self._name}] {self._warm_start_failures} executor pools in '
-                'a row broke while warm start was starting workers; turning '
-                'warm start off. Workers now start on demand.')
 
     def shutdown(self) -> None:
         """Shutdown the executor."""

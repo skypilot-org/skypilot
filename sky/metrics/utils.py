@@ -579,10 +579,10 @@ SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
 
 # A guaranteed executor pool breaks when any of its workers dies (e.g. OOM or a
 # crash in the worker initializer) and is replaced on the next submit. `phase`
-# is `warm_start` when it broke during warm start because workers failed to
-# start (one reported a start-up error, none had become ready yet, or one
-# exited before it became ready), and `serving` otherwise; a steady
-# `warm_start` rate means workers keep failing to come up.
+# is `warm_start` when the pool broke while boot-time warm start was starting
+# its workers and they failed to start (one reported a start-up error, none
+# had become ready yet, or one exited before it became ready), and `serving`
+# otherwise. Pools that replace a broken one start workers on demand.
 SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL = prom.Counter(
     'sky_apiserver_executor_pool_broken_total',
     'Guaranteed executor pools found broken and replaced, by pool and phase',
@@ -593,26 +593,13 @@ SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL = prom.Counter(
 # and running the initializer), as opposed to failing in a task. `reason` is
 # `error` when start-up raised, `died` when the process exited first (killed,
 # crashed or aborted). Workers of a guaranteed pool that exited while starting
-# are only distinguishable
-# during warm start; otherwise they show up in
+# are only distinguishable during warm start; otherwise they show up in
 # SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL. Failures in a guaranteed pool are
 # counted when the broken pool is replaced (on the next submit) or shut down.
 SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL = prom.Counter(
     'sky_apiserver_executor_worker_start_failures_total',
     'Executor workers that failed to start, by pool and reason',
     ['pool', 'reason'],
-)
-
-# 1 once warm start was turned off for a pool after repeated consecutive
-# failures; its workers then start on demand until the server restarts.
-# 'max' rather than 'livemax' for the prometheus_client version reason given
-# for SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS.
-SKY_APISERVER_EXECUTOR_WARM_START_DISABLED = prom.Gauge(
-    'sky_apiserver_executor_warm_start_disabled',
-    '1 if warm start was turned off for an executor pool after repeated '
-    'failures',
-    ['pool'],
-    multiprocess_mode='max',
 )
 
 # Active threads in on-demand thread executors. Each process has its own
