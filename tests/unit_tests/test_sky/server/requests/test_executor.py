@@ -3507,3 +3507,19 @@ def test_request_worker_passes_eager_workers_flag(monkeypatch, enabled):
     thread.join(timeout=30)
     assert not thread.is_alive()
     assert captured['warm_start'] is enabled
+    assert captured['name'] == requests_lib.ScheduleType.SHORT.value
+
+
+def test_eager_workers_warns_without_memory_aware_sizing(monkeypatch):
+    """Eager start stays on but warns when pools are not sized to fit."""
+    monkeypatch.setenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', '1')
+    monkeypatch.delenv('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', raising=False)
+    monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI, raising=False)
+    warnings = []
+    monkeypatch.setattr(executor.logger, 'warning', warnings.append)
+    executor.eager_workers_enabled.cache_clear()
+    try:
+        assert executor.eager_workers_enabled() is True
+        assert any('SKYPILOT_MEMORY_AWARE_WORKER_SIZING' in w for w in warnings)
+    finally:
+        executor.eager_workers_enabled.cache_clear()

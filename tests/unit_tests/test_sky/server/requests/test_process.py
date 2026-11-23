@@ -5,11 +5,13 @@ import multiprocessing
 import os
 import signal
 import sys
+import threading
 import time
 import unittest.mock
 
 import pytest
 
+from sky.metrics import utils as metrics_utils
 from sky.server.requests import process as requests_process
 from sky.server.requests.process import BurstableExecutor
 from sky.server.requests.process import DisposableExecutor
@@ -245,6 +247,34 @@ def record_init(log_path, seconds):
         f.write(f'{start} {time.time()}\n')
 
 
+def die_in_init():
+    """Initializer that kills its worker before it can report ready."""
+    os._exit(1)
+
+
+def raise_in_init():
+    """Initializer that fails the way a broken import or plugin would."""
+    raise RuntimeError('start-up failed')
+
+
+def _start_failures(pool, reason):
+    return metrics_utils.SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL.labels(
+        pool=pool, reason=reason)._value.get()
+
+
+def _peak_overlap(log_path):
+    """Most initializer runs in `log_path` that overlapped in time."""
+    with open(log_path, encoding='utf-8') as f:
+        windows = [tuple(map(float, line.split())) for line in f]
+    events = sorted([(start, 1) for start, _ in windows] +
+                    [(end, -1) for _, end in windows])
+    overlap = peak = 0
+    for _, delta in events:
+        overlap += delta
+        peak = max(peak, overlap)
+    return len(windows), peak
+
+
 def _wait_until(predicate, timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -308,19 +338,49 @@ def test_pool_executor_warm_start_caps_starting_workers(tmp_path):
                             initializer=record_init,
                             initargs=(log_path, 0.5))
     try:
-        assert _wait_until(lambda: executor._ready.value == 5)
-        with open(log_path, encoding='utf-8') as f:
-            windows = [tuple(map(float, line.split())) for line in f]
-        assert len(windows) == 5
-        events = sorted([(start, 1) for start, _ in windows] +
-                        [(end, -1) for _, end in windows])
-        overlap = peak = 0
-        for _, delta in events:
-            overlap += delta
-            peak = max(peak, overlap)
+        assert executor._warm_start_done.wait(60)
+        runs, peak = _peak_overlap(log_path)
+        assert runs == 5
         assert peak <= requests_process._WARM_START_MAX_STARTING
     finally:
         executor.shutdown()
+
+
+@requires_warm_start
+def test_pool_executor_warm_start_caps_workers_started_by_submits(tmp_path):
+    """Tasks submitted while warm start runs wait for ready workers instead of
+    starting more, so the cap on workers starting at once still holds."""
+    log_path = str(tmp_path / 'init.log')
+    executor = PoolExecutor(max_workers=6,
+                            warm_start=True,
+                            initializer=record_init,
+                            initargs=(log_path, 0.6))
+    try:
+        # Submitted at once, before any worker is ready.
+        futures = [executor.submit(get_pid) for _ in range(6)]
+        assert all(f.result(timeout=60) for f in futures)
+        assert executor._warm_start_done.wait(60)
+        runs, peak = _peak_overlap(log_path)
+        assert runs == 6
+        assert peak <= requests_process._WARM_START_MAX_STARTING
+    finally:
+        executor.shutdown()
+
+
+@requires_warm_start
+def test_pool_executor_warm_start_survives_worker_dying_in_init():
+    """A worker that dies before reporting ready breaks the pool; warm start
+    and shutdown still finish instead of hanging."""
+    executor = PoolExecutor(max_workers=4,
+                            warm_start=True,
+                            initializer=die_in_init)
+    executor._warm_start_thread.join(timeout=30)
+    assert not executor._warm_start_thread.is_alive()
+    assert executor.broke_during_warm_start()
+    shutdown = threading.Thread(target=executor.shutdown)
+    shutdown.start()
+    shutdown.join(timeout=30)
+    assert not shutdown.is_alive()
 
 
 @requires_warm_start
@@ -349,6 +409,176 @@ def test_pool_executor_warm_start_off_with_fork():
                             mp_context=multiprocessing.get_context('fork'))
     try:
         assert executor._warm_start_thread is None
+    finally:
+        executor.shutdown()
+
+
+@requires_warm_start
+def test_burstable_executor_rebuilt_pool_warm_starts():
+    """When a warm-started pool breaks after warm start, its replacement also
+    warm-starts, and the break counts as a serving-phase break."""
+    broken = metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
+        pool='rebuild-test', phase='serving')
+    before = broken._value.get()
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name='rebuild-test')
+    try:
+        original = executor._executor
+        assert original._warm_start_done.wait(60)
+        os.kill(next(iter(original._processes)), signal.SIGKILL)
+        assert _wait_until(lambda: original._broken)
+        assert executor.submit_until_success(dummy_task).result(timeout=60)
+        rebuilt = executor._executor
+        assert rebuilt is not original
+        assert rebuilt._warm_start_done.wait(60)
+        assert len(rebuilt._processes) == 2
+        assert broken._value.get() == before + 1
+    finally:
+        executor.shutdown()
+
+
+def test_pool_executor_counts_worker_start_errors():
+    """A pool worker whose start-up raises is counted as a start failure."""
+    before = _start_failures('pool-error-test', 'error')
+    executor = PoolExecutor(max_workers=1,
+                            name='pool-error-test',
+                            initializer=raise_in_init)
+    try:
+        with pytest.raises(concurrent.futures.process.BrokenProcessPool):
+            executor.submit(get_pid).result(timeout=60)
+        executor.drain_start_signals()
+        assert _start_failures('pool-error-test', 'error') == before + 1
+    finally:
+        executor.shutdown()
+
+
+@pytest.mark.parametrize('initializer,reason', [(raise_in_init, 'error'),
+                                                (die_in_init, 'died')])
+def test_disposable_executor_counts_worker_start_failures(initializer, reason):
+    """A one-off worker that fails to start is counted by why it failed, and a
+    task that fails after start-up is not counted."""
+    pool = f'disposable-{reason}-test'
+    before = _start_failures(pool, reason)
+    executor = DisposableExecutor(max_workers=1,
+                                  initializer=initializer,
+                                  name=pool)
+    try:
+        with pytest.raises(BaseException):
+            executor.submit(get_pid).result(timeout=60)
+        assert _wait_until(lambda: _start_failures(pool, reason) == before + 1)
+    finally:
+        executor.shutdown()
+
+    healthy = DisposableExecutor(max_workers=1, name='disposable-ok-test')
+    try:
+        with pytest.raises(ValueError):
+            healthy.submit(failing_task).result(timeout=60)
+        time.sleep(0.5)
+        assert _start_failures('disposable-ok-test', 'error') == 0
+        assert _start_failures('disposable-ok-test', 'died') == 0
+    finally:
+        healthy.shutdown()
+
+
+@requires_warm_start
+def test_burstable_executor_counts_worker_killed_during_warm_start():
+    """A pool whose workers die while warm start runs counts as a warm-start
+    break and as a worker that died starting."""
+    pool = 'warm-died-test'
+    broken = metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
+        pool=pool, phase='warm_start')
+    broken_before = broken._value.get()
+    died_before = _start_failures(pool, 'died')
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name=pool,
+                                 initializer=die_in_init)
+    try:
+        assert _wait_until(lambda: executor._executor._broken)
+        with executor._guaranteed_pool_lock:
+            executor._record_broken_pool(executor._executor)
+        assert broken._value.get() == broken_before + 1
+        assert _start_failures(pool, 'died') == died_before + 1
+    finally:
+        executor.shutdown()
+
+
+@requires_warm_start
+def test_pool_break_after_warm_start_stalls_is_not_a_start_failure(
+        tmp_path, monkeypatch):
+    """Once warm start has given up, a later break is a serving break, and
+    tasks queued during warm start get workers started for them."""
+    monkeypatch.setattr(requests_process, '_WARM_START_STALL_SECONDS', 1)
+    executor = PoolExecutor(max_workers=3,
+                            warm_start=True,
+                            initializer=record_init,
+                            initargs=(str(tmp_path / 'init.log'), 2.5))
+    try:
+        futures = [executor.submit(get_pid) for _ in range(3)]
+        executor._warm_start_thread.join(timeout=30)
+        assert executor._warm_start_end == 'stalled'
+        # Every queued task got a worker once warm start gave up.
+        assert all(f.result(timeout=60) for f in futures)
+        os.kill(next(iter(executor._processes)), signal.SIGKILL)
+        assert _wait_until(lambda: executor._broken)
+        executor.drain_start_signals()
+        assert not executor.broke_during_warm_start()
+    finally:
+        executor.shutdown()
+
+
+@requires_warm_start
+def test_task_death_during_warm_start_is_not_a_start_failure(tmp_path):
+    """A ready worker that dies serving a task while warm start is still
+    running does not count as a start-up failure once all started workers
+    are ready."""
+    executor = PoolExecutor(max_workers=2,
+                            warm_start=True,
+                            initializer=record_init,
+                            initargs=(str(tmp_path / 'init.log'), 0.1))
+    try:
+        assert _wait_until(lambda: executor.drain_start_signals() >= 0 and
+                           executor._ready_count == 2)
+        # Pretend warm start still runs, then kill a ready worker.
+        executor._warm_start_end = None
+        os.kill(next(iter(executor._processes)), signal.SIGKILL)
+        assert _wait_until(lambda: executor._broken)
+        executor.drain_start_signals()
+        assert not executor.broke_during_warm_start()
+    finally:
+        executor.shutdown()
+
+
+class _PoolThatBrokeInWarmStart:
+    """Stands in for a pool that broke before warm start finished."""
+
+    start_failures = 0
+
+    def broke_during_warm_start(self):
+        return True
+
+    def drain_start_signals(self):
+        return 0
+
+
+def test_burstable_executor_turns_warm_start_off_after_repeated_failures():
+    """After _WARM_START_MAX_CONSECUTIVE_FAILURES pools in a row break during
+    warm start, rebuilt pools start their workers on demand."""
+    disabled = metrics_utils.SKY_APISERVER_EXECUTOR_WARM_START_DISABLED.labels(
+        pool='failing-test')
+    executor = BurstableExecutor(garanteed_workers=1,
+                                 warm_start=True,
+                                 name='failing-test')
+    try:
+        limit = requests_process._WARM_START_MAX_CONSECUTIVE_FAILURES
+        for _ in range(limit - 1):
+            executor._record_broken_pool(_PoolThatBrokeInWarmStart())
+        assert executor._guaranteed_pool_kwargs['warm_start'] is True
+        assert disabled._value.get() == 0
+        executor._record_broken_pool(_PoolThatBrokeInWarmStart())
+        assert executor._guaranteed_pool_kwargs['warm_start'] is False
+        assert disabled._value.get() == 1
     finally:
         executor.shutdown()
 

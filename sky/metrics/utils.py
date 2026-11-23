@@ -577,6 +577,42 @@ SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
     multiprocess_mode='livesum',
 )
 
+# A guaranteed executor pool breaks when any of its workers dies (e.g. OOM or a
+# crash in the worker initializer) and is replaced on the next submit. `phase`
+# is `warm_start` when it broke while warm start still had workers starting
+# (started but not yet ready), `serving` otherwise; a steady `warm_start` rate
+# means workers keep failing to come up.
+SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL = prom.Counter(
+    'sky_apiserver_executor_pool_broken_total',
+    'Guaranteed executor pools found broken and replaced, by pool and phase',
+    ['pool', 'phase'],
+)
+
+# Executor workers that exited before finishing start-up (importing SkyPilot
+# and running the initializer), as opposed to failing in a task. `reason` is
+# `error` when start-up raised, `died` when the process was killed first.
+# Workers of a guaranteed pool killed while starting are only distinguishable
+# during warm start; otherwise they show up in
+# SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL. Failures in a guaranteed pool are
+# counted when the broken pool is replaced (on the next submit) or shut down.
+SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL = prom.Counter(
+    'sky_apiserver_executor_worker_start_failures_total',
+    'Executor workers that failed to start, by pool and reason',
+    ['pool', 'reason'],
+)
+
+# 1 once warm start was turned off for a pool after repeated consecutive
+# failures; its workers then start on demand until the server restarts.
+# 'max' rather than 'livemax' for the prometheus_client version reason given
+# for SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS.
+SKY_APISERVER_EXECUTOR_WARM_START_DISABLED = prom.Gauge(
+    'sky_apiserver_executor_warm_start_disabled',
+    '1 if warm start was turned off for an executor pool after repeated '
+    'failures',
+    ['pool'],
+    multiprocess_mode='max',
+)
+
 # Active threads in on-demand thread executors. Each process has its own
 # executor with a per-process max_workers limit, so per-pid series are kept:
 # exhaustion is a per-process condition and a sum across processes can exceed

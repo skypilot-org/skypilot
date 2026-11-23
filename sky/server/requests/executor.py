@@ -385,6 +385,12 @@ def eager_workers_enabled() -> bool:
             f'{constants.ENV_VAR_DB_POOL_CONNECTION_URI}); executor workers '
             'will start on demand.')
         return False
+    if not env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        logger.warning(
+            f'{env_options.Options.EAGER_EXECUTOR_WORKERS.env_key} starts '
+            'every executor worker, but '
+            f'{env_options.Options.MEMORY_AWARE_WORKER_SIZING.env_key} is off, '
+            'so the pools may not fit in memory once all workers are up.')
     return True
 
 
@@ -830,6 +836,7 @@ class RequestWorker:
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 warm_start=eager_workers_enabled(),
+                name=proc_group,
                 initializer=executor_initializer,
                 initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
