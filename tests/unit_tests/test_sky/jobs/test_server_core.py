@@ -486,12 +486,15 @@ def test_refusal_names_a_writable_workspace_to_switch_to():
 
 
 def test_refusal_of_a_read_only_workspace():
-    assert 'read-only for you' in _refusal_message(True, 'ws-r')[0]
+    message, stacktrace = _refusal_message(True, 'ws-r')
+    assert 'read-only for you' in message
+    assert 'PoolRefusedError' not in stacktrace
 
 
 def test_refusal_of_the_active_workspace_is_not_a_switch():
-    message, _ = _refusal_message(True, 'ws-b')
+    message, stacktrace = _refusal_message(True, 'ws-b')
     assert 'Re-create the pool' in message
+    assert 'PoolRefusedError' not in stacktrace
     assert 'Switch' not in message
 
 
