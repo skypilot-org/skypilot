@@ -2,6 +2,7 @@
 import pytest
 
 from sky import resources as resources_lib
+from sky.adaptors import gcp
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import accelerator_registry
 
@@ -127,16 +128,14 @@ def test_ironwood_autoscaler_matches_pools_to_requests():
 def test_gke_api_error_falls_back_to_optimistic_scheduling(monkeypatch):
     """A refused GKE API call (no permission on the project) logs the error
     and schedules optimistically instead of crashing the launch."""
-    from googleapiclient import errors as gcp_errors  # pylint: disable=import-outside-toplevel
-
-    from sky.adaptors import gcp  # pylint: disable=import-outside-toplevel
 
     class _Resp(dict):
         status = 403
         reason = 'Forbidden'
 
     def _raise(*args, **kwargs):
-        raise gcp_errors.HttpError(_Resp(), b'{"error": "PERMISSION_DENIED"}')
+        raise gcp.http_error_exception()(_Resp(),
+                                         b'{"error": "PERMISSION_DENIED"}')
 
     monkeypatch.setattr(gcp, 'build', _raise)
     ctx = 'gke_my-project_us-central1-c_my-cluster'
