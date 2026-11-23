@@ -288,6 +288,9 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
     'tpu-v5-lite-podslice': 'v5e',
     'tpu-v5p-slice': 'v5p',
     'tpu-v6e-slice': 'v6e',
+    # Ironwood. Requested as `tpu7x:<chips>`; there is no `tpu7x-<N>` name,
+    # because Google's own `tpu7x-<N>` names count TensorCores (two per chip).
+    'tpu7x': 'v7x',
 }
 
 POD_STATUSES = {
@@ -400,8 +403,24 @@ GKE_TPU_MULTI_HOST_TOPOLOGIES: Dict[str, Dict[int, str]] = {
         128: '8x16',
         256: '16x16',
     },
+    # Ironwood slices of 4-chip VMs. Sizes of a 4x4x4 cube (64 chips) and up
+    # also exist in custom shapes; these are the default ones.
+    'tpu7x': {
+        8: '2x2x2',
+        16: '2x2x4',
+        32: '2x4x4',
+        64: '4x4x4',
+        128: '4x4x8',
+        256: '4x8x8',
+        512: '8x8x8',
+        1024: '8x8x16',
+        2048: '8x16x16',
+    },
 }
-GKE_TPU_MULTI_HOST_CHIPS_PER_VM: Dict[str, int] = {'tpu-v6e-slice': 4}
+GKE_TPU_MULTI_HOST_CHIPS_PER_VM: Dict[str, int] = {
+    'tpu-v6e-slice': 4,
+    'tpu7x': 4,
+}
 # The only slice that exists both as one VM and as a multi-host slice:
 # TPU v6e with 8 chips is one ct6e-standard-8t VM, or two ct6e-standard-4t
 # VMs on one 2x4 slice. ``accelerator_args: {multi_host: true}`` selects the
@@ -750,7 +769,8 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         # RTX PRO 6000 (G4) is labeled nvidia-rtx-pro-6000 in GKE, and is
         # named RTXPRO6000 in the GCP catalog.
         return 'nvidia-rtx-pro-6000'
-    elif accelerator.startswith('tpu-'):
+    elif accelerator.startswith('tpu-') or is_tpu_on_gke(accelerator):
+        # GKE TPU label values are used as is: tpu-v6e-slice, tpu7x.
         return accelerator
     elif accelerator.startswith('amd-'):
         return accelerator
@@ -867,12 +887,17 @@ class GKELabelFormatter(GPULabelFormatter):
             1: '1x1',
             4: '2x2',
             8: '2x4'
-        }
+        },
+        # tpu7x: https://cloud.google.com/tpu/docs/tpu7x
+        'tpu7x': {
+            4: '2x2x1'
+        },
     }
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
-        if accelerator is not None and accelerator.startswith('tpu-'):
+        if accelerator is not None and (accelerator.startswith('tpu-') or
+                                        is_tpu_on_gke(accelerator)):
             return cls.TPU_LABEL_KEY
         return cls.GPU_LABEL_KEY
 
@@ -1523,6 +1548,10 @@ class GKEAutoscaler(Autoscaler):
                 if tpu_multi_host_shape is not None:
                     accelerator_exists = cls._node_pool_is_tpu_slice(
                         node_pool, tpu_multi_host_shape)
+                elif cls._node_pool_is_multi_host_tpu(node_pool):
+                    # A single-host request does not fit one VM of a
+                    # multi-host slice.
+                    accelerator_exists = False
                 elif 'resourceLabels' in node_config:
                     requested_acc_type, requested_acc_count = (
                         normalize_tpu_accelerator(requested_acc_type,
@@ -1635,7 +1664,7 @@ class GKEAutoscaler(Autoscaler):
         """
         node_config = node_pool.get('config', {})
         resource_labels = node_config.get('resourceLabels', {})
-        if not cls._is_node_multi_host_tpu(resource_labels):
+        if not cls._node_pool_is_multi_host_tpu(node_pool):
             return False
         if resource_labels.get('goog-gke-accelerator-type') != (
                 shape.accelerator):
@@ -1652,10 +1681,12 @@ class GKEAutoscaler(Autoscaler):
         # according to
         # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
         # GKE TPU machine types have the format of
-        # ct<version>-<type>-<node-chip-count>t
+        # ct<version>-<type>-<node-chip-count>t (e.g. ct6e-standard-4t), or
+        # tpu<version>-<type>-<node-chip-count>t from Ironwood on
+        # (tpu7x-standard-4t).
         logger.debug(
             f'inferring TPU chip count from machine type: {machine_type}')
-        pattern = r'ct[a-z0-9]+-[a-z]+-([0-9]+)t'
+        pattern = r'(?:ct|tpu)[a-z0-9]+-[a-z]+-([0-9]+)t'
         search = re.search(pattern, machine_type)
         if search is None:
             logger.debug(f'machine type {machine_type} is not a '
@@ -1665,6 +1696,27 @@ class GKEAutoscaler(Autoscaler):
         logger.debug(
             f'machine type {machine_type} has {num_tpu_chips} TPU chips.')
         return int(num_tpu_chips)
+
+    @classmethod
+    def _node_pool_is_multi_host_tpu(cls, node_pool: dict) -> bool:
+        """Whether a node pool is a multi-host TPU slice.
+
+        v6e multi-host pools carry the resource label
+        ``goog-gke-tpu-node-pool-type: multi-host``. Ironwood (tpu7x) pools
+        set their slice through a workload policy and are labeled
+        ``single-host`` even when the slice spans several VMs, so a pool also
+        counts as multi-host when its slice topology has more chips than one
+        of its VMs.
+        """
+        node_config = node_pool.get('config', {})
+        if cls._is_node_multi_host_tpu(node_config.get('resourceLabels', {})):
+            return True
+        topology = node_pool.get('placementPolicy', {}).get('tpuTopology')
+        if not topology:
+            return False
+        chips_per_vm = cls._tpu_chip_count_from_instance_type(
+            node_config.get('machineType', ''))
+        return 0 < chips_per_vm < reduce_tpu_topology(topology)
 
     @classmethod
     def _is_node_multi_host_tpu(cls, resource_labels: dict) -> bool:

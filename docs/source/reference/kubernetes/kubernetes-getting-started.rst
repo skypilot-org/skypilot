@@ -430,12 +430,26 @@ FAQs
 
 * **Does SkyPilot support TPUs on GKE?**
 
-  SkyPilot supports single-host TPU topologies on GKE (e.g., 1x1, 2x2, 2x4). To use TPUs, add it to the accelerator field in your task YAML:
+  SkyPilot supports single-host TPU topologies on GKE (e.g., 1x1, 2x2, 2x4), and multi-host slices of TPU v6e and Ironwood (TPU7x). To use TPUs, add it to the accelerator field in your task YAML:
 
   .. code-block:: yaml
 
     resources:
       accelerators: tpu-v5-lite-podslice:1  # or tpu-v5-lite-device, tpu-v5p-slice
+
+  The count is the number of TPU chips. A multi-host slice runs one pod per TPU VM, and ``num_nodes`` counts slices:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v6e-16  # a 4x4 slice: 4 VMs of 4 chips each
+
+  Ironwood is requested by its GKE accelerator name and chip count. ``tpu7x:4`` is one 4-chip VM (``2x2x1``), and ``tpu7x:8`` and larger are multi-host slices (``tpu7x:8`` is a ``2x2x2`` slice of 2 VMs). Google's own ``tpu7x-<N>`` names count TensorCores (two per chip), so they are not accepted.
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu7x:8
 
 * **I am using a custom image. How can I speed up the pod startup time?**
 
