@@ -1789,6 +1789,14 @@ class PermissionService:
     def resync_workspace_policies_for_new_user(self, user_id: str) -> None:
         """Grant a newly-created user any workspace access owed by config.
 
+        See `resync_workspace_policies_for_new_users`.
+        """
+        self.resync_workspace_policies_for_new_users([user_id])
+
+    def resync_workspace_policies_for_new_users(self,
+                                                user_ids: List[str]) -> None:
+        """Grant newly-created users any workspace access owed by config.
+
         Private workspaces list their members in ``allowed_users`` (a mix
         of user_ids and usernames). Those entries are resolved to casbin
         policies at server startup and on workspace-config updates, but an
@@ -1797,11 +1805,13 @@ class PermissionService:
         ``allowed_users`` before that user has ever logged in therefore
         produces an entry that resolves to nothing at sync time.
 
-        This method re-resolves the config from the perspective of a single
-        newly-created user: for each private workspace whose
-        ``allowed_users`` names this user (by id or unique username), it
+        This method re-resolves the config from the perspective of the given
+        newly-created users: for each private workspace whose
+        ``allowed_users`` names one of them (by id or unique username), it
         adds the missing ``(user_id, workspace_name, '*')`` policy. It is
-        scoped to this one user and does not rebuild all policies.
+        scoped to these users and does not rebuild all policies. A batch
+        takes each lock once, so a bulk import does not pay one lock and
+        policy write per user.
 
         Idempotent and concurrency-safe: policy writes are guarded by the
         distributed policy lock and only missing grants are added, so
@@ -1813,14 +1823,14 @@ class PermissionService:
         — config lock (shared, we only read) first, then the policy lock —
         so the two paths cannot deadlock, and holding the config lock
         across the policy write means the matches can never be computed
-        from a config snapshot that predates an admin's removal of this
+        from a config snapshot that predates an admin's removal of a
         user: whichever side takes the config lock second sees the other's
         result. On a config-lock timeout the grant is SKIPPED (never
         computed from a stale config); the zero-accessible retry in
         `workspaces.core.resolve_workspace_for_user` picks it up later.
         The pre-lock computation is only a cheap early exit so user
         creation skips the distributed locks entirely when no private
-        workspace names the user.
+        workspace names the users.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             return
@@ -1830,7 +1840,8 @@ class PermissionService:
         # pylint: disable=import-outside-toplevel
         from sky.users import resolver as user_resolver
 
-        def _matching_workspaces() -> List[str]:
+        def _matching_grants() -> List[Tuple[str, str]]:
+            """(user_id, workspace_name) pairs the config owes these users."""
             workspaces = skypilot_config.get_nested(('workspaces',),
                                                     default_value={})
             private_workspaces = {
@@ -1844,16 +1855,20 @@ class PermissionService:
                 # when there is nothing to match against.
                 return []
             resolver = user_resolver.UserResolver()
-            # Every form of this user that could appear in an allowed_users
-            # list: the user_id itself plus the unique username, if any.
-            user_entries = set(resolver.entries_for(user_id))
-            return [
-                workspace_name for workspace_name, workspace_config in
-                private_workspaces.items() if user_entries.intersection(
-                    workspace_config.get('allowed_users', []))
-            ]
+            grants: List[Tuple[str, str]] = []
+            for user_id in dict.fromkeys(user_ids):
+                # Every form of this user that could appear in an
+                # allowed_users list: the user_id itself plus the username,
+                # if an entry of it means this user.
+                user_entries = set(resolver.entries_for(user_id))
+                grants.extend((user_id, workspace_name)
+                              for workspace_name, workspace_config in
+                              private_workspaces.items()
+                              if user_entries.intersection(
+                                  workspace_config.get('allowed_users', [])))
+            return grants
 
-        if not _matching_workspaces():
+        if not _matching_grants():
             return
 
         try:
@@ -1863,24 +1878,26 @@ class PermissionService:
                 # reload_config directly: safe_reload_config would try to
                 # re-acquire the (non-reentrant) config lock we now hold.
                 skypilot_config.reload_config()
-                matching_workspaces = _matching_workspaces()
-                if not matching_workspaces:
+                matching_grants = _matching_grants()
+                if not matching_grants:
                     return
                 with _policy_lock():
                     with self._policy_transaction() as rows:
-                        granted = {
-                            workspace_name
-                            for _, workspace_name, _ in rows.select(
-                                'p', rows.c.v0 == user_id, rows.c.v2 == '*')
-                        }
-                        added = [
-                            workspace_name
-                            for workspace_name in matching_workspaces
-                            if workspace_name not in granted
-                        ]
-                        rows.insert('p', [(user_id, workspace_name, '*')
-                                          for workspace_name in added])
-                for workspace_name in added:
+                        # Filter on workspace, not user: a batch can hold more
+                        # users than a database allows bind parameters.
+                        granted = set(
+                            rows.select(
+                                'p', rows.c.v2 == '*',
+                                rows.c.v1.in_({
+                                    workspace_name
+                                    for _, workspace_name in matching_grants
+                                })))
+                        added = [(user_id, workspace_name, '*')
+                                 for user_id, workspace_name in matching_grants
+                                 if (user_id, workspace_name,
+                                     '*') not in granted]
+                        rows.insert('p', added)
+                for user_id, workspace_name, _ in added:
                     label = skypilot_config.workspace_label(workspace_name)
                     logger.info(f'Granting user {user_id} access to private '
                                 f'workspace {label} on user creation '
@@ -1889,8 +1906,9 @@ class PermissionService:
         except locks.LockTimeout:
             logger.warning(
                 f'Timed out acquiring the config lock; skipping the '
-                f'workspace policy re-sync for user {user_id}. It will be '
-                'retried on their next workspace resolution.')
+                f'workspace policy re-sync for {len(user_ids)} user(s) '
+                f'(first: {user_ids[0]}). It will be retried on their next '
+                'workspace resolution.')
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""

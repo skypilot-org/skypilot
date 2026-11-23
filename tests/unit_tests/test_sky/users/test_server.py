@@ -1069,6 +1069,34 @@ charlie,pw789,invalid_role"""
         assert 'bob: User already exists' in result['creation_errors']
         assert 'charlie: DB error' in result['creation_errors']
 
+    @pytest.mark.parametrize('resync_error', [None, RuntimeError('lock')])
+    @mock.patch('sky.users.permission.permission_service.'
+                'resync_workspace_policies_for_new_users')
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    def test_user_import_resyncs_created_users_once(self,
+                                                    mock_add_or_update_user,
+                                                    mock_update_role,
+                                                    mock_get_user_by_name,
+                                                    mock_resync, resync_error):
+        """Imported users get the grants allowed_users owes them, in one
+        batch, and a failed grant does not fail the import."""
+        mock_get_user_by_name.side_effect = [None, object(), None]  # bob exists
+        mock_resync.side_effect = resync_error
+        csv_content = """username,password,role
+alice,pw123,user
+bob,pw456,user
+charlie,pw789,user"""
+
+        result = server.user_import(
+            payloads.UserImportBody(csv_content=csv_content))
+
+        assert result['success_count'] == 2
+        created = [c.args[0].id for c in mock_add_or_update_user.call_args_list]
+        mock_resync.assert_called_once_with(created)
+        assert len(created) == 2
+
     @pytest.mark.asyncio
     async def test_user_import_invalid_csv(self):
         """Test POST /users/import endpoint with invalid CSV."""
