@@ -482,6 +482,8 @@ def get_tpu_multi_host_shape(
 TPU_WORKER_ID_TAG = 'skypilot-tpu-worker-id'
 TPU_WORKER_HOSTNAMES_TAG = 'skypilot-tpu-worker-hostnames'
 TPU_SLICE_NAME_TAG = 'skypilot-tpu-slice-name'
+# Port the TPU runtime of each VM listens on (GKE's TPU_PROCESS_PORT).
+TPU_PROCESS_PORT = 8471
 
 # Pod label naming the multi-host TPU slice a pod belongs to,
 # `<cluster name on cloud>-<slice index>`. Set only on clusters launched
@@ -494,14 +496,22 @@ def tpu_worker_env_vars(tags: Optional[Dict[str, str]]) -> Dict[str, str]:
 
     The TPU runtime on GKE reads the slice shape from env vars GKE injects
     (TPU_TOPOLOGY, TPU_HOST_BOUNDS, ...), but GKE injects the worker's
-    identity only into JobSet and Indexed Job pods. These are set from the
-    node's provisioner tags; empty for any other node.
+    identity only into JobSet and Indexed Job pods. Other pods get
+    single-host values (``TPU_WORKER_HOSTNAMES=localhost``,
+    ``TPU_PROCESS_ADDRESSES=localhost:8471``). These are set from the node's
+    provisioner tags; empty for any other node. JAX and libtpu count the
+    slice's processes from ``TPU_PROCESS_ADDRESSES``, one ``host:port`` per
+    VM, in worker order.
     """
     if not tags or TPU_WORKER_ID_TAG not in tags:
         return {}
+    hostnames = tags.get(TPU_WORKER_HOSTNAMES_TAG, '')
     return {
         'TPU_WORKER_ID': tags[TPU_WORKER_ID_TAG],
-        'TPU_WORKER_HOSTNAMES': tags.get(TPU_WORKER_HOSTNAMES_TAG, ''),
+        'TPU_WORKER_HOSTNAMES': hostnames,
+        'TPU_PROCESS_ADDRESSES': ','.join(
+            f'{host}:{TPU_PROCESS_PORT}' for host in hostnames.split(',')
+            if host),
         'TPU_NAME': tags.get(TPU_SLICE_NAME_TAG, ''),
     }
 

@@ -3318,8 +3318,9 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
 
 
 # Tags get_cluster_info() puts on the pods of a multi-host TPU slice; the
-# task runner exports them as TPU_WORKER_ID, TPU_WORKER_HOSTNAMES and
-# TPU_NAME (see kubernetes_utils.tpu_worker_env_vars()).
+# task runner exports them as TPU_WORKER_ID, TPU_WORKER_HOSTNAMES,
+# TPU_PROCESS_ADDRESSES and TPU_NAME (see
+# kubernetes_utils.tpu_worker_env_vars()).
 _GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
 
 
