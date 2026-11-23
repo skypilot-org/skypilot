@@ -310,7 +310,8 @@ def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
 
 def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
                                                         monkeypatch):
-    service.add_workspace_policy('ws-a', ['alice'])
+    # Both users already hold a grant, so a lookup keyed on one user misses.
+    service.add_workspace_policy('ws-a', ['alice', 'bob'])
     workspaces = {
         'ws-a': {
             'private': True,
@@ -319,6 +320,10 @@ def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
         'ws-b': {
             'private': True,
             'allowed_users': ['alice']
+        },
+        'ws-c': {
+            'private': True,
+            'allowed_users': ['bob-name']
         },
         'ws-open': {
             'allowed_users': ['carol']
@@ -338,10 +343,12 @@ def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
         'bob': ['bob', 'bob-name'],
         'carol': ['carol'],
     }.get
-    with mock.patch('sky.users.resolver.UserResolver', return_value=resolver):
+    with mock.patch('sky.users.resolver.UserResolver',
+                    return_value=resolver), _policy_commits(engine) as counts:
         service.resync_workspace_policies_for_new_users(
             ['alice', 'bob', 'carol', 'alice'])
     assert config_locks == [1]
+    assert counts['commits'] == 1
     with engine.connect() as conn:
         rows = conn.execute(
             sqlalchemy.text('SELECT v0, v1, v2 FROM casbin_rule '
@@ -349,7 +356,8 @@ def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
     # A list, not a set: an existing or repeated grant must not be re-inserted.
     assert sorted(tuple(r) for r in rows) == [('alice', 'ws-a', '*'),
                                               ('alice', 'ws-b', '*'),
-                                              ('bob', 'ws-a', '*')]
+                                              ('bob', 'ws-a', '*'),
+                                              ('bob', 'ws-c', '*')]
 
 
 def _startup_patches(monkeypatch, service, rules_complete):

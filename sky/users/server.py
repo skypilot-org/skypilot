@@ -843,7 +843,7 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
         # Grant the private-workspace access `allowed_users` owes the new
         # accounts, as `/users/create` does, once for the whole batch. The
         # users already exist, so a failure is logged rather than raised: the
-        # grant is retried on each user's next workspace resolution.
+        # grant is retried when a user next requests that workspace.
         try:
             (permission.permission_service.
              resync_workspace_policies_for_new_users(created_user_ids))
