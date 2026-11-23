@@ -513,15 +513,25 @@ def num_task_nodes(
     """Task nodes of a cluster with ``launched_nodes`` cluster nodes.
 
     ``launched_nodes`` counts cluster nodes (pods), while
-    ``launched_resources`` describes one task node. They differ only for a
-    multi-host GKE TPU slice on Kubernetes, where one task node (one slice)
-    has one pod per VM. Use this wherever the node count is shown next to or
-    multiplied with ``launched_resources``.
+    ``launched_resources`` describes one task node. They differ when:
+
+    * Multi-host GKE TPU slice on Kubernetes: one task node (one slice) has
+      one pod per VM.
+    * Dedicated thin head (``head_node_cpus``): ``launched_nodes`` includes
+      the CPU-only head, which does not host Ray CPU tasks; task nodes are
+      the workers only.
+
+    Use this wherever the node count is shown next to or multiplied with
+    ``launched_resources``.
     """
+    nodes = launched_nodes
+    if (launched_resources is not None and
+            launched_resources.has_separate_head() is True):
+        nodes = max(launched_nodes - 1, 0)
     vms_per_slice = tpu_vms_per_slice(launched_resources)
     if vms_per_slice <= 1:
-        return launched_nodes
-    return launched_nodes // vms_per_slice
+        return nodes
+    return nodes // vms_per_slice
 
 
 # Kept under their old names: callers inside and outside this repo use them.

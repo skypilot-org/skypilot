@@ -41,3 +41,9 @@ PROVIDER_EXECUTION_CONTEXT_KEY = 'execution_context'
 
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']
+
+# Ray ``--num-cpus`` for a dedicated thin head (integer; ``ray start`` rejects
+# fractions). ``0`` means no Ray CPU tasks schedule on the head. Setup pins via
+# ``node:<ip>`` resources instead of a CPU placement-group bundle. Pod
+# requests/limits still come from ``head_node_*``.
+THIN_HEAD_RAY_NUM_CPUS = '0'
