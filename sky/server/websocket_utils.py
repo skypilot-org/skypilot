@@ -32,7 +32,9 @@ def register_ssh_redirect_hook(
     """Register a hook that checks whether an SSH connection should redirect.
 
     The hook is called with (websocket, cluster_name) after the WebSocket is
-    accepted but before the backend connection is established.
+    accepted but before the backend connection is established. The server has
+    already checked that ``websocket.state.auth_user`` may write to the
+    cluster; a None auth_user is a trusted local caller.
     """
     global ssh_redirect_hook
     if ssh_redirect_hook is not None:
