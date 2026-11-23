@@ -214,23 +214,27 @@ def test_skypilot_pods_are_read_from_a_cache(serve):
 
 
 def _query_instances(monkeypatch,
-                     non_terminated_only: bool = True) -> Dict[str, Any]:
+                     non_terminated_only: bool = True,
+                     pods: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Queries a cluster whose services select `pods` (by default the head),
+    as kubernetes-ray.yml.j2 gives each node a service."""
     monkeypatch.setattr(instance, '_get_pod_failure_reason_from_events',
                         lambda *args, **kwargs: None)
     monkeypatch.setattr(instance, '_get_pod_missing_reason',
                         lambda *args, **kwargs: None)
+    services = [{
+        'spec': {
+            'selector': {
+                'component': pod
+            }
+        }
+    } for pod in pods or [_HEAD]]
     return instance.query_instances('c',
                                     'c',
                                     provider_config={
                                         'namespace': 'default',
                                         'context': _CONTEXT,
-                                        'services': [{
-                                            'spec': {
-                                                'selector': {
-                                                    'component': _HEAD
-                                                }
-                                            }
-                                        }],
+                                        'services': services,
                                     },
                                     non_terminated_only=non_terminated_only)
 
@@ -269,6 +273,15 @@ def test_the_api_server_confirms_an_unhealthy_cached_answer(
     fake = serve(pods=[cached, [_pod()]])
     assert _query_instances(monkeypatch) == {
         _HEAD: (status_lib.ClusterStatus.UP, None)
+    }
+    assert _consistencies(fake) == [reads.CACHED, reads.FRESH]
+
+
+def test_a_cached_answer_missing_a_worker_is_read_again(monkeypatch, serve):
+    fake = serve(pods=[[_pod()], [_pod(), _pod(name='c-worker1')]])
+    assert _query_instances(monkeypatch, pods=[_HEAD, 'c-worker1']) == {
+        _HEAD: (status_lib.ClusterStatus.UP, None),
+        'c-worker1': (status_lib.ClusterStatus.UP, None),
     }
     assert _consistencies(fake) == [reads.CACHED, reads.FRESH]
 

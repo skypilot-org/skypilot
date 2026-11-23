@@ -366,6 +366,62 @@ def test_api_errors_name_the_resource(api, monkeypatch):
         reads.list_objects('ctx', reads.NODES)
 
 
+def test_a_body_cut_off_mid_read_is_retried(api, monkeypatch):
+    monkeypatch.setattr(kubernetes_utils.time, 'sleep', lambda seconds: None)
+    client = api(_POD_LIST)
+
+    class _CutOff(_Response):
+
+        def read(self, *args, **kwargs):
+            raise kubernetes.urllib3.exceptions.ProtocolError(
+                'Connection broken')
+
+    calls = []
+
+    def call_api(path, method, **kwargs):
+        del method, kwargs
+        calls.append(path)
+        return _CutOff(b'')
+
+    monkeypatch.setattr(client, 'call_api', call_api)
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError):
+        reads.list_objects('ctx', reads.PODS)
+    assert len(calls) == kubernetes_utils.DEFAULT_MAX_RETRIES
+
+
+def test_an_interrupted_attempt_is_observed_as_failed(api, monkeypatch):
+    client = api(_POD_LIST)
+    observed = []
+    kubernetes_utils.register_context_call_observer(
+        lambda context, error, duration: observed.append(error))
+    monkeypatch.setattr(client, 'call_api',
+                        mock.Mock(side_effect=KeyboardInterrupt))
+
+    with pytest.raises(KeyboardInterrupt):
+        reads.list_objects('ctx', reads.PODS)
+    assert isinstance(observed[0], KeyboardInterrupt)
+
+
+def test_reads_under_different_kubeconfigs_are_not_shared(api, monkeypatch):
+    api(_POD_LIST)
+    keys = []
+    in_flight = reads._IN_FLIGHT  # pylint: disable=protected-access
+
+    class _Recording:
+
+        def do(self, key, fn):
+            keys.append(key)
+            return in_flight.do(key, fn)
+
+    monkeypatch.setattr(reads, '_IN_FLIGHT', _Recording())
+    for kubeconfig in ('/a/config', '/b/config'):
+        monkeypatch.setenv('KUBECONFIG', kubeconfig)
+        reads.list_objects('ctx', reads.PODS, consistency=reads.FRESH)
+
+    assert keys[0] != keys[1]
+
+
 def test_namespace_rules(api):
     api(_POD_LIST)
     with pytest.raises(ValueError):
