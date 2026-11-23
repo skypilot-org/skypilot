@@ -1087,6 +1087,9 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
           pattern: "sleep 60 & wait \\$!"
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "logrotate\\.conf & wait \\$!"
       - notMatchRegex:
           path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
           pattern: "sleep [0-9]+;?\\n"

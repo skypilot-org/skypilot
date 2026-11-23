@@ -490,8 +490,9 @@ spec:
         - |
           # The shell is PID 1, which ignores SIGTERM without a handler, so
           # without this trap every pod shutdown waits out
-          # terminationGracePeriodSeconds. Sleeps run in the background so
-          # `wait` returns as soon as the signal arrives.
+          # terminationGracePeriodSeconds. Each command runs in the background
+          # so `wait` returns as soon as the signal arrives. An interrupted
+          # copytruncate leaves server.log intact; only server.log.1 is partial.
           trap 'exit 0' TERM INT
           if ! command -v logrotate >/dev/null 2>&1; then
             echo "warning: logrotate not found; skipping log retention" >&2
@@ -510,7 +511,7 @@ spec:
           }
           EOF
           while true; do
-            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf
+            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf & wait $!
             sleep 60 & wait $!
           done
         volumeMounts:
