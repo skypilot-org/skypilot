@@ -32,7 +32,9 @@ _WARM_START_MAX_CONSECUTIVE_FAILURES = 5
 # How long shutdown waits for the warm-start thread, which checks for a stop
 # every _WARM_START_POLL_SECONDS.
 _WARM_START_JOIN_SECONDS = 10
-# How long replacing a broken pool waits for the stdlib to reap its workers.
+# How long replacing a pool that broke while warm start ran waits for the
+# stdlib to reap its workers, when telling a start-up failure from a serving
+# crash needs their exit codes.
 _BROKEN_POOL_JOIN_SECONDS = 5
 
 # What a worker reports on its start-up pipe once its initializer has run,
@@ -68,7 +70,18 @@ def _run_initializer(ready_conn, initializer: Optional[Callable],
     except BaseException:
         _send_start_signal(ready_conn, _START_FAILED)
         raise
+    _warn_if_sigterm_handled()
     _send_start_signal(ready_conn, _STARTED)
+
+
+def _warn_if_sigterm_handled() -> None:
+    """Warm start tells a starting worker that the stdlib stopped (it exits
+    with -SIGTERM) from one that failed to start. A SIGTERM handler installed
+    during start-up, e.g. by a plugin, would blur that, so say so."""
+    if signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL:
+        logger.warning(
+            'An executor worker initializer installed a SIGTERM handler; '
+            'workers stopped while starting may be counted as start failures.')
 
 
 def _count_start_failure(pool: str, reason: str) -> None:
@@ -212,10 +225,9 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
 
         True only while warm start was running and either a worker reported
         that its start-up failed, no worker of the pool had become ready yet,
-        or a worker that never became ready was killed (e.g. out of memory).
-        Otherwise a ready worker may have died serving a task; the stdlib
-        terminates the others with SIGTERM, so a break with only those exits
-        counts as a serving break.
+        or a worker that never became ready exited on its own (killed, e.g.
+        out of memory, crashed or aborted). Otherwise a ready worker died,
+        possibly serving a task, and the break counts as a serving break.
         """
         if self._warm_start_thread is None or self._warm_start_end not in (
                 None, 'broken'):
@@ -223,7 +235,7 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         if self.start_failures > 0 or (self._ready_count == 0 and
                                        self._warm_start_started > 0):
             return True
-        return self._starting_worker_killed()
+        return self._starting_worker_died()
 
     def wait_until_broken_handled(self, timeout: float) -> None:
         """Waits for the stdlib to finish terminating and reaping the workers
@@ -232,20 +244,36 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         manager = pool._executor_manager_thread  # pylint: disable=protected-access
         if manager is not None and manager is not threading.current_thread():
             manager.join(timeout)
+            if manager.is_alive():
+                logger.warning(
+                    f'[{self.name}] Workers of a broken executor pool did not '
+                    f'exit within {timeout}s of being stopped.')
 
-    def _starting_worker_killed(self) -> bool:
-        """Whether a worker that never reported ready was SIGKILLed."""
+    def _starting_worker_died(self) -> bool:
+        """Whether a worker that never reported ready exited on its own.
+
+        When a pool breaks, the stdlib stops the other workers with SIGTERM. A
+        worker only installs its own SIGTERM handler when it runs a request,
+        so a worker stopped while starting exits with -SIGTERM; any other exit
+        of a worker that never became ready is its own failure to start.
+        """
+        # Exit codes are only final once the stdlib reaped the workers, and a
+        # worker that became ready may have reported it just before the break.
+        self.wait_until_broken_handled(_BROKEN_POOL_JOIN_SECONDS)
+        self.drain_start_signals()
         processes = self._processes  # pylint: disable=protected-access
         if not processes:
             return False
         with self._ready_lock:
             ready_pids = set(self._ready_pids)
         for process in list(processes.values()):
+            if process.pid in ready_pids:
+                continue
             try:
-                killed = process.exitcode == -signal.SIGKILL
+                exitcode = process.exitcode
             except ValueError:
                 continue  # Already closed.
-            if killed and process.pid not in ready_pids:
+            if exitcode is not None and exitcode != -signal.SIGTERM:
                 return True
         return False
 
@@ -615,8 +643,6 @@ class BurstableExecutor:
         """Counts a broken pool, and turns warm start off for the pools that
         replace it once it keeps failing. Call with _guaranteed_pool_lock held.
         """
-        # Exit codes are only final once the stdlib reaped the workers.
-        broken_pool.wait_until_broken_handled(_BROKEN_POOL_JOIN_SECONDS)
         # A worker whose initializer raised reported it on the start-up pipe.
         broken_pool.drain_start_signals()
         if not broken_pool.broke_during_warm_start():

@@ -271,6 +271,35 @@ def first_fast_rest_slow(marker, seconds):
     os.close(fd)
 
 
+def first_fast_rest_exit(marker, delay, how):
+    """The first worker to run this starts at once and records its pid; the
+    others wait `delay` seconds and then exit on their own, the way `how`
+    says, before they become ready."""
+    try:
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        time.sleep(delay)
+        if how == 'exit1':
+            os._exit(1)
+        if how == 'exit0':
+            os._exit(0)
+        os.kill(os.getpid(), getattr(signal, how))
+        time.sleep(60)  # The signal ends the process.
+        return
+    os.write(fd, str(os.getpid()).encode())
+    os.close(fd)
+
+
+# Exit code of a worker that exits on its own in first_fast_rest_exit.
+_SELF_EXIT_CODES = {
+    'exit1': 1,
+    'exit0': 0,
+    'SIGSEGV': -signal.SIGSEGV,
+    'SIGABRT': -signal.SIGABRT,
+    'SIGKILL': -signal.SIGKILL,
+}
+
+
 def raise_in_init():
     """Initializer that fails the way a broken import or plugin would."""
     raise RuntimeError('start-up failed')
@@ -647,9 +676,14 @@ def test_serving_crash_while_another_worker_starts_is_not_a_start_failure(
         ) >= 0 and executor._ready_count == 1 and len(executor._processes) == 2)
         with open(marker, encoding='utf-8') as f:
             ready_pid = int(f.read())
+        starting = executor._processes[(set(executor._processes) -
+                                        {ready_pid}).pop()]
         os.kill(ready_pid, signal.SIGKILL)
         assert _wait_until(lambda: executor._broken)
         executor.wait_until_broken_handled(30)
+        # The stdlib stopped the still-starting worker; that is not its own
+        # failure to start.
+        assert starting.exitcode == -signal.SIGTERM
         executor.drain_start_signals()
         assert not executor.broke_during_warm_start()
     finally:
@@ -681,6 +715,137 @@ def test_starting_worker_killed_while_another_is_ready_is_a_start_failure(
         executor.shutdown()
 
 
+@requires_warm_start
+@pytest.mark.parametrize('how', sorted(_SELF_EXIT_CODES))
+def test_starting_worker_exiting_while_another_is_ready_is_a_start_failure(
+        tmp_path, how):
+    """A worker that exits on its own before it becomes ready (an exit, a crash
+    or an abort, not only SIGKILL) counts as a failure to start, even when
+    another worker of the pool is ready."""
+    marker = str(tmp_path / 'first')
+    executor = PoolExecutor(max_workers=2,
+                            warm_start=True,
+                            initializer=first_fast_rest_exit,
+                            initargs=(marker, 3, how))
+    try:
+        assert _wait_until(lambda: executor.drain_start_signals(
+        ) >= 0 and executor._ready_count == 1 and len(executor._processes) == 2)
+        with open(marker, encoding='utf-8') as f:
+            ready_pid = int(f.read())
+        starting = executor._processes[(set(executor._processes) -
+                                        {ready_pid}).pop()]
+        assert _wait_until(lambda: executor._broken)
+        executor.wait_until_broken_handled(30)
+        assert starting.exitcode == _SELF_EXIT_CODES[how]
+        assert executor.start_failures == 0  # Nothing was reported.
+        assert executor.broke_during_warm_start()
+    finally:
+        executor.shutdown()
+
+
+@requires_warm_start
+def test_starting_worker_aborts_keep_counting_toward_turning_warm_start_off(
+        tmp_path):
+    """Starting workers that abort while another worker is ready count as
+    warm-start breaks: they do not reset the consecutive count, so the pool
+    that keeps failing this way has warm start turned off."""
+    pool = 'abort-while-ready-test'
+    limit = requests_process._WARM_START_MAX_CONSECUTIVE_FAILURES
+    warm_before = _pool_broken(pool, 'warm_start')
+    serving_before = _pool_broken(pool, 'serving')
+    died_before = _start_failures(pool, 'died')
+    marker = str(tmp_path / 'first')
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name=pool,
+                                 initializer=first_fast_rest_exit,
+                                 initargs=(marker, 3, 'exit1'))
+    try:
+        # Earlier pools of this executor already broke while starting.
+        executor._warm_start_failures = limit - 1
+        original = executor._executor
+        assert _wait_until(lambda: original.drain_start_signals() >= 0 and
+                           original._ready_count == 1)
+        assert _wait_until(lambda: original._broken)
+        with unittest.mock.patch.object(
+                PoolExecutor,
+                'wait_until_broken_handled',
+                autospec=True,
+                side_effect=PoolExecutor.wait_until_broken_handled) as wait:
+            executor.submit_until_success(dummy_task)
+        # Classifying this break needed the exit codes.
+        assert wait.call_count == 1
+        assert executor._executor is not original
+        assert _pool_broken(pool, 'warm_start') == warm_before + 1
+        assert _pool_broken(pool, 'serving') == serving_before
+        assert _start_failures(pool, 'died') == died_before + 1
+        assert executor._warm_start_failures == limit
+        assert executor._guaranteed_pool_kwargs['warm_start'] is False
+        assert _warm_start_disabled(pool) == 1
+    finally:
+        executor.shutdown()
+
+
+def test_pool_recovery_without_warm_start_does_not_wait():
+    """Replacing a broken pool that never warm-started does not wait for the
+    stdlib to reap its workers: exit codes cannot change how it is counted."""
+    pool = 'no-warm-start-recovery-test'
+    serving_before = _pool_broken(pool, 'serving')
+    executor = BurstableExecutor(garanteed_workers=1, name=pool)
+    try:
+        original = executor._executor
+        pid = executor.submit_until_success(get_pid).result(timeout=60)
+        os.kill(pid, signal.SIGKILL)
+        assert _wait_until(lambda: original._broken)
+        with unittest.mock.patch.object(PoolExecutor,
+                                        'wait_until_broken_handled') as wait:
+            assert executor.submit_until_success(get_pid).result(timeout=60)
+        wait.assert_not_called()
+        assert executor._executor is not original
+        assert _pool_broken(pool, 'serving') == serving_before + 1
+    finally:
+        executor.shutdown()
+
+
+@requires_warm_start
+def test_pool_recovery_does_not_wait_when_no_worker_was_ready():
+    """A pool that broke during warm start before any worker was ready counts
+    as a warm-start break without waiting for exit codes."""
+    pool = 'no-ready-recovery-test'
+    warm_before = _pool_broken(pool, 'warm_start')
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name=pool,
+                                 initializer=die_in_init)
+    try:
+        original = executor._executor
+        assert _wait_until(lambda: original._broken)
+        with unittest.mock.patch.object(PoolExecutor,
+                                        'wait_until_broken_handled') as wait:
+            executor.submit_until_success(dummy_task)
+        wait.assert_not_called()
+        assert _pool_broken(pool, 'warm_start') == warm_before + 1
+    finally:
+        executor.shutdown()
+
+
+def test_warns_when_start_up_installs_a_sigterm_handler():
+    """A SIGTERM handler installed by worker start-up would make stopped
+    starting workers look like start failures; that is logged."""
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        with unittest.mock.patch.object(requests_process.logger,
+                                        'warning') as warning:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            requests_process._warn_if_sigterm_handled()
+            warning.assert_not_called()
+            signal.signal(signal.SIGTERM, lambda *_: None)
+            requests_process._warn_if_sigterm_handled()
+            warning.assert_called_once()
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 class _PoolThatBrokeInWarmStart:
     """Stands in for a pool that broke before warm start finished."""
 
@@ -691,9 +856,6 @@ class _PoolThatBrokeInWarmStart:
 
     def drain_start_signals(self):
         return 0
-
-    def wait_until_broken_handled(self, timeout):
-        del timeout
 
 
 def test_burstable_executor_turns_warm_start_off_after_repeated_failures():
