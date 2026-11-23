@@ -303,7 +303,6 @@ def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
                         lambda *a, **k: contextlib.nullcontext())
     resolver = mock.Mock()
     resolver.entries_for.return_value = ['alice']
-    resolver.has_id.return_value = False
     with mock.patch('sky.users.resolver.UserResolver', return_value=resolver):
         service.resync_workspace_policies_for_new_user('alice')
     assert _rows(engine, 'p') == {('alice', 'ws-a', '*'),
@@ -347,7 +346,6 @@ def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
         'bob': ['bob', 'bob-name'],
         'carol': ['carol'],
     }.get
-    resolver.has_id.return_value = False
     with mock.patch('sky.users.resolver.UserResolver',
                     return_value=resolver), _policy_commits(engine) as counts:
         service.resync_workspace_policies_for_new_users(
