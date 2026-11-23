@@ -1210,8 +1210,7 @@ def test_workspace_allowed_queues(generic_cloud: str):
                     quota:
                       queue: {queue}
                 """))
-    # A queue label set directly on the pod skips the submission check, so
-    # only the queue the cluster ends up with catches it.
+    # A queue set as a pod label is caught when the cluster config is written.
     task_yamls['label'] = os.path.join(local_dir_obj.name, 'label.yaml')
     with open(task_yamls['label'], 'w', encoding='utf-8') as f:
         f.write(
@@ -1238,15 +1237,13 @@ def test_workspace_allowed_queues(generic_cloud: str):
         f'{launch} echo hi',
     ]
     if generic_cloud == 'kubernetes':
-        # A real launch: the queue is checked while the cluster config is
-        # written, before any pod is created.
+        # A real launch is refused before any pod is created.
         commands.append(
             f's=$(sky launch -y -c {name} --infra kubernetes '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'--config active_workspace=queues-ws {task_yamls["label"]} 2>&1) '
             f'&& exit 1; echo "$s"; {rejected}')
-        # A managed job: its cluster is refused on the controller, which
-        # fails the job instead of retrying.
+        # A refused managed job fails instead of retrying.
         commands += [
             f'sky jobs launch -y -d -n {name}-job --infra kubernetes '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '

@@ -953,7 +953,7 @@ class TestWorkspaceManagement(unittest.TestCase):
             ({
                 'kubernetes': None
             }, cfg(allowed_queues=['a']), False),
-            # Together with an infra change, it is an infra change.
+            # With another change in the same save, it is not safe.
             (cfg(allowed_queues=['a']), {
                 'kubernetes': {
                     'namespace': 'ns',

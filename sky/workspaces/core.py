@@ -273,7 +273,8 @@ def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
     access_fields = set(_ACCESS_AND_NAME_FIELDS)
     access_fields |= schemas.access_only_workspace_properties()
     stripped = {k: v for k, v in config.items() if k not in access_fields}
-    # Allowed queues are not infra. An empty block counts as no block.
+    # Allowed queues are left out. An empty cloud or quota block counts as
+    # no block.
     for cloud in ('kubernetes', 'slurm'):
         if cloud not in stripped:
             continue

@@ -3073,8 +3073,7 @@ def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
             'allowed_queues': ['q', 'other']
         }, "Default queue 'q,other' of workspace 'team-a' is not in its allowed"
         ),
-        # Names are compared exactly; Slurm would read a padded name as a
-        # separate argument.
+        # Names are compared exactly.
         ('slurm', {
             'queue': 'q, other',
             'allowed_queues': ['q', 'other']

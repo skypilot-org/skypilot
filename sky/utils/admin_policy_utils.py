@@ -240,8 +240,8 @@ def apply(
         - The new copy of dag after applying the policy
         - The new copy of skypilot config after applying the policy.
     """
-    # Check new submissions only. A controller relaunching or recovering a
-    # job or replica is exempt: the job was checked when it was submitted.
+    # Only new submissions are checked; relaunches and recoveries were
+    # checked when submitted.
     if not at_client_side and request_name not in _VOLUME_CHECK_EXEMPT_REQUESTS:
         _check_user_named_volumes(entrypoint)
         _check_requested_queues(entrypoint)
