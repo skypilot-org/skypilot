@@ -471,10 +471,13 @@ def test_refusal_hides_what_the_caller_cannot_read(exists, workspace):
     message, stacktrace = _refusal_message(exists, workspace)
     assert message == "Pool 'p' not found."
     assert 'PoolRefusedError' not in stacktrace
+    if workspace is not None:
+        assert workspace not in stacktrace
 
 
 def test_refusal_names_a_writable_workspace_to_switch_to():
-    message, _ = _refusal_message(True, 'ws-a')
+    message, stacktrace = _refusal_message(True, 'ws-a')
+    assert 'PoolRefusedError' not in stacktrace
     assert "Switch to workspace 'team-a'" in message
     assert "active workspace 'team-b'" in message
 

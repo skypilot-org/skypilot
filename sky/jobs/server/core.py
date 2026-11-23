@@ -726,7 +726,8 @@ def _submit_remotely(controller: controller_utils.Controllers,
                      dag: 'sky.Dag',
                      pool: Optional[str] = None,
                      num_jobs: int = 1,
-                     uploaded_to_bucket: bool = False) -> List[int]:
+                     *,
+                     uploaded_to_bucket: bool) -> List[int]:
     # Ensure the controller is up before trying to create job IDs
     # Use the same cloud as the tasks for the controller
     task_resources = None
@@ -836,25 +837,25 @@ def _raise_pool_refused(pool: str, exists: bool,
         pool_workspace = None
     readable, writable = workspaces_core.get_workspace_access_sets()
     active_workspace = skypilot_config.get_active_workspace()
+    # The request's stacktrace goes to the client, so each raise drops the
+    # chained refusal, which names the workspace.
     with ux_utils.print_exception_no_traceback():
         if pool_workspace is None or pool_workspace not in readable:
-            # The request's stacktrace goes to the client; drop the chained
-            # refusal, which names the workspace.
             raise not_found from None
         pool_name = skypilot_config.get_workspace_name(pool_workspace)
         if pool_workspace == active_workspace:
             # Only a hand-edited controller config gets here.
             raise ValueError(
                 f'Pool {pool!r} records workspace {pool_name!r} in a form the '
-                'jobs controller does not match. Re-create the pool.')
+                'jobs controller does not match. Re-create the pool.') from None
         active_name = skypilot_config.get_workspace_name(active_workspace)
         if pool_workspace in writable:
             raise ValueError(
                 f'Pool {pool!r} is in workspace {pool_name!r}, not the active '
                 f'workspace {active_name!r}. Switch to workspace '
-                f'{pool_name!r} to use it.')
+                f'{pool_name!r} to use it.') from None
         raise ValueError(f'Pool {pool!r} is in workspace {pool_name!r}, which '
-                         'is read-only for you.')
+                         'is read-only for you.') from None
 
 
 def _client_set_workspace() -> bool:
