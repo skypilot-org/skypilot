@@ -1,4 +1,5 @@
 """Tests for sky.jobs.server.core."""
+import traceback
 from unittest import mock
 
 import pytest
@@ -450,8 +451,15 @@ def _refusal_message(exists, workspace):
          mock.patch.object(jobs_core.skypilot_config,
                            'get_workspace_name', side_effect=_NAMES.get):
         with pytest.raises(ValueError) as info:
-            jobs_core._raise_pool_refused('p', exists, workspace)
-    return str(info.value)
+            try:  # As the remote path raises it.
+                raise exceptions.PoolRefusedError(exists, workspace)
+            except exceptions.PoolRefusedError:
+                jobs_core._raise_pool_refused('p', exists, workspace)
+    # What the API server sends the client as the stacktrace.
+    stacktrace = ''.join(
+        traceback.format_exception(type(info.value), info.value,
+                                   info.value.__traceback__))
+    return str(info.value), stacktrace
 
 
 @pytest.mark.parametrize(('exists', 'workspace'), [
@@ -460,35 +468,34 @@ def _refusal_message(exists, workspace):
     (True, 'dup'),
 ])
 def test_refusal_hides_what_the_caller_cannot_read(exists, workspace):
-    message = _refusal_message(exists, workspace)
+    message, stacktrace = _refusal_message(exists, workspace)
     assert message == "Pool 'p' not found."
+    assert 'PoolRefusedError' not in stacktrace
 
 
 def test_refusal_names_a_writable_workspace_to_switch_to():
-    message = _refusal_message(True, 'ws-a')
+    message, _ = _refusal_message(True, 'ws-a')
     assert "Switch to workspace 'team-a'" in message
     assert "active workspace 'team-b'" in message
 
 
 def test_refusal_of_a_read_only_workspace():
-    assert 'read-only for you' in _refusal_message(True, 'ws-r')
+    assert 'read-only for you' in _refusal_message(True, 'ws-r')[0]
 
 
 def test_refusal_of_the_active_workspace_is_not_a_switch():
-    message = _refusal_message(True, 'ws-b')
+    message, _ = _refusal_message(True, 'ws-b')
     assert 'Re-create the pool' in message
     assert 'Switch' not in message
 
 
 @pytest.mark.parametrize(('uploaded', 'cleanup_fails'), [(True, False),
                                                          (True, True),
-                                                         (False, False),
-                                                         (None, False)])
+                                                         (False, False)])
 def test_submission_refused_by_the_controller(uploaded, cleanup_fails):
     """The files uploaded for the job are removed: it never runs, and only a
     finished job removes them. Without a cloud bucket nothing was uploaded,
-    and the storage mounts are left alone. A failed check (None) leaves
-    them alone too, and still reports the refusal."""
+    and the storage mounts are left alone."""
     backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
     backend.set_job_info_without_job_id.side_effect = (
         exceptions.PoolRefusedError(True, 'ws-a'))
@@ -509,20 +516,13 @@ def test_submission_refused_by_the_controller(uploaded, cleanup_fails):
                            return_value=backend), \
          mock.patch.object(jobs_core.backend_utils, 'get_task_resources_str',
                            return_value='r'), \
-         mock.patch.object(jobs_core.storage_lib,
-                           'get_cached_enabled_storage_cloud_names_or_refresh',
-                           return_value=['gcp']), \
-         mock.patch.object(
-             jobs_core,
-             '_stages_through_cloud_bucket',
-             return_value=uploaded,
-             side_effect=None if uploaded is not None else RuntimeError('db'),
-         ) as stages, \
          mock.patch.object(jobs_core, '_raise_pool_refused',
                            side_effect=ValueError('refused')) as refuse:
         with pytest.raises(ValueError, match='refused'):
-            jobs_core._submit_remotely(mock.Mock(), dag, pool='p')
-    stages.assert_called_once_with(['gcp'])
+            jobs_core._submit_remotely(mock.Mock(),
+                                       dag,
+                                       pool='p',
+                                       uploaded_to_bucket=uploaded)
     refuse.assert_called_once_with('p', True, 'ws-a')
     persistent.construct.assert_not_called()
     if not uploaded:
@@ -543,18 +543,16 @@ def test_upload_shares_the_cleanup_condition(uploaded):
     task = sky.Task(name='t', run='echo')
     with dag_lib.Dag() as dag:
         dag.add(task)
-    with mock.patch.object(jobs_core.storage_lib,
-                           'get_cached_enabled_storage_cloud_names_or_refresh',
-                           return_value=['gcp']), \
-         mock.patch.object(jobs_core, '_stages_through_cloud_bucket',
-                           return_value=uploaded), \
+    with mock.patch.object(jobs_core, '_stages_through_cloud_bucket',
+                           return_value=uploaded) as stages, \
          mock.patch.object(jobs_core.controller_utils,
                            'maybe_translate_local_file_mounts_and_sync_up'
                           ) as sync_up, \
          mock.patch.object(jobs_core.controller_utils,
                            'translate_local_file_mounts_to_two_hop',
                            return_value={}):
-        jobs_core._upload_files_to_controller(dag)
+        jobs_core._upload_files_to_controller(dag, ['gcp'])
+    stages.assert_called_once_with(['gcp'])
     assert sync_up.called == uploaded
 
 
