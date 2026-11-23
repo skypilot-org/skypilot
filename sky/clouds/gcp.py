@@ -69,7 +69,7 @@ _GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
 # 567.0.0 bundles gsutil 5.37 which fixes pyOpenSSL >= 24.3.0 compatibility
 # (OpenSSL.crypto.sign was removed in pyOpenSSL 24.3.0).
 # https://cloud.google.com/sdk/docs/release-notes#56700_2026-05-05
-_GCLOUD_VERSION = '567.0.0'
+_GCLOUD_VERSION = '594.0.1'
 # Need to be run with /bin/bash
 # We factor out the installation logic to keep it align in both spot
 # controller and cloud stores.

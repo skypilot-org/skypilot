@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Stage 1: Install Google Cloud SDK using APT
-FROM python:3.13.15-slim AS gcloud-apt-install
+FROM python:3.13.18-slim AS gcloud-apt-install
 
 # Keep in sync with _GCLOUD_VERSION in sky/clouds/gcp.py. Pinned so the apt
 # install layer doesn't bake in a stale version via buildx registry caching
@@ -9,7 +9,7 @@ FROM python:3.13.15-slim AS gcloud-apt-install
 # the layer is reused indefinitely from whatever apt resolved at first build).
 # 567.0.0 ships gsutil 5.37, which replaced OpenSSL.crypto.sign with the
 # cryptography library — required after pyopenssl 24.3 dropped that API (#8070).
-ARG GCLOUD_VERSION=567.0.0-0
+ARG GCLOUD_VERSION=594.0.1-0
 
 RUN apt-get update && \
     apt-get install -y curl gnupg lsb-release && \
@@ -24,7 +24,7 @@ RUN apt-get update && \
 
 
 # Stage 2: Process the source code for INSTALL_FROM_SOURCE
-FROM python:3.13.15-slim AS process-source
+FROM python:3.13.18-slim AS process-source
 
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
@@ -77,7 +77,7 @@ RUN cd /skypilot && \
 
 
 # Stage 3: Main image
-FROM python:3.13.15-slim
+FROM python:3.13.18-slim
 
 ARG INSTALL_FROM_SOURCE=true
 
@@ -93,8 +93,12 @@ ARG TARGETARCH
 # Control Next.js basePath for staging deployments
 ARG NEXT_BASE_PATH=/dashboard
 
+# Changing this value (e.g. --build-arg APT_REFRESH=<date>) rebuilds the
+# layer below so apt-get upgrade picks up current security updates.
+# Unset by default: no effect on normal builds.
+ARG APT_REFRESH=
 # Install system packages
-RUN apt-get update -y && \
+RUN echo "apt refresh: ${APT_REFRESH}" && apt-get update -y && \
     apt-get upgrade -y && \
     apt-get install --no-install-recommends -y \
         git gcc rsync sudo patch openssh-server \
@@ -118,7 +122,7 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    curl -LO "https://dl.k8s.io/release/v1.33.7/bin/linux/$ARCH/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/v1.34.13/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl
 
