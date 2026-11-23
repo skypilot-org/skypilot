@@ -300,6 +300,12 @@ _SELF_EXIT_CODES = {
 }
 
 
+def ignore_sigterm_until(marker):
+    """Ignores SIGTERM, like an idle request worker, until `marker` exists."""
+    if not os.path.exists(marker):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
 def raise_in_init():
     """Initializer that fails the way a broken import or plugin would."""
     raise RuntimeError('start-up failed')
@@ -844,6 +850,71 @@ def test_warns_when_start_up_installs_a_sigterm_handler():
             warning.assert_called_once()
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+def _break_pool_leaving_a_survivor(executor):
+    """Kills one worker of the warm pool; the other ignores the stdlib's
+    SIGTERM and keeps running. Returns the survivor."""
+    original = executor._executor
+    assert original._warm_start_done.wait(60)
+    victim, survivor = list(original._processes.values())
+    os.kill(victim.pid, signal.SIGKILL)
+    assert _wait_until(lambda: original._broken)
+    time.sleep(1)  # The stdlib has sent its SIGTERM by now.
+    assert survivor.is_alive()
+    return survivor
+
+
+@requires_warm_start
+def test_replacement_pool_waits_for_surviving_workers_before_warm_start(
+        tmp_path):
+    """A pool replacing a broken one only starts the worker a submit needs
+    while the broken pool's workers are still running, and warm-starts the
+    rest once they exit, so both pools never hold all their workers."""
+    marker = str(tmp_path / 'stop-ignoring')
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name='survivor-test',
+                                 initializer=ignore_sigterm_until,
+                                 initargs=(marker,))
+    try:
+        survivor = _break_pool_leaving_a_survivor(executor)
+        open(marker, 'w', encoding='utf-8').close()
+        assert executor.submit_until_success(get_pid).result(timeout=60)
+        replacement = executor._executor
+        for _ in range(20):
+            assert survivor.is_alive()
+            assert len(replacement._processes) == 1
+            time.sleep(0.1)
+        os.kill(survivor.pid, signal.SIGKILL)
+        assert replacement._warm_start_done.wait(60)
+        assert len(replacement._processes) == 2
+    finally:
+        executor.shutdown()
+
+
+@requires_warm_start
+def test_replacement_pool_wait_for_surviving_workers_is_bounded(
+        tmp_path, monkeypatch):
+    """If the broken pool's workers do not exit in time, the replacement
+    warm-starts anyway."""
+    monkeypatch.setattr(requests_process, '_WARM_START_PREDECESSOR_SECONDS', 1)
+    marker = str(tmp_path / 'stop-ignoring')
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name='survivor-bound-test',
+                                 initializer=ignore_sigterm_until,
+                                 initargs=(marker,))
+    try:
+        survivor = _break_pool_leaving_a_survivor(executor)
+        open(marker, 'w', encoding='utf-8').close()
+        assert executor.submit_until_success(get_pid).result(timeout=60)
+        replacement = executor._executor
+        assert replacement._warm_start_done.wait(60)
+        assert len(replacement._processes) == 2
+        assert survivor.is_alive()
+    finally:
+        executor.shutdown()
 
 
 class _PoolThatBrokeInWarmStart:
