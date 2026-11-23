@@ -880,7 +880,12 @@ class TestSetJobInfoWithoutJobId:
             is_primary_in_job_groups=[True, False])
         context_mock = mock.Mock()
 
-        response = self.service.SetJobInfoWithoutJobId(request, context_mock)
+        # The pool exists and is in the request's workspace.
+        with mock.patch.object(services.serve_utils,
+                               'get_pool_refusal',
+                               return_value=None):
+            response = self.service.SetJobInfoWithoutJobId(
+                request, context_mock)
 
         context_mock.abort.assert_not_called()
         assert len(response.job_ids) == 3
