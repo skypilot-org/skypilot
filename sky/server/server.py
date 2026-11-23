@@ -1594,7 +1594,8 @@ async def poll_auth_token(
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_verifier is required')
 
-    auth_token = auth_sessions.auth_session_store.poll_session(code_verifier)
+    auth_token = await asyncio.to_thread(
+        auth_sessions.auth_session_store.poll_session, code_verifier)
 
     if auth_token is None:
         raise fastapi.HTTPException(status_code=404, detail='Session not found')
@@ -1635,7 +1636,8 @@ async def authorize_auth_session(
     auth_token = _generate_auth_token(request)
 
     # Create the session with the token
-    auth_sessions.auth_session_store.create_session(code_challenge, auth_token)
+    await asyncio.to_thread(auth_sessions.auth_session_store.create_session,
+                            code_challenge, auth_token)
 
     return fastapi.responses.JSONResponse(content={'status': 'authorized'},
                                           headers={'Cache-Control': 'no-store'})
@@ -1715,11 +1717,12 @@ async def enabled_clouds_batch(request: fastapi.Request,
         # read, so a read-only-visible workspace must survive this filter (the
         # dashboard asks for every workspace it can see at once, and dropping
         # one would fail the whole batch).
-        workspace_list = list(
-            permission.permission_service.get_accessible_workspace_names(
-                auth_user.id,
-                set(workspace_list),
-                action=workspace_constants.WORKSPACE_ACTION_READ))
+        workspace_list = list(await context_utils.to_thread_with_executor(
+            None,
+            permission.permission_service.get_accessible_workspace_names,
+            auth_user.id,
+            set(workspace_list),
+            action=workspace_constants.WORKSPACE_ACTION_READ))
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
@@ -3611,7 +3614,7 @@ async def api_status(
                                           req_filter)
         return fastapi.Response(content=content, media_type='application/json')
     else:
-        encoded_request_tasks = []
+        matched_request_tasks = []
         for request_id in request_ids:
             request_tasks = await requests_lib.get_requests_async_with_prefix(
                 request_id, requests_lib.DISPLAY_COLUMNS)
@@ -3622,8 +3625,10 @@ async def api_status(
                 if (scope_user_id is not None and
                         request_task.user_id != scope_user_id):
                     continue
-                encoded_request_tasks.append(request_task.readable_encode())
-        return encoded_request_tasks
+                matched_request_tasks.append(request_task)
+        # Encoding looks up each task's user in the DB.
+        return await asyncio.to_thread(
+            lambda: [task.readable_encode() for task in matched_request_tasks])
 
 
 def _get_local_contexts() -> List[str]:
