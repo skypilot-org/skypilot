@@ -122,3 +122,23 @@ def test_ironwood_autoscaler_matches_pools_to_requests():
     assert not fits('8CPU--64GB--tpu7x:4', slice_pool)
     assert fits('8CPU--64GB--tpu7x:8', slice_pool, shape_8)
     assert not fits('8CPU--64GB--tpu7x:8', vm_pool, shape_8)
+
+
+def test_gke_api_error_falls_back_to_optimistic_scheduling(monkeypatch):
+    """A refused GKE API call (no permission on the project) logs the error
+    and schedules optimistically instead of crashing the launch."""
+    from googleapiclient import errors as gcp_errors  # pylint: disable=import-outside-toplevel
+
+    from sky.adaptors import gcp  # pylint: disable=import-outside-toplevel
+
+    class _Resp(dict):
+        status = 403
+        reason = 'Forbidden'
+
+    def _raise(*args, **kwargs):
+        raise gcp_errors.HttpError(_Resp(), b'{"error": "PERMISSION_DENIED"}')
+
+    monkeypatch.setattr(gcp, 'build', _raise)
+    ctx = 'gke_my-project_us-central1-c_my-cluster'
+    assert _GKE.can_create_new_instance_of_type(ctx, '8CPU--64GB--tpu7x:4')
+    assert _GKE.get_available_machine_types(ctx) == []

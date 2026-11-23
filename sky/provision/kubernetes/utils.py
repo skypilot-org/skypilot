@@ -1385,7 +1385,8 @@ class GKEAutoscaler(Autoscaler):
         except gcp.http_error_exception() as e:
             # Cluster information is not available.
             # return True for optimistic pod scheduling.
-            logger.debug(f'{e.message}', exc_info=True)
+            # googleapiclient's HttpError has no `message` attribute.
+            logger.debug(f'{e}', exc_info=True)
             return True
 
         # GKE Autopilot uses Node Auto-Provisioning (NAP) to create node
@@ -1469,7 +1470,8 @@ class GKEAutoscaler(Autoscaler):
         except gcp.http_error_exception() as e:
             # Cluster information is not available.
             # Return empty list.
-            logger.debug(f'{e.message}', exc_info=True)
+            # googleapiclient's HttpError has no `message` attribute.
+            logger.debug(f'{e}', exc_info=True)
             return []
 
         machine_types = []
