@@ -922,7 +922,10 @@ class TestStatusYaml:
                         'get_controller_for_pool'), \
              mock.patch('sky.serve.server.impl.backend_utils.'
                         'is_controller_accessible', return_value=_handle()), \
-             mock.patch('sky.serve.server.impl._resolve_user_names'):
+             mock.patch('sky.serve.server.impl._resolve_user_names'), \
+             mock.patch('sky.serve.server.impl.workspaces_core.'
+                        'get_readable_workspace_names',
+                        return_value={constants.SKYPILOT_DEFAULT_WORKSPACE}):
             yield
 
     @staticmethod
@@ -1097,6 +1100,67 @@ class TestStatusYaml:
         with _caller(roles=('admin',)), self._env(records):
             (record,) = impl.status(pool=True)
         assert record['yaml_content'] == _YAML_WITH_SECRET
+
+
+class TestStatusWorkspace:
+    """`status` leaves out services in workspaces the caller cannot read,
+    before their endpoints are looked up."""
+
+    _RECORDS = [
+        {
+            'name': 'in-a',
+            'workspace': 'ws-a'
+        },
+        {
+            'name': 'in-b',
+            'workspace': 'ws-b'
+        },
+        {
+            'name': 'unknown',
+            'workspace': None
+        },
+        {
+            'name': 'b-by-name',
+            'workspace': 'team-b'
+        },
+        {
+            'name': 'ambiguous',
+            'workspace': 'dup'
+        },
+    ]
+
+    @staticmethod
+    def _resolve(ref):
+        if ref == 'dup':
+            raise ValueError('More than one workspace is named dup.')
+        return {'team-b': 'ws-b'}.get(ref, ref)
+
+    def _names(self, readable):
+        records = [
+            dict(TestStatusYaml._with_yaml(dict(r, user_hash='alice-hash')),
+                 load_balancer_port=1,
+                 tls_encrypted=False) for r in self._RECORDS
+        ]
+        with _caller(), TestStatusYaml()._env(records), \
+             mock.patch('sky.serve.server.impl.workspaces_core.'
+                        'get_readable_workspace_names',
+                        return_value=readable), \
+             mock.patch('sky.serve.server.impl.skypilot_config.'
+                        'resolve_workspace_ref', side_effect=self._resolve), \
+             mock.patch('sky.serve.server.impl.serve_utils.'
+                        'is_consolidation_mode', return_value=False), \
+             mock.patch('sky.serve.server.impl.backend_utils.get_endpoints',
+                        return_value={}) as get_endpoints:
+            names = [r['name'] for r in impl.status(pool=False)]
+        assert get_endpoints.call_count == len(names)
+        return names
+
+    def test_unreadable_workspaces_are_left_out(self):
+        assert self._names({'default',
+                            'ws-b'}) == ['in-b', 'unknown', 'b-by-name']
+
+    def test_unrestricted_caller_sees_everything(self):
+        assert self._names(None) == [r['name'] for r in self._RECORDS]
 
 
 @contextlib.contextmanager

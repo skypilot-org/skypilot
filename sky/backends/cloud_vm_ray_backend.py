@@ -4643,6 +4643,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).set_job_info_without_job_id(request))
                 return list(response.job_ids)
+            except grpc.RpcError as e:
+                # Not chained: the details name a workspace the caller may
+                # not be able to read.
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    raise exceptions.PoolRefusedError(False, None) from None
+                if e.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                    raise exceptions.PoolRefusedError(True,
+                                                      e.details()) from None
+                raise
             except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
                 logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
@@ -4674,6 +4683,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to fetch job id.',
                                                stderr)
+            for line in result_str.splitlines():
+                if line.startswith(job_lib.POOL_REFUSED_MARKER):
+                    exists, pool_workspace = json.loads(
+                        line[len(job_lib.POOL_REFUSED_MARKER):])
+                    raise exceptions.PoolRefusedError(exists, pool_workspace)
             try:
                 # Parse job IDs from output
                 job_ids_match = _JOB_IDS_PATTERN.search(result_str)

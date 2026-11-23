@@ -882,8 +882,8 @@ class TestServeStorage:
 
 
 class TestServeStatusWorkspace:
-    """`status` lists every user's services; the workspace of one in a
-    workspace the caller cannot read is not shown."""
+    """`status` leaves out services in workspaces the caller cannot
+    read."""
 
     _READABLE = 'sky.workspaces.core.get_readable_workspace_names'
 
@@ -916,11 +916,11 @@ class TestServeStatusWorkspace:
         'load_balancer_port': None
     }]
 
-    def test_unreadable_workspaces_are_withheld(self):
+    def test_unreadable_workspaces_are_left_out(self):
         with self._env(self._RECORDS), \
              mock.patch(self._READABLE, return_value={'ws-a'}):
             records = serve_impl.status()
-        assert [r['workspace'] for r in records] == ['ws-a', None]
+        assert [r['workspace'] for r in records] == ['ws-a']
 
     def test_admin_sees_every_workspace(self):
         with self._env(self._RECORDS), \

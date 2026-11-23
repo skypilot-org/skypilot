@@ -1,9 +1,13 @@
 """Tests for sky.jobs.server.core."""
+import traceback
 from unittest import mock
 
 import pytest
 
+import sky
 from sky import backends
+from sky import dag as dag_lib
+from sky import exceptions
 from sky.jobs.server import core as jobs_core
 
 
@@ -365,3 +369,167 @@ def test_cancel_names_the_active_workspace():
     message = info.call_args.args[0]
     assert "active workspace 'ml'" in message
     assert 'ws-0123456789ab' not in message
+
+
+class _Proceeded(Exception):
+    """Raised by the step after the pool check, to stop there."""
+
+
+def _launch_on_pool(consolidated, refusal):
+    task = sky.Task(run='echo')
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=consolidated), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace', return_value='ws-b'), \
+         mock.patch.object(jobs_core.serve_utils, 'get_pool_refusal',
+                           return_value=refusal) as check, \
+         mock.patch.object(jobs_core, '_raise_pool_refused',
+                           side_effect=ValueError('refused')) as refuse, \
+         mock.patch.object(dag_lib.Dag, 'validate', side_effect=_Proceeded):
+        try:
+            jobs_core._launch(task,
+                              name=None,
+                              pool='p',
+                              num_jobs=None,
+                              stream_logs=False,
+                              file_mounts_blob_id=None,
+                              parent_job_id=None,
+                              parent_task_id=None,
+                              root_job_id=None,
+                              depends_on=[])
+        except (ValueError, _Proceeded) as e:
+            return e, check, refuse
+    raise AssertionError('neither refused nor proceeded')
+
+
+def test_launch_refuses_the_pool_before_validating():
+    """Checked on the server: the client checks only when it confirms."""
+    error, check, refuse = _launch_on_pool(True, (True, 'ws-a'))
+    assert str(error) == 'refused'
+    check.assert_called_once_with('p', 'ws-b')
+    refuse.assert_called_once_with('p', True, 'ws-a')
+
+
+def test_launch_proceeds_on_a_usable_pool():
+    error, check, refuse = _launch_on_pool(True, None)
+    assert isinstance(error, _Proceeded)
+    check.assert_called_once()
+    refuse.assert_not_called()
+
+
+def test_remote_controller_checks_on_submission():
+    # The API server's serve DB holds no pools in this mode.
+    error, check, _ = _launch_on_pool(False, (False, None))
+    assert isinstance(error, _Proceeded)
+    check.assert_not_called()
+
+
+_NAMES = {
+    'ws-a': 'team-a',
+    'ws-b': 'team-b',
+    'ws-r': 'team-r',
+    'ws-x': 'secret-x',
+}
+
+
+def _refusal_message(exists, workspace):
+
+    def _resolve(ref):
+        if ref == 'dup':
+            raise ValueError('More than one workspace is named dup.')
+        return ref
+
+    with mock.patch.object(jobs_core.workspaces_core,
+                           'get_workspace_access_sets',
+                           return_value=({'default', 'ws-a', 'ws-b', 'ws-r'},
+                                         {'default', 'ws-a', 'ws-b'})), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace', return_value='ws-b'), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'resolve_workspace_ref', side_effect=_resolve), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_workspace_name', side_effect=_NAMES.get):
+        with pytest.raises(ValueError) as info:
+            try:  # As the remote path raises it.
+                raise exceptions.PoolRefusedError(exists, workspace)
+            except exceptions.PoolRefusedError:
+                jobs_core._raise_pool_refused('p', exists, workspace)
+    # What the API server sends the client as the stacktrace.
+    stacktrace = ''.join(
+        traceback.format_exception(type(info.value), info.value,
+                                   info.value.__traceback__))
+    return str(info.value), stacktrace
+
+
+@pytest.mark.parametrize(('exists', 'workspace'), [
+    (False, None),
+    (True, 'ws-x'),
+    (True, 'dup'),
+])
+def test_refusal_hides_what_the_caller_cannot_read(exists, workspace):
+    message, stacktrace = _refusal_message(exists, workspace)
+    assert message == "Pool 'p' not found."
+    assert 'PoolRefusedError' not in stacktrace
+    if workspace is not None:
+        assert workspace not in stacktrace
+        # Nor in the refusal's own message, should anything chain it.
+        assert workspace not in str(exceptions.PoolRefusedError(
+            True, workspace))
+
+
+def test_refusal_names_a_writable_workspace_to_switch_to():
+    message, stacktrace = _refusal_message(True, 'ws-a')
+    assert 'PoolRefusedError' not in stacktrace
+    assert "Switch to workspace 'team-a'" in message
+    assert "active workspace 'team-b'" in message
+
+
+def test_refusal_of_a_read_only_workspace():
+    message, stacktrace = _refusal_message(True, 'ws-r')
+    assert 'read-only for you' in message
+    assert 'PoolRefusedError' not in stacktrace
+
+
+def test_refusal_of_the_active_workspace_is_not_a_switch():
+    message, stacktrace = _refusal_message(True, 'ws-b')
+    assert 'Re-create the pool' in message
+    assert 'PoolRefusedError' not in stacktrace
+    assert 'Switch' not in message
+
+
+def test_submission_refused_by_the_controller():
+    backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
+    backend.set_job_info_without_job_id.side_effect = (
+        exceptions.PoolRefusedError(True, 'ws-a'))
+    task = sky.Task(name='t', run='echo')
+    with dag_lib.Dag() as dag:
+        task.set_resources(sky.Resources())
+        dag.add(task)
+    dag.name = 'j'
+    with mock.patch.object(jobs_core, '_ensure_controller_up'), \
+         mock.patch.object(jobs_core.backend_utils, 'get_backend_from_handle',
+                           return_value=backend), \
+         mock.patch.object(jobs_core.backend_utils, 'get_task_resources_str',
+                           return_value='r'), \
+         mock.patch.object(jobs_core, '_raise_pool_refused',
+                           side_effect=ValueError('refused')) as refuse:
+        with pytest.raises(ValueError, match='refused'):
+            jobs_core._submit_remotely(mock.Mock(), dag, pool='p')
+    refuse.assert_called_once_with('p', True, 'ws-a')
+
+
+def test_pool_taken_down_after_the_check(tmp_path):
+    task = sky.Task(name='t', run='echo')
+    with dag_lib.Dag() as dag:
+        dag.add(task)
+    dag.pool = 'p'
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode', return_value=True), \
+         mock.patch.object(jobs_core.serve_state, 'get_service_hash',
+                           return_value=None), \
+         mock.patch.object(jobs_core, '_raise_pool_refused',
+                           side_effect=ValueError('refused')) as refuse:
+        with pytest.raises(ValueError, match='refused'):
+            jobs_core._maybe_submit_job_locally(str(tmp_path), dag, 1)
+    refuse.assert_called_once_with('p', False, None)

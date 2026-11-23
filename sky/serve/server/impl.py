@@ -1486,6 +1486,7 @@ def status(
 
     service_records = serve_runner.current().get_service_status(
         handle=handle, service_names=service_names, pool=pool)
+    service_records = _readable_only(service_records)
 
     # Get the endpoint for each service
     for service_record in service_records:
@@ -1512,23 +1513,32 @@ def status(
                                                 '').replace('http://', '')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
 
-    _withhold_workspaces_of_unreadable(service_records)
     _resolve_user_names(service_records)
     _withhold_details_of_others(service_records)
 
     return service_records
 
 
-def _withhold_workspaces_of_unreadable(
-        service_records: List[Dict[str, Any]]) -> None:
-    """Drops the workspace from records in workspaces the caller cannot
-    read; status lists every user's services."""
+def _readable_only(
+        service_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drops records in workspaces the caller cannot read. A record whose
+    workspace is unknown is kept."""
     readable = workspaces_core.get_readable_workspace_names()
     if readable is None:
-        return
-    for record in service_records:
-        if record.get('workspace') not in readable:
-            record['workspace'] = None
+        return service_records
+
+    def _readable(workspace: Optional[str]) -> bool:
+        if workspace is None or workspace in readable:
+            return True
+        try:  # Older records may hold a name.
+            return skypilot_config.resolve_workspace_ref(workspace) in readable
+        except ValueError:  # Two workspaces share this name.
+            return False
+
+    return [
+        record for record in service_records
+        if _readable(record.get('workspace'))
+    ]
 
 
 ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]

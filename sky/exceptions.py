@@ -912,6 +912,20 @@ class SkyletUnavailableError(Exception):
     pass
 
 
+class PoolRefusedError(Exception):
+    """The jobs controller refused a pool for the job's workspace.
+
+    Raised and handled on the API server, which words the error the user sees.
+    """
+
+    def __init__(self, exists: bool, workspace: Optional[str]) -> None:
+        # The workspace stays out of the message: it may be one the caller
+        # cannot read, and a chained exception's message reaches the client.
+        super().__init__('Pool refused by the jobs controller.')
+        self.exists = exists
+        self.workspace = workspace
+
+
 # Exception types that indicate gRPC failed and the caller should fall
 # back to the legacy SSH code path.
 SKYLET_GRPC_FALLBACK_ERRORS = (
