@@ -2139,15 +2139,19 @@ _NODE_RDMA_METRICS = (
 )
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
-# CPU/memory, node RDMA throughput and errors, kube_pod_labels, and cAdvisor
-# container metrics (per-pod CPU/Memory in the Telemetry section joins on (pod,
-# namespace) with kube_pod_labels — same join shape the GPU panels use to
-# filter by SkyPilot cluster name).
+# CPU/memory, node RDMA throughput, errors and link changes, kube_pod_labels,
+# and cAdvisor container metrics (per-pod CPU/Memory in the Telemetry section
+# joins on (pod, namespace) with kube_pod_labels — same join shape the GPU
+# panels use to filter by SkyPilot cluster name).
 GPU_METRICS_MATCH_PATTERNS = [
     '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
     'kube_pod_labels',
     'node_cpu_seconds_total{mode="idle"}',
     '{__name__=~"' + '|'.join(_NODE_RDMA_METRICS) + '"}',
+    # Down and up transitions of the RDMA network interfaces (rdma* for RoCE,
+    # ib* for InfiniBand), 2 per link drop. A flapping RoCE port leaves
+    # node_infiniband_link_downed_total at 0; this is what rises.
+    'node_network_carrier_changes_total{device=~"rdma.*|ib.*"}',
     'container_cpu_usage_seconds_total{container!="",container!="POD"}',
     'container_memory_working_set_bytes{container!="",container!="POD"}',
     # GPU allocation metrics — pod requests + node capacity for nvidia/amd
