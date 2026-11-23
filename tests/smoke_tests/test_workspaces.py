@@ -1248,7 +1248,7 @@ def test_workspace_allowed_queues(generic_cloud: str):
         # A managed job: its cluster is refused on the controller, which
         # fails the job instead of retrying.
         commands += [
-            f'sky jobs launch -y -n {name}-job --infra kubernetes '
+            f'sky jobs launch -y -d -n {name}-job --infra kubernetes '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'--config active_workspace=queues-ws {task_yamls["label"]}',
             smoke_tests_utils.
