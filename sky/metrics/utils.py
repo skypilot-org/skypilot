@@ -579,9 +579,10 @@ SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
 
 # A guaranteed executor pool breaks when any of its workers dies (e.g. OOM or a
 # crash in the worker initializer) and is replaced on the next submit. `phase`
-# is `warm_start` when it broke while warm start still had workers starting
-# (started but not yet ready), `serving` otherwise; a steady `warm_start` rate
-# means workers keep failing to come up.
+# is `warm_start` when it broke during warm start because workers failed to
+# start (one reported a start-up error, none had become ready yet, or one was
+# killed before it became ready), and `serving` otherwise; a steady
+# `warm_start` rate means workers keep failing to come up.
 SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL = prom.Counter(
     'sky_apiserver_executor_pool_broken_total',
     'Guaranteed executor pools found broken and replaced, by pool and phase',
