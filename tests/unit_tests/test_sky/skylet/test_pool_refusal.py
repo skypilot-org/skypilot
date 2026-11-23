@@ -215,6 +215,8 @@ class TestGrpcPath:
         with pytest.raises(exceptions.PoolRefusedError) as info:
             self._submit(_RpcError(code, details))
         assert (info.value.exists, info.value.workspace) == refusal
+        # The details stay out of any traceback the refusal is chained into.
+        assert info.value.__cause__ is None and info.value.__suppress_context__
 
     def test_other_codes_pass_through(self):
         error = _RpcError(grpc.StatusCode.PERMISSION_DENIED, 'x')

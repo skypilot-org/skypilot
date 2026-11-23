@@ -4644,10 +4644,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                         ).set_job_info_without_job_id(request))
                 return list(response.job_ids)
             except grpc.RpcError as e:
+                # Not chained: the details name a workspace the caller may
+                # not be able to read.
                 if e.code() == grpc.StatusCode.NOT_FOUND:
-                    raise exceptions.PoolRefusedError(False, None) from e
+                    raise exceptions.PoolRefusedError(False, None) from None
                 if e.code() == grpc.StatusCode.FAILED_PRECONDITION:
-                    raise exceptions.PoolRefusedError(True, e.details()) from e
+                    raise exceptions.PoolRefusedError(True,
+                                                      e.details()) from None
                 raise
             except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
                 logger.debug(f'gRPC failed, falling back to SSH: {e}')
