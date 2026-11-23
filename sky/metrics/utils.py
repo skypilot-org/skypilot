@@ -2148,10 +2148,10 @@ GPU_METRICS_MATCH_PATTERNS = [
     'kube_pod_labels',
     'node_cpu_seconds_total{mode="idle"}',
     '{__name__=~"' + '|'.join(_NODE_RDMA_METRICS) + '"}',
-    # Down and up transitions of the RDMA network interfaces (rdma* for RoCE,
-    # ib* for InfiniBand), 2 per link drop. A flapping RoCE port leaves
+    # Link drops of the RDMA network interfaces (rdma* for RoCE, ib* for
+    # InfiniBand), one per drop. A flapping RoCE port leaves
     # node_infiniband_link_downed_total at 0; this is what rises.
-    'node_network_carrier_changes_total{device=~"rdma.*|ib.*"}',
+    'node_network_carrier_down_changes_total{device=~"rdma.*|ib.*"}',
     'container_cpu_usage_seconds_total{container!="",container!="POD"}',
     'container_memory_working_set_bytes{container!="",container!="POD"}',
     # GPU allocation metrics — pod requests + node capacity for nvidia/amd

@@ -46,7 +46,7 @@ def test_gpu_metrics_federates_node_rdma_series():
     # node-exporter's RDMA byte counters (the GPU dashboard's node network
     # panel) plus its NIC error, link and link-rate series, and none of the
     # infiniband collector's other series. Names as node-exporter 1.11 exports
-    # them on a RoCE mlx5 node. Plus the RDMA interfaces' carrier changes.
+    # them on a RoCE mlx5 node. Plus the RDMA interfaces' link drops.
     name_regexes = [
         m.group(1)
         for m in (re.fullmatch(r'\{__name__=~"(.+)"\}', p)
@@ -84,11 +84,11 @@ def test_gpu_metrics_federates_node_rdma_series():
     ):
         assert not federated(name), name
 
-    # Carrier changes of the RDMA interfaces only, not every interface.
-    assert not federated('node_network_carrier_changes_total')
-    carrier = 'node_network_carrier_changes_total{device=~"rdma.*|ib.*"}'
-    assert carrier in metrics_utils.GPU_METRICS_MATCH_PATTERNS
-    device_regex = re.search(r'device=~"(.+)"', carrier).group(1)
+    # Link drops of the RDMA interfaces only, not every interface.
+    assert not federated('node_network_carrier_down_changes_total')
+    drops = 'node_network_carrier_down_changes_total{device=~"rdma.*|ib.*"}'
+    assert drops in metrics_utils.GPU_METRICS_MATCH_PATTERNS
+    device_regex = re.search(r'device=~"(.+)"', drops).group(1)
     for device in ('rdma5', 'ibs0', 'ibp29s0f0'):
         assert re.fullmatch(device_regex, device), device
     for device in ('eth0', 'enp157s0np0', 'lxc_health', 'lo'):
