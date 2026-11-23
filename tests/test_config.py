@@ -3033,6 +3033,138 @@ def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
         ]
 
 
+@pytest.mark.parametrize(
+    'cloud,quota,error',
+    [
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('kubernetes', {
+            'allowed_queues': ['q']
+        },
+         "Workspace 'team-a' has allowed queues \\['q'\\] but no default queue"
+        ),
+        ('kubernetes', {}, None),
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        ('slurm', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        # A Slurm QoS can be a comma-separated list; each name must be allowed.
+        ('slurm', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('slurm', {
+            'queue': 'q,bad',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,bad' of workspace 'team-a' is not in its allowed"),
+        # A Kueue queue is a single name.
+        ('kubernetes', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,other' of workspace 'team-a' is not in its allowed"
+        ),
+        # Names are compared exactly.
+        ('slurm', {
+            'queue': 'q, other',
+            'allowed_queues': ['q', 'other']
+        },
+         "Default queue 'q, other' of workspace 'team-a' is not in its allowed"
+        ),
+        # A queue read back from rendered YAML can be a number.
+        ('kubernetes', {
+            'queue': 123,
+            'allowed_queues': ['123']
+        }, None),
+        ('slurm', {
+            'queue': 123,
+            'allowed_queues': ['other']
+        }, "Default queue '123' of workspace 'team-a' is not in its allowed"),
+    ])
+def test_check_queue_allowed_for_default_queue(cloud, quota, error) -> None:
+    """A workspace's default queue must be in its allowed queues."""
+    workspace_config = {cloud: {'quota': quota}}
+    if error is None:
+        skypilot_config.check_queue_allowed('team-a',
+                                            workspace_config,
+                                            cloud,
+                                            quota.get('queue'),
+                                            is_default=True)
+    else:
+        with pytest.raises(ValueError, match=error):
+            skypilot_config.check_queue_allowed('team-a',
+                                                workspace_config,
+                                                cloud,
+                                                quota.get('queue'),
+                                                is_default=True)
+
+
+def test_update_config_refuses_default_queue_outside_allowed_queues(
+        monkeypatch, tmp_path) -> None:
+    """Saving a default queue that is not allowed leaves the file as it was."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    config_path = tmp_path / 'server_config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            workspaces:
+              team-a:
+                kubernetes:
+                  quota:
+                    queue: team-q
+                    allowed_queues: [team-q]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        str(config_path))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    queue_key = ('workspaces', 'team-a', 'kubernetes', 'quota', 'queue')
+    new_config.set_nested(queue_key, 'other-q')
+    with pytest.raises(ValueError, match="'other-q'"):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+    assert yaml_utils.read_yaml(str(config_path)) == {
+        'workspaces': {
+            'team-a': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'team-q',
+                        'allowed_queues': ['team-q'],
+                    }
+                }
+            }
+        }
+    }
+
+    # Adding the new default to the list lets the save through.
+    new_config.set_nested(
+        ('workspaces', 'team-a', 'kubernetes', 'quota', 'allowed_queues'),
+        ['team-q', 'other-q'])
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert yaml_utils.read_yaml(str(config_path)) == {
+        'workspaces': {
+            'team-a': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'other-q',
+                        'allowed_queues': ['team-q', 'other-q'],
+                    }
+                }
+            }
+        }
+    }
+
+
 # --- The server config is reloaded only when its source changed -------------
 
 

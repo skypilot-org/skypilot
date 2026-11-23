@@ -48,6 +48,7 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.modal import modal_utils
@@ -863,6 +864,15 @@ def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
         f'or {remove_hint}.')
 
 
+def _check_cluster_queue(cloud: str, queue: Optional[str]) -> None:
+    """Checks that the queue a cluster will run in is allowed."""
+    try:
+        skypilot_config.check_active_workspace_queue(cloud, queue)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.QueueNotAllowedError(str(e)) from None
+
+
 def _credential_upload_identity(
         cloud: clouds.Cloud, region: clouds.Region, cluster_name: str,
         to_provision: 'resources_lib.Resources',
@@ -1079,6 +1089,13 @@ def write_cluster_config(
             cluster_name,
             cluster_name_on_cloud,
         ), region, zones, num_nodes, dryrun, volume_mounts)
+    if isinstance(cloud, clouds.Slurm):
+        sbatch_options: Dict[str, Any] = typing.cast(
+            Dict[str, Any],
+            resources_vars.get('sbatch_options') or {})
+        _check_cluster_queue(
+            'slurm',
+            sbatch_options.get('qos') or sbatch_options.get('q'))
     config_dict = {}
 
     specific_reservations = set(
@@ -1582,6 +1599,10 @@ def write_cluster_config(
 
         pod_config: Dict[str, Any] = combined_yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
+        _check_cluster_queue(cloud.canonical_name(),
+                             (pod_config.get('metadata') or {}).get(
+                                 'labels',
+                                 {}).get(k8s_constants.KUEUE_QUEUE_NAME_LABEL))
         # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
         pod_config.pop('deployment_spec', None)
         pod_config.pop('pvc_spec', None)

@@ -833,6 +833,11 @@ class StorageReadOnlyError(StorageSpecError, PermissionDeniedError):
     pass
 
 
+class QueueNotAllowedError(PermissionDeniedError):
+    """Raised when a job's queue is not in its workspace's allowed queues."""
+    pass
+
+
 class InfraTargetNotFoundError(ValueError):
     """Raised when a named Kubernetes context or Slurm cluster is not found.
 
