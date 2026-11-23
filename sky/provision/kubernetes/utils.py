@@ -554,7 +554,7 @@ def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
 # Observers of the attempts of `_retry_on_error`-wrapped calls on a named
 # context. Each is called with the context name, the exception the attempt
 # raised (None if it returned), and the attempt's duration in seconds.
-ContextCallObserver = Callable[[str, Optional[Exception], float], None]
+ContextCallObserver = Callable[[str, Optional[BaseException], float], None]
 _CONTEXT_CALL_OBSERVERS: List[ContextCallObserver] = []
 
 
@@ -571,10 +571,10 @@ def register_context_call_observer(observer: ContextCallObserver) -> None:
 def _call_observed(context: Optional[str], func: Callable, args: tuple,
                    kwargs: dict) -> Any:
     start = time.monotonic()
-    error: Optional[Exception] = None
+    error: Optional[BaseException] = None
     try:
         return func(*args, **kwargs)
-    except Exception as e:
+    except BaseException as e:
         error = e
         raise
     finally:

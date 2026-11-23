@@ -16,6 +16,7 @@ Example:
 from concurrent import futures
 import dataclasses
 import json
+import os
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -244,7 +245,9 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                   for key, value in (('labelSelector', label_selector),
                                      ('fieldSelector', field_selector))
                   if value)
-    got = _IN_FLIGHT.do((context, path, query),
+    # Each request may carry its own KUBECONFIG.
+    kubeconfig = os.environ.get('KUBECONFIG')
+    got = _IN_FLIGHT.do((context, kubeconfig, path, query),
                         lambda: _get(context=context,
                                      resource_label=resource.label,
                                      path=path,
@@ -287,6 +290,10 @@ def _get(*, context: Optional[str], resource_label: str, path: str,
             else:
                 obj = json.loads(response.data)
                 got = [obj], _object_version([obj])
+        except (kubernetes.urllib3.exceptions.HTTPError, ijson.JSONError,
+                json.JSONDecodeError) as e:
+            # A body cut off mid-read is retried like a request that failed.
+            raise kubernetes.max_retry_error()(None, path, reason=e) from e
         finally:
             response.release_conn()
         outcome = 'ok'
