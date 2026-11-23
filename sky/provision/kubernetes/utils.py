@@ -4998,6 +4998,29 @@ def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
     return merged_cluster_yaml_obj
 
 
+# Hooks that edit a rendered cluster config after combine_pod_config_fields()
+# has merged the user's pod_config into it. Each is called with the merged
+# cluster config, the task's cluster_config_overrides and the context, and
+# edits the node configs in place. Empty by default -- nothing in core
+# registers one.
+PodConfigHook = Callable[[Dict[str, Any], Dict[str, Any], Optional[str]], None]
+_POD_CONFIG_HOOKS: List[PodConfigHook] = []
+
+
+def register_pod_config_hook(hook: PodConfigHook) -> None:
+    """Register a hook that edits every rendered Kubernetes cluster config.
+
+    Hooks run in registration order, last in combine_pod_config_fields(). A
+    hook must be idempotent: on relaunch, the stored config of an existing
+    cluster is combined again and compared with the stored one.
+
+    Idempotent, so a module that registers on import keeps one registration
+    across the several process contexts that may import it.
+    """
+    if hook not in _POD_CONFIG_HOOKS:
+        _POD_CONFIG_HOOKS.append(hook)
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
@@ -5041,6 +5064,8 @@ def combine_pod_config_fields(
                 imagePullSecrets:
                     - name: my-secret
         ```
+    Then runs the hooks registered with register_pod_config_hook() on the
+    result.
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     kubernetes_config = resolve_effective_pod_config(cluster_config_overrides,
@@ -5050,6 +5075,8 @@ def combine_pod_config_fields(
     config_utils.merge_k8s_configs(
         merged_cluster_yaml_obj['available_node_types']['ray_head_default']
         ['node_config'], kubernetes_config)
+    for hook in _POD_CONFIG_HOOKS:
+        hook(merged_cluster_yaml_obj, cluster_config_overrides, context)
     return merged_cluster_yaml_obj
 
 
