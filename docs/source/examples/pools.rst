@@ -123,7 +123,7 @@ To submit jobs to the pool, create a job YAML file:
   # job.yaml
   name: simple-workload
 
-  # Always specify the resources requirements for the job. Without this 
+  # Always specify the resources requirements for the job. Without this
   # specification this job will not be able to use a GPU.
   resources:
     accelerators: {H100:1, H200:1}
@@ -179,6 +179,10 @@ The job will be launched on one of the available workers in the pool.
 .. note::
 
   Currently, each worker is **exclusively occupied** by a single job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
+
+.. note::
+
+  A pool belongs to the :ref:`workspace <workspaces>` it was created in. Jobs can use it only from that workspace: switch to it before :code:`sky jobs launch -p`. :code:`sky jobs pool status` lists only pools in workspaces you can read.
 
 Scale out with multiple jobs
 ----------------------------
@@ -477,4 +481,3 @@ To increase the limit:
 
   - **Multi-job per worker**: Support for running multiple jobs concurrently on the same worker.
   - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
-

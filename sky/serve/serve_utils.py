@@ -16,7 +16,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
-                    Optional, Set, TextIO, Type, Union)
+                    Optional, Set, TextIO, Tuple, Type, Union)
 import uuid
 
 import colorama
@@ -647,18 +647,55 @@ def get_service_workspace(service_name: str) -> Optional[str]:
     workspace. None when the file cannot be read: in consolidation mode it
     may be gone after a pod restart, and a guess would be wrong either way.
     """
+    found, workspace = _read_config_workspace(service_name)
+    if not found:
+        return None
+    return workspace or skylet_constants.SKYPILOT_DEFAULT_WORKSPACE
+
+
+def _read_config_workspace(service_name: str) -> Tuple[bool, Optional[str]]:
+    """Whether the service's config file could be read, and its
+    ``active_workspace`` if set."""
     path = os.path.expanduser(
         generate_remote_config_yaml_file_name(service_name))
     try:
         config = yaml_utils.read_yaml(path)
     except Exception:  # pylint: disable=broad-except
-        return None
+        return False, None
     if not isinstance(config, dict):
-        return None
+        return False, None
     workspace = config.get('active_workspace')
     if not isinstance(workspace, str) or not workspace:
-        return skylet_constants.SKYPILOT_DEFAULT_WORKSPACE
-    return workspace
+        return True, None
+    return True, workspace
+
+
+def get_pool_workspace(pool: str) -> Tuple[bool, Optional[str]]:
+    """Whether the pool exists in the local serve DB, and its workspace id.
+
+    The workspace is None when unknown. Unlike `get_service_workspace`, a
+    config without ``active_workspace`` is unknown, not the default one: the
+    key is always set since workspaces were recorded, so such a pool predates
+    that and its workspace was never stored.
+    """
+    record = serve_state.get_service_from_name(pool)
+    if record is None or not record['pool']:
+        return False, None
+    found, workspace = _read_config_workspace(pool)
+    if found:
+        return True, workspace
+    return True, record.get('workspace')
+
+
+def get_pool_refusal(pool: str,
+                     workspace: str) -> Optional[Tuple[bool, Optional[str]]]:
+    """None if a job in `workspace` may use the pool, else what
+    `get_pool_workspace` found. Both workspaces are ids, so no name lookup:
+    a remote controller's config has the names stripped."""
+    exists, pool_workspace = get_pool_workspace(pool)
+    if exists and pool_workspace in (None, workspace):
+        return None
+    return exists, pool_workspace
 
 
 def generate_remote_controller_log_file_name(service_name: str) -> str:

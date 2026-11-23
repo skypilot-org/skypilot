@@ -435,8 +435,9 @@ def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Cannot list what down reaches: {e}')
         return None
-    # Status reports None for a workspace the caller cannot read, so key
-    # presence cannot tell a controller older than the field apart.
+    # Older servers report None for a workspace the caller cannot read (newer
+    # ones leave the record out), so key presence cannot tell a controller
+    # older than the field apart.
     if records and all(r.get('workspace') is None for r in records):
         # The server does not scope these either.
         return None
