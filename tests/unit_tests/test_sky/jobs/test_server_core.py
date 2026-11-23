@@ -480,14 +480,20 @@ def test_refusal_of_the_active_workspace_is_not_a_switch():
     assert 'Switch' not in message
 
 
-def test_submission_refused_by_the_controller():
+@pytest.mark.parametrize('cleanup_fails', [False, True])
+def test_submission_refused_by_the_controller(cleanup_fails):
+    """The files uploaded for the job are removed: it never runs, and only a
+    finished job removes them."""
     backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
     backend.set_job_info_without_job_id.side_effect = (
         exceptions.PoolRefusedError(True, 'ws-a'))
-    task = sky.Task(name='t', run='echo')
-    task.set_resources(sky.Resources())
+    if cleanup_fails:
+        backend.teardown_ephemeral_storage.side_effect = RuntimeError('gone')
+    tasks = [sky.Task(name=f't{i}', run='echo') for i in range(2)]
     with dag_lib.Dag() as dag:
-        dag.add(task)
+        for task in tasks:
+            task.set_resources(sky.Resources())
+            dag.add(task)
     dag.name = 'j'
     with mock.patch.object(jobs_core, '_ensure_controller_up'), \
          mock.patch.object(jobs_core.backend_utils, 'get_backend_from_handle',
@@ -499,3 +505,22 @@ def test_submission_refused_by_the_controller():
         with pytest.raises(ValueError, match='refused'):
             jobs_core._submit_remotely(mock.Mock(), dag, pool='p')
     refuse.assert_called_once_with('p', True, 'ws-a')
+    assert backend.teardown_ephemeral_storage.call_args_list == [
+        mock.call(task) for task in tasks
+    ]
+
+
+def test_pool_taken_down_after_the_check(tmp_path):
+    task = sky.Task(name='t', run='echo')
+    with dag_lib.Dag() as dag:
+        dag.add(task)
+    dag.pool = 'p'
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode', return_value=True), \
+         mock.patch.object(jobs_core.serve_state, 'get_service_hash',
+                           return_value=None), \
+         mock.patch.object(jobs_core, '_raise_pool_refused',
+                           side_effect=ValueError('refused')) as refuse:
+        with pytest.raises(ValueError, match='refused'):
+            jobs_core._maybe_submit_job_locally(str(tmp_path), dag, 1)
+    refuse.assert_called_once_with('p', False, None)

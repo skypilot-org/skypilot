@@ -570,8 +570,8 @@ def _maybe_submit_job_locally(
     pool_hash = None
     if pool is not None:
         pool_hash = serve_state.get_service_hash(pool)
-        # Checked in _launch.
-        assert pool_hash is not None, f'Pool {pool} not found'
+        if pool_hash is None:  # Taken down since _launch checked it.
+            _raise_pool_refused(pool, False, None)
     for _ in range(num_jobs):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
@@ -788,6 +788,16 @@ def _submit_remotely(controller: controller_utils.Controllers,
             is_primary_in_job_groups=(is_primary_in_job_groups),
             is_batch=is_batch)
     except exceptions.PoolRefusedError as e:
+        # The job's uploaded files are removed when it finishes; a refused
+        # job never runs, so remove them here.
+        for task in dag.tasks:
+            try:
+                backend.teardown_ephemeral_storage(task)
+            except Exception as cleanup_error:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to clean up the storage of a refused '
+                    'job: '
+                    f'{common_utils.format_exception(cleanup_error)}')
         _raise_pool_refused(pool or '', e.exists, e.workspace)
     return job_ids
 
