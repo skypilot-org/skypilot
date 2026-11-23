@@ -131,8 +131,7 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
               return_value=False)
         patch(jobs_core, '_warn_file_mounts_rolling_update')
 
-        def stage_workdirs(dag_to_stage, storage_clouds):
-            assert storage_clouds == ['gcp']
+        def stage_workdirs(dag_to_stage):
             if translate_workdir:
                 return controller_utils.translate_local_file_mounts_to_two_hop(
                     dag_to_stage.tasks[0])
@@ -141,12 +140,6 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
         patch(jobs_core,
               '_upload_files_to_controller',
               side_effect=stage_workdirs)
-        patch(jobs_core.storage_lib,
-              'get_cached_enabled_storage_cloud_names_or_refresh',
-              return_value=['gcp'])
-        stages = patch(jobs_core,
-                       '_stages_through_cloud_bucket',
-                       return_value=True)
         patch(jobs_core.controller_utils,
               'get_controller_resources',
               return_value=task.resources)
@@ -193,10 +186,6 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
     assert result == (job_ids, None)
     assert submit.call_args.kwargs['file_mounts_blob_id'] == blob_id
     assert remote.call_count == (0 if consolidation else 1)
-    if not consolidation:
-        # The refusal cleanup gets the decision the upload made.
-        stages.assert_called_once_with(['gcp'])
-        assert remote.call_args.kwargs['uploaded_to_bucket'] is True
     if raises and registered:
         warning.assert_called_once()
         assert 'hook failed' in warning.call_args.args[0]

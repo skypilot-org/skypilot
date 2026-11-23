@@ -173,27 +173,7 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
         f'{colorama.Style.RESET_ALL}')
 
 
-def _stages_through_cloud_bucket(storage_clouds: List[str]) -> bool:
-    """Whether a job's files are uploaded to cloud storage, its storage
-    mounts included, rather than staged on the controller."""
-    # Check if user has explicitly configured a bucket for jobs.
-    # If so, we should use cloud storage even in consolidation mode to persist
-    # files across rolling updates and pod restarts.
-    has_explicit_bucket = skypilot_config.get_nested(('jobs', 'bucket'),
-                                                     None) is not None
-    force_disable_cloud_bucket = skypilot_config.get_nested(
-        ('jobs', 'force_disable_cloud_bucket'), False)
-    # Use cloud storage if:
-    # 1. Not in consolidation mode, OR
-    # 2. In consolidation mode BUT user has explicit bucket configured
-    # AND storage clouds are available AND cloud bucket is not force-disabled
-    return bool((not managed_job_utils.is_consolidation_mode() or
-                 has_explicit_bucket) and storage_clouds and
-                not force_disable_cloud_bucket)
-
-
-def _upload_files_to_controller(dag: 'sky.Dag',
-                                storage_clouds: List[str]) -> Dict[str, str]:
+def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """Upload files to the controller.
 
     In consolidation mode, we still need to upload files to the controller as
@@ -203,7 +183,21 @@ def _upload_files_to_controller(dag: 'sky.Dag',
     """
     local_to_controller_file_mounts: Dict[str, str] = {}
 
-    if _stages_through_cloud_bucket(storage_clouds):
+    # Check if user has explicitly configured a bucket for jobs.
+    # If so, we should use cloud storage even in consolidation mode to persist
+    # files across rolling updates and pod restarts.
+    has_explicit_bucket = skypilot_config.get_nested(('jobs', 'bucket'),
+                                                     None) is not None
+    storage_clouds = (
+        storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+    force_disable_cloud_bucket = skypilot_config.get_nested(
+        ('jobs', 'force_disable_cloud_bucket'), False)
+    # Use cloud storage if:
+    # 1. Not in consolidation mode, OR
+    # 2. In consolidation mode BUT user has explicit bucket configured
+    # AND storage clouds are available AND cloud bucket is not force-disabled
+    if ((not managed_job_utils.is_consolidation_mode() or has_explicit_bucket)
+            and storage_clouds and not force_disable_cloud_bucket):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -725,9 +719,7 @@ def _ensure_controller_up(
 def _submit_remotely(controller: controller_utils.Controllers,
                      dag: 'sky.Dag',
                      pool: Optional[str] = None,
-                     num_jobs: int = 1,
-                     *,
-                     uploaded_to_bucket: bool) -> List[int]:
+                     num_jobs: int = 1) -> List[int]:
     # Ensure the controller is up before trying to create job IDs
     # Use the same cloud as the tasks for the controller
     task_resources = None
@@ -796,33 +788,8 @@ def _submit_remotely(controller: controller_utils.Controllers,
             is_primary_in_job_groups=(is_primary_in_job_groups),
             is_batch=is_batch)
     except exceptions.PoolRefusedError as e:
-        # Without a cloud bucket nothing was uploaded, and constructing the
-        # storage mounts would create them.
-        if uploaded_to_bucket:
-            _teardown_uploaded_storage(dag, backend)
         _raise_pool_refused(pool or '', e.exists, e.workspace)
     return job_ids
-
-
-def _teardown_uploaded_storage(dag: 'sky.Dag',
-                               backend: backends.CloudVmRayBackend) -> None:
-    """Removes the files uploaded for a job that will not run, as the
-    controller does when a job finishes. Best effort."""
-    for task in dag.tasks:
-        # A storage replaced by its spec on upload is constructed first.
-        for storage in task.storage_mounts.values():
-            if storage.persistent:
-                continue
-            try:
-                storage.construct()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Failed to construct a storage of a refused '
-                               f'job: {e}')
-        try:
-            backend.teardown_ephemeral_storage(task)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning('Failed to clean up the storage of a refused job: '
-                           f'{common_utils.format_exception(e)}')
 
 
 def _raise_pool_refused(pool: str, exists: bool,
@@ -1355,10 +1322,7 @@ def _launch(
     if plugin_hooks.has_managed_job_submitted_hooks():
         submitted_dag = copy.deepcopy(dag)
         submitted_dag.pool = pool
-    storage_clouds = (
-        storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
-    local_to_controller_file_mounts = _upload_files_to_controller(
-        dag, storage_clouds)
+    local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     controller_name = controller.value.cluster_name
     prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
@@ -1381,12 +1345,7 @@ def _launch(
                                         depends_on=depends_on)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
-        job_ids = _submit_remotely(
-            controller,
-            dag,
-            pool,
-            num_jobs,
-            uploaded_to_bucket=_stages_through_cloud_bucket(storage_clouds))
+        job_ids = _submit_remotely(controller, dag, pool, num_jobs)
     assert job_ids is not None, 'job_ids is not set'
     if submitted_dag is not None:
         plugin_hooks.fire_managed_job_submitted(job_ids, submitted_dag,

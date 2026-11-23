@@ -919,8 +919,9 @@ class PoolRefusedError(Exception):
     """
 
     def __init__(self, exists: bool, workspace: Optional[str]) -> None:
-        super().__init__(f'Pool refused: exists={exists}, '
-                         f'workspace={workspace!r}')
+        # The workspace stays out of the message: it may be one the caller
+        # cannot read, and a chained exception's message reaches the client.
+        super().__init__('Pool refused by the jobs controller.')
         self.exists = exists
         self.workspace = workspace
 
