@@ -480,10 +480,13 @@ def test_refusal_of_the_active_workspace_is_not_a_switch():
     assert 'Switch' not in message
 
 
-@pytest.mark.parametrize('cleanup_fails', [False, True])
-def test_submission_refused_by_the_controller(cleanup_fails):
+@pytest.mark.parametrize(('uploaded', 'cleanup_fails'), [(True, False),
+                                                         (True, True),
+                                                         (False, False)])
+def test_submission_refused_by_the_controller(uploaded, cleanup_fails):
     """The files uploaded for the job are removed: it never runs, and only a
-    finished job removes them."""
+    finished job removes them. Without a cloud bucket nothing was uploaded,
+    and the storage mounts are left alone."""
     backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
     backend.set_job_info_without_job_id.side_effect = (
         exceptions.PoolRefusedError(True, 'ws-a'))
@@ -491,7 +494,7 @@ def test_submission_refused_by_the_controller(cleanup_fails):
         backend.teardown_ephemeral_storage.side_effect = RuntimeError('gone')
     tasks = [sky.Task(name=f't{i}', run='echo') for i in range(2)]
     ephemeral = mock.Mock(persistent=False)
-    ephemeral.construct.side_effect = exceptions.StorageError('gone')
+    ephemeral.construct.side_effect = RuntimeError('gone')
     persistent = mock.Mock(persistent=True)
     tasks[0].storage_mounts = {'/a': ephemeral, '/b': persistent}
     with dag_lib.Dag() as dag:
@@ -504,18 +507,28 @@ def test_submission_refused_by_the_controller(cleanup_fails):
                            return_value=backend), \
          mock.patch.object(jobs_core.backend_utils, 'get_task_resources_str',
                            return_value='r'), \
+         mock.patch.object(jobs_core.storage_lib,
+                           'get_cached_enabled_storage_cloud_names_or_refresh',
+                           return_value=['gcp']), \
+         mock.patch.object(jobs_core, '_stages_through_cloud_bucket',
+                           return_value=uploaded) as stages, \
          mock.patch.object(jobs_core, '_raise_pool_refused',
                            side_effect=ValueError('refused')) as refuse:
         with pytest.raises(ValueError, match='refused'):
             jobs_core._submit_remotely(mock.Mock(), dag, pool='p')
+    stages.assert_called_once_with(['gcp'])
     refuse.assert_called_once_with('p', True, 'ws-a')
+    persistent.construct.assert_not_called()
+    if not uploaded:
+        backend.teardown_ephemeral_storage.assert_not_called()
+        ephemeral.construct.assert_not_called()
+        return
     assert backend.teardown_ephemeral_storage.call_args_list == [
         mock.call(task) for task in tasks
     ]
     # Built like the controller does, so a spec-only storage is deleted;
     # never a persistent one, which construct() would create if missing.
     ephemeral.construct.assert_called_once_with()
-    persistent.construct.assert_not_called()
 
 
 def test_pool_taken_down_after_the_check(tmp_path):
@@ -532,3 +545,25 @@ def test_pool_taken_down_after_the_check(tmp_path):
         with pytest.raises(ValueError, match='refused'):
             jobs_core._maybe_submit_job_locally(str(tmp_path), dag, 1)
     refuse.assert_called_once_with('p', False, None)
+
+
+@pytest.mark.parametrize(
+    ('consolidated', 'jobs_bucket', 'force_disable', 'clouds', 'expected'), [
+        (False, None, False, ['gcp'], True),
+        (True, None, False, ['gcp'], False),
+        (True, 'gs://b', False, ['gcp'], True),
+        (False, None, True, ['gcp'], False),
+        (False, None, False, [], False),
+    ])
+def test_stages_through_cloud_bucket(consolidated, jobs_bucket, force_disable,
+                                     clouds, expected):
+    config = {
+        ('jobs', 'bucket'): jobs_bucket,
+        ('jobs', 'force_disable_cloud_bucket'): force_disable,
+    }
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=consolidated), \
+         mock.patch.object(jobs_core.skypilot_config, 'get_nested',
+                           side_effect=lambda keys, default: config[keys]):
+        assert jobs_core._stages_through_cloud_bucket(clouds) is expected

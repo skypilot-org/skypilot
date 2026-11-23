@@ -182,7 +182,7 @@ The job will be launched on one of the available workers in the pool.
 
 .. note::
 
-  A pool belongs to the :ref:`workspace <workspaces>` it was created in. Jobs can use it only from that workspace: switch to it before :code:`sky jobs launch -p`. :code:`sky jobs pool status` lists only pools in workspaces you can read.
+  A pool belongs to the :ref:`workspace <workspaces>` it was created in. Jobs can use it only from that workspace: switch to it before :code:`sky jobs launch -p`. :code:`sky jobs pool status` lists only pools in workspaces you can read. Pools created by older SkyPilot versions, which did not record a workspace, are not restricted.
 
 Scale out with multiple jobs
 ----------------------------
