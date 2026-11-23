@@ -308,6 +308,50 @@ def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
                                   ('alice', 'ws-b', '*')}
 
 
+def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
+                                                        monkeypatch):
+    service.add_workspace_policy('ws-a', ['alice'])
+    workspaces = {
+        'ws-a': {
+            'private': True,
+            'allowed_users': ['alice', 'bob-name']
+        },
+        'ws-b': {
+            'private': True,
+            'allowed_users': ['alice']
+        },
+        'ws-open': {
+            'allowed_users': ['carol']
+        },
+    }
+    config_locks = []
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda *a, **k: copy.deepcopy(workspaces))
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(
+        skypilot_config, 'get_skypilot_config_lock',
+        lambda *a, **k: config_locks.append(1) or contextlib.nullcontext())
+    resolver = mock.Mock()
+    resolver.entries_for.side_effect = {
+        'alice': ['alice'],
+        'bob': ['bob', 'bob-name'],
+        'carol': ['carol'],
+    }.get
+    with mock.patch('sky.users.resolver.UserResolver', return_value=resolver):
+        service.resync_workspace_policies_for_new_users(
+            ['alice', 'bob', 'carol', 'alice'])
+    assert config_locks == [1]
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sqlalchemy.text('SELECT v0, v1, v2 FROM casbin_rule '
+                            'WHERE ptype = \'p\'')).fetchall()
+    # A list, not a set: an existing or repeated grant must not be re-inserted.
+    assert sorted(tuple(r) for r in rows) == [('alice', 'ws-a', '*'),
+                                              ('alice', 'ws-b', '*'),
+                                              ('bob', 'ws-a', '*')]
+
+
 def _startup_patches(monkeypatch, service, rules_complete):
     monkeypatch.setattr(
         permission.rbac, 'get_role_permissions', lambda **_: {
