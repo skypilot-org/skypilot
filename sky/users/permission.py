@@ -1859,8 +1859,12 @@ class PermissionService:
             for user_id in dict.fromkeys(user_ids):
                 # Every form of this user that could appear in an
                 # allowed_users list: the user_id itself plus the unique
-                # username, if any.
-                user_entries = set(resolver.entries_for(user_id))
+                # username, unless that name is another user's id (an id
+                # entry always means that id, as in resolve_allowed_entries).
+                user_entries = {
+                    entry for entry in resolver.entries_for(user_id)
+                    if entry == user_id or not resolver.has_id(entry)
+                }
                 grants.extend((user_id, workspace_name)
                               for workspace_name, workspace_config in
                               private_workspaces.items()

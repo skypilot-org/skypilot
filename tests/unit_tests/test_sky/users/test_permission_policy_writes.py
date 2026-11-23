@@ -19,6 +19,7 @@ from sky import global_user_state
 from sky import models
 from sky import skypilot_config
 from sky.users import permission
+from sky.users import resolver as resolver_lib
 from sky.utils.db import migration_utils
 from sky.workspaces import core
 
@@ -302,6 +303,7 @@ def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
                         lambda *a, **k: contextlib.nullcontext())
     resolver = mock.Mock()
     resolver.entries_for.return_value = ['alice']
+    resolver.has_id.return_value = False
     with mock.patch('sky.users.resolver.UserResolver', return_value=resolver):
         service.resync_workspace_policies_for_new_user('alice')
     assert _rows(engine, 'p') == {('alice', 'ws-a', '*'),
@@ -345,6 +347,7 @@ def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
         'bob': ['bob', 'bob-name'],
         'carol': ['carol'],
     }.get
+    resolver.has_id.return_value = False
     with mock.patch('sky.users.resolver.UserResolver',
                     return_value=resolver), _policy_commits(engine) as counts:
         service.resync_workspace_policies_for_new_users(
@@ -360,6 +363,27 @@ def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
                                               ('alice', 'ws-b', '*'),
                                               ('bob', 'ws-a', '*'),
                                               ('bob', 'ws-c', '*')]
+
+
+def test_new_user_resync_ignores_a_username_that_is_another_users_id(
+        service, engine, monkeypatch):
+    # 'c0ffee00' is alice's id; bob's username happens to equal it.
+    workspaces = {'ws-a': {'private': True, 'allowed_users': ['c0ffee00']}}
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda *a, **k: copy.deepcopy(workspaces))
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(skypilot_config, 'get_skypilot_config_lock',
+                        lambda *a, **k: contextlib.nullcontext())
+    users = [
+        models.User(id='c0ffee00', name='alice'),
+        models.User(id='b0b0b0b0', name='c0ffee00')
+    ]
+    with mock.patch('sky.users.resolver.UserResolver',
+                    return_value=resolver_lib.UserResolver(users, [])):
+        service.resync_workspace_policies_for_new_users(
+            ['c0ffee00', 'b0b0b0b0'])
+    assert _rows(engine, 'p') == {('c0ffee00', 'ws-a', '*')}
 
 
 def _startup_patches(monkeypatch, service, rules_complete):
