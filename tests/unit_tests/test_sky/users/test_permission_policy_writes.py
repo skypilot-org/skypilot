@@ -310,8 +310,10 @@ def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
 
 def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
                                                         monkeypatch):
-    # Both users already hold a grant, so a lookup keyed on one user misses.
-    service.add_workspace_policy('ws-a', ['alice', 'bob'])
+    # Each user already holds one grant, so a lookup keyed on one user misses;
+    # ws-a is partly granted, so skipping a workspace with any grant misses.
+    service.add_workspace_policy('ws-a', ['alice'])
+    service.add_workspace_policy('ws-c', ['bob'])
     workspaces = {
         'ws-a': {
             'private': True,
