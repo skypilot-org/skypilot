@@ -490,6 +490,10 @@ def test_submission_refused_by_the_controller(cleanup_fails):
     if cleanup_fails:
         backend.teardown_ephemeral_storage.side_effect = RuntimeError('gone')
     tasks = [sky.Task(name=f't{i}', run='echo') for i in range(2)]
+    ephemeral = mock.Mock(persistent=False)
+    ephemeral.construct.side_effect = exceptions.StorageError('gone')
+    persistent = mock.Mock(persistent=True)
+    tasks[0].storage_mounts = {'/a': ephemeral, '/b': persistent}
     with dag_lib.Dag() as dag:
         for task in tasks:
             task.set_resources(sky.Resources())
@@ -508,6 +512,10 @@ def test_submission_refused_by_the_controller(cleanup_fails):
     assert backend.teardown_ephemeral_storage.call_args_list == [
         mock.call(task) for task in tasks
     ]
+    # Built like the controller does, so a spec-only storage is deleted;
+    # never a persistent one, which construct() would create if missing.
+    ephemeral.construct.assert_called_once_with()
+    persistent.construct.assert_not_called()
 
 
 def test_pool_taken_down_after_the_check(tmp_path):

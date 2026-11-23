@@ -789,8 +789,18 @@ def _submit_remotely(controller: controller_utils.Controllers,
             is_batch=is_batch)
     except exceptions.PoolRefusedError as e:
         # The job's uploaded files are removed when it finishes; a refused
-        # job never runs, so remove them here.
+        # job never runs, so remove them here, as the controller would. A
+        # storage replaced by its spec on upload must be constructed first.
         for task in dag.tasks:
+            for storage in task.storage_mounts.values():
+                if storage.persistent:
+                    continue
+                try:
+                    storage.construct()
+                except (exceptions.StorageSpecError,
+                        exceptions.StorageError) as construct_error:
+                    logger.warning('Failed to construct a storage of a '
+                                   f'refused job: {construct_error}')
             try:
                 backend.teardown_ephemeral_storage(task)
             except Exception as cleanup_error:  # pylint: disable=broad-except
