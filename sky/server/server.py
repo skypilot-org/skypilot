@@ -3692,8 +3692,8 @@ async def dashboard_config(request: fastapi.Request) -> Dict[str, Any]:
     render the link; entries without a scope appear on all pages. Also
     exposes `local_contexts` (contexts pointing at the API server's own
     cluster); the field is omitted when detection raises, so the
-    dashboard falls back to its ['in-cluster'] default instead of
-    treating an error as "no local contexts".
+    dashboard keeps its last known list (or its ['in-cluster'] default
+    on first load) instead of treating an error as "no local contexts".
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
