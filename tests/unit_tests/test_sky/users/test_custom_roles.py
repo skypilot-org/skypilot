@@ -9,13 +9,17 @@ import yaml
 
 from sky import exceptions
 from sky import models
+from sky import skypilot_config
 from sky.server import plugins
 from sky.skylet import constants
 from sky.users import authz
 from sky.users import permission
+from sky.utils import config_utils
+from tests.unit_tests.test_sky.users import test_permission
 from tests.unit_tests.test_sky.users.test_permission import _service_over
-from tests.unit_tests.test_sky.users.test_permission import (
-    policy_engine)  # pylint: disable=unused-import
+
+# Reuse the fixture: pytest finds fixtures by name in this module.
+policy_engine = test_permission.policy_engine
 
 _CORDON_PATH = '/plugins/api/nodes/cordon'
 
@@ -466,10 +470,6 @@ class TestReviewFixes:
 
     def test_client_override_cannot_bring_its_own_bindings(self, monkeypatch):
         """A request's config override must not reach the permission check."""
-        from sky import (
-            skypilot_config)  # pylint: disable=import-outside-toplevel
-        from sky.utils import (
-            config_utils)  # pylint: disable=import-outside-toplevel
         ctx = skypilot_config.ConfigContext(
             config=config_utils.Config.from_dict({'rbac': _OPERATOR_CONFIG}))
         monkeypatch.setattr(skypilot_config, '_get_config_context', lambda: ctx)
