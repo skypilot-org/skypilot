@@ -983,9 +983,12 @@ def test_shutdown_stops_workers_when_counting_a_start_failure_fails():
                 SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL,
                 'labels',
                 side_effect=OSError('metrics dir full')) as labels:
+            start = time.time()
             pool.shutdown()
         assert labels.called
-        assert _wait_until(lambda: not _pid_alive(pid))
+        # The task sleeps 120 s, so only shutdown's kill can end it this soon.
+        assert _wait_until(lambda: not _pid_alive(pid), timeout=30)
+        assert time.time() - start < 30
     finally:
         if _pid_alive(pid):
             os.kill(pid, signal.SIGKILL)
