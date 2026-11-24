@@ -595,7 +595,12 @@ def test_warm_start_progress_resets_the_stall_timer(tmp_path, monkeypatch):
         # Warm start is polling, so it has recorded its start time.
         assert _wait_until(lambda: polls[0] >= 1)
         released = set()
+        cap = requests_process._WARM_START_MAX_STARTING
         for _ in range(3):
+            # Wait until warm start has started all the workers it may, so
+            # its next polls cannot start one and skip the stall check.
+            target = min(3, len(released) + cap)
+            assert _wait_until(lambda: len(executor._processes) == target)
             # 8 s without progress each time: 24 s in all, more than the
             # stall time, but never 10 s without a worker becoming ready.
             clock.now += 8
