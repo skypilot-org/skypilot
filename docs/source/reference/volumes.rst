@@ -238,6 +238,23 @@ This allows you to:
   $ sky volumes apply volume.yaml
   # SkyPilot finds the existing PVC by its skypilot-name label
 
+.. note::
+
+  SkyPilot does not change the ownership or permissions of a volume registered with ``use_existing: true``. Such a volume is often a file system shared with other workloads, and with some storage drivers the Kubernetes ``fsGroup`` setting changes the group of every file on it. So when a pod mounts one of these volumes, SkyPilot sets no ``fsGroup`` for the pod. Volumes that SkyPilot created in the same pod are still made writable when the container starts.
+
+  To have Kubernetes set the group of the volume anyway, set ``fsGroup`` through :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
+
+  .. code-block:: yaml
+
+    # task.yaml
+    config:
+      kubernetes:
+        pod_config:
+          spec:
+            securityContext:
+              fsGroup: 1000
+              fsGroupChangePolicy: OnRootMismatch
+
 Using existing file systems
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

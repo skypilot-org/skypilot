@@ -1296,6 +1296,8 @@ def write_cluster_config(
                     sub_path=vol.sub_path,
                     volume_type=vol.volume_config.type,
                     host_path=vol.volume_config.config.get('host_path'),
+                    use_existing=bool(
+                        vol.volume_config.config.get('use_existing')),
                 )
                 conflict_checker.check(
                     volume_info,
@@ -1363,6 +1365,8 @@ def write_cluster_config(
                         volume_id_on_cloud=volume_config.id_on_cloud,
                         volume_type=volume_config.type,
                         host_path=volume_config.config.get('host_path'),
+                        use_existing=bool(
+                            volume_config.config.get('use_existing')),
                     )
                     conflict_checker.check(
                         vol_info,
@@ -1399,11 +1403,22 @@ def write_cluster_config(
         keys=('post_provision_runcmd',),
         default_value=None)
 
-    # Build a list of read-write volume mount paths. The container startup
-    # script checks each path and fixes permissions if the current user cannot
-    # write to it (e.g. hostPath dirs created as root by kubelet, PVC subPath
-    # dirs created as root, or NFS volumes that ignore fsGroup).
-    volume_mount_rw_paths: List[str] = [v.path for v in volume_mount_vars]
+    # A volume registered with `use_existing` was adopted, not created, by
+    # SkyPilot. It is often a filesystem shared with other workloads, so
+    # SkyPilot changes neither its ownership nor its permissions.
+    #
+    # The container startup script checks each of these paths and fixes
+    # permissions if the current user cannot write to it (e.g. hostPath dirs
+    # created as root by kubelet, PVC subPath dirs created as root, or NFS
+    # volumes that ignore fsGroup).
+    volume_mount_rw_paths: List[str] = [
+        v.path for v in volume_mount_vars if not v.use_existing
+    ]
+    # fsGroup is pod-level: kubelet applies it to every volume in the pod whose
+    # driver supports it, walking the whole tree when the volume root does not
+    # already match. One `use_existing` volume therefore rules it out.
+    set_pod_fs_group = bool(volume_mount_vars) and not any(
+        v.use_existing for v in volume_mount_vars)
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -1557,6 +1572,7 @@ def write_cluster_config(
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
             'volume_mount_rw_paths': volume_mount_rw_paths,
+            'set_pod_fs_group': set_pod_fs_group,
             'modal_cloud_bucket_mounts': modal_cloud_bucket_mounts,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.

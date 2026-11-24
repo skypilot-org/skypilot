@@ -78,8 +78,9 @@ import difflib
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
@@ -200,6 +201,7 @@ def base_variables() -> Dict[str, Any]:
         'volume_mounts': [],
         'ephemeral_volume_mounts': [],
         'volume_mount_rw_paths': [],
+        'set_pod_fs_group': False,
         'runcmd': [],
         'priority_class': None,
         # --- resources.py extra_template_variables ---
@@ -223,6 +225,7 @@ _VOLUME_MOUNTS = [
         'sub_path': 'subdir',
         'volume_type': 'k8s-pvc',
         'host_path': None,
+        'use_existing': False,
     },
     {
         'name': 'my-hostpath-volume',
@@ -232,8 +235,20 @@ _VOLUME_MOUNTS = [
         'sub_path': None,
         'volume_type': 'k8s-hostpath',
         'host_path': '/data/on/host',
+        'use_existing': False,
     },
 ]
+# A PVC registered with `use_existing`: adopted, not created, by SkyPilot.
+_IMPORTED_VOLUME_MOUNT = {
+    'name': 'my-imported-volume',
+    'path': '/mnt/shared',
+    'volume_name_on_cloud': 'team-shared-fs',
+    'volume_id_on_cloud': None,
+    'sub_path': None,
+    'volume_type': 'k8s-pvc',
+    'host_path': None,
+    'use_existing': True,
+}
 _EPHEMERAL_VOLUME_MOUNTS = [{
     'name': 'sky-cluster-abc123-ephemeral',
     'path': '/mnt/scratch',
@@ -412,7 +427,18 @@ CASES: Dict[str, Dict[str, Any]] = {
     'volume_mounts': {
         'volume_mounts': _VOLUME_MOUNTS,
         'volume_mount_rw_paths': ['/mnt/pvc', '/mnt/host'],
+        'set_pod_fs_group': True,
         'ephemeral_volume_mounts': _EPHEMERAL_VOLUME_MOUNTS,
+    },
+    'volume_mounts_imported': {
+        'volume_mounts': [_IMPORTED_VOLUME_MOUNT],
+        'volume_mount_rw_paths': [],
+        'set_pod_fs_group': False,
+    },
+    'volume_mounts_mixed': {
+        'volume_mounts': [_VOLUME_MOUNTS[0], _IMPORTED_VOLUME_MOUNT],
+        'volume_mount_rw_paths': ['/mnt/pvc'],
+        'set_pod_fs_group': False,
     },
     'flex_start_priority_preemption': {
         'k8s_enable_flex_start': True,
@@ -444,6 +470,7 @@ CASES: Dict[str, Dict[str, Any]] = {
         'k8s_ephemeral_storage_limit': 512.0,
         'volume_mounts': _VOLUME_MOUNTS,
         'volume_mount_rw_paths': ['/mnt/pvc'],
+        'set_pod_fs_group': True,
         'k8s_enable_docker_all': True,
         'k8s_docker_dind_image': 'docker:29.3-dind',
         'k8s_docker_buildkit_image': 'moby/buildkit:v0.28.0-rootless',
@@ -626,6 +653,34 @@ def test_sriov_pod_is_coherent() -> None:
     assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
     mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
     assert '/dev/infiniband' not in mounts
+
+
+@pytest.mark.parametrize(
+    'case_name,expected_security_context,expected_fixup_paths', [
+        ('volume_mounts', {
+            'fsGroup': 1000,
+            'fsGroupChangePolicy': 'OnRootMismatch'
+        }, ['/mnt/pvc', '/mnt/host']),
+        ('volume_mounts_imported', None, []),
+        ('volume_mounts_mixed', None, ['/mnt/pvc']),
+    ])
+def test_volume_ownership_changes_only_on_created_volumes(
+        case_name: str, expected_security_context: Optional[Dict[str, Any]],
+        expected_fixup_paths: List[str]) -> None:
+    """fsGroup and the startup chown/chmod leave `use_existing` volumes alone.
+
+    The golden pins the pod securityContext but not the container args, where
+    the startup permission fix-up lives, so both are asserted here.
+    """
+    pod = yaml.safe_load(_render(_build_variables(
+        case_name)))['available_node_types']['ray_head_default']['node_config']
+    assert pod['spec'].get('securityContext') == expected_security_context
+
+    container = next(
+        c for c in pod['spec']['containers'] if c['name'] == 'ray-node')
+    script = '\n'.join(container['args'])
+    assert re.findall(r'test -w "([^"]+)" \|\| ',
+                      script) == expected_fixup_paths
 
 
 def _ray_node_env(case_name: str) -> Dict[str, Any]:

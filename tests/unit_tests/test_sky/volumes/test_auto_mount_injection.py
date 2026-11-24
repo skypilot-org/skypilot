@@ -47,12 +47,17 @@ class _Injected(NamedTuple):
     looked_up: List[str]
 
 
-def _volume_config(name: str, volume_type: str = 'k8s-pvc'):
+def _volume_config(name: str,
+                   volume_type: str = 'k8s-pvc',
+                   use_existing: bool = False):
     config = {'namespace': 'my-namespace'}
     if volume_type == 'k8s-pvc':
         config['access_mode'] = 'ReadWriteMany'
     else:
         config['host_path'] = '/mnt/data'
+    if use_existing:
+        # Where `sky volumes apply` records it.
+        config['use_existing'] = True
     return models.VolumeConfig(
         _version=1,
         name=name,
@@ -76,10 +81,13 @@ def _mounted(name: str, mount_paths=('/mnt/auto',), **kwargs):
                                   mount_paths=list(mount_paths))
 
 
-def _task_volume(name: str, is_ephemeral: bool = False):
+def _task_volume(name: str,
+                 is_ephemeral: bool = False,
+                 use_existing: bool = False):
     return volume_utils.VolumeMount(path='/mnt/vol',
                                     volume_name=name,
-                                    volume_config=_volume_config(name),
+                                    volume_config=_volume_config(
+                                        name, use_existing=use_existing),
                                     is_ephemeral=is_ephemeral)
 
 
@@ -294,3 +302,45 @@ class TestTaskVolumeReadiness:
 
         assert out.looked_up == []
         assert out.checked == []
+
+
+class TestImportedVolumeOwnership:
+    """SkyPilot changes ownership only on volumes it created.
+
+    A `use_existing` volume is often a filesystem shared with other workloads.
+    fsGroup is pod-level, so one such volume rules it out for the whole pod.
+    """
+
+    def test_created_volumes_get_fs_group_and_the_startup_fixup(self, inject):
+        out = inject(volume_utils.AutoMountResolution(
+            mounted=[_mounted('auto-vol')], skipped=[]),
+                     volume_mounts=[_task_volume('task-vol')],
+                     volume_records={'task-vol': _record()})
+
+        assert out.variables['set_pod_fs_group'] is True
+        assert out.variables['volume_mount_rw_paths'] == [
+            '/mnt/vol', '/mnt/auto'
+        ]
+
+    def test_an_imported_task_volume_gets_neither(self, inject):
+        out = inject(_NOTHING_AUTO_MOUNTED,
+                     volume_mounts=[_task_volume('shared', use_existing=True)],
+                     volume_records={'shared': _record()})
+
+        assert out.variables['set_pod_fs_group'] is False
+        assert out.variables['volume_mount_rw_paths'] == []
+
+    def test_an_imported_auto_mount_rules_out_fs_group_for_the_pod(
+            self, inject):
+        out = inject(volume_utils.AutoMountResolution(
+            mounted=[_mounted('shared', use_existing=True)], skipped=[]),
+                     volume_mounts=[_task_volume('task-vol')],
+                     volume_records={'task-vol': _record()})
+
+        assert out.variables['set_pod_fs_group'] is False
+        assert out.variables['volume_mount_rw_paths'] == ['/mnt/vol']
+
+    def test_no_volumes_no_fs_group(self, inject):
+        out = inject(_NOTHING_AUTO_MOUNTED)
+
+        assert out.variables['set_pod_fs_group'] is False
