@@ -391,6 +391,12 @@ available_node_types:
           # annotation (annotation values have no such charset restrictions)
           # so consumers can recover the exact username regardless of config.
           skypilot-user: "{{ original_user }}"
+          {% if volume_mounts %}
+          # The SkyPilot volumes mounted below. A volume registered with
+          # use_existing counts as in use only by the pods that list it here,
+          # not by pods that mount its PVC some other way (e.g. pod_config).
+          skypilot-volumes: "{{ volume_mounts | map(attribute='name') | unique | join(',') }}"
+          {% endif %}
         {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
           skypilot-workspace: {{ workspace }}
           {% if priority_class is not none %}

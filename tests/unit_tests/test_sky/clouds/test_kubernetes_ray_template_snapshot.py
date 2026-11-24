@@ -85,6 +85,7 @@ import pytest
 import yaml
 
 from sky.clouds import kubernetes
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 
@@ -626,6 +627,26 @@ def test_sriov_pod_is_coherent() -> None:
     assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
     mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
     assert '/dev/infiniband' not in mounts
+
+
+def _pod_annotations(variables: Dict[str, Any]) -> Dict[str, Any]:
+    return yaml.safe_load(_render(variables))['available_node_types'][
+        'ray_head_default']['node_config']['metadata']['annotations']
+
+
+def test_pod_lists_the_skypilot_volumes_it_mounts() -> None:
+    """Under the annotation the in-use check of a use_existing volume reads.
+
+    Each volume is listed once, however many paths it is mounted at.
+    """
+    variables = _build_variables('volume_mounts')
+    variables['volume_mounts'] = _VOLUME_MOUNTS + [
+        dict(_VOLUME_MOUNTS[0], path='/mnt/pvc-again')
+    ]
+    assert _pod_annotations(variables)[k8s_constants.VOLUMES_ANNOTATION] == (
+        'my-pvc-volume,my-hostpath-volume')
+    assert k8s_constants.VOLUMES_ANNOTATION not in _pod_annotations(
+        _build_variables('base_cpu'))
 
 
 def _ray_node_env(case_name: str) -> Dict[str, Any]:

@@ -32,6 +32,12 @@ KUEUE_MANAGED_FINALIZER = 'kueue.x-k8s.io/managed'
 # is configured (templates/kubernetes-ray.yml.j2).
 KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
 
+# Annotation SkyPilot stamps on a cluster's pods listing, comma-separated, the
+# SkyPilot volumes it mounts on them through task `volumes` or `auto_mounts`
+# (templates/kubernetes-ray.yml.j2). Absent on pods that mount none. Volume
+# names are DNS-1123 subdomains, so they never contain a comma.
+VOLUMES_ANNOTATION = 'skypilot-volumes'
+
 # Provider-config key recording the Kubernetes context a cluster's pods
 # actually run on, when that can differ from the context the cluster was
 # submitted to (see get_execution_context_from_config). Recorded alongside

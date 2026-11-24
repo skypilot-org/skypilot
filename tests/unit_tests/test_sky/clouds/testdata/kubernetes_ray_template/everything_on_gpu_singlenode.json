@@ -15,6 +15,7 @@
             "provreq.kueue.x-k8s.io/maxRunDurationSeconds": "7200",
             "skypilot-priority-class": "high-priority",
             "skypilot-user": "testuser",
+            "skypilot-volumes": "my-pvc-volume,my-hostpath-volume",
             "skypilot-workspace": "default"
           },
           "labels": {

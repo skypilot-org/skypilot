@@ -10,7 +10,8 @@
         "kind": "Pod",
         "metadata": {
           "annotations": {
-            "skypilot-user": "testuser"
+            "skypilot-user": "testuser",
+            "skypilot-volumes": "my-pvc-volume,my-hostpath-volume"
           },
           "labels": {
             "parent": "skypilot",
