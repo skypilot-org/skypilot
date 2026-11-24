@@ -254,8 +254,8 @@ jobs:
           echo "name=$PLATFORM_NAME" >> $GITHUB_OUTPUT
 
       # APT_REFRESH changes once a week, so the cached apt-get upgrade layer
-      # in the Dockerfile is rebuilt at least weekly and picks up Debian
-      # security updates; other layers keep using the build cache.
+      # in the Dockerfile (and the layers after it) is rebuilt at least weekly
+      # and picks up Debian security updates. Earlier stages keep their cache.
       - name: Compute apt refresh key
         id: apt-refresh
         run: echo "key=$(date -u +%G%V)" >> "$GITHUB_OUTPUT"
