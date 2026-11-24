@@ -3454,6 +3454,7 @@ async def test_caller_usage_of_an_inline_request(in_process_env,
         ('1', 'postgresql://u:p@db:5432/sky', None, False),
         # Postgres behind a pooler.
         ('1', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', True),
+        ('1', 'postgresql://u:p@db:5432/sky', 'uri', True),
         ('0', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', False),
     ])
 def test_eager_workers_enabled(monkeypatch, flag, db_uri, pool_hostport,
@@ -3462,8 +3463,12 @@ def test_eager_workers_enabled(monkeypatch, flag, db_uri, pool_hostport,
     env = {
         'SKYPILOT_EAGER_EXECUTOR_WORKERS': flag,
         constants.ENV_VAR_DB_CONNECTION_URI: db_uri,
-        constants.ENV_VAR_DB_POOL_HOSTPORT: pool_hostport,
-        constants.ENV_VAR_DB_POOL_CONNECTION_URI: None,
+        # 'uri' sets the pooler connection URI instead of the host:port.
+        constants.ENV_VAR_DB_POOL_HOSTPORT:
+            (None if pool_hostport == 'uri' else pool_hostport),
+        constants.ENV_VAR_DB_POOL_CONNECTION_URI:
+            ('postgresql://u:p@pooler:6432/sky'
+             if pool_hostport == 'uri' else None),
     }
     for name, value in env.items():
         if value is None:
@@ -3510,16 +3515,23 @@ def test_request_worker_passes_eager_workers_flag(monkeypatch, enabled):
     assert captured['name'] == requests_lib.ScheduleType.SHORT.value
 
 
-def test_eager_workers_warns_without_memory_aware_sizing(monkeypatch):
-    """Warm start stays on, but warns when memory-aware sizing is off."""
+@pytest.mark.parametrize('sizing,warns', [(None, True), ('1', False)])
+def test_eager_workers_warns_without_memory_aware_sizing(
+        monkeypatch, sizing, warns):
+    """Warm start stays on, but warns when memory-aware sizing is off, and
+    only then."""
     monkeypatch.setenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', '1')
-    monkeypatch.delenv('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', raising=False)
+    if sizing is None:
+        monkeypatch.delenv('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', raising=False)
+    else:
+        monkeypatch.setenv('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', sizing)
     monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI, raising=False)
     warnings = []
     monkeypatch.setattr(executor.logger, 'warning', warnings.append)
     executor.eager_workers_enabled.cache_clear()
     try:
         assert executor.eager_workers_enabled() is True
-        assert any('SKYPILOT_MEMORY_AWARE_WORKER_SIZING' in w for w in warnings)
+        assert any('SKYPILOT_MEMORY_AWARE_WORKER_SIZING' in w
+                   for w in warnings) is warns
     finally:
         executor.eager_workers_enabled.cache_clear()

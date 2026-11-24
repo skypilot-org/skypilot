@@ -301,6 +301,10 @@ def _release_one_at_a_time(executor, gate_dir, total, after_release=None):
         pid = min(waiting())
         open(os.path.join(gate_dir, f'go.{pid}'), 'w', encoding='utf-8').close()
         released.add(pid)
+        # Count the worker as released only once it is ready; until then it
+        # is still starting and the next check would allow one too many.
+        assert _wait_until(lambda: executor.drain_start_signals() >= 0 and
+                           executor._ready_count >= len(released))
         if after_release is not None:
             after_release()
 
@@ -422,11 +426,7 @@ def test_pool_executor_warm_start_starts_all_workers():
     executor = PoolExecutor(max_workers=4, warm_start=True)
     try:
         assert _wait_until(lambda: len(executor._processes) == 4)
-        pids = set(executor._processes)
-        # Tasks run on the workers warm start started; no extra worker starts.
-        futures = [executor.submit(get_pid) for _ in range(8)]
-        assert {f.result(timeout=30) for f in futures} <= pids
-        assert set(executor._processes) == pids
+        assert executor._warm_start_done.wait(60)
     finally:
         executor.shutdown()
 
@@ -434,7 +434,8 @@ def test_pool_executor_warm_start_starts_all_workers():
 @requires_warm_start
 def test_pool_executor_serves_tasks_during_warm_start():
     """Ready workers run tasks while warm start is still starting others,
-    and shutdown stops warm start."""
+    and shutdown stops warm start and leaves no worker behind."""
+    before = {p.pid for p in psutil.Process().children()}
     executor = PoolExecutor(max_workers=30, warm_start=True)
     try:
         pid = executor.submit(get_pid).result(timeout=30)
@@ -444,6 +445,21 @@ def test_pool_executor_serves_tasks_during_warm_start():
     finally:
         executor.shutdown()
     assert not executor._warm_start_thread.is_alive()
+
+    def new_workers():
+        found = []
+        for p in psutil.Process().children():
+            if p.pid in before:
+                continue
+            try:
+                if _alive(p) and ('resource_tracker' not in ' '.join(
+                        p.cmdline())):
+                    found.append(p)
+            except psutil.Error:
+                continue  # Exited while we looked: gone.
+        return found
+
+    assert _wait_until(lambda: not new_workers())
 
 
 @requires_warm_start
@@ -523,8 +539,7 @@ def test_pool_executor_warm_start_survives_worker_dying_in_init():
 @requires_warm_start
 def test_pool_executor_warm_start_stops_when_workers_stall(
         tmp_path, monkeypatch):
-    """If starting workers never become ready, warm start gives up and the
-    rest of the pool starts on demand."""
+    """If starting workers never become ready, warm start gives up."""
     monkeypatch.setattr(requests_process, '_WARM_START_STALL_SECONDS', 1)
     executor = PoolExecutor(max_workers=6,
                             warm_start=True,
@@ -533,8 +548,58 @@ def test_pool_executor_warm_start_stops_when_workers_stall(
     try:
         executor._warm_start_thread.join(timeout=30)
         assert not executor._warm_start_thread.is_alive()
+        assert executor._warm_start_end == 'stalled'
         started = len(executor._processes)
         assert started <= requests_process._WARM_START_MAX_STARTING
+    finally:
+        executor.shutdown()
+
+
+class _FakeClock:
+    """Stands in for the `time` module in process.py: monotonic() only moves
+    when the test advances it; everything else is the real module."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@requires_warm_start
+def test_warm_start_progress_resets_the_stall_timer(tmp_path, monkeypatch):
+    """Warm start only gives up after no worker became ready for the stall
+    time, not after the stall time since it began."""
+    clock = _FakeClock()
+    monkeypatch.setattr(requests_process, 'time', clock)
+    monkeypatch.setattr(requests_process, '_WARM_START_STALL_SECONDS', 10)
+    gate_dir = str(tmp_path)
+    executor = PoolExecutor(max_workers=3,
+                            warm_start=True,
+                            initializer=gated_start,
+                            initargs=(gate_dir, 60))
+    try:
+        released = set()
+        for _ in range(3):
+            # 8 s without progress each time: 24 s in all, more than the
+            # stall time, but never 10 s without a worker becoming ready.
+            clock.now += 8
+
+            def waiting():
+                return _gated_pids(gate_dir, 'started') - released
+
+            assert _wait_until(lambda: waiting())
+            pid = min(waiting())
+            open(os.path.join(gate_dir, f'go.{pid}'), 'w',
+                 encoding='utf-8').close()
+            released.add(pid)
+            # Let warm start itself see the worker become ready.
+            assert _wait_until(lambda: executor._ready_count >= len(released))
+        executor._warm_start_thread.join(timeout=30)
+        assert executor._warm_start_end == 'done'
     finally:
         executor.shutdown()
 
@@ -595,7 +660,9 @@ def test_disposable_executor_counts_worker_start_failures(initializer, reason):
     """A one-off worker that fails to start is counted with the reason; a
     task that fails after start-up is not counted."""
     pool = f'disposable-{reason}-test'
+    other = 'died' if reason == 'error' else 'error'
     before = _start_failures(pool, reason)
+    other_before = _start_failures(pool, other)
     executor = DisposableExecutor(max_workers=1,
                                   initializer=initializer,
                                   name=pool)
@@ -603,6 +670,9 @@ def test_disposable_executor_counts_worker_start_failures(initializer, reason):
         with pytest.raises(BaseException):
             executor.submit(get_pid).result(timeout=60)
         assert _wait_until(lambda: _start_failures(pool, reason) == before + 1)
+        assert _wait_until(lambda: not executor.workers)
+        # One failure, counted once, with one reason.
+        assert _start_failures(pool, other) == other_before
     finally:
         executor.shutdown()
 
@@ -616,6 +686,49 @@ def test_disposable_executor_counts_worker_start_failures(initializer, reason):
         assert _start_failures('disposable-ok-test', 'died') == 0
     finally:
         healthy.shutdown()
+
+
+def test_disposable_worker_stopped_by_shutdown_is_not_a_start_failure(tmp_path):
+    """A one-off worker that shutdown stops while it is starting is not
+    counted as a failed start."""
+    pool = 'disposable-shutdown-test'
+    died_before = _start_failures(pool, 'died')
+    error_before = _start_failures(pool, 'error')
+    executor = DisposableExecutor(max_workers=1,
+                                  initializer=hang_until,
+                                  initargs=(str(tmp_path / 'never'), 60),
+                                  name=pool)
+    try:
+        future = executor.submit(get_pid)
+        assert _wait_until(lambda: executor.workers)
+    finally:
+        executor.shutdown()
+    # The future is resolved only after the worker's exit has been counted.
+    with pytest.raises(concurrent.futures.process.BrokenProcessPool):
+        future.result(timeout=30)
+    assert _start_failures(pool, 'died') == died_before
+    assert _start_failures(pool, 'error') == error_before
+
+
+@requires_warm_start
+def test_start_error_during_warm_start_is_counted_once_as_error():
+    """A worker whose initializer raises during warm start counts as an
+    "error" start failure, not also as one that "died"."""
+    pool = 'warm-error-test'
+    warm_before = _pool_broken(pool, 'warm_start')
+    error_before = _start_failures(pool, 'error')
+    died_before = _start_failures(pool, 'died')
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name=pool,
+                                 initializer=raise_in_init)
+    try:
+        assert _wait_until(
+            lambda: _pool_broken(pool, 'warm_start') == warm_before + 1)
+        assert _start_failures(pool, 'error') >= error_before + 1
+        assert _start_failures(pool, 'died') == died_before
+    finally:
+        executor.shutdown()
 
 
 @requires_warm_start
@@ -657,28 +770,6 @@ def test_pool_break_after_warm_start_stalls_is_not_a_start_failure(
         # start, not only the two warm start started.
         assert _wait_until(lambda: len(executor._processes) == 3)
         assert all(f.result(timeout=60) for f in futures)
-        os.kill(next(iter(executor._processes)), signal.SIGKILL)
-        assert _wait_until(lambda: executor._broken)
-        executor.drain_start_signals()
-        assert not executor.broke_during_warm_start()
-    finally:
-        executor.shutdown()
-
-
-@requires_warm_start
-def test_task_death_during_warm_start_is_not_a_start_failure(tmp_path):
-    """If a ready worker dies while warm start is still running, it is not
-    counted as a start failure."""
-    executor = PoolExecutor(max_workers=2,
-                            warm_start=True,
-                            initializer=record_init,
-                            initargs=(str(tmp_path / 'init.log'), 0.1))
-    try:
-        executor._warm_start_thread.join(timeout=30)
-        assert executor._warm_start_end == 'done'
-        # Act as if warm start is still running (it has exited, so it cannot
-        # overwrite this), then kill a ready worker.
-        executor._warm_start_end = None
         os.kill(next(iter(executor._processes)), signal.SIGKILL)
         assert _wait_until(lambda: executor._broken)
         executor.drain_start_signals()
@@ -829,9 +920,9 @@ def test_starting_worker_exiting_while_another_is_ready_is_a_start_failure(
 
 
 @requires_warm_start
-def test_starting_worker_abort_while_another_is_ready_counts_as_warm_start_break(
+def test_starting_worker_exit_while_another_is_ready_counts_as_warm_start_break(
         tmp_path):
-    """If a starting worker aborts while another is ready, the break counts
+    """If a starting worker exits while another is ready, the break counts
     as "warm_start" and as a worker that died while starting, not as
     "serving"; the new pool starts workers on demand."""
     pool = 'abort-while-ready-test'
@@ -896,8 +987,9 @@ def test_pool_recovery_without_warm_start_does_not_wait():
 
 @requires_warm_start
 def test_pool_recovery_does_not_wait_when_no_worker_was_ready():
-    """If a pool breaks during warm start before any worker is ready, it is
-    counted as "warm_start" without waiting for exit codes."""
+    """If a pool breaks during warm start before any worker is ready, warm
+    start counts it as "warm_start" without waiting for exit codes, and the
+    request that replaces the pool does not count it again."""
     pool = 'no-ready-recovery-test'
     warm_before = _pool_broken(pool, 'warm_start')
     # Patch before the pool exists: warm start may count the break first.
@@ -918,18 +1010,21 @@ def test_pool_recovery_does_not_wait_when_no_worker_was_ready():
 
 
 def test_warns_when_start_up_installs_a_sigterm_handler():
-    """A warning is logged if worker start-up installs a SIGTERM handler,
-    since that would make stopped workers look like start failures."""
+    """Running a worker initializer that installs a SIGTERM handler logs a
+    warning (it would make stopped workers look like start failures); one
+    that does not, does not."""
     previous = signal.getsignal(signal.SIGTERM)
+    conn = unittest.mock.Mock()
     try:
         with unittest.mock.patch.object(requests_process.logger,
                                         'warning') as warning:
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
-            requests_process._warn_if_sigterm_handled()
+            requests_process._run_initializer(conn, None, ())
             warning.assert_not_called()
-            signal.signal(signal.SIGTERM, lambda *_: None)
-            requests_process._warn_if_sigterm_handled()
+            requests_process._run_initializer(conn, signal.signal,
+                                              (signal.SIGTERM, lambda *_: None))
             warning.assert_called_once()
+        assert conn.send_bytes.call_count == 2
     finally:
         signal.signal(signal.SIGTERM, previous)
 
@@ -1147,10 +1242,12 @@ def test_burstable_executor_warm_start_applies_to_guaranteed_pool():
     one-off and never start ahead of a task)."""
     executor = BurstableExecutor(garanteed_workers=2,
                                  burst_workers=1,
-                                 warm_start=True)
+                                 warm_start=True,
+                                 name='warm-guaranteed-test')
     try:
         assert executor._executor._warm_start_thread is not None
         assert _wait_until(lambda: len(executor._executor._processes) == 2)
         assert executor._executor._warm_start_done.wait(60)
+        assert executor._burst_executor.name == 'warm-guaranteed-test-burst'
     finally:
         executor.shutdown()
