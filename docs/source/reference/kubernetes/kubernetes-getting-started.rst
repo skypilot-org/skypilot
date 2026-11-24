@@ -446,7 +446,7 @@ FAQs
 
   The pods of a slice are launched as one unit:
 
-  - They are all placed on the VMs of one slice, and the launch succeeds only when every pod is running. With a Kueue queue, the pods are admitted together as one group.
+  - They are all placed on the VMs of one slice, and the launch succeeds only when every pod is running.
   - SkyPilot sets the TPU worker environment (``TPU_WORKER_ID``, ``TPU_WORKER_HOSTNAMES``, ``TPU_PROCESS_ADDRESSES``) on each pod, so JAX and the TPU runtime see one slice.
   - ``num_nodes`` counts slices: ``num_nodes: 2`` with ``tpu-v6e-16`` runs 8 pods on two slices.
 
