@@ -581,21 +581,21 @@ class TestServeAndPoolDown:
             _record('own', 'alice'),
             _record('bobs', 'bob'),
         ]
-        monkeypatch.setattr(
-            'sky.client.sdk.stream_and_get',
-            mock.MagicMock(side_effect=lambda request_id, **kwargs: (jobs, 2, {
-            }, 2) if request_id == 'req' else records))
-        monkeypatch.setattr('sky.jobs.pool_status',
-                            mock.MagicMock(return_value='pools'))
         cancel = mock.MagicMock(return_value='cancel-req')
         monkeypatch.setattr('sky.jobs.cancel', cancel)
+        # No jobs remain once they are cancelled, so the wait loop never
+        # sleeps. Patching time.sleep instead would be process-wide, and any
+        # other thread sleeping would empty the queue before the question.
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get',
+            mock.MagicMock(side_effect=lambda request_id, **kwargs:
+                           ([] if cancel.called else jobs, 2, {}, 2)
+                           if request_id == 'req' else records))
+        monkeypatch.setattr('sky.jobs.pool_status',
+                            mock.MagicMock(return_value='pools'))
         monkeypatch.setattr('sky.client.sdk.get', mock.MagicMock())
         pool_down = mock.MagicMock(return_value='down-req')
         monkeypatch.setattr('sky.jobs.pool_down', pool_down)
-        # Stop the wait loop: no jobs remain after the cancel.
-        jobs_after = []
-        monkeypatch.setattr('sky.client.cli.command.time.sleep',
-                            lambda _: jobs.clear() or jobs_after)
         return cancel, pool_down
 
     def test_unscoped_server_keeps_the_plain_prompt(self, services,
