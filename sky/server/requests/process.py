@@ -171,7 +171,7 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         if self._warm_start_end == 'broken':
             # Count the break now: no request may reach this pool before the
             # server shuts down.
-            self.record_break()
+            self._record_break_safely()
 
     def _warm_up_loop(self) -> None:
         # ProcessPoolExecutor has no public API to add a worker, so this uses
@@ -231,22 +231,26 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         self._warm_start_done.set()
         logger.info(f'Warm start: {self.max_workers} workers started.')
 
-    def record_break(self) -> None:
+    def record_break(self, only_warm_start: bool = False) -> None:
         """Counts this pool's break in the metrics, once.
 
         Called by whichever notices the break first: warm start, the submit
         that replaces the pool, or shutdown. Does nothing if the pool is not
-        broken.
+        broken. With only_warm_start, counts the break only if it happened
+        during warm start.
         """
         if not self._broken:  # pylint: disable=protected-access
             return
         with self._break_lock:
             if self._break_recorded:
                 return
-            self._break_recorded = True
             # Read start-up errors that workers reported on the pipe.
             self.drain_start_signals()
-            if not self.broke_during_warm_start():
+            during_warm_start = self.broke_during_warm_start()
+            if only_warm_start and not during_warm_start:
+                return
+            self._break_recorded = True
+            if not during_warm_start:
                 metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
                     pool=self.name, phase='serving').inc()
                 return
@@ -256,6 +260,15 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                 # No start-up error was reported, so a worker exited while
                 # starting.
                 _count_start_failure(self.name, 'died')
+
+    def _record_break_safely(self, only_warm_start: bool = False) -> None:
+        """record_break, but logs errors instead of raising, for callers that
+        must carry on (warm start, shutdown)."""
+        try:
+            self.record_break(only_warm_start=only_warm_start)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception(f'[{self.name}] Failed to count a broken '
+                             'executor pool.')
 
     def broke_during_warm_start(self) -> bool:
         """Whether the pool broke because a worker failed to start.
@@ -402,8 +415,12 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                 logger.warning('Warm start did not stop within '
                                f'{_WARM_START_JOIN_SECONDS}s; shutting down '
                                'the pool anyway.')
-        # Count a break that no request noticed before shutdown.
-        self.record_break()
+        # Count a boot-time break that no request noticed. Other breaks are
+        # not counted here: stopping the server (e.g. Ctrl-C, which reaches
+        # idle workers) can itself break the pool just before shutdown.
+        # Ctrl-C during warm start still counts as a warm-start break: it
+        # looks the same as workers failing to start.
+        self._record_break_safely(only_warm_start=True)
         self.drain_start_signals()
         with self._ready_lock:
             self._ready_reader.close()

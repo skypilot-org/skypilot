@@ -321,6 +321,18 @@ def _pool_broken(pool, phase):
                    phase=phase)
 
 
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A child that exited but was not reaped yet still has its pid.
+    try:
+        return os.waitpid(pid, os.WNOHANG) == (0, 0)
+    except ChildProcessError:
+        return True
+
+
 def _peak_overlap(log_path):
     """Most initializer runs in `log_path` that overlapped in time."""
     with open(log_path, encoding='utf-8') as f:
@@ -926,22 +938,36 @@ def test_pool_break_at_boot_is_counted_without_a_request():
     assert _start_failures(pool, 'died') == died_before + 1
 
 
-def test_pool_break_is_counted_on_shutdown_without_a_request():
-    """A pool that breaks after start-up and is shut down before any request
-    notices the break still counts it, once."""
+def test_shutdown_does_not_count_a_break_after_start_up():
+    """Shutdown does not count a break that happened after start-up: stopping
+    the server (e.g. Ctrl-C) can break the pool itself just before shutdown.
+    A request that replaces the pool counts such breaks instead."""
     pool = 'shutdown-break-test'
     serving_before = _pool_broken(pool, 'serving')
     executor = BurstableExecutor(garanteed_workers=1, name=pool)
-    pid = executor.submit_until_success(get_pid).result(timeout=60)
-    os.kill(pid, signal.SIGKILL)
-    assert _wait_until(lambda: executor._executor._broken)
+    try:
+        pid = executor.submit_until_success(get_pid).result(timeout=60)
+        os.kill(pid, signal.SIGKILL)
+        assert _wait_until(lambda: executor._executor._broken)
+    finally:
+        executor.shutdown()
     assert _pool_broken(pool, 'serving') == serving_before
-    executor.shutdown()
-    assert _pool_broken(pool, 'serving') == serving_before + 1
+
+
+def test_shutdown_stops_workers_when_counting_a_break_fails():
+    """If counting a broken pool raises, shutdown still stops the workers."""
+    executor = PoolExecutor(max_workers=1)
+    pid = executor.submit(get_pid).result(timeout=60)
+    with unittest.mock.patch.object(PoolExecutor,
+                                    'record_break',
+                                    side_effect=RuntimeError('metrics down')):
+        executor.shutdown()
+    assert _wait_until(lambda: not _pid_alive(pid))
 
 
 @requires_warm_start
-def test_boot_break_found_by_shutdown_counts_as_warm_start(tmp_path):
+def test_boot_break_found_by_shutdown_counts_as_warm_start(
+        tmp_path, monkeypatch):
     """If shutdown stops warm start before warm start sees that the pool
     broke, the break still counts as "warm_start", not "serving"."""
     pool = 'shutdown-boot-break-test'
@@ -953,21 +979,31 @@ def test_boot_break_found_by_shutdown_counts_as_warm_start(tmp_path):
                             name=pool,
                             initializer=first_fast_rest_slow,
                             initargs=(marker, 30))
-    assert _wait_until(lambda: executor.drain_start_signals() >= 0 and executor.
-                       _ready_count == 1 and len(executor._processes) == 2)
-    # Keep warm start from counting the break, as if shutdown stopped it
-    # first.
-    with unittest.mock.patch.object(PoolExecutor, 'record_break'):
+    try:
+        assert _wait_until(lambda: executor.drain_start_signals(
+        ) >= 0 and executor._ready_count == 1 and len(executor._processes) == 2)
+        # Make warm start's next wait long, and wait until it is in it, so it
+        # cannot see the break before shutdown stops it.
+        in_long_wait = threading.Event()
+        stop_wait = executor._warm_start_stop.wait
+
+        def wait(timeout=None):
+            if timeout == 60:
+                in_long_wait.set()
+            return stop_wait(timeout)
+
+        monkeypatch.setattr(executor._warm_start_stop, 'wait', wait)
+        monkeypatch.setattr(requests_process, '_WARM_START_POLL_SECONDS', 60)
+        assert in_long_wait.wait(30)
         with open(marker, encoding='utf-8') as f:
             ready_pid = int(f.read())
         starting_pid = (set(executor._processes) - {ready_pid}).pop()
         os.kill(starting_pid, signal.SIGKILL)
         assert _wait_until(lambda: executor._broken)
-        executor._warm_start_stop.set()
-        executor._warm_start_thread.join(30)
-    # As shutdown would see it: warm start stopped, pool broken.
-    executor._warm_start_end = 'stopped'
-    executor.shutdown()
+        assert executor._warm_start_end is None  # Warm start has not seen it.
+    finally:
+        executor.shutdown()
+    assert executor._warm_start_end == 'stopped'
     assert _pool_broken(pool, 'warm_start') == warm_before + 1
     assert _pool_broken(pool, 'serving') == serving_before
 
