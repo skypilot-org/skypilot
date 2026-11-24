@@ -221,6 +221,23 @@ class TestOutcome:
                             state.spot_table.c.task_id)).fetchall()
         assert [r[0] for r in reasons] == [None, 'why']
 
+    @pytest.mark.parametrize('call', [
+        lambda: state.get_unsucceeded_dependencies_async(10),
+        lambda: state.get_dependencies_finished_at_async(10),
+        lambda: state.set_pending_tasks_failure_reason_async(10, 'why'),
+    ])
+    def test_connect_timeout_is_retried(self, _db, monkeypatch, call):
+        """A connect timeout on the controller's first DB calls for a job is
+        retried instead of escaping as an unexpected controller error."""
+        _add_job(_db, 10, ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.PENDING)
+        get_engine = mock.AsyncMock(
+            side_effect=[TimeoutError(), state._db_manager._engine_async])
+        monkeypatch.setattr(state._db_manager, 'get_async_engine', get_engine)
+        monkeypatch.setattr(asyncio, 'sleep', mock.AsyncMock())
+        asyncio.run(call())
+        assert get_engine.await_count == 2
+
 
 class TestCheckJobDependencies:
 

@@ -5190,6 +5190,7 @@ def get_unfinished_dependencies(job_ids: List[int]) -> Dict[int, List[int]]:
     return unfinished
 
 
+@db_retries.retry_async
 async def get_dependencies_finished_at_async(job_id: int) -> Optional[float]:
     """When the last of ``job_id``'s dependencies ended; None without any."""
     engine = await _db_manager.get_async_engine()
@@ -5238,6 +5239,7 @@ def get_job_outcome(job_id: int) -> Tuple[bool, Optional[ManagedJobStatus]]:
     return _job_outcome([(row[0], row[1]) for row in rows])
 
 
+@db_retries.retry_async
 async def get_unsucceeded_dependencies_async(
         job_id: int) -> List[Tuple[int, Optional[ManagedJobStatus]]]:
     """The jobs ``job_id`` depends on that did not succeed, with the status
@@ -5268,6 +5270,7 @@ async def get_unsucceeded_dependencies_async(
     return unsucceeded
 
 
+@db_retries.retry_async
 async def set_pending_tasks_failure_reason_async(job_id: int,
                                                  failure_reason: str) -> None:
     """Set the failure reason of a job's PENDING tasks."""
