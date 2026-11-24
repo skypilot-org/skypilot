@@ -131,7 +131,8 @@ class TestDown:
             with pytest.raises(exceptions.PermissionDeniedError) as e:
                 impl.down(service_names=['alice-svc', 'bob-svc'])
         assert _terminated(terminate) == ['alice-svc']
-        assert str(e.value).startswith("Terminated 'alice-svc'; ")
+        assert str(e.value).startswith(
+            "Asked the controller to terminate 'alice-svc' ")
         assert 'bob-svc' in str(e.value)
 
     def test_only_others_names_are_refused_before_anything(self):
@@ -139,7 +140,7 @@ class TestDown:
             with pytest.raises(exceptions.PermissionDeniedError) as e:
                 impl.down(service_names=['bob-svc', 'legacy-svc'])
         terminate.assert_not_called()
-        assert 'Terminated' not in str(e.value)
+        assert 'Asked the controller' not in str(e.value)
 
     def test_pattern_matching_only_own_services(self):
         with _caller(), _down_env() as terminate:

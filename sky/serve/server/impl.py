@@ -92,8 +92,9 @@ def _check_service_ownership(service_records: List[Dict[str, Any]],
     creator it would otherwise read as someone else's.
 
     Args:
-        terminated: Names already terminated in the same request, named in
-            the error so a caller can tell a partial refusal from a total one.
+        terminated: Names already handed to the controller in the same
+            request, named in the error so a caller can tell a partial
+            refusal from a total one.
 
     Raises:
         exceptions.PermissionDeniedError: If the caller is not an admin and
@@ -119,8 +120,11 @@ def _check_service_ownership(service_records: List[Dict[str, Any]],
             f'{_names_str(unrecorded)} with no recorded creator (created by '
             'an older version, or reported by a controller that predates '
             'creator records)')
-    done = (f'Terminated {", ".join(repr(n) for n in terminated)}; '
-            if terminated else '')
+    # The controller may still skip one (e.g. failed without --purge); its
+    # output, logged before this, says so.
+    done = (f'Asked the controller to terminate '
+            f'{", ".join(repr(n) for n in terminated)} (see its output '
+            'above); ' if terminated else '')
     raise exceptions.PermissionDeniedError(
         f'{done}User {user.name} ({user.id}) cannot manage '
         f'{" and ".join(reasons)}. '
