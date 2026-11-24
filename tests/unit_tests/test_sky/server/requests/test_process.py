@@ -12,6 +12,7 @@ import unittest.mock
 import prometheus_client
 import pytest
 
+from sky.metrics import utils as metrics_utils
 from sky.server.requests import process as requests_process
 from sky.server.requests.process import BurstableExecutor
 from sky.server.requests.process import DisposableExecutor
@@ -963,6 +964,26 @@ def test_shutdown_stops_workers_when_counting_a_break_fails():
                                     side_effect=RuntimeError('metrics down')):
         executor.shutdown()
     assert _wait_until(lambda: not _pid_alive(pid))
+
+
+def test_shutdown_stops_workers_when_counting_a_start_failure_fails():
+    """If counting a worker's failed start raises during shutdown, shutdown
+    still stops the other workers."""
+    pool = PoolExecutor(max_workers=1, initializer=raise_in_init)
+    future = pool.submit(dummy_task)
+    with pytest.raises(concurrent.futures.process.BrokenProcessPool):
+        future.result(timeout=60)
+    pids = list(pool._processes)
+    # As if shutdown ran before the pool was marked broken: record_break does
+    # nothing and shutdown's own read of the start-up pipe counts the failure.
+    with unittest.mock.patch.object(PoolExecutor, 'record_break'), \
+            unittest.mock.patch.object(
+                metrics_utils.SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL,
+                'labels',
+                side_effect=OSError('metrics dir full')) as labels:
+        pool.shutdown()
+    assert labels.called
+    assert all(_wait_until(lambda p=p: not _pid_alive(p)) for p in pids)
 
 
 @requires_warm_start

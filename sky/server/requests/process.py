@@ -85,8 +85,13 @@ def _warn_if_sigterm_handled() -> None:
 
 
 def _count_start_failure(pool: str, reason: str) -> None:
-    metrics_utils.SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL.labels(
-        pool=pool, reason=reason).inc()
+    """Counts a worker that failed to start. Never raises: callers include
+    shutdown, which must still stop the workers."""
+    try:
+        metrics_utils.SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL.labels(
+            pool=pool, reason=reason).inc()
+    except Exception:  # pylint: disable=broad-except
+        logger.exception(f'[{pool}] Failed to count a worker start failure.')
 
 
 class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
