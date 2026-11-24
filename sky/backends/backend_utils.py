@@ -1414,11 +1414,12 @@ def write_cluster_config(
     volume_mount_rw_paths: List[str] = [
         v.path for v in volume_mount_vars if not v.use_existing
     ]
-    # fsGroup is pod-level: kubelet applies it to every volume in the pod whose
-    # driver supports it, walking the whole tree when the volume root does not
-    # already match. One `use_existing` volume therefore rules it out.
-    set_pod_fs_group = bool(volume_mount_vars) and not any(
-        v.use_existing for v in volume_mount_vars)
+    set_pod_fs_group = False
+    if isinstance(cloud, clouds.Kubernetes):
+        set_pod_fs_group = kubernetes_utils.should_set_pod_fs_group(
+            volume_mount_vars,
+            kubernetes_utils.resolve_effective_pod_config(
+                to_provision.cluster_config_overrides, cloud, region.name))
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.

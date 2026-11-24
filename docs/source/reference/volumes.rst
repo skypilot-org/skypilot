@@ -240,7 +240,7 @@ This allows you to:
 
 .. note::
 
-  SkyPilot does not change the ownership or permissions of a volume registered with ``use_existing: true``. Such a volume is often a file system shared with other workloads, and with some storage drivers the Kubernetes ``fsGroup`` setting changes the group of every file on it. So when a pod mounts one of these volumes, SkyPilot sets no ``fsGroup`` for the pod. Volumes that SkyPilot created in the same pod are still made writable when the container starts.
+  SkyPilot does not change the ownership or permissions of a volume registered with ``use_existing: true``, or of a PVC or inline CSI volume added through :ref:`pod_config <advanced-mount-pvc-with-kubernetes-configs>`. Such a volume is often a file system shared with other workloads, and with some storage drivers the Kubernetes ``fsGroup`` setting changes the group of every file on it. So when a pod mounts one of these volumes, SkyPilot sets no ``fsGroup`` for the pod. Volumes that SkyPilot created in the same pod are still made writable when the container starts.
 
   To have Kubernetes set the group of the volume anyway, set ``fsGroup`` through :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
 
@@ -552,7 +552,7 @@ Volume mounting can be done directly in the task YAML on a per-task basis, or gl
     .. tab-item:: PVC
       :name: kubernetes-volumes-pvc
 
-      Mount a PVC with additional configurations like ``fsGroup`` and ``fsGroupChangePolicy``.
+      Mount a PVC with additional configurations like ``fsGroup`` and ``fsGroupChangePolicy``. SkyPilot sets no ``fsGroup`` on a pod whose ``pod_config`` adds a PVC or an inline CSI volume, so set it here if the container user needs to write to the PVC.
 
       **Per-task configuration:**
 
