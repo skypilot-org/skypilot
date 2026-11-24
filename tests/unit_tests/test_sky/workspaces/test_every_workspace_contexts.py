@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from sky import core
+from sky import models
 from sky import skypilot_config
 from sky.clouds import ssh as ssh_cloud
 from sky.metrics import utils as metrics_utils
@@ -108,15 +109,39 @@ def test_federation_targets_cover_every_workspace(configure, monkeypatch):
     assert remote == ['ctx-a', 'ctx-b']
 
 
-def test_dashboard_local_contexts_match_the_federation(configure, monkeypatch):
-    """The dashboard and the federation classify the same, fresh contexts."""
-    configure(_CONFIG)
-    refresh = mock.MagicMock()
+def test_dashboard_local_contexts_refresh_before_listing(
+        configure, monkeypatch):
+    """The dashboard lists contexts after refreshing config, as the federation
+    does, so a context a workspace just allowed is classified."""
+    configure({'kubernetes': {'allowed_contexts': ['ctx-a']}})
+    # Only the refresh makes ws-b (and ctx-b) visible.
+    refresh = mock.MagicMock(side_effect=lambda: configure(_CONFIG))
     split = mock.MagicMock(side_effect=lambda contexts: (list(contexts), []))
     monkeypatch.setattr(server.common,
                         'refresh_workspace_state_for_sync_handler', refresh)
     monkeypatch.setattr(metrics_utils, 'split_local_remote_contexts', split)
-    local = server._get_local_contexts()  # pylint: disable=protected-access
+    local = server._get_local_contexts(None)  # pylint: disable=protected-access
     assert local == ['ctx-a', 'ctx-b']
     split.assert_called_once_with(['ctx-a', 'ctx-b'])
-    refresh.assert_called_once_with()
+
+
+@pytest.mark.parametrize('admin, readable, expected', [
+    (False, ['default'], ['ctx-a']),
+    (False, ['ws-b'], ['ctx-b']),
+    (False, ['default', 'ws-b'], ['ctx-a', 'ctx-b']),
+    (False, [], []),
+    (True, [], ['ctx-a', 'ctx-b']),
+])
+def test_dashboard_local_contexts_only_name_the_callers_contexts(
+        configure, monkeypatch, admin, readable, expected):
+    configure(_CONFIG)
+    monkeypatch.setattr(server.permission, 'is_admin', lambda user_id: admin)
+    monkeypatch.setattr(server.common,
+                        'refresh_workspace_state_for_sync_handler',
+                        lambda: None)
+    monkeypatch.setattr(metrics_utils, 'split_local_remote_contexts',
+                        lambda contexts: (list(contexts), []))
+    monkeypatch.setattr(server.workspaces_core, 'workspaces_for_user',
+                        lambda user_id: {w: {} for w in readable})
+    user = models.User(id='alice-id', name='alice')
+    assert server._get_local_contexts(user) == expected  # pylint: disable=protected-access
