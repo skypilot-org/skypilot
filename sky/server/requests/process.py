@@ -143,6 +143,9 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         # Number of workers started so far during warm start. Compared with the
         # ready count to tell if the pool broke while workers were starting.
         self._warm_start_started = 0
+        # Set once this pool's break has been counted in the metrics.
+        self._break_recorded = False
+        self._break_lock = threading.Lock()
         if warm_start:
             # Starting workers from another thread is only safe when the pool
             # does not fork (cpython gh-90622). The flag that tells us this and
@@ -164,6 +167,13 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         ready for _WARM_START_STALL_SECONDS, warm start gives up and the rest
         start on demand.
         """
+        self._warm_up_loop()
+        if self._warm_start_end == 'broken':
+            # Count the break now: no request may reach this pool before the
+            # server shuts down.
+            self.record_break()
+
+    def _warm_up_loop(self) -> None:
         # ProcessPoolExecutor has no public API to add a worker, so this uses
         # its private state.
         # pylint: disable=protected-access
@@ -220,6 +230,32 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         self._warm_start_end = 'done'
         self._warm_start_done.set()
         logger.info(f'Warm start: {self.max_workers} workers started.')
+
+    def record_break(self) -> None:
+        """Counts this pool's break in the metrics, once.
+
+        Called by whichever notices the break first: warm start, the submit
+        that replaces the pool, or shutdown. Does nothing if the pool is not
+        broken.
+        """
+        if not self._broken:  # pylint: disable=protected-access
+            return
+        with self._break_lock:
+            if self._break_recorded:
+                return
+            self._break_recorded = True
+            # Read start-up errors that workers reported on the pipe.
+            self.drain_start_signals()
+            if not self.broke_during_warm_start():
+                metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
+                    pool=self.name, phase='serving').inc()
+                return
+            metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
+                pool=self.name, phase='warm_start').inc()
+            if self.start_failures == 0:
+                # No start-up error was reported, so a worker exited while
+                # starting.
+                _count_start_failure(self.name, 'died')
 
     def broke_during_warm_start(self) -> bool:
         """Whether the pool broke because a worker failed to start.
@@ -364,6 +400,8 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                 logger.warning('Warm start did not stop within '
                                f'{_WARM_START_JOIN_SECONDS}s; shutting down '
                                'the pool anyway.')
+        # Count a break that no request noticed before shutdown.
+        self.record_break()
         self.drain_start_signals()
         with self._ready_lock:
             self._ready_reader.close()
@@ -644,20 +682,9 @@ class BurstableExecutor:
         return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
 
     def _record_broken_pool(self, broken_pool: PoolExecutor) -> None:
-        """Records a broken pool in the metrics, by whether it broke during
-        warm start. Call with _guaranteed_pool_lock held."""
-        # Read start-up errors that workers reported on the pipe.
-        broken_pool.drain_start_signals()
-        if not broken_pool.broke_during_warm_start():
-            metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
-                pool=self._name, phase='serving').inc()
-            return
-        metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
-            pool=self._name, phase='warm_start').inc()
-        if broken_pool.start_failures == 0:
-            # No start-up error was reported, so a worker exited while
-            # starting.
-            _count_start_failure(self._name, 'died')
+        """Counts a broken pool in the metrics, unless warm start or a
+        previous call already did. Call with _guaranteed_pool_lock held."""
+        broken_pool.record_break()
 
     def shutdown(self) -> None:
         """Shutdown the executor."""

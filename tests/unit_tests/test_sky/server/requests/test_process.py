@@ -751,6 +751,12 @@ def test_starting_worker_abort_while_another_is_ready_counts_as_warm_start_break
     serving_before = _pool_broken(pool, 'serving')
     died_before = _start_failures(pool, 'died')
     marker = str(tmp_path / 'first')
+    # Warm start or the next request records the break, whichever is first.
+    wait = unittest.mock.patch.object(
+        PoolExecutor,
+        'wait_until_broken_handled',
+        autospec=True,
+        side_effect=PoolExecutor.wait_until_broken_handled).start()
     executor = BurstableExecutor(garanteed_workers=2,
                                  warm_start=True,
                                  name=pool,
@@ -761,13 +767,8 @@ def test_starting_worker_abort_while_another_is_ready_counts_as_warm_start_break
         assert _wait_until(lambda: original.drain_start_signals() >= 0 and
                            original._ready_count == 1)
         assert _wait_until(lambda: original._broken)
-        with unittest.mock.patch.object(
-                PoolExecutor,
-                'wait_until_broken_handled',
-                autospec=True,
-                side_effect=PoolExecutor.wait_until_broken_handled) as wait:
-            executor.submit_until_success(dummy_task)
-        # Telling what broke the pool needed the exit codes.
+        executor.submit_until_success(dummy_task)
+        # Telling what broke the pool needed the exit codes, once.
         assert wait.call_count == 1
         assert executor._executor is not original
         assert _pool_broken(pool, 'warm_start') == warm_before + 1
@@ -775,6 +776,7 @@ def test_starting_worker_abort_while_another_is_ready_counts_as_warm_start_break
         assert _start_failures(pool, 'died') == died_before + 1
         assert executor._executor._warm_start_thread is None
     finally:
+        unittest.mock.patch.stopall()
         executor.shutdown()
 
 
@@ -895,6 +897,47 @@ def test_serving_crash_is_counted_as_serving_break(tmp_path):
         assert _start_failures(pool, 'error') == error_before
     finally:
         executor.shutdown()
+
+
+@requires_warm_start
+def test_pool_break_at_boot_is_counted_without_a_request():
+    """If every worker dies during warm start and no request ever reaches the
+    pool, the break and the failed start are still counted, exactly once,
+    even after a later request and shutdown."""
+    pool = 'boot-break-test'
+    warm_before = _pool_broken(pool, 'warm_start')
+    died_before = _start_failures(pool, 'died')
+    executor = BurstableExecutor(garanteed_workers=2,
+                                 warm_start=True,
+                                 name=pool,
+                                 initializer=die_in_init)
+    try:
+        original = executor._executor
+        # No request is sent: warm start notices the break and counts it.
+        assert _wait_until(
+            lambda: _pool_broken(pool, 'warm_start') == warm_before + 1)
+        assert _start_failures(pool, 'died') == died_before + 1
+        # A later request replaces the pool without counting the break again.
+        executor.submit_until_success(dummy_task)
+        assert executor._executor is not original
+    finally:
+        executor.shutdown()
+    assert _pool_broken(pool, 'warm_start') == warm_before + 1
+    assert _start_failures(pool, 'died') == died_before + 1
+
+
+def test_pool_break_is_counted_on_shutdown_without_a_request():
+    """A pool that breaks after start-up and is shut down before any request
+    notices the break still counts it, once."""
+    pool = 'shutdown-break-test'
+    serving_before = _pool_broken(pool, 'serving')
+    executor = BurstableExecutor(garanteed_workers=1, name=pool)
+    pid = executor.submit_until_success(get_pid).result(timeout=60)
+    os.kill(pid, signal.SIGKILL)
+    assert _wait_until(lambda: executor._executor._broken)
+    assert _pool_broken(pool, 'serving') == serving_before
+    executor.shutdown()
+    assert _pool_broken(pool, 'serving') == serving_before + 1
 
 
 @requires_warm_start
