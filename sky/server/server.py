@@ -3630,18 +3630,28 @@ async def api_status(
             lambda: [task.readable_encode() for task in matched_request_tasks])
 
 
-def _get_local_contexts() -> List[str]:
+def _get_local_contexts(user: Optional[models.User]) -> List[str]:
     """Kubeconfig contexts that point at the API server's own cluster.
 
     Uses the same detection as the metrics federation routes, so the
     dashboard and the federation always agree on which contexts are
     local (their series are queried with cluster="" instead of a
-    context name). Non-blocking: verdicts come from the detection cache,
-    so this never stalls the event loop on a slow context.
+    context name). Verdicts come from the detection cache, so a slow context
+    never stalls it, but listing every workspace's contexts parses the
+    kubeconfig: call it off the event loop. For a non-admin ``user``, only the
+    contexts of the workspaces that user reads are returned.
     """
+    # This worker does not get the executor's per-request config reload; the
+    # federation reloads on every refresh, so match it.
+    common.refresh_workspace_state_for_sync_handler()
     local_contexts, _ = metrics_utils.split_local_remote_contexts(
-        core.get_all_contexts())
-    return local_contexts
+        core.get_every_workspace_contexts())
+    if user is None or permission.is_admin(user.id):
+        return local_contexts
+    workspaces = list(workspaces_core.workspaces_for_user(user.id))
+    readable = (visibility.visible_for_workspaces(workspaces, 'kubernetes') |
+                visibility.visible_for_workspaces(workspaces, 'ssh'))
+    return [c for c in local_contexts if c in readable]
 
 
 @app.get('/kubernetes/allowed_nodes')
@@ -3670,7 +3680,7 @@ async def kubernetes_allowed_nodes(k8s_context: str) -> Dict[str, Any]:
 
 
 @app.get('/dashboard_config')
-async def dashboard_config() -> Dict[str, Any]:
+async def dashboard_config(request: fastapi.Request) -> Dict[str, Any]:
     """Returns admin-configured dashboard settings consumed by the UI.
 
     Exposes the optional `external_links` entries: `regex` entries that
@@ -3682,8 +3692,8 @@ async def dashboard_config() -> Dict[str, Any]:
     render the link; entries without a scope appear on all pages. Also
     exposes `local_contexts` (contexts pointing at the API server's own
     cluster); the field is omitted when detection raises, so the
-    dashboard falls back to its ['in-cluster'] default instead of
-    treating an error as "no local contexts".
+    dashboard keeps its last known list (or its ['in-cluster'] default
+    on first load) instead of treating an error as "no local contexts".
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
@@ -3721,7 +3731,7 @@ async def dashboard_config() -> Dict[str, Any]:
         # keep it off the event loop. Failures must not break the rest of
         # the dashboard config.
         dashboard_settings['local_contexts'] = await asyncio.to_thread(
-            _get_local_contexts)
+            _get_local_contexts, request.state.auth_user)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning('Failed to determine local Kubernetes contexts for '
                        f'the dashboard: {common_utils.format_exception(e)}')
