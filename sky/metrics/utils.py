@@ -677,6 +677,31 @@ SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
              120.0, 300.0, 600.0, float('inf')),
 )
 
+# Reads made through sky.provision.kubernetes.reads. reason is '' for a read
+# served from the cluster state source.
+SKY_APISERVER_KUBE_READS_TOTAL = prom.Counter(
+    'sky_apiserver_kube_reads_total',
+    'Kubernetes object reads by context, resource, the source that served '
+    'them, and why a read went to the API server',
+    ['context', 'resource', 'source', 'reason'],
+)
+
+# One sample per GET call to an API server, retries included.
+SKY_APISERVER_KUBE_READ_API_CALL_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_api_call_seconds',
+    'Duration of the Kubernetes API calls made by object reads, by resource '
+    'and outcome',
+    ['resource', 'outcome'],
+    buckets=_LATENCY_BUCKETS,
+)
+
+SKY_APISERVER_KUBE_READ_STALENESS_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_staleness_seconds',
+    'How long the watch behind a cached object read had been failing',
+    ['resource'],
+    buckets=(0, 1, 5, 15, 30, 60, 120, 300, 600, float('inf')),
+)
+
 # --- ~/sky_logs retention ---
 #
 # Written once per hourly sweep by _prune_sky_logs() in the main API server
@@ -812,6 +837,44 @@ def observe_launch_phase(phase: str, attempt: str, workspace: str,
                                                      max(0.0, duration_seconds))
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to observe launch phase metric: {e}')
+
+
+def count_kube_read(context: str, resource: str, source: str,
+                    reason: str) -> None:
+    """Record one Kubernetes object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READS_TOTAL.labels(context=context,
+                                              resource=resource,
+                                              source=source,
+                                              reason=reason).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count Kubernetes read: {e}')
+
+
+def observe_kube_read_api_call(resource: str, outcome: str,
+                               duration_seconds: float) -> None:
+    """Record one Kubernetes API call made by an object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_API_CALL_SECONDS.labels(
+            resource=resource, outcome=outcome).observe(duration_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes API call: {e}')
+
+
+def observe_kube_read_staleness(resource: str,
+                                staleness_seconds: float) -> None:
+    """Record the staleness of one cached object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_STALENESS_SECONDS.labels(
+            resource=resource).observe(staleness_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes read staleness: {e}')
 
 
 def count_launch_phase_dropped(phase: str, reason: str) -> None:

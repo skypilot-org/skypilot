@@ -671,6 +671,42 @@ def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
         _CONTEXT_UNREACHABLE_CHECKS.append(check)
 
 
+# Observers of the attempts of `_retry_on_error`-wrapped calls on a named
+# context. Each is called with the context name, the exception the attempt
+# raised (None if it returned), and the attempt's duration in seconds.
+ContextCallObserver = Callable[[str, Optional[BaseException], float], None]
+_CONTEXT_CALL_OBSERVERS: List[ContextCallObserver] = []
+
+
+def register_context_call_observer(observer: ContextCallObserver) -> None:
+    """Register a function called after every attempt of a wrapped call.
+
+    It runs in the calling thread, so it must be cheap and must not block.
+    Idempotent.
+    """
+    if observer not in _CONTEXT_CALL_OBSERVERS:
+        _CONTEXT_CALL_OBSERVERS.append(observer)
+
+
+def _call_observed(context: Optional[str], func: Callable, args: tuple,
+                   kwargs: dict) -> Any:
+    start = time.monotonic()
+    error: Optional[BaseException] = None
+    try:
+        return func(*args, **kwargs)
+    except BaseException as e:
+        error = e
+        raise
+    finally:
+        if context is not None:
+            duration = time.monotonic() - start
+            for observer in _CONTEXT_CALL_OBSERVERS:
+                try:
+                    observer(context, error, duration)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Context call observer failed: {e}')
+
+
 def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
     """Why `context` is known to be unreachable, or None.
 
@@ -727,7 +763,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
             for attempt in range(max_retries):
                 try:
-                    return func(*args, **kwargs)
+                    return _call_observed(context, func, args, kwargs)
                 except (kubernetes.max_retry_error(),
                         kubernetes.api_exception(),
                         kubernetes.config_exception()) as e:
