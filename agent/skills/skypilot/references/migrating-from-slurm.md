@@ -146,10 +146,13 @@ them with a warning:
 
 ```
 job-name  output  error  nodes  wait-all-nodes
-no-requeue  requeue  cpus-per-task  mem  gres  partition
+no-requeue  requeue  cpus-per-task  mem  gres  partition  hold
 ```
 
 If a user asks for one of those, set it through `resources` / `name` instead.
+`hold` has no equivalent: SkyPilot submits every job held and releases it once
+Slurm has kept the requested CPUs and nodes, so a user hold would be released
+with it.
 
 ---
 

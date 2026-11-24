@@ -204,36 +204,97 @@ def test_refusal_is_not_wrapped_or_cancelled_twice():
     client.cancel_job.assert_called_once_with('123')
 
 
-def _left_held_client(job_state='PENDING',
-                      reason='JobHeldUser',
-                      cpus_per_task='4'):
-    client = _client(cpus_per_task=cpus_per_task)
-    client.get_job_fields.return_value.update(JobState=job_state, Reason=reason)
+def test_failed_cancel_after_failed_release_says_state_is_unknown():
+    # A failed release says nothing about whether the job is still held.
+    client = _client()
+    client.release_job.side_effect = RuntimeError('not permitted')
+    client.cancel_job.side_effect = RuntimeError('ssh down')
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
+        _check(client)
+    message = str(e.value)
+    assert ('Slurm job 123 could not be cancelled, and its state is unknown'
+            in message)
+    assert 'squeue -j 123' in message
+    assert 'scancel 123' in message
+    assert 'still held' not in message
+
+
+@pytest.mark.parametrize('fields', [{'CPUs/Task': '8', 'NumNodes': '1'}, {}])
+def test_failed_cancel_before_release_says_still_held(fields):
+    client = mock.Mock()
+    client.get_job_fields.return_value = fields
+    client.cancel_job.side_effect = RuntimeError('ssh down')
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
+        _check(client)
+    message = str(e.value)
+    assert 'could not be cancelled and is still held' in message
+    assert 'scancel 123' in message
+    assert 'state is unknown' not in message
+    client.release_job.assert_not_called()
+
+
+def _left_held_client(job_state='PENDING', reason='JobHeldUser'):
+    client = mock.Mock()
+    client.get_job_fields.return_value = {
+        'JobId': '123',
+        'JobState': job_state,
+        'Reason': reason,
+    }
+    client.query_jobs.return_value = []
     return client
 
 
-def _check_left_held(client):
-    slurm_instance._release_if_left_held(client, '123', 'my-cluster', 'batch',
-                                         1, {
-                                             'cpus': 4,
-                                             'memory': 64
-                                         })
+def _cancel_if_left_held(client):
+    return slurm_instance._cancel_if_left_held(client, '123', 'my-cluster',
+                                               'my-cluster-on-cloud')
 
 
-def test_reused_job_left_held_is_verified_and_released():
+@mock.patch('sky.provision.slurm.instance.time.sleep')
+def test_reused_job_left_held_is_cancelled_for_resubmission(mock_sleep):
     client = _left_held_client()
-    _check_left_held(client)
-    client.release_job.assert_called_once_with('123')
-    client.cancel_job.assert_not_called()
-
-
-def test_reused_job_left_held_with_changed_shape_is_refused():
-    client = _left_held_client(cpus_per_task='8')
-    with pytest.raises(exceptions.ProvisionUnsupportedError,
-                       match='8 CPUs per task instead of the 4 requested'):
-        _check_left_held(client)
+    # Still listed on the first poll after the cancel, gone on the second.
+    client.query_jobs.side_effect = [['123'], []]
+    with mock.patch.object(slurm_instance.logger, 'info') as info:
+        assert _cancel_if_left_held(client) is True
     client.cancel_job.assert_called_once_with('123')
     client.release_job.assert_not_called()
+    assert client.query_jobs.call_args_list == [
+        mock.call('my-cluster-on-cloud', ['pending', 'configuring', 'running'])
+    ] * 2
+    mock_sleep.assert_called_once_with(slurm_instance.POLL_INTERVAL_SECONDS)
+    assert 'Slurm job 123' in info.call_args.args[0]
+    assert 'submitting a new job' in info.call_args.args[0]
+
+
+def test_reused_job_left_held_that_cannot_be_cancelled_is_refused():
+    client = _left_held_client()
+    client.cancel_job.side_effect = RuntimeError('ssh down')
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
+        _cancel_if_left_held(client)
+    message = str(e.value)
+    assert 'Slurm job 123' in message
+    assert 'could not be cancelled' in message
+    assert 'scancel 123' in message
+    client.query_jobs.assert_not_called()
+
+
+@mock.patch('sky.provision.slurm.instance.time.sleep')
+@mock.patch('sky.provision.slurm.instance.time.time')
+def test_reused_job_left_held_that_lingers_is_refused(mock_time, mock_sleep):
+    # Never waited on: refused once the termination timeout has passed.
+    client = _left_held_client()
+    client.query_jobs.return_value = ['123']
+    timeout = slurm_instance._JOB_TERMINATION_TIMEOUT_SECONDS
+    mock_time.side_effect = [0, 1, timeout / 2, timeout]
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
+        _cancel_if_left_held(client)
+    message = str(e.value)
+    assert 'Slurm job 123' in message
+    assert f'still listed {timeout}s after it was cancelled' in message
+    assert 'squeue -j 123' in message
+    assert 'scancel 123' in message
+    client.cancel_job.assert_called_once_with('123')
+    assert mock_sleep.call_count == 2
 
 
 @pytest.mark.parametrize('job_state, reason', [
@@ -243,17 +304,17 @@ def test_reused_job_left_held_with_changed_shape_is_refused():
 ])
 def test_reused_job_not_left_held_is_untouched(job_state, reason):
     client = _left_held_client(job_state=job_state, reason=reason)
-    _check_left_held(client)
-    client.release_job.assert_not_called()
+    assert _cancel_if_left_held(client) is False
     client.cancel_job.assert_not_called()
+    client.release_job.assert_not_called()
 
 
 def test_reused_job_that_cannot_be_read_is_untouched():
     client = _left_held_client()
     client.get_job_fields.side_effect = RuntimeError('ssh down')
-    _check_left_held(client)
-    client.release_job.assert_not_called()
+    assert _cancel_if_left_held(client) is False
     client.cancel_job.assert_not_called()
+    client.release_job.assert_not_called()
 
 
 @pytest.mark.parametrize('value, expected', [('8', 8), ('1-1', 1), ('2+', 2)])

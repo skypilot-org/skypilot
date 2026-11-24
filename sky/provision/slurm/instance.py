@@ -348,10 +348,21 @@ def _cancel_quietly(client: 'slurm.SlurmClient', job_id: str) -> bool:
         return False
 
 
-def _cancel_held_job(client: 'slurm.SlurmClient', job_id: str) -> str:
-    """Cancel a held job and say, for an error message, how that went."""
+def _cancel_held_job(client: 'slurm.SlurmClient',
+                     job_id: str,
+                     release_failed: bool = False) -> str:
+    """Cancel a held job and say, for an error message, how that went.
+
+    Args:
+        release_failed: The job's release was attempted and failed, so it may
+            or may not still be held.
+    """
     if _cancel_quietly(client, job_id):
         return f'Slurm job {job_id} was cancelled before it started.'
+    if release_failed:
+        return (f'Slurm job {job_id} could not be cancelled, and its state is '
+                f'unknown; check it with `squeue -j {job_id}` and cancel it '
+                f'with `scancel {job_id}`.')
     return (f'Slurm job {job_id} could not be cancelled and is still held; '
             f'cancel it with `scancel {job_id}`.')
 
@@ -436,38 +447,59 @@ def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
     try:
         client.release_job(job_id)
     except Exception as e:  # pylint: disable=broad-except
-        cancelled = _cancel_held_job(client, job_id)
+        cancelled = _cancel_held_job(client, job_id, release_failed=True)
         raise exceptions.ProvisionUnsupportedError(
             f'Could not release held Slurm job {job_id} for cluster '
             f'{cluster_name!r}, so the launch was refused. {cancelled} '
             f'Error: {e}') from e
 
 
-def _release_if_left_held(client: 'slurm.SlurmClient', job_id: str,
-                          cluster_name: str, partition: str, num_nodes: int,
-                          resources: Dict[str, Any]) -> None:
-    """Verify and release a reused job that an earlier launch left held.
+def _cancel_if_left_held(client: 'slurm.SlurmClient', job_id: str,
+                         cluster_name: str, cluster_name_on_cloud: str) -> bool:
+    """Cancel a job that an earlier launch left held, so it is resubmitted.
 
     A launch submits its job held and releases it once verified. If that
     launch died in between without cleaning up (e.g. its process was killed),
     the job is still pending under a user hold (``--hold`` itself is refused
-    in slurm.sbatch_options), and a launch reusing it would wait on a job that
-    cannot start. Such a job gets the same check as a new one. Jobs held for
-    any other reason, e.g. by an administrator, are left as they are.
+    in slurm.sbatch_options) and has not run its batch script. Rather than
+    reuse it, which would wait on a job that cannot start, it is cancelled so
+    that the launch submits, verifies and waits for a new one as usual. Jobs
+    held for any other reason, e.g. by an administrator, are left as they are.
+
+    Returns:
+        Whether the job was left held and is now gone.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: The job was left held but could
+            not be cancelled, or is still listed after the cancel.
     """
     try:
         fields = client.get_job_fields(job_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not check Slurm job {job_id} for a hold: {e}')
-        return
+        return False
     if (fields.get('JobState') != 'PENDING' or
             fields.get('Reason') != 'JobHeldUser'):
-        return
-    logger.debug(f'Slurm job {job_id} was left held by an earlier launch; '
-                 'verifying it before releasing it.')
-    _release_if_request_kept(client, job_id, cluster_name, partition,
-                             math.ceil(float(resources['cpus'])), num_nodes,
-                             resources['memory'])
+        return False
+    left_held = (f'Slurm job {job_id} for cluster {cluster_name!r} was left '
+                 'held by an earlier launch')
+    if not _cancel_quietly(client, job_id):
+        raise exceptions.ProvisionUnsupportedError(
+            f'{left_held} and could not be cancelled; cancel it with '
+            f'`scancel {job_id}` and launch again.')
+    deadline = time.time() + _JOB_TERMINATION_TIMEOUT_SECONDS
+    while job_id in client.query_jobs(cluster_name_on_cloud,
+                                      ['pending', 'configuring', 'running']):
+        if time.time() >= deadline:
+            raise exceptions.ProvisionUnsupportedError(
+                f'{left_held}, and is still listed '
+                f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s after it was cancelled; '
+                f'check it with `squeue -j {job_id}`, cancel it with '
+                f'`scancel {job_id}` if needed, and launch again.')
+        time.sleep(POLL_INTERVAL_SECONDS)
+    logger.info(f'Cancelled Slurm job {job_id}, which an earlier launch of '
+                f'cluster {cluster_name!r} left held; submitting a new job.')
+    return True
 
 
 def _wait_for_job_nodes(
@@ -1193,12 +1225,15 @@ def _create_virtual_instance(
         assert len(existing_jobs) == 1, (
             f'Multiple jobs found with name {cluster_name_on_cloud}: '
             f'{existing_jobs}')
+        if _cancel_if_left_held(client, existing_jobs[0], cluster_name,
+                                cluster_name_on_cloud):
+            # Submitted again below, like a new job.
+            existing_jobs = []
 
+    if existing_jobs:
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
-        _release_if_left_held(client, job_id, cluster_name, partition,
-                              num_nodes, config.node_config)
         _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
