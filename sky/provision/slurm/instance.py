@@ -98,6 +98,9 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'cpus-per-task',
     'mem',
     'partition',
+    # The job is submitted held and released once its shape is verified, so
+    # a user hold would be released along with it.
+    'hold',
 })
 # Merged into the --gres directive SkyPilot writes for the GPUs, so that
 # non-GPU GRES (e.g. local scratch disk) can be requested alongside them.
@@ -312,6 +315,16 @@ def _leading_int(value: str) -> int:
     return int(match.group(0))
 
 
+def _node_count_range(value: str) -> Tuple[int, int]:
+    """The (min, max) of a NumNodes field ('2' -> (2, 2), '1-2' -> (1, 2))."""
+    match = re.fullmatch(r'(\d+)(?:-(\d+))?', value or '')
+    if match is None:
+        raise ValueError(f'not a node count: {value!r}')
+    low = int(match.group(1))
+    high = int(match.group(2)) if match.group(2) is not None else low
+    return low, high
+
+
 def _requested_memory_gb(memory: Any) -> float:
     """The memory the batch script requests with --mem, in GB; 0 if none."""
     try:
@@ -320,12 +333,27 @@ def _requested_memory_gb(memory: Any) -> float:
         return 0.0
 
 
-def _cancel_quietly(client: 'slurm.SlurmClient', job_id: str) -> None:
+def _cancel_quietly(client: 'slurm.SlurmClient', job_id: str) -> bool:
+    """Cancel a job, logging rather than raising on failure.
+
+    Returns:
+        Whether the job was cancelled.
+    """
     try:
         client.cancel_job(job_id)
+        return True
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to cancel held Slurm job {job_id}: {e}. '
                        f'Cancel it manually with: scancel {job_id}')
+        return False
+
+
+def _cancel_held_job(client: 'slurm.SlurmClient', job_id: str) -> str:
+    """Cancel a held job and say, for an error message, how that went."""
+    if _cancel_quietly(client, job_id):
+        return f'Slurm job {job_id} was cancelled before it started.'
+    return (f'Slurm job {job_id} could not be cancelled and is still held; '
+            f'cancel it with `scancel {job_id}`.')
 
 
 def _release_if_request_kept(client: 'slurm.SlurmClient', job_id: str,
@@ -342,29 +370,52 @@ def _release_if_request_kept(client: 'slurm.SlurmClient', job_id: str,
     otherwise it is cancelled and the launch refused, before anything is
     allocated. A job whose shape cannot be read is cancelled as well.
 
+    The job is also cancelled if anything else, e.g. a Ctrl-C, interrupts
+    this before the release: left held, it would be reused by the next
+    launch, which would wait on a job that cannot start.
+
     Raises:
         exceptions.ProvisionUnsupportedError: Slurm changed the request, or
             the held job could not be verified or released.
     """
     try:
+        _verify_and_release(client, job_id, cluster_name, partition,
+                            cpus_per_task, num_nodes, memory)
+    except exceptions.ProvisionUnsupportedError:
+        # Refused: the job was already cancelled, or the error says how to.
+        raise
+    except BaseException:
+        _cancel_quietly(client, job_id)
+        raise
+
+
+def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
+                        cluster_name: str, partition: str, cpus_per_task: int,
+                        num_nodes: int, memory: Any) -> None:
+    """The check behind _release_if_request_kept; refusals cancel the job."""
+    try:
         fields = client.get_job_fields(job_id)
         slurm_cpus_per_task = _leading_int(fields.get('CPUs/Task', ''))
-        slurm_num_nodes = _leading_int(fields.get('NumNodes', ''))
+        slurm_num_nodes = fields.get('NumNodes', '')
+        slurm_node_range = _node_count_range(slurm_num_nodes)
     except Exception as e:  # pylint: disable=broad-except
-        _cancel_quietly(client, job_id)
+        cancelled = _cancel_held_job(client, job_id)
         raise exceptions.ProvisionUnsupportedError(
             f'Could not verify the shape Slurm gave job {job_id} for '
-            f'cluster {cluster_name!r}, so it was cancelled: {e}') from e
+            f'cluster {cluster_name!r}, so the launch was refused. '
+            f'{cancelled} Error: {e}') from e
 
     changes = []
     if slurm_cpus_per_task != cpus_per_task:
         changes.append(f'{slurm_cpus_per_task} CPUs per task instead of the '
                        f'{cpus_per_task} requested')
-    if slurm_num_nodes != num_nodes:
+    # A range (e.g. 1-2) lets Slurm schedule the job on more nodes than were
+    # requested, so both ends must match the request.
+    if slurm_node_range != (num_nodes, num_nodes):
         changes.append(f'{slurm_num_nodes} nodes instead of the {num_nodes} '
                        'requested')
     if changes:
-        _cancel_quietly(client, job_id)
+        cancelled = _cancel_held_job(client, job_id)
         hint = ''
         # Only a --mem request can make Slurm raise the CPUs for MaxMemPerCPU;
         # without one (the batch script then sends no --mem) the cause is
@@ -380,16 +431,43 @@ def _release_if_request_kept(client: 'slurm.SlurmClient', job_id: str,
             f'Slurm would run cluster {cluster_name!r} with '
             f'{" and ".join(changes)}, so the launch was refused rather '
             f'than run (and accounted) on resources that were not '
-            f'requested; Slurm job {job_id} was cancelled before it '
-            f'started.{hint}')
+            f'requested; {cancelled}{hint}')
 
     try:
         client.release_job(job_id)
     except Exception as e:  # pylint: disable=broad-except
-        _cancel_quietly(client, job_id)
+        cancelled = _cancel_held_job(client, job_id)
         raise exceptions.ProvisionUnsupportedError(
             f'Could not release held Slurm job {job_id} for cluster '
-            f'{cluster_name!r}, so it was cancelled: {e}') from e
+            f'{cluster_name!r}, so the launch was refused. {cancelled} '
+            f'Error: {e}') from e
+
+
+def _release_if_left_held(client: 'slurm.SlurmClient', job_id: str,
+                          cluster_name: str, partition: str, num_nodes: int,
+                          resources: Dict[str, Any]) -> None:
+    """Verify and release a reused job that an earlier launch left held.
+
+    A launch submits its job held and releases it once verified. If that
+    launch died in between without cleaning up (e.g. its process was killed),
+    the job is still pending under a user hold (``--hold`` itself is refused
+    in slurm.sbatch_options), and a launch reusing it would wait on a job that
+    cannot start. Such a job gets the same check as a new one. Jobs held for
+    any other reason, e.g. by an administrator, are left as they are.
+    """
+    try:
+        fields = client.get_job_fields(job_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not check Slurm job {job_id} for a hold: {e}')
+        return
+    if (fields.get('JobState') != 'PENDING' or
+            fields.get('Reason') != 'JobHeldUser'):
+        return
+    logger.debug(f'Slurm job {job_id} was left held by an earlier launch; '
+                 'verifying it before releasing it.')
+    _release_if_request_kept(client, job_id, cluster_name, partition,
+                             math.ceil(float(resources['cpus'])), num_nodes,
+                             resources['memory'])
 
 
 def _wait_for_job_nodes(
@@ -1119,6 +1197,8 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
+        _release_if_left_held(client, job_id, cluster_name, partition,
+                              num_nodes, config.node_config)
         _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)

@@ -1134,7 +1134,10 @@ class SlurmClient:
             job_id: The Slurm job ID.
 
         Returns:
-            The job's ``Key=Value`` fields as a dict of strings.
+            The job's ``Key=Value`` fields as a dict of strings. Only the
+            first occurrence of a key is kept: Slurm prints the job's own
+            fields before free text such as its Comment, which can contain
+            ``Key=Value`` pairs of its own.
         """
         cmd = ['scontrol', 'show', 'job', '--oneliner', job_id]
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
@@ -1143,11 +1146,11 @@ class SlurmClient:
                                            f'Failed to show job {job_id}.',
                                            stderr=f'{stdout}\n{stderr}',
                                            stream_logs=False)
-        fields = {}
+        fields: Dict[str, str] = {}
         for token in stdout.split():
             key, sep, value = token.partition('=')
             if sep:
-                fields[key] = value
+                fields.setdefault(key, value)
         return fields
 
     def release_job(self, job_id: str) -> None:

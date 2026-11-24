@@ -22,6 +22,7 @@ from sky.adaptors import slurm
 from sky.backends import backend_utils
 from sky.catalog import slurm_catalog
 from sky.clouds import slurm as slurm_cloud
+from sky.provision import common
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
@@ -1500,14 +1501,11 @@ class TestProvisionTimeoutPassthrough:
             mock_get_proctrack_type, mock_wait_for_job_nodes, held_job_check):
         """The job is submitted held and verified before anything waits on
         its allocation."""
-        from sky.adaptors.slurm import SlurmPartition
-        from sky.provision import common
-
-        mock_get_partition_info.return_value = SlurmPartition(name='gpu',
-                                                              is_default=False,
-                                                              maxtime=7 * 24 *
-                                                              60 * 60,
-                                                              default_time=None)
+        mock_get_partition_info.return_value = slurm.SlurmPartition(
+            name='gpu',
+            is_default=False,
+            maxtime=7 * 24 * 60 * 60,
+            default_time=None)
         mock_get_proctrack_type.return_value = 'cgroup'
 
         mock_client = mock.MagicMock()
@@ -1568,6 +1566,80 @@ class TestProvisionTimeoutPassthrough:
         held_job_check.assert_called_once_with(
             mock_client, mock_client.submit_job.return_value, 'test-held',
             'gpu', 2, 1, 8)
+        mock_wait_for_job_nodes.assert_called_once()
+
+    @patch('sky.provision.slurm.instance._record_nodes_allocated')
+    @patch('sky.provision.slurm.instance._record_allocation')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    def test_reused_job_left_held_is_verified_first(
+            self, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_record_allocation, mock_record_nodes_allocated,
+            held_job_check):
+        """A pending job an earlier launch left held is verified (and so
+        released or refused) before the launch waits on it."""
+        del mock_record_allocation, mock_record_nodes_allocated
+        mock_get_partition_info.return_value = slurm.SlurmPartition(
+            name='gpu',
+            is_default=False,
+            maxtime=7 * 24 * 60 * 60,
+            default_time=None)
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        mock_client = mock.MagicMock()
+        mock_client.query_jobs.side_effect = (
+            lambda name, states: [] if states == ['completing'] else ['77'])
+        mock_client.get_job_fields.return_value = {
+            'JobId': '77',
+            'JobState': 'PENDING',
+            'Reason': 'JobHeldUser',
+        }
+        mock_client.get_job_nodes.return_value = (['node1'], {
+            'node1': '10.0.0.5'
+        })
+        mock_slurm_client.return_value = mock_client
+
+        held_job_check.side_effect = (
+            lambda *args: mock_wait_for_job_nodes.assert_not_called())
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 120,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 2,
+                'memory': 8,
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        slurm_instance._create_virtual_instance(
+            region='us-west-2',
+            cluster_name='test-held',
+            cluster_name_on_cloud='test-held',
+            config=config,
+        )
+
+        mock_client.submit_job.assert_not_called()
+        held_job_check.assert_called_once_with(mock_client, '77', 'test-held',
+                                               'gpu', 2, 1, 8)
         mock_wait_for_job_nodes.assert_called_once()
 
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
