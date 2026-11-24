@@ -581,12 +581,31 @@ def test_warm_start_progress_resets_the_stall_timer(tmp_path, monkeypatch):
                             warm_start=True,
                             initializer=gated_start,
                             initargs=(gate_dir, 60))
+    # Count warm start's polls, so the test can wait for it to check the
+    # stall deadline at each new clock reading.
+    polls = [0]
+    stop_wait = executor._warm_start_stop.wait
+
+    def counting_wait(timeout=None):
+        polls[0] += 1
+        return stop_wait(timeout)
+
+    monkeypatch.setattr(executor._warm_start_stop, 'wait', counting_wait)
     try:
+        # Warm start is polling, so it has recorded its start time.
+        assert _wait_until(lambda: polls[0] >= 1)
         released = set()
         for _ in range(3):
             # 8 s without progress each time: 24 s in all, more than the
             # stall time, but never 10 s without a worker becoming ready.
             clock.now += 8
+            # Let warm start finish a full poll at the new time, including
+            # its stall check, before this step's worker becomes ready.
+            seen = polls[0]
+            # (Stop waiting early if warm start has exited.)
+            assert _wait_until(lambda: polls[0] >= seen + 2 or not executor.
+                               _warm_start_thread.is_alive())
+            assert executor._warm_start_end is None
 
             def waiting():
                 return _gated_pids(gate_dir, 'started') - released
@@ -718,14 +737,15 @@ def test_start_error_during_warm_start_is_counted_once_as_error():
     warm_before = _pool_broken(pool, 'warm_start')
     error_before = _start_failures(pool, 'error')
     died_before = _start_failures(pool, 'died')
-    executor = BurstableExecutor(garanteed_workers=2,
+    # One worker, so exactly one start error.
+    executor = BurstableExecutor(garanteed_workers=1,
                                  warm_start=True,
                                  name=pool,
                                  initializer=raise_in_init)
     try:
         assert _wait_until(
             lambda: _pool_broken(pool, 'warm_start') == warm_before + 1)
-        assert _start_failures(pool, 'error') >= error_before + 1
+        assert _start_failures(pool, 'error') == error_before + 1
         assert _start_failures(pool, 'died') == died_before
     finally:
         executor.shutdown()
