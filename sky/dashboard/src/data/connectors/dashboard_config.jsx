@@ -93,9 +93,11 @@ export const getDashboardConfig = async () => {
           }
           return normalized;
         });
+      // The server omits local_contexts when detection fails; keep the
+      // last known list rather than falling back to the default.
       const localContexts = Array.isArray(data?.local_contexts)
         ? data.local_contexts.filter((entry) => typeof entry === 'string')
-        : EMPTY_CONFIG.localContexts;
+        : config.localContexts;
       config = { externalLinks, localContexts };
       if (generation === dashboardConfigGeneration) {
         lastGoodDashboardConfig = config;

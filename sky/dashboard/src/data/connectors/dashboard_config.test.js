@@ -67,3 +67,19 @@ test('a failed refetch keeps the last good response', async () => {
   invalidateDashboardConfig();
   expect((await getDashboardConfig()).localContexts).toEqual(['local-named']);
 });
+
+test('a response without local_contexts keeps the last known list', async () => {
+  apiClient.get
+    .mockResolvedValueOnce(response(['local-named']))
+    .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+
+  await getDashboardConfig();
+  invalidateDashboardConfig();
+  expect((await getDashboardConfig()).localContexts).toEqual(['local-named']);
+});
+
+test('the first response without local_contexts uses the default', async () => {
+  apiClient.get.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+
+  expect((await getDashboardConfig()).localContexts).toEqual(['in-cluster']);
+});
