@@ -310,15 +310,19 @@ def test_show_gpus_skips_slices_skypilot_cannot_launch():
     assert [int(i.accelerator_count) for i in counts['tpu7x']] == [8]
 
 
-def test_show_gpus_tainted_vm_makes_its_slice_busy():
+@pytest.mark.parametrize('tolerated,free', [(False, 0), (True, 8)])
+def test_show_gpus_slice_taint(tolerated, free):
+    """An untolerated taint on one VM makes its whole slice busy; a taint
+    the configured tolerations cover does not."""
     nodes = [
         _tpu_node('a1', 'tpu7x', '2x2x2', pool='a'),
         _tpu_node('a2', 'tpu7x', '2x2x2', pool='a')
     ]
-    taint = mock.MagicMock()
-    taint.tolerated = False
-    nodes[0].get_taints.return_value = [taint]
-    with mock.patch('sky.provision.kubernetes.utils.has_untolerated_taint',
-                    side_effect=lambda taints: bool(taints)):
-        _, _, available = _show_gpus(nodes, quantity_filter=8)
-    assert available['tpu7x'] == 0
+    nodes[0].get_taints.return_value = [{
+        'key': 'maintenance',
+        'value': 'true',
+        'effect': 'NoSchedule',
+        'tolerated': tolerated,
+    }]
+    _, _, available = _show_gpus(nodes, quantity_filter=8)
+    assert available['tpu7x'] == free
