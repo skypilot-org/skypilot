@@ -59,7 +59,10 @@ import {
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
-import { getDashboardConfig } from '@/data/connectors/dashboard_config';
+import {
+  getDashboardConfig,
+  invalidateDashboardConfig,
+} from '@/data/connectors/dashboard_config';
 import {
   getSSHNodePools,
   updateSSHNodePools,
@@ -1428,7 +1431,8 @@ export function ContextDetails({
     }
   }, []);
 
-  // Fetch the server-detected local contexts (cached per session).
+  // Fetch the server-detected local contexts (cached per session; Refresh
+  // clears the cache and bumps the trigger).
   useEffect(() => {
     let cancelled = false;
     getDashboardConfig().then((config) => {
@@ -1439,7 +1443,7 @@ export function ContextDetails({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [gpuMetricsRefreshTrigger]);
 
   // The local cluster's series carry no cluster label; ^$ matches only
   // the missing/empty label. External clusters match their context name.
@@ -3534,6 +3538,8 @@ export function GPUs() {
     dashboardCache.invalidate(getSlurmClusterNames);
     // One cache entry per cluster; invalidateFunction clears every variant.
     dashboardCache.invalidateFunction(getSlurmClusterInfrastructure);
+    // Local contexts change with workspace grants and context detection.
+    invalidateDashboardConfig();
 
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
