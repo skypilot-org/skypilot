@@ -1,5 +1,6 @@
 """Tests for Slurm cloud implementation."""
 
+import itertools
 import os
 from pathlib import Path
 import re
@@ -1750,36 +1751,100 @@ class TestProvisionTimeoutPassthrough:
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.'
            'SlurmLoginNodeCommandRunner')
-    def test_reused_job_left_held_from_another_script_is_not_released(
+    def test_reused_job_left_held_from_another_script_is_replaced(
             self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
             mock_get_proctrack_type, mock_wait_for_job_nodes,
             mock_record_allocation, mock_wait_for_job_ready, held_job_check,
             mismatch):
         """A job left held that this launch would not have submitted (another
         batch script, e.g. under an older sky_base_dir, or another partition)
-        is cancelled rather than waited on for a ready signal it may never
-        write, and the attempt fails retryably for failover."""
+        is not waited on for a ready signal it may never write: it is
+        cancelled, and once Slurm no longer lists it, a new job is submitted
+        in the same attempt, so a pinned partition is not given up."""
         fields = dict(self._LEFT_HELD_FIELDS)
         for key, value in mismatch.items():
             if value is None:
                 del fields[key]
             else:
                 fields[key] = value
-        mock_client, _ = self._reuse_mocks(mock_ssh_runner, mock_slurm_client,
-                                           mock_get_partition_info,
-                                           mock_get_proctrack_type, ['77'],
-                                           fields)
+        mock_client, mock_runner = self._reuse_mocks(mock_ssh_runner,
+                                                     mock_slurm_client,
+                                                     mock_get_partition_info,
+                                                     mock_get_proctrack_type,
+                                                     ['77'], fields)
+        active = ['77']
+        mock_client.query_jobs.side_effect = (
+            lambda name, states: []
+            if states == ['completing'] else list(active))
+        mock_client.cancel_job.side_effect = active.remove
+
+        with patch.object(slurm_instance.logger, 'info') as info:
+            record = self._launch()
+
+        mock_client.cancel_job.assert_called_once_with('77')
+        assert "'/home/testuser/.sky_provision/test-held.sh' on 'gpu'" in (
+            info.call_args_list[0].args[0])
+        mock_client.release_job.assert_not_called()
+        mock_client.submit_job.assert_called_once_with('gpu',
+                                                       'test-held',
+                                                       mock.ANY,
+                                                       hold=True)
+        held_job_check.assert_called_once_with(mock_client, '78', 'test-held',
+                                               'gpu', 2, 1, 8)
+        mock_record_allocation.assert_called_once_with('test-held',
+                                                       'test-slurm', '78')
+        mock_wait_for_job_nodes.assert_called_once_with(mock_client, '78', 120,
+                                                        'gpu', mock.ANY)
+        mock_wait_for_job_ready.assert_called_once_with(
+            mock_runner, mock_client, '78',
+            '/home/testuser/.sky_clusters/test-held/.sky_sbatch_ready',
+            '/home/testuser/.sky_provision/slurm-78.out')
+        assert record.created_instance_ids == [
+            slurm_utils.instance_id('78', 'node1')
+        ]
+
+    @pytest.mark.parametrize('cancel_fails', [True, False])
+    @patch('sky.provision.slurm.instance.time.sleep')
+    @patch('sky.provision.slurm.instance.time.time')
+    @patch('sky.provision.slurm.instance._wait_for_job_ready')
+    @patch('sky.provision.slurm.instance._record_allocation')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_reused_job_left_held_from_another_script_that_stays_is_retryable(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_record_allocation, mock_wait_for_job_ready, mock_time,
+            mock_sleep, held_job_check, cancel_fails):
+        """If that job cannot be cancelled, or Slurm still lists it after the
+        termination timeout, no job with the same name is submitted beside
+        it: the attempt fails retryably, saying what to check."""
+        del mock_sleep
+        mock_client, _ = self._reuse_mocks(
+            mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, ['77'],
+            dict(self._LEFT_HELD_FIELDS, Partition='cpu'))
+        if cancel_fails:
+            mock_client.cancel_job.side_effect = RuntimeError('ssh down')
+        timeout = slurm_instance._JOB_TERMINATION_TIMEOUT_SECONDS
+        # Every clock read is a second later.
+        mock_time.side_effect = itertools.count()
 
         with pytest.raises(RuntimeError) as e:
             self._launch()
 
         assert not isinstance(e.value, exceptions.ProvisionUnsupportedError)
         message = str(e.value)
-        assert 'Slurm job 77' in message
-        assert 'so it was not released' in message
-        assert "'/home/testuser/.sky_provision/test-held.sh' on 'gpu'" in (
-            message)
-        assert 'Slurm job 77 was cancelled before it started.' in message
+        assert "on partition 'cpu'" in message
+        if cancel_fails:
+            assert 'could not be cancelled and is still held' in message
+            assert 'scancel 77' in message
+        else:
+            assert f'still lists it {timeout}s later' in message
+            assert 'squeue -j 77' in message
         mock_client.cancel_job.assert_called_once_with('77')
         held_job_check.assert_not_called()
         mock_client.release_job.assert_not_called()

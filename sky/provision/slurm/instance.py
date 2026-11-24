@@ -466,6 +466,22 @@ def _release_if_request_kept(client: 'slurm.SlurmClient', job_id: str,
         raise
 
 
+def _is_user_held(fields: Dict[str, str]) -> bool:
+    """Whether `scontrol show job` fields show a job pending under a hold
+    its user can release.
+
+    A held job has priority 0. Its reason is normally JobHeldUser, but Slurm
+    keeps some earlier reasons (e.g. BadConstraints) on a priority-0 job, so
+    the priority is read as well. A hold by an administrator (JobHeldAdmin)
+    is not one the user can release.
+    """
+    if (fields.get('JobState') != 'PENDING' or
+            fields.get('Reason') == 'JobHeldAdmin'):
+        return False
+    return (fields.get('Reason') == 'JobHeldUser' or
+            fields.get('Priority') == '0')
+
+
 def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
                         cluster_name: str, partition: str, cpus_per_task: int,
                         num_nodes: int, memory: Any) -> None:
@@ -491,19 +507,19 @@ def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
 
     state = fields.get('JobState')
     reason = fields.get('Reason')
-    held = state == 'PENDING' and reason == 'JobHeldUser'
+    held = _is_user_held(fields)
     if state is None:
         raise _Refusal(
             RuntimeError, f'`scontrol show job` gave no state for Slurm job '
             f'{job_id} of cluster {cluster_name!r}.', _UNKNOWN)
     if state == 'PENDING' and reason == 'JobHeldAdmin':
-        # A job_submit plugin can hold a job for an administrator, which the
-        # user cannot release.
+        # Submitted with --hold, the job's own hold is a user hold; an
+        # operator must have held it since (scontrol hold). That says nothing
+        # about the partition, and the user cannot release it.
         raise _Refusal(
-            exceptions.ProvisionUnsupportedInZoneError,
-            f'Slurm holds job {job_id} of cluster {cluster_name!r} for an '
-            f'administrator on partition {partition!r}, so SkyPilot cannot '
-            'release it and the launch was refused there.', _HELD)
+            RuntimeError, f'Slurm job {job_id} of cluster {cluster_name!r} '
+            'was held by an administrator after it was submitted, so '
+            'SkyPilot cannot release it.', _HELD)
     if not held and state not in ('PENDING', 'CONFIGURING', 'RUNNING'):
         # Cancelled, ended, or suspended by someone else: nothing to check
         # or release. Whatever is left of it is torn down with the cluster.
@@ -547,8 +563,10 @@ def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
                     f'use under MaxMemPerCPU, set for partition {partition!r} '
                     f'or for the whole cluster. Request --cpus '
                     f'{slurm_cpus_per_task}, or less --memory.')
+        # Pending (held or not), it has not started: Slurm would run it so.
+        verb = 'would run' if state == 'PENDING' else 'runs'
         raise _Refusal(exceptions.ProvisionUnsupportedInZoneError,
-                       f'Slurm would run cluster {cluster_name!r} on partition '
+                       f'Slurm {verb} cluster {cluster_name!r} on partition '
                        f'{partition!r} with {" and ".join(changes)}, so the '
                        'launch was refused there rather than run (and '
                        'accounted) on resources that were not requested.',
@@ -571,7 +589,7 @@ def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
 
 def _left_held_fields(client: 'slurm.SlurmClient',
                       job_id: str) -> Optional[Dict[str, str]]:
-    """A reused job's fields, if it is still pending under a user hold.
+    """A reused job's fields, if it is pending under a user hold.
 
     A launch submits its job held and releases it once verified. A launch
     that died in between without cleaning up (e.g. its process was killed)
@@ -579,17 +597,16 @@ def _left_held_fields(client: 'slurm.SlurmClient',
     script. `hold` is a protected option in slurm.sbatch_options, so such a
     hold is normally SkyPilot's own (sbatch also takes abbreviations, e.g.
     `--ho`, which that check does not catch); _recover_left_held_job checks
-    that the job is the one this launch would have submitted. A job held for
-    any other reason, e.g. by an administrator, or whose fields cannot be
-    read, gives None.
+    that the job is the one this launch would have submitted. A job that is
+    not held (see _is_user_held), e.g. held by an administrator, or whose
+    fields cannot be read, gives None.
     """
     try:
         fields = client.get_job_fields(job_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not check Slurm job {job_id} for a hold: {e}')
         return None
-    if (fields.get('JobState') == 'PENDING' and
-            fields.get('Reason') == 'JobHeldUser'):
+    if _is_user_held(fields):
         return fields
     return None
 
@@ -1332,6 +1349,35 @@ def _wait_for_new_allocation(
                                   created_instance_ids=created_instance_ids)
 
 
+def _cancel_and_wait_until_gone(client: 'slurm.SlurmClient', job_id: str,
+                                cluster_name_on_cloud: str,
+                                description: str) -> None:
+    """Cancel a held job, and wait until Slurm no longer lists it as active.
+
+    Only then can a job with the same name be submitted in its place: the
+    launch finds a cluster's job by name.
+
+    Args:
+        description: What the job is, starting an error message.
+
+    Raises:
+        RuntimeError: The job could not be cancelled, or is still listed
+            after _JOB_TERMINATION_TIMEOUT_SECONDS.
+    """
+    if not _cancel_quietly(client, job_id, warn=False):
+        raise RuntimeError(f'{description}. It could not be cancelled and is '
+                           f'still held; cancel it with `scancel {job_id}`.')
+    deadline = time.time() + _JOB_TERMINATION_TIMEOUT_SECONDS
+    while job_id in client.query_jobs(cluster_name_on_cloud,
+                                      ['pending', 'configuring', 'running']):
+        if time.time() >= deadline:
+            raise RuntimeError(
+                f'{description}. It was cancelled, but Slurm still lists it '
+                f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s later; check it with '
+                f'`squeue -j {job_id}`.')
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+
 def _recover_left_held_job(
     client: 'slurm.SlurmClient',
     provider_config: Dict[str, Any],
@@ -1346,18 +1392,23 @@ def _recover_left_held_job(
     resources: Dict[str, Any],
     provision_timeout: int,
     on_pending: Callable[[str, Optional[str], Optional[int]], None],
-) -> common.ProvisionRecord:
+) -> Optional[common.ProvisionRecord]:
     """Check, release and wait for a job an earlier launch left held.
 
     Its batch script has not run yet, so it is checked and waited for exactly
     like a new job. It keeps its ID, so jobs that depend on it (e.g. afterok)
     still do. That is only done if it is the job this launch would submit:
     the same batch script, which the ready signal and log paths it waits on
-    are tied to, on the same partition. Otherwise it is cancelled, and the
-    attempt fails so that failover can submit a new job.
+    are tied to, on the same partition. Otherwise it is cancelled, so that
+    the caller submits a new job in its place.
+
+    Returns:
+        The job's record once it is ready, or None if it was cancelled
+        instead and is gone.
 
     Raises:
-        RuntimeError: The job is not the one this launch would submit, or
+        RuntimeError: The job is not the one this launch would submit and
+            could not be cancelled, or is still listed after the cancel; or
             checking it failed for a reason worth retrying.
         exceptions.ProvisionUnsupportedError: See _release_if_request_kept.
     """
@@ -1370,12 +1421,14 @@ def _recover_left_held_job(
     command = fields.get('Command')
     job_partition = fields.get('Partition')
     if command != script_path or job_partition != partition:
-        cancelled = _cancel_and_describe(client, job_id, _HELD)
-        raise RuntimeError(
-            f'Slurm job {job_id} for cluster {cluster_name!r} was left held '
-            f'by an earlier launch, but runs {command!r} on partition '
-            f'{job_partition!r}, not {script_path!r} on {partition!r} as this '
-            f'launch would, so it was not released. {cancelled}')
+        foreign = (f'Slurm job {job_id} for cluster {cluster_name!r} was left '
+                   f'held by an earlier launch, but runs {command!r} on '
+                   f'partition {job_partition!r}, not {script_path!r} on '
+                   f'{partition!r} as this launch would')
+        _cancel_and_wait_until_gone(client, job_id, cluster_name_on_cloud,
+                                    foreign)
+        logger.info(f'{foreign}, so it was cancelled; submitting a new job.')
+        return None
     logger.info(f'Slurm job {job_id} for cluster {cluster_name!r} was left '
                 'held by an earlier launch; checking it before releasing it.')
     _release_if_request_kept(client, job_id, cluster_name, partition,
@@ -1467,13 +1520,18 @@ def _create_virtual_instance(
                      f'(JOBID: {job_id})')
         left_held_fields = _left_held_fields(client, job_id)
         if left_held_fields is not None:
-            return _recover_left_held_job(client, provider_config, job_id,
-                                          left_held_fields, region,
-                                          cluster_name, cluster_name_on_cloud,
-                                          slurm_cluster, partition, num_nodes,
-                                          config.node_config, provision_timeout,
-                                          on_pending)
+            record = _recover_left_held_job(client, provider_config, job_id,
+                                            left_held_fields, region,
+                                            cluster_name, cluster_name_on_cloud,
+                                            slurm_cluster, partition, num_nodes,
+                                            config.node_config,
+                                            provision_timeout, on_pending)
+            if record is not None:
+                return record
+            # It was cancelled: a new job is submitted below.
+            existing_jobs = []
 
+    if existing_jobs:
         _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)

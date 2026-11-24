@@ -16,12 +16,18 @@ from sky.provision.slurm import instance as slurm_instance
 def _client(cpus_per_task='4',
             num_nodes='1',
             job_state='PENDING',
-            reason='JobHeldUser'):
+            reason='JobHeldUser',
+            priority=None):
+    if priority is None:
+        # A held job has priority 0.
+        held = reason in ('JobHeldUser', 'JobHeldAdmin')
+        priority = '0' if held else '4294'
     client = mock.Mock()
     client.get_job_fields.return_value = {
         'JobId': '123',
         'JobState': job_state,
         'Reason': reason,
+        'Priority': priority,
         'CPUs/Task': cpus_per_task,
         'NumNodes': num_nodes,
     }
@@ -124,17 +130,48 @@ def test_refusal_is_not_wrapped_or_cancelled_twice():
     client.cancel_job.assert_called_once_with('123')
 
 
-def test_job_held_for_an_administrator_is_refused_on_this_partition():
-    # A job_submit plugin can put a job on an admin hold the user cannot
-    # release.
+def test_job_held_by_an_administrator_since_is_retryable():
+    # Submitted with --hold, the job's own hold is a user hold: an admin hold
+    # means an operator held it since, which says nothing about the
+    # partition.
     client = _client(reason='JobHeldAdmin')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(RuntimeError) as e:
         _check(client)
+    assert not isinstance(e.value, exceptions.ProvisionUnsupportedError)
     message = str(e.value)
-    assert 'for an administrator' in message
+    assert 'held by an administrator after it was submitted' in message
     assert 'Slurm job 123 was cancelled before it started.' in message
     client.release_job.assert_not_called()
     client.cancel_job.assert_called_once_with('123')
+
+
+@pytest.mark.parametrize('reason', ['BadConstraints', 'QOSMaxCpuPerNode'])
+def test_job_with_priority_zero_and_another_reason_is_held(reason):
+    # Slurm keeps some earlier reasons on a held (priority 0) job; left as
+    # it is, the job would never start.
+    client = _client(reason=reason, priority='0')
+    _check(client)
+    client.release_job.assert_called_once_with('123')
+    client.cancel_job.assert_not_called()
+
+
+def test_pending_unheld_job_with_changed_shape_says_would_run():
+    # The hold was dropped but the job waits for resources: not started.
+    client = _client(cpus_per_task='8', reason='Resources')
+    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+        _check(client)
+    message = str(e.value)
+    assert message.startswith('Slurm would run cluster')
+    assert 'Slurm job 123 was cancelled.' in message
+    client.release_job.assert_not_called()
+
+
+def test_held_job_with_another_reason_and_changed_shape_says_would_run():
+    client = _client(cpus_per_task='8', reason='BadConstraints', priority='0')
+    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+        _check(client)
+    assert str(e.value).startswith('Slurm would run cluster')
+    assert 'cancelled before it started' in str(e.value)
 
 
 # --- A shape that cannot be parsed is refused outright: it will not change. ---
@@ -222,6 +259,8 @@ def test_running_job_with_changed_shape_is_cancelled_without_claiming_held():
     with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
         _check(client)
     message = str(e.value)
+    # It runs already: Slurm "runs" it so, not "would run" it so.
+    assert message.startswith('Slurm runs cluster')
     assert 'Slurm job 123 was cancelled.' in message
     assert 'before it started' not in message
     client.cancel_job.assert_called_once_with('123')
@@ -348,19 +387,31 @@ def test_job_left_under_the_submission_hold_is_recognised():
     client.get_job_fields.assert_called_once_with('123')
 
 
-@pytest.mark.parametrize('job_state, reason', [
-    ('RUNNING', 'None'),
-    ('CONFIGURING', 'None'),
-    ('PENDING', 'Resources'),
-    ('PENDING', 'JobHeldAdmin'),
+@pytest.mark.parametrize('job_state, reason, priority', [
+    ('RUNNING', 'None', '4294'),
+    ('CONFIGURING', 'None', '4294'),
+    ('PENDING', 'Resources', '4294'),
+    ('PENDING', 'JobHeldAdmin', '0'),
 ])
-def test_job_not_under_the_submission_hold_is_not_recognised(job_state, reason):
+def test_job_not_under_the_submission_hold_is_not_recognised(
+        job_state, reason, priority):
     client = mock.Mock()
     client.get_job_fields.return_value = {
         'JobState': job_state,
         'Reason': reason,
+        'Priority': priority,
     }
     assert slurm_instance._left_held_fields(client, '123') is None
+
+
+def test_held_job_with_another_reason_is_recognised_as_left_held():
+    client = mock.Mock()
+    client.get_job_fields.return_value = {
+        'JobState': 'PENDING',
+        'Reason': 'BadConstraints',
+        'Priority': '0',
+    }
+    assert slurm_instance._left_held_fields(client, '123') is not None
 
 
 def test_unreadable_job_is_not_recognised_as_left_held():
