@@ -367,12 +367,11 @@ _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 @functools.lru_cache(maxsize=1)
 def eager_workers_enabled() -> bool:
-    """Whether executor pools start every worker at boot (warm start).
+    """Whether executor pools start all their workers at boot (warm start).
 
-    On with SKYPILOT_EAGER_EXECUTOR_WORKERS, except when the server reaches a
-    Postgres state DB without a connection pooler: every worker would then
-    hold its own database connections, and a full pool can exhaust a database
-    shared with other servers. Decided once per process.
+    True when SKYPILOT_EAGER_EXECUTOR_WORKERS is set, unless the state DB is
+    Postgres without a connection pooler: then every started worker keeps its
+    own DB connections, which could exhaust the database. Cached per process.
     """
     if not env_options.Options.EAGER_EXECUTOR_WORKERS.get():
         return False

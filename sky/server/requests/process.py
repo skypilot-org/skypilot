@@ -16,33 +16,32 @@ from sky.utils import subprocess_utils
 
 logger = logging.getLogger(__name__)
 
-# Warm start lets at most this many workers be starting (spawned, initializer
-# not yet finished) at a time. Each start imports SkyPilot, which costs CPU and
-# memory, and runs plugin initializers, some of which connect to the database.
-# Pacing by readiness means a slow start slows warm start down instead of
-# piling up starting processes.
+# Maximum number of workers that warm start starts at the same time. Starting a
+# worker imports SkyPilot (CPU and memory) and runs plugin initializers (some
+# connect to the database), so starting them a few at a time avoids a spike.
 _WARM_START_MAX_STARTING = 2
 _WARM_START_POLL_SECONDS = 0.1
-# Warm start stops, and the remaining workers start on demand, when no worker
-# becomes ready for this long.
+# If no worker becomes ready for this long, warm start gives up and the
+# remaining workers start on demand.
 _WARM_START_STALL_SECONDS = 120
-# How long shutdown waits for the warm-start thread, which checks for a stop
-# every _WARM_START_POLL_SECONDS.
+# How long shutdown waits for the warm-start thread to stop.
 _WARM_START_JOIN_SECONDS = 10
-# How long replacing a pool that broke while warm start ran waits for the
-# stdlib to reap its workers, when telling a start-up failure from a serving
-# crash needs their exit codes.
+# How long to wait for a broken pool's workers to exit, so their exit codes can
+# tell a start-up failure from a crash while serving.
 _BROKEN_POOL_JOIN_SECONDS = 5
 
-# What a worker reports on its start-up pipe once its initializer has run,
-# followed by its pid.
+# Status a worker sends on the start-up pipe after its initializer, followed by
+# its pid.
 _STARTED = b'r'
 _START_FAILED = b'f'
 
 
 def _send_start_signal(conn, status: bytes) -> None:
-    """One small pipe write: atomic and lock-free, so a worker dying at any
-    point cannot leave the parent blocked."""
+    """Sends a start-up status to the parent.
+
+    A single small pipe write is atomic and needs no lock, so a worker that
+    dies at any point cannot leave the parent blocked.
+    """
     try:
         conn.send_bytes(status + str(os.getpid()).encode())
     except OSError:
@@ -50,7 +49,8 @@ def _send_start_signal(conn, status: bytes) -> None:
 
 
 def _parse_start_signal(message: bytes) -> Tuple[bytes, int]:
-    """Returns the status and pid (0 if unreadable) of a start-up report."""
+    """Returns the status and pid of a start-up message (pid 0 if unreadable).
+    """
     try:
         pid = int(message[1:] or 0)
     except ValueError:
@@ -60,7 +60,7 @@ def _parse_start_signal(message: bytes) -> Tuple[bytes, int]:
 
 def _run_initializer(ready_conn, initializer: Optional[Callable],
                      initargs: Tuple) -> None:
-    """Runs a worker's initializer and reports whether it started."""
+    """Runs the worker's initializer and tells the parent if it succeeded."""
     try:
         if initializer is not None:
             initializer(*initargs)
@@ -72,9 +72,12 @@ def _run_initializer(ready_conn, initializer: Optional[Callable],
 
 
 def _warn_if_sigterm_handled() -> None:
-    """Warm start tells a starting worker that the stdlib stopped (it exits
-    with -SIGTERM) from one that failed to start. A SIGTERM handler installed
-    during start-up, e.g. by a plugin, would blur that, so say so."""
+    """Warns if worker start-up installed a SIGTERM handler.
+
+    A worker stopped by the stdlib while starting exits with -SIGTERM, which is
+    how it is told apart from a worker that failed to start. A SIGTERM handler
+    installed during start-up (e.g. by a plugin) would change that exit code.
+    """
     if signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL:
         logger.warning(
             'An executor worker initializer installed a SIGTERM handler; '
@@ -95,8 +98,8 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
     2. Idle check: support check if there are any idle workers.
     3. Proactive shutdown: SIGTERM worker processes when the executor is
        shutting down instead of indefinitely waiting.
-    4. Warm start (opt-in): start every worker in the background, a few at a
-       time, instead of on the first submits that find no idle worker.
+    4. Warm start (opt-in): start all workers in the background at boot, a few
+       at a time, instead of only when a task finds no idle worker.
     """
 
     def __init__(self,
@@ -104,16 +107,17 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                  warm_start: bool = False,
                  name: str = 'guaranteed',
                  **kwargs):
-        # Labels this pool's metrics, e.g. the request schedule type.
+        # Pool name used as a metric label, e.g. the request schedule type.
         self.name = name
-        # Every worker reports on this pipe whether its initializer ran: warm
-        # start paces itself on it, and start-up failures are counted from it.
+        # Each worker reports on this pipe whether it started. Warm start uses
+        # it to know when a worker is ready, and start failures are counted
+        # from it.
         context = kwargs.get('mp_context') or multiprocessing.get_context()
         self._ready_reader: Any
         self._ready_reader, ready_writer = context.Pipe(duplex=False)
         self._ready_lock = threading.Lock()
         self._ready_count = 0
-        # Pids of the workers that reported they started.
+        # Pids of workers that reported they are ready.
         self._ready_pids: Set[int] = set()
         self.start_failures = 0
         kwargs['initargs'] = (ready_writer, kwargs.get('initializer'),
@@ -132,17 +136,17 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         self.running: atomic.AtomicInt = atomic.AtomicInt(0)
         self._warm_start_stop = threading.Event()
         self._warm_start_thread: Optional[threading.Thread] = None
-        # Set once warm start has started every worker and all are ready.
+        # Set when warm start has started all workers and all are ready.
         self._warm_start_done = threading.Event()
-        # Why the warm-start thread returned: done, stalled, stopped or broken.
+        # Why the warm-start thread exited: done, stalled, stopped or broken.
         self._warm_start_end: Optional[str] = None
-        # Workers started when warm start last looked; compared with the ready
-        # reports to tell whether a break happened while workers were starting.
+        # Number of workers started so far during warm start. Compared with the
+        # ready count to tell if the pool broke while workers were starting.
         self._warm_start_started = 0
         if warm_start:
-            # Starting workers from another thread is only safe without fork
-            # (cpython gh-90622). The stdlib flag for that exists on Python
-            # 3.11+, which also added _spawn_process.
+            # Starting workers from another thread is only safe when the pool
+            # does not fork (cpython gh-90622). The flag that tells us this and
+            # _spawn_process both exist only on Python 3.11+.
             if getattr(self, '_safe_to_dynamically_spawn_children', False):
                 self._warm_start_thread = threading.Thread(
                     target=self._warm_up, name='pool-warm-start', daemon=True)
@@ -153,15 +157,15 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                                'demand.')
 
     def _warm_up(self) -> None:
-        """Starts workers, at most _WARM_START_MAX_STARTING at a time, until
-        every worker is started and ready.
+        """Starts all workers, at most _WARM_START_MAX_STARTING at a time.
 
-        The lock is held only while starting each process, so workers that are
-        up take tasks while the rest start. Stops, leaving the rest to start on
-        demand, if no worker becomes ready for _WARM_START_STALL_SECONDS.
+        The pool lock is held only while starting each process, so ready
+        workers can run tasks while the others start. If no worker becomes
+        ready for _WARM_START_STALL_SECONDS, warm start gives up and the rest
+        start on demand.
         """
-        # ProcessPoolExecutor has no public way to add a worker without
-        # occupying the idle ones, so this uses its private state.
+        # ProcessPoolExecutor has no public API to add a worker, so this uses
+        # its private state.
         # pylint: disable=protected-access
         pool: Any = self
         progress_at = time.monotonic()
@@ -179,14 +183,14 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                 started = len(pool._processes)
                 self._warm_start_started = started
                 if started >= self.max_workers:
-                    # Every worker is started; done once all are ready too.
+                    # All workers are started; finish once all are ready.
                     if ready >= self.max_workers:
                         break
                 elif started - ready < _WARM_START_MAX_STARTING:
                     pool._start_executor_manager_thread()
                     pool._spawn_process()
                     self._warm_start_started = len(pool._processes)
-                    # Let the manager thread watch the new worker right away.
+                    # Wake the manager thread so it watches the new worker.
                     pool._executor_manager_thread_wakeup.wakeup()
                     continue
             if time.monotonic() - progress_at > _WARM_START_STALL_SECONDS:
@@ -200,13 +204,13 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                                                 if pool._broken else 'stopped')
                         return
                     self._warm_start_end = 'stalled'
-                    # Tasks submitted during warm start started no worker;
-                    # start workers for them now, up to the pool size.
+                    # Tasks submitted during warm start did not start any
+                    # workers, so start workers for them now.
                     missing = min(len(pool._pending_work_items),
                                   self.max_workers - len(pool._processes))
                     for _ in range(missing):
                         pool._spawn_process()
-                    # Let the manager thread watch the new workers.
+                    # Wake the manager thread so it watches the new workers.
                     pool._executor_manager_thread_wakeup.wakeup()
                 return
         if self._warm_start_stop.is_set():
@@ -218,13 +222,14 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         logger.info(f'Warm start: {self.max_workers} workers started.')
 
     def broke_during_warm_start(self) -> bool:
-        """Whether this broken pool broke because workers failed to start.
+        """Whether the pool broke because a worker failed to start.
 
-        True only while warm start was running and either a worker reported
-        that its start-up failed, no worker of the pool had become ready yet,
-        or a worker that never became ready exited on its own (killed, e.g.
-        out of memory, crashed or aborted). Otherwise a ready worker died,
-        possibly serving a task, and the break counts as a serving break.
+        Only true if warm start was running and one of these happened:
+        - a worker's initializer raised an error;
+        - no worker had become ready yet;
+        - a worker that was not ready yet exited on its own (e.g. it was
+          killed for using too much memory, or crashed).
+        Otherwise a ready worker died, and it counts as a crash while serving.
         """
         if self._warm_start_thread is None or self._warm_start_end not in (
                 None, 'broken'):
@@ -235,8 +240,8 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         return self._starting_worker_died()
 
     def wait_until_broken_handled(self, timeout: float) -> None:
-        """Waits for the stdlib to finish terminating and reaping the workers
-        of this broken pool, so their exit codes are final."""
+        """Waits until the stdlib has stopped all workers of this broken pool,
+        so their exit codes are known."""
         pool: Any = self
         manager = pool._executor_manager_thread  # pylint: disable=protected-access
         if manager is not None and manager is not threading.current_thread():
@@ -247,15 +252,16 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
                     f'exit within {timeout}s of being stopped.')
 
     def _starting_worker_died(self) -> bool:
-        """Whether a worker that never reported ready exited on its own.
+        """Whether a worker that was not ready yet exited on its own.
 
-        When a pool breaks, the stdlib stops the other workers with SIGTERM. A
-        worker only installs its own SIGTERM handler when it runs a request,
-        so a worker stopped while starting exits with -SIGTERM; any other exit
-        of a worker that never became ready is its own failure to start.
+        When a pool breaks, the stdlib stops the remaining workers with
+        SIGTERM. A worker that is still starting has no SIGTERM handler (it
+        installs one only when it runs a request), so it exits with -SIGTERM.
+        Any other exit code from a worker that was not ready means it failed
+        to start.
         """
-        # Exit codes are only final once the stdlib reaped the workers, and a
-        # worker that became ready may have reported it just before the break.
+        # Wait for the exit codes, and read any ready messages that workers
+        # sent just before the break.
         self.wait_until_broken_handled(_BROKEN_POOL_JOIN_SECONDS)
         self.drain_start_signals()
         processes = self._processes  # pylint: disable=protected-access
@@ -275,8 +281,10 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         return False
 
     def drain_start_signals(self) -> int:
-        """Reads the workers' start-up reports; counts failed starts in the
-        metrics. Returns how many workers newly reported they started."""
+        """Reads start-up messages from workers and counts failed starts.
+
+        Returns the number of workers that newly reported they are ready.
+        """
         started = failed = 0
         with self._ready_lock:
             try:
@@ -297,23 +305,21 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         return started
 
     def _warm_start_running(self) -> bool:
-        # _warm_start_end is set under the pool's lock when warm start stalls,
-        # so a submit after the stall fallback starts workers as usual.
+        # _warm_start_end is set (under the pool lock) when warm start gives
+        # up, so later submits start workers normally.
         return (self._warm_start_thread is not None and
                 self._warm_start_end is None and
                 self._warm_start_thread.is_alive())
 
     def _adjust_process_count(self) -> None:
-        """Called by submit, with the pool's lock held, to start a worker when
-        none is idle.
+        """Starts a worker for a new task if none is idle (called by submit).
 
-        While warm start runs, it alone starts workers, so the cap on workers
-        starting at once also holds for submits: a task takes an idle worker if
-        there is one, as the stdlib does, and otherwise waits in the queue for
-        the next worker to become ready. The one exception is a pool with no
-        worker yet: the task starts the first one, so it never waits on a pool
-        with nothing to run it (warm start counts that worker toward its cap).
-        Once warm start is done or has given up, workers start on demand as
+        While warm start is running, only warm start starts workers, so the
+        limit on workers starting at the same time also applies to tasks. A
+        task uses an idle worker if there is one, or waits for the next worker
+        to become ready. Exception: if the pool has no workers yet, the task
+        starts the first one, so it never waits on an empty pool.
+        After warm start finishes or gives up, workers start on demand as
         usual.
         """
         pool: Any = self
@@ -324,7 +330,7 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
             return
         super()._adjust_process_count()  # type: ignore[misc]
         if running:
-            # Count the first worker toward the pool's started workers.
+            # Count this first worker as started by warm start.
             self._warm_start_started = len(pool._processes)
 
     def submit(self, fn, /, *args, **kwargs) -> concurrent.futures.Future:
@@ -349,7 +355,8 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         # Here wait means wait for the proactive cancellation complete.
         # TODO(aylei): we may support wait=True in the future if needed.
         assert wait is True, 'wait=False is not supported'
-        # Stop warm start first, so no worker starts after the snapshot below.
+        # Stop warm start first, so no new worker starts after we list them
+        # below.
         self._warm_start_stop.set()
         if self._warm_start_thread is not None:
             self._warm_start_thread.join(_WARM_START_JOIN_SECONDS)
@@ -408,7 +415,7 @@ class DisposableExecutor:
                  initializer: Optional[Callable] = None,
                  initargs: Tuple = (),
                  name: str = 'burst'):
-        # Labels this executor's metrics, e.g. the request schedule type.
+        # Name used as a metric label, e.g. the request schedule type.
         self.name = name
         self.max_workers: Optional[int] = max_workers
         self.workers: Dict[int, multiprocessing.Process] = {}
@@ -424,8 +431,8 @@ class DisposableExecutor:
         """Monitor the worker process and cleanup when it's done."""
         try:
             process.join()
-            # Free the worker's slot before resolving the future, so a caller
-            # that submits again as soon as it has the result finds room.
+            # Free the worker's slot before setting the result, so a caller that
+            # submits again right after getting the result finds a free slot.
             self._remove_worker(process)
             self._count_start_failure(ready_reader)
             if not future.cancelled():
@@ -457,9 +464,9 @@ class DisposableExecutor:
                 self.workers.pop(process.pid, None)
 
     def _count_start_failure(self, ready_reader: Any) -> None:
-        """Counts an exited worker that never finished starting."""
+        """Counts a worker that exited before it finished starting."""
         if self._shutdown:
-            return  # Killed by shutdown, not a failure to start.
+            return  # Stopped by shutdown; not a start failure.
         try:
             message = ready_reader.recv_bytes() if ready_reader.poll() else None
         except (EOFError, OSError):
@@ -539,21 +546,22 @@ class BurstableExecutor:
                  warm_start: bool = False,
                  name: str = 'guaranteed',
                  **kwargs):
-        # Labels this executor's metrics, e.g. the request schedule type.
+        # Name used as a metric label, e.g. the request schedule type.
         self._name = name
         if garanteed_workers > 0:
             self._guaranteed_workers = garanteed_workers
             self._guaranteed_pool_kwargs = dict(kwargs, name=name)
             self._guaranteed_pool_lock = threading.Lock()
-            # Only the first guaranteed pool warm-starts. A pool rebuilt after
-            # a worker died starts its workers on demand, so a crash does not
-            # start every worker again while the broken pool's workers are
-            # still exiting; burst workers stay one-off.
+            # Only the first guaranteed pool uses warm start. A pool rebuilt
+            # after a worker died starts workers on demand, so a crash does not
+            # start all workers again while the old pool's workers are still
+            # exiting. Burst workers are always one-off.
             self._executor = PoolExecutor(max_workers=garanteed_workers,
                                           warm_start=warm_start,
                                           **self._guaranteed_pool_kwargs)
         if burst_workers > 0:
-            # Burst workers next to a guaranteed pool get their own label.
+            # Give burst workers their own label when there is a guaranteed
+            # pool too.
             burst_name = f'{name}-burst' if garanteed_workers > 0 else name
             self._burst_executor = DisposableExecutor(max_workers=burst_workers,
                                                       name=burst_name,
@@ -636,9 +644,9 @@ class BurstableExecutor:
         return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
 
     def _record_broken_pool(self, broken_pool: PoolExecutor) -> None:
-        """Counts a broken pool by whether it broke while warm start was
-        starting workers. Call with _guaranteed_pool_lock held."""
-        # A worker whose initializer raised reported it on the start-up pipe.
+        """Records a broken pool in the metrics, by whether it broke during
+        warm start. Call with _guaranteed_pool_lock held."""
+        # Read start-up errors that workers reported on the pipe.
         broken_pool.drain_start_signals()
         if not broken_pool.broke_during_warm_start():
             metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
@@ -647,7 +655,8 @@ class BurstableExecutor:
         metrics_utils.SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL.labels(
             pool=self._name, phase='warm_start').inc()
         if broken_pool.start_failures == 0:
-            # No start-up error was reported: a starting worker exited first.
+            # No start-up error was reported, so a worker exited while
+            # starting.
             _count_start_failure(self._name, 'died')
 
     def shutdown(self) -> None:

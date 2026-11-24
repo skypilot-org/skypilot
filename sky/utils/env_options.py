@@ -51,12 +51,12 @@ class Options(enum.Enum):
     # it the pools are sized against total memory and the permanent processes
     # can add up to more memory than the server has.
     MEMORY_AWARE_WORKER_SIZING = ('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', False)
-    # Start every guaranteed executor worker when the API server starts, a few
-    # at a time, instead of on the first requests that find no idle worker.
-    # The pod's process count is then fixed from startup rather than growing to
-    # a high-water mark, and with it the most DB connections the pod can open
-    # (each worker connects on its first request). Meant for deployed API
-    # servers, with memory-aware sizing so the full pool fits.
+    # Start all guaranteed executor workers when the API server starts, a few
+    # at a time, instead of only when a request finds no idle worker. The
+    # number of processes (and the most DB connections they can open) is then
+    # fixed from startup instead of growing with the busiest moment. Use on
+    # deployed API servers together with memory-aware sizing, so that the full
+    # pool fits in memory.
     EAGER_EXECUTOR_WORKERS = ('SKYPILOT_EAGER_EXECUTOR_WORKERS', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
