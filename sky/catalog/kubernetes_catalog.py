@@ -240,15 +240,30 @@ def _list_accelerators(
     # A multi-host TPU slice is one GKE node pool and is only usable whole:
     # its VMs count as free only when every VM of the pool is ready,
     # schedulable and idle.
+    # A pool also counts as busy when fewer of its VMs are visible than the
+    # slice has (a pool still scaling up, or allowed_nodes listing only some
+    # of its VMs).
     pool_key = kubernetes_utils.GKE_NODEPOOL_LABEL_KEY
     busy_slice_pools: Set[str] = set()
+    pool_vms: Dict[str, int] = collections.defaultdict(int)
+    pool_vms_needed: Dict[str, int] = {}
     for node in nodes:
         labels = node.metadata.labels or {}
-        if (kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in labels and
-                kubernetes_utils.is_multi_host_tpu(labels) and
-            (not node.is_ready() or node.is_cordoned() or _is_tainted(node) or
-             allocated_qty_by_node.get(node.metadata.name, 0) > 0)):
-            busy_slice_pools.add(labels.get(pool_key, ''))
+        if not (kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in labels and
+                kubernetes_utils.is_multi_host_tpu(labels)):
+            continue
+        pool = labels.get(pool_key, '')
+        pool_vms[pool] += 1
+        formatter = kubernetes_utils.GKELabelFormatter
+        pool_vms_needed[pool] = (
+            kubernetes_utils.reduce_tpu_topology(
+                labels[formatter.TPU_TOPOLOGY_LABEL_KEY]) //
+            max(1, int(labels[formatter.ACCELERATOR_COUNT_LABEL_KEY])))
+        if (not node.is_ready() or node.is_cordoned() or _is_tainted(node) or
+                allocated_qty_by_node.get(node.metadata.name, 0) > 0):
+            busy_slice_pools.add(pool)
+    busy_slice_pools.update(pool for pool, needed in pool_vms_needed.items()
+                            if pool_vms[pool] < needed)
 
     for node in nodes:
         # Check if node is ready

@@ -326,3 +326,14 @@ def test_show_gpus_slice_taint(tolerated, free):
     }]
     _, _, available = _show_gpus(nodes, quantity_filter=8)
     assert available['tpu7x'] == free
+
+
+def test_show_gpus_partial_slice_is_not_free():
+    """One visible VM of each of two 2-VM slices (allowed_nodes, or a pool
+    still scaling up) gives no free 8-chip slice."""
+    nodes = [
+        _tpu_node('a1', 'tpu7x', '2x2x2', pool='a'),
+        _tpu_node('b1', 'tpu7x', '2x2x2', pool='b')
+    ]
+    _, _, available = _show_gpus(nodes, quantity_filter=8)
+    assert available['tpu7x'] == 0
