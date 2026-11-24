@@ -119,6 +119,10 @@ def down(
         sky.exceptions.ClusterNotUpError: if the sky serve controller is not up.
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
+        sky.exceptions.PermissionDeniedError: if a named service was created
+          by another user; the caller's own named services are handed to the
+          controller first. A pattern from a non-admin skips other users'
+          services instead.
     """
     return impl.down(service_names, all, purge, pool=False)
 

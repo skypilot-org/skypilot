@@ -421,8 +421,8 @@ def _note_other_workspaces(noun: str,
 def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
                           workspace_id: Optional[str]) -> Optional[List[Any]]:
     """The services or pools `down` reaches, as the server picks them: -a and
-    patterns stay in the workspace, and -a takes only the caller's own unless
-    they are an admin. None when they cannot be listed or scoped."""
+    patterns stay in the workspace and take only the caller's own unless they
+    are an admin. None when they cannot be listed or scoped."""
     if workspace_id is None:
         return None
     try:
@@ -448,28 +448,42 @@ def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
         if '*' in name
     ]
 
-    def _selected(candidates: List[Any]) -> List[Any]:
+    def _matched(candidates: List[Any]) -> List[Any]:
         if apply_to_all:
-            if caller.get('role') == 'admin':
-                return candidates
-            return [r for r in candidates if r.get('user_hash') == caller['id']]
+            return candidates
         return [
             r for r in candidates if r['name'] not in exact_names and any(
                 p.fullmatch(r['name']) for p in patterns)
         ]
 
+    def _owned(r: Any) -> bool:
+        return caller.get('role') == 'admin' or r.get(
+            'user_hash') == caller['id']
+
+    def _selected(candidates: List[Any]) -> List[Any]:
+        return [r for r in _matched(candidates) if _owned(r)]
+
+    noun = 'pool' if is_pool else 'service'
     unknown = _selected([r for r in records if r.get('workspace') is None])
     if unknown:
-        noun = 'pool' if is_pool else 'service'
         click.echo(f'Skipping {noun}s whose workspace is unknown or not '
                    f'readable (name them to tear them down): '
                    f'{", ".join(r["name"] for r in unknown)}')
     _note_other_workspaces(
-        'pool' if is_pool else 'service',
-        _selected([r for r in records if r.get('workspace') is not None]),
+        noun, _selected([r for r in records if r.get('workspace') is not None]),
         workspace_id)
-    return [r for r in records if r['name'] in exact_names] + _selected(
-        _in_workspace(records, workspace_id))
+    matched = _matched(_in_workspace(records, workspace_id))
+    skipped = [r for r in matched if not _owned(r)]
+    if skipped:
+        unrecorded = sum(r.get('user_hash') is None for r in skipped)
+        extra = (f' ({unrecorded} with no recorded creator; an admin can tear '
+                 f'{"them" if unrecorded > 1 else "it"} down)'
+                 if unrecorded else '')
+        click.echo(f'Skipped {len(skipped)} {noun}'
+                   f'{"s" if len(skipped) > 1 else ""} not owned by you'
+                   f'{extra}.')
+    return [r for r in records if r['name'] in exact_names
+           ] + [r for r in matched if _owned(r)]
 
 
 def _down_names(targets: List[Any], names: List[str]) -> List[str]:

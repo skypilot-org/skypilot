@@ -1100,7 +1100,14 @@ def pool_down(
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
 ) -> server_common.RequestId[None]:
-    """Delete a pool."""
+    """Delete a pool.
+
+    Request Raises:
+        sky.exceptions.PermissionDeniedError: if a named pool was created by
+          another user; the caller's own named pools are handed to the
+          controller first. A pattern from a non-admin skips other users'
+          pools instead.
+    """
     return impl.down(pool_names, all, purge, pool=True)
 
 

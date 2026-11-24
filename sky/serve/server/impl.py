@@ -79,7 +79,8 @@ def _names_str(service_records: List[Dict[str, Any]]) -> str:
 
 
 def _check_service_ownership(service_records: List[Dict[str, Any]],
-                             pool: bool) -> None:
+                             pool: bool,
+                             terminated: Optional[List[str]] = None) -> None:
     """Refuses to act on a service the current user did not create.
 
     The services table records the creator of each service. The check
@@ -89,6 +90,11 @@ def _check_service_ownership(service_records: List[Dict[str, Any]],
     did not record one, or came from a controller that does not report
     it, so only an admin can act on it; the error says so, since to its
     creator it would otherwise read as someone else's.
+
+    Args:
+        terminated: Names already handed to the controller in the same
+            request, named in the error so a caller can tell a partial
+            refusal from a total one.
 
     Raises:
         exceptions.PermissionDeniedError: If the caller is not an admin and
@@ -114,8 +120,14 @@ def _check_service_ownership(service_records: List[Dict[str, Any]],
             f'{_names_str(unrecorded)} with no recorded creator (created by '
             'an older version, or reported by a controller that predates '
             'creator records)')
+    # The controller may still skip one (e.g. failed without --purge); its
+    # output, logged before this, says so.
+    done = (f'Asked the controller to terminate '
+            f'{", ".join(repr(n) for n in terminated)} (see its output '
+            'above); ' if terminated else '')
     raise exceptions.PermissionDeniedError(
-        f'User {user.name} ({user.id}) cannot manage {" and ".join(reasons)}. '
+        f'{done}User {user.name} ({user.id}) cannot manage '
+        f'{" and ".join(reasons)}. '
         f'Only the creator of a {noun} or an admin can manage it; a {noun} '
         'with no recorded creator needs an admin.')
 
@@ -428,6 +440,24 @@ def _own_service_records(
         record for record in service_records
         if record.get('user_hash') == user_id
     ]
+
+
+def _own_or_skip(service_records: List[Dict[str, Any]],
+                 noun: str) -> List[Dict[str, Any]]:
+    """The caller's own records, as `--all` and patterns take them; logs how
+    many others it left out."""
+    targets = _own_service_records(service_records)
+    skipped = len(service_records) - len(targets)
+    if skipped:
+        # Only a non-admin skips, and then every record without a creator.
+        unrecorded = sum(
+            record.get('user_hash') is None for record in service_records)
+        extra = (f' ({unrecorded} with no recorded creator; an admin can tear '
+                 f'{"them" if unrecorded > 1 else "it"} down)'
+                 if unrecorded else '')
+        logger.info(f'Skipped {skipped} {noun}{"s" if skipped > 1 else ""} '
+                    f'not owned by you{extra}.')
+    return targets
 
 
 def _in_workspace(record: Dict[str, Any], workspace_id: str) -> bool:
@@ -1269,6 +1299,8 @@ def down(
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
 
+    # Exact names the caller may not manage: refused after their own go down.
+    denied: List[Dict[str, Any]] = []
     try:
         # Resolve the request to concrete records first, so each can be
         # checked against its creator. Every record is fetched: an older
@@ -1307,23 +1339,35 @@ def down(
 
             if all:
                 # `down --all` from a non-admin means all of the caller's own.
-                in_workspace = [
-                    record for record in service_records if _reached(record)
-                ]
-                targets = _own_service_records(in_workspace)
-                skipped = len(in_workspace) - len(targets)
-                if skipped:
-                    logger.info(
-                        f'Skipped {skipped} {noun}{"s" if skipped > 1 else ""} '
-                        'not owned by you.')
+                targets = _own_or_skip(
+                    [record for record in service_records if _reached(record)],
+                    noun)
             else:
-                targets = [
-                    record for record in service_records if any(
-                        _matches_service_pattern(record['name'], pattern) and
-                        ('*' not in pattern or _reached(record))
-                        for pattern in service_names)
+                # A pattern, like `--all`, takes only the caller's own; an
+                # exact name is refused if it is someone else's, even when a
+                # pattern matches it too.
+                exact = [
+                    record for record in service_records
+                    if record['name'] in service_names
                 ]
-                _check_service_ownership(targets, pool)
+                own_names = {
+                    record['name'] for record in _own_service_records(exact)
+                }
+                denied = [
+                    record for record in exact
+                    if record['name'] not in own_names
+                ]
+                targets = [
+                    record for record in exact if record['name'] in own_names
+                ] + _own_or_skip([
+                    record for record in service_records
+                    if record['name'] not in service_names and _reached(record)
+                    and any('*' in pattern and
+                            _matches_service_pattern(record['name'], pattern)
+                            for pattern in service_names)
+                ], noun)
+                if denied and not targets:
+                    _check_service_ownership(denied, pool)
                 unknown = [
                     name for name in unknown
                     if name not in service_names and any(
@@ -1381,6 +1425,8 @@ def down(
         raise RuntimeError('gRPC timed out') from e
 
     logger.info(stdout)
+    if denied:
+        _check_service_ownership(denied, pool, terminated=service_names)
 
 
 class _DefaultServiceStatusRunner:

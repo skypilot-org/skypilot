@@ -466,6 +466,53 @@ class TestServeAndPoolDown:
                                          all=False,
                                          purge=False)
 
+    def test_user_down_all_says_what_it_skipped(self, services, monkeypatch):
+        self._role(monkeypatch, 'user')
+        result = cli_testing.CliRunner().invoke(command.serve_down, ['-a'],
+                                                input='\n')
+        assert not result.exception, result.output
+        assert 'Skipped 1 service not owned by you.' in result.output
+
+    def test_user_pattern_lists_own_only(self, services, monkeypatch):
+        self._role(monkeypatch, 'user')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get',
+            mock.MagicMock(return_value=[
+                _record('p-own', 'alice'),
+                _record('p-bobs', 'bob'),
+                dict(_record('p-old', 'nobody'), user_hash=None),
+            ]))
+        result = cli_testing.CliRunner().invoke(command.serve_down, ['p-*'],
+                                                input='\n')
+        assert not result.exception, result.output
+        assert ('Skipped 2 services not owned by you (1 with no recorded '
+                'creator; an admin can tear it down).' in result.output)
+        assert 'Terminating 1 service: p-own. Proceed? [Y/n]' in result.output
+        services.assert_called_once_with(service_names=['p-own'],
+                                         all=False,
+                                         purge=False)
+
+    def test_admin_pattern_still_lists_others(self, services, monkeypatch):
+        self._role(monkeypatch, 'admin')
+        result = cli_testing.CliRunner().invoke(command.serve_down, ['*'],
+                                                input='\n')
+        assert 'Aborted' in result.output, result.output
+        assert 'other users (1): bob: bobs' in result.output
+        assert 'not owned by you' not in result.output
+        services.assert_not_called()
+
+    def test_user_exact_other_name_is_still_sent(self, services, monkeypatch):
+        """The server refuses it by name; the preview does not drop it."""
+        self._role(monkeypatch, 'user')
+        result = cli_testing.CliRunner().invoke(command.serve_down,
+                                                ['bobs', 'own*'],
+                                                input='y\n')
+        assert not result.exception, result.output
+        assert 'other users (1): bob: bobs' in result.output
+        services.assert_called_once_with(service_names=['bobs', 'own'],
+                                         all=False,
+                                         purge=False)
+
     def test_pattern_stays_in_the_workspace_exact_name_does_not(
             self, services, monkeypatch):
         self._role(monkeypatch, 'user')
@@ -625,3 +672,13 @@ class TestServeAndPoolDown:
         assert 'Would you like to cancel' not in result.output
         cancel.assert_not_called()
         pool_down.assert_not_called()
+
+    def test_pool_pattern_cancels_only_own_pools_jobs(self, services,
+                                                      monkeypatch):
+        cancel, pool_down = self._pools(monkeypatch, 'user')
+        result = cli_testing.CliRunner().invoke(command.jobs_pool_down,
+                                                ['*', '-y'])
+        assert not result.exception, result.output
+        assert 'Skipped 1 pool not owned by you.' in result.output
+        assert cancel.call_args.kwargs['job_ids'] == [1]
+        pool_down.assert_called_once_with(['own'], all=False, purge=False)
