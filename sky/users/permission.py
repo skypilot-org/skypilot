@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import functools
 import hashlib
+import inspect
 import logging
 import os
 import queue
@@ -12,8 +14,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (ContextManager, Dict, Generator, Iterable, List, Optional,
-                    Set, Tuple)
+from typing import (Any, Callable, ContextManager, Dict, Generator, Iterable,
+                    List, Mapping, Optional, Set, Tuple, TypeVar, Union)
 
 from sky.adaptors import common as adaptors_common
 from sky.utils.db import sqlalchemy_deps
@@ -34,11 +36,13 @@ else:
         'sqlalchemy_adapter', import_error_message=_SA_MSG)
 
 # pylint: disable=wrong-import-position,ungrouped-imports
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
+from sky.users import authz
 from sky.users import rbac
 from sky.utils import common
 from sky.utils import common_utils
@@ -590,9 +594,39 @@ class PermissionService:
                                      for rule in rbac.get_read_only_endpoints(
                                          plugin_allowlist=plugin_viewer_allow)]
         self._read_only_endpoint_cache = {}
+        self._register_plugin_permissions()
         logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
                      f'entries, read-only endpoints '
                      f'{len(self._read_only_endpoints)}')
+
+    @staticmethod
+    def _register_plugin_permissions() -> None:
+        """Add the permissions plugins declare to this process's registry.
+
+        Like the viewer allowlist, per-process state that every process
+        handling requests must build: uvicorn workers re-import the plugins
+        module and start with nothing collected.
+        """
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky.server import plugins as server_plugins
+            declared = (server_plugins.get_plugin_permissions() or
+                        server_plugins.load_plugin_permissions())
+        except ImportError:
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get plugin permissions: {e}')
+            return
+        for perm in declared:
+            try:
+                authz.registry.register(perm)
+            except ValueError as e:
+                logger.warning(f'Skipping plugin permission: {e}')
+        try:
+            for problem in authz.validate_config(skypilot_config.to_dict()):
+                logger.warning(f'RBAC config: {problem}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to check the RBAC config: {e}')
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled.
@@ -1290,6 +1324,10 @@ class PermissionService:
             # authorize its own calls whatever the policy holds. Evaluated
             # against the *role* rather than the id: casbin's `g` is reflexive,
             # and this way an operator's blocklist for that role still applies.
+            endpoint_permissions = authz.registry.for_endpoint(path, method)
+            if endpoint_permissions:
+                return not self._holds_all(user_id, [system_role],
+                                           endpoint_permissions)
             if system_role == rbac.RoleName.VIEWER.value:
                 return not self._is_viewer_allowed(path, method)
             return enforcer.enforce(system_role, path, method)
@@ -1325,6 +1363,19 @@ class PermissionService:
         # repair for each of them after every restart, which could fire the
         # in-flight cap warning on ordinary warm-up.
         self.remember_role_seen(user_id)
+        # An endpoint that performs a declared permission is decided by that
+        # permission alone, whatever the built-in role would say: a custom
+        # role is how a non-admin is let through, and the built-in role must
+        # not let anyone else through. The scope is not known here (the body
+        # is not parsed), so holding the permission anywhere is enough to pass;
+        # the operation itself checks the exact scope (`requires`). Only these
+        # endpoints pay for it: bindings are read from config, and the user
+        # table only when a binding names users by name. The config here is
+        # this worker's, which may lag a change until it reloads; the
+        # operation's own check reads the config of the request.
+        endpoint_permissions = authz.registry.for_endpoint(path, method)
+        if endpoint_permissions:
+            return not self._holds_all(user_id, roles, endpoint_permissions)
         # Admin wins over viewer when a user holds both — viewer's
         # default-deny semantics shouldn't restrict an admin.
         if (rbac.RoleName.VIEWER.value in roles and
@@ -1334,6 +1385,60 @@ class PermissionService:
         # whose row never landed matches nothing -- which under blocklist
         # semantics is "allowed", the same answer its admin role gives.
         return enforcer.enforce(user_id, path, method)
+
+    def has_permission(self,
+                       user_id: str,
+                       perm: Union[str, authz.Permission],
+                       scope: Optional[authz.Scope] = None) -> bool:
+        """Whether the user holds `perm` on `scope`.
+
+        Admin holds every permission; anyone else through a custom-role
+        binding. `scope=None` asks whether the user holds it in any scope.
+        Unknown permissions and principals without a recognized role are
+        denied. Built-in roles come from the current policy (`get_user_roles`
+        reloads it when another process changed it); custom roles and bindings
+        from this process's config, which the request executor reloads for
+        every request.
+        """
+        if isinstance(perm, str):
+            found = authz.registry.get(perm)
+            if found is None:
+                logger.warning(f'Permission check for unknown permission '
+                               f'{perm!r}; denying.')
+                return False
+            perm = found
+        system_role = _system_role(user_id)
+        roles = ([system_role]
+                 if system_role is not None else self.get_user_roles(user_id))
+        return self._holds(user_id, roles, perm, scope)
+
+    @classmethod
+    def _holds_all(cls, user_id: str, roles: List[str],
+                   perms: List[authz.Permission]) -> bool:
+        """For the middleware: whether the user holds every one of `perms` in
+        some scope. A malformed binding denies rather than failing the
+        request; a database error propagates, as it does from the rest of the
+        middleware's checks."""
+        try:
+            return all(
+                cls._holds(user_id, roles, perm, scope=None) for perm in perms)
+        except sqlalchemy.exc.SQLAlchemyError:
+            # A database failure is handled like one anywhere else in the
+            # middleware, not reported as a denial the caller cannot retry.
+            raise
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Permission check for {user_id} failed; denying: '
+                         f'{common_utils.format_exception(e)}')
+            return False
+
+    @staticmethod
+    def _holds(user_id: str, roles: List[str], perm: authz.Permission,
+               scope: Optional[authz.Scope]) -> bool:
+        if not _recognized_roles(roles):
+            return False
+        if rbac.RoleName.ADMIN.value in roles:
+            return True
+        return authz.holds(user_id, perm, scope, _username_matcher(user_id))
 
     def _is_viewer_allowed(self, path: str, method: str) -> bool:
         """Test (path, method) against the viewer allowlist."""
@@ -2023,13 +2128,120 @@ def caller_is_admin() -> bool:
     have them too, so they must keep reaching these checks via the main
     server, never in-process.
     """
+    if _authorized_upstream():
+        return True
+    return is_admin(common_utils.get_current_user().id)
+
+
+def _authorized_upstream() -> bool:
+    """Whether the main API server already authorized the current request.
+
+    True off the API server: there the request was authorized on the server
+    already. Also true on a jobs or serve controller's own API server, which
+    inherits one of the controller variables below from the process that
+    started it (the main API server never has them, and a client cannot send
+    them): the job was checked when it was submitted.
+    """
     if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         return True
     # Presence, not value: a jobs controller sets the serve one to 'false'.
-    if (os.getenv(constants.OVERRIDE_CONSOLIDATION_MODE) is not None or
-            os.getenv(constants.IS_SKYPILOT_SERVE_CONTROLLER) is not None):
-        return True
-    return is_admin(common_utils.get_current_user().id)
+    return (os.getenv(constants.OVERRIDE_CONSOLIDATION_MODE) is not None or
+            os.getenv(constants.IS_SKYPILOT_SERVE_CONTROLLER) is not None)
+
+
+def _username_matcher(user_id: str) -> Callable[[str], bool]:
+    """Decides whether a username entry in a role binding means this user.
+
+    Only for people: a service account's name is chosen by whoever creates it,
+    so matching it would let anyone take a grant meant for a person who has
+    not logged in yet. A name must also belong to exactly one person (two
+    accounts sharing a name must not share a grant), and must not be another
+    user's id. Service accounts are bound by id. Looks the user up at most
+    once, and only when a binding lists something other than their id.
+    """
+    user: List[Optional[models.User]] = []
+
+    def matches(entry: str) -> bool:
+        if not user:
+            user.append(global_user_state.get_user(user_id))
+        record = user[0]
+        if (record is None or not record.name or entry != record.name or
+                not _matchable_by_name(record)):
+            return False
+        if global_user_state.get_user(entry) is not None:
+            return False
+        people = [
+            u for u in global_user_state.get_user_by_name(entry)
+            if _matchable_by_name(u)
+        ]
+        return [u.id for u in people] == [user_id]
+
+    return matches
+
+
+def _matchable_by_name(user: models.User) -> bool:
+    """Whether a role binding may name `user` by name: people only.
+
+    Service accounts are recognized by id as well as type, since older rows
+    may carry no type.
+    """
+    return (user.user_type
+            not in (models.UserType.SA.value, models.UserType.SYSTEM.value) and
+            not user.is_service_account() and
+            user.id not in _system_user_roles())
+
+
+_F = TypeVar('_F', bound=Callable[..., Any])
+
+
+def requires(
+    perm: authz.Permission,
+    scope: Optional[Callable[[Mapping[str, Any]], authz.Scope]] = None,
+) -> Callable[[_F], _F]:
+    """Check `perm` for the current user before running the function.
+
+    The authoritative check for an operation: put it on the function that
+    performs it, so every way in (a route, the executor, another module) is
+    covered, not only the endpoints the RBAC middleware knows.
+
+    Args:
+        perm: The permission the operation needs. Registered on decoration.
+        scope: Given the call's arguments by name, returns the scope the call
+            acts on. Required unless `perm` is global.
+
+    Raises:
+        PermissionDeniedError: from the decorated function, when the current
+            user does not hold `perm` on that scope.
+    """
+    if scope is None and perm.scope_kind != authz.ScopeKind.GLOBAL:
+        raise ValueError(f'Permission {perm.name!r} is scoped by '
+                         f'{perm.scope_kind.value}; pass `scope`.')
+    authz.registry.register(perm)
+
+    def decorator(fn: _F) -> _F:
+        signature = inspect.signature(fn)
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not _authorized_upstream():
+                if scope is None:
+                    target = authz.GLOBAL_SCOPE
+                else:
+                    bound = signature.bind(*args, **kwargs)
+                    bound.apply_defaults()
+                    target = scope(bound.arguments)
+                user = common_utils.get_current_user()
+                if not permission_service.has_permission(user.id, perm, target):
+                    where = (f' on {target.kind.value} {target.name!r}'
+                             if target.name is not None else '')
+                    raise exceptions.PermissionDeniedError(
+                        f'User {user.name or user.id!r} does not have '
+                        f'permission {perm.name!r}{where}.')
+            return fn(*args, **kwargs)
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorator
 
 
 def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:

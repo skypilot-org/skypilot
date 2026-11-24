@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from sky import sky_logging
 from sky.skylet import constants as skylet_constants
+from sky.users import authz
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import yaml_utils
@@ -322,6 +323,32 @@ class BasePlugin(abc.ABC):
                     RBACRule(path='/plugins/api/foo/status',
                              method='POST'),
                 ]
+        """
+        return []
+
+    @property
+    def permissions(self) -> List[authz.Permission]:
+        """Fine-grained permissions for this plugin's operations.
+
+        Each permission names one operation, the kind of scope a grant is
+        limited to, and the endpoints that perform it. Admins compose them
+        into custom roles (`rbac.custom_roles`) and grant those roles to users
+        (`rbac.role_bindings`).
+
+        The RBAC middleware decides a declared endpoint by its permission
+        alone: admins and holders of the permission (in any scope) pass,
+        everyone else is denied, whatever `rbac_rules` or `viewer_allowlist`
+        say. Also put `sky.users.permission.requires` on the function that
+        performs the operation: it checks the exact scope the call acts on.
+
+        Example:
+            NODE_CORDON = authz.Permission(
+                'node.cordon', authz.ScopeKind.CONTEXT, 'Cordon a node.',
+                endpoints=(('/plugins/api/nodes/cordon', 'POST'),))
+
+            @property
+            def permissions(self):
+                return [NODE_CORDON]
         """
         return []
 
@@ -735,6 +762,53 @@ def load_plugin_viewer_allowlist() -> List[Dict[str, str]]:
 def get_plugin_viewer_allowlist() -> List[Dict[str, str]]:
     """Return the cached viewer-allowlist entries collected from plugins."""
     return _PLUGIN_VIEWER_ALLOWLIST
+
+
+_PLUGIN_PERMISSIONS: List[authz.Permission] = []
+
+
+def load_plugin_permissions() -> List[authz.Permission]:
+    """Collect the permissions plugins declare, without calling install().
+
+    Mirrors `load_plugin_viewer_allowlist`: instantiates each configured plugin
+    that loads in an API-server context and reads its `permissions` property.
+    Side-effect-free and idempotent.
+    """
+    global _PLUGIN_PERMISSIONS
+
+    config = _load_plugin_config()
+    if not config:
+        return []
+
+    declared: List[authz.Permission] = []
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+            for perm in plugin.permissions:
+                declared.append(perm)
+                logger.debug(f'Collected permission {perm.name!r} from '
+                             f'{class_path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load permissions from {class_path}: '
+                           f'{e}')
+
+    _PLUGIN_PERMISSIONS = declared
+    return declared
+
+
+def get_plugin_permissions() -> List[authz.Permission]:
+    """Return the cached permissions collected from plugins."""
+    return _PLUGIN_PERMISSIONS
 
 
 def get_extension_context() -> Optional[ExtensionContext]:

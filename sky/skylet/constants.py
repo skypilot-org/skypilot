@@ -737,6 +737,11 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     # module or URL, so a client must not be able to replace the server's one.
     (
         'admin_policy',),
+    # Roles, role bindings and the other RBAC settings decide what a request
+    # may do, and are checked inside the request; a client must not bring its
+    # own.
+    (
+        'rbac',),
     ('db',),
     ('daemons',),
     ('metrics',),

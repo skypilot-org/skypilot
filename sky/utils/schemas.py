@@ -2825,6 +2825,56 @@ def get_config_schema():
                     },
                 },
             },
+            # Admin-defined roles: name -> fine-grained permissions (see
+            # sky/users/authz.py). Permission names are checked against the
+            # registry at server start, not here.
+            'custom_roles': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['permissions'],
+                    'properties': {
+                        'description': {
+                            'type': 'string',
+                        },
+                        'permissions': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                                'pattern': r'^[a-z0-9_-]+\.[a-z0-9_.-]+$',
+                            },
+                        },
+                    },
+                },
+            },
+            # Grants of custom roles. A scoped permission is granted only
+            # within the scopes listed for its kind (e.g. `contexts`).
+            'role_bindings': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['role', 'users'],
+                    'properties': {
+                        'role': {
+                            'type': 'string',
+                        },
+                        'users': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'contexts': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                    },
+                },
+            },
         },
     }
 
