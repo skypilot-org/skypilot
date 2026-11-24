@@ -238,13 +238,14 @@ def test_slice_rule_skips_native_gcp_tpu_vms():
     assert kubernetes_utils.tpu_slice_fit_error(task, 1, gcp_cluster, 2) is None
 
 
-def _tpu_node(name, accelerator, topology, chips='4'):
+def _tpu_node(name, accelerator, topology, chips='4', pool='pool'):
     node = mock.MagicMock()
     node.metadata.name = name
     node.metadata.labels = {
         _FMT.TPU_LABEL_KEY: accelerator,
         _FMT.TPU_TOPOLOGY_LABEL_KEY: topology,
         _FMT.ACCELERATOR_COUNT_LABEL_KEY: chips,
+        'cloud.google.com/gke-nodepool': pool,
     }
     node.status.allocatable = {'google.com/tpu': chips}
     node.status.capacity = {'google.com/tpu': chips}
@@ -278,9 +279,24 @@ def test_show_gpus_slice_filter_counts_whole_slice_vms():
     _, capacity, available = _show_gpus(nodes, quantity_filter=8)
     assert capacity['tpu7x'] == 8
     assert available['tpu7x'] == 8
-    # A VM with chips in use does not count as free.
+    # A busy VM makes its whole slice unavailable.
     _, _, available = _show_gpus(nodes, quantity_filter=8, allocated={'s1': 4})
-    assert available['tpu7x'] == 4
+    assert available['tpu7x'] == 0
+
+
+def test_show_gpus_slice_filter_matches_slice_size_exactly():
+    """An 8-chip request can only use an 8-chip slice."""
+    nodes = [
+        _tpu_node('a1', 'tpu7x', '2x2x2', pool='a'),
+        _tpu_node('a2', 'tpu7x', '2x2x2', pool='a')
+    ]
+    nodes += [_tpu_node(f'b{i}', 'tpu7x', '2x2x4', pool='b') for i in range(4)]
+    _, capacity, available = _show_gpus(nodes, quantity_filter=8)
+    assert (capacity['tpu7x'], available['tpu7x']) == (8, 8)
+    _, capacity, available = _show_gpus(nodes, quantity_filter=16)
+    assert (capacity['tpu7x'], available['tpu7x']) == (16, 16)
+    _, capacity, available = _show_gpus(nodes)
+    assert (capacity['tpu7x'], available['tpu7x']) == (24, 24)
 
 
 def test_show_gpus_skips_slices_skypilot_cannot_launch():

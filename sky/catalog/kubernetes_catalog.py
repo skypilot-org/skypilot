@@ -26,6 +26,9 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# GKE node label naming the node pool; one multi-host TPU slice is one pool.
+_GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
+
 _PULL_FREQUENCY_HOURS = 7
 
 # We keep pull_frequency_hours so we can remotely update the default image paths
@@ -224,6 +227,17 @@ def _list_accelerators(
     configured_tolerations = kubernetes_utils.get_configured_tolerations(
         context)
 
+    # A multi-host TPU slice is one GKE node pool and is only usable whole:
+    # its VMs count as free only when every VM of the pool is ready and idle.
+    busy_slice_pools: Set[str] = set()
+    for node in nodes:
+        labels = node.metadata.labels or {}
+        if (kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in labels and
+                kubernetes_utils.is_multi_host_tpu(labels) and
+            (not node.is_ready() or node.is_cordoned() or
+             allocated_qty_by_node.get(node.metadata.name, 0) > 0)):
+            busy_slice_pools.add(labels.get(_GKE_NODEPOOL_LABEL, ''))
+
     for node in nodes:
         # Check if node is ready
         node_is_ready = node.is_ready()
@@ -315,9 +329,9 @@ def _list_accelerators(
                                 (accelerator_name, accelerator_capacity))
 
                 if multi_host_slice_chips is not None:
-                    # Each VM adds its own chips, counted when the whole
-                    # slice satisfies the quantity filter.
-                    if multi_host_slice_chips >= min_quantity_filter:
+                    # Each VM adds its own chips. A slice only serves a request
+                    # for exactly its size, so a quantity filter must match it.
+                    if quantity_filter in (None, multi_host_slice_chips):
                         total_accelerators_capacity[accelerator_name] = (
                             total_accelerators_capacity.get(
                                 accelerator_name, 0) + accelerator_capacity)
@@ -352,9 +366,11 @@ def _list_accelerators(
                 accelerators_available = accelerator_count - allocated_qty
 
                 if multi_host_slice_chips is not None:
-                    # A slice VM is only usable whole: its chips count as free
-                    # when none are allocated.
-                    if (multi_host_slice_chips >= min_quantity_filter and
+                    # A slice VM's chips count as free only when its whole
+                    # slice (node pool) is ready and idle.
+                    pool = node.metadata.labels.get(_GKE_NODEPOOL_LABEL, '')
+                    if (quantity_filter in (None, multi_host_slice_chips) and
+                            pool not in busy_slice_pools and
                             accelerators_available == accelerator_count and
                             accelerator_count > 0):
                         total_accelerators_available[accelerator_name] = (
