@@ -251,13 +251,14 @@ def _list_accelerators(
 
                 # One VM of a multi-host TPU slice is requested as the whole
                 # slice, so its requestable quantity is the slice's chips.
-                multi_host_slice_chips = None
-                if kubernetes_utils.is_multi_host_tpu(node.metadata.labels):
-                    topology_key = (kubernetes_utils.GKELabelFormatter.
-                                    TPU_TOPOLOGY_LABEL_KEY)
-                    multi_host_slice_chips = (
-                        kubernetes_utils.reduce_tpu_topology(
-                            node.metadata.labels[topology_key]))
+                # Slices of a shape SkyPilot cannot launch are skipped.
+                multi_host_slice_chips = (
+                    kubernetes_utils.launchable_tpu_slice_chips(
+                        accelerator_name, node.metadata.labels))
+                if (multi_host_slice_chips is None and
+                        kubernetes_utils.is_multi_host_tpu(
+                            node.metadata.labels)):
+                    continue
 
                 # Check if name_filter regex matches the accelerator_name
                 regex_flags = 0 if case_sensitive else re.IGNORECASE
@@ -313,7 +314,14 @@ def _list_accelerators(
                             accelerators_qtys.add(
                                 (accelerator_name, accelerator_capacity))
 
-                if accelerator_capacity >= min_quantity_filter:
+                if multi_host_slice_chips is not None:
+                    # Each VM adds its own chips, counted when the whole
+                    # slice satisfies the quantity filter.
+                    if multi_host_slice_chips >= min_quantity_filter:
+                        total_accelerators_capacity[accelerator_name] = (
+                            total_accelerators_capacity.get(
+                                accelerator_name, 0) + accelerator_capacity)
+                elif accelerator_capacity >= min_quantity_filter:
                     quantized_count = (
                         min_quantity_filter *
                         (accelerator_capacity // min_quantity_filter))
@@ -343,7 +351,16 @@ def _list_accelerators(
                 allocated_qty = allocated_qty_by_node[node.metadata.name]
                 accelerators_available = accelerator_count - allocated_qty
 
-                if accelerators_available >= min_quantity_filter:
+                if multi_host_slice_chips is not None:
+                    # A slice VM is only usable whole: its chips count as free
+                    # when none are allocated.
+                    if (multi_host_slice_chips >= min_quantity_filter and
+                            accelerators_available == accelerator_count and
+                            accelerator_count > 0):
+                        total_accelerators_available[accelerator_name] = (
+                            total_accelerators_available.get(
+                                accelerator_name, 0) + accelerator_count)
+                elif accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
                     if quantized_availability > 0:

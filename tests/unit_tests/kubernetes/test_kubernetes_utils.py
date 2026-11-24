@@ -321,11 +321,10 @@ def test_get_kubernetes_node_info():
                    return_value=(collections.defaultdict(int, {mock_gpu_node_1.metadata.name: 2}), {})):
         node_info = utils.get_kubernetes_node_info()
         assert isinstance(node_info, models.KubernetesNodesInfo)
-        # A VM of a multi-host TPU slice is listed with its own chips.
-        assert len(node_info.node_info_dict) == 2
-        assert node_info.node_info_dict['node-3'].total[
-            'accelerator_count'] == 4
-        assert node_info.hint == ''
+        # A VM of a multi-host TPU slice is not listed per node.
+        assert len(node_info.node_info_dict) == 1
+        assert 'node-3' not in node_info.node_info_dict
+        assert 'multi-host TPU slices are not listed' in node_info.hint
 
     # Test case 4: Empty cluster
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',

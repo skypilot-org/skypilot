@@ -529,6 +529,10 @@ def tpu_slice_fit_error(resources: 'resources_lib.Resources',
     slices. Tasks that request no TPU, and clusters without a multi-host
     slice, are not restricted here.
     """
+    # Only GKE slices on Kubernetes; native GCP TPU VM pods keep their own
+    # node rules.
+    if not isinstance(launched_resources.cloud, clouds.Kubernetes):
+        return None
     launched_shape = _tpu_request_shape(launched_resources)
     requested_shape = _tpu_request_shape(resources)
     if requested_shape is None:
@@ -550,6 +554,25 @@ def tpu_slice_fit_error(resources: 'resources_lib.Resources',
                 f'cluster has {launched_task_nodes}; a multi-host TPU task '
                 'must use every slice of the cluster')
     return None
+
+
+def launchable_tpu_slice_chips(accelerator: str,
+                               node_labels: Dict[str, str]) -> Optional[int]:
+    """Chips in the multi-host TPU slice a node belongs to, or None.
+
+    None for a node that is not a VM of a multi-host slice, and for a slice
+    whose shape SkyPilot cannot launch (topology or chips per VM not in
+    GKE_TPU_MULTI_HOST_TOPOLOGIES).
+    """
+    if not is_multi_host_tpu(node_labels):
+        return None
+    topology = node_labels[GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY]
+    chips = reduce_tpu_topology(topology)
+    shape = get_tpu_multi_host_shape(accelerator, chips, True)
+    if (shape is None or shape.topology != topology or shape.chips_per_vm !=
+            int(node_labels[GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY])):
+        return None
+    return chips
 
 
 def _tpu_request_shape(
@@ -5645,6 +5668,7 @@ def _get_kubernetes_node_info(
                 raise
 
     node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
+    has_multi_host_tpu = False
 
     for node in nodes:
         accelerator_name = None
@@ -5761,6 +5785,13 @@ def _get_kubernetes_node_info(
             accelerators_available = max(
                 0, accelerator_allocatable - allocated_qty)
 
+        # A VM of a multi-host TPU slice cannot serve a request for its own
+        # chips (the slice is requested whole), so it is not listed as a
+        # node with requestable accelerators.
+        if is_multi_host_tpu(node.metadata.labels):
+            has_multi_host_tpu = True
+            continue
+
         node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
@@ -5778,9 +5809,14 @@ def _get_kubernetes_node_info(
             is_cordoned=node.is_cordoned(),
             taints=node_taints,
         )
+    hint = ''
+    if has_multi_host_tpu:
+        hint = ('(Note: VMs of multi-host TPU slices are not listed per node; '
+                'request a slice by its total chips, e.g. tpu7x:8.)')
+
     return models.KubernetesNodesInfo(
         node_info_dict=node_info_dict,
-        hint='',
+        hint=hint,
     )
 
 

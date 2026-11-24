@@ -165,7 +165,7 @@ def _k8s(accelerators, accelerator_args=None):
         # Same slice, every slice of the cluster.
         ('tpu7x:8', 1, 'tpu7x:8', 1, True),
         ('tpu7x:8', 2, 'tpu7x:8', 2, True),
-        ('tpu-v6e-16', 1, 'tpu-v6e-slice:16', 1, True),
+        ('tpu-v6e-16', 1, 'tpu-v6e-16', 1, True),
         # One slice of a two-slice cluster.
         ('tpu7x:8', 1, 'tpu7x:8', 2, False),
         # Single-host clusters keep the existing rules.
@@ -228,3 +228,67 @@ def test_show_gpus_lists_a_slice_vm_by_slice_size():
             True, None, None, None)
     assert sorted(int(i.accelerator_count) for i in counts['tpu7x']) == [4, 8]
     assert capacity['tpu7x'] == 12
+
+
+def test_slice_rule_skips_native_gcp_tpu_vms():
+    """Native GCP TPU VM pods keep their own node rules."""
+    gcp_cluster = resources_lib.Resources(infra='gcp',
+                                          accelerators='tpu-v6e-32')
+    task = resources_lib.Resources(infra='gcp', accelerators='tpu-v6e-32')
+    assert kubernetes_utils.tpu_slice_fit_error(task, 1, gcp_cluster, 2) is None
+
+
+def _tpu_node(name, accelerator, topology, chips='4'):
+    node = mock.MagicMock()
+    node.metadata.name = name
+    node.metadata.labels = {
+        _FMT.TPU_LABEL_KEY: accelerator,
+        _FMT.TPU_TOPOLOGY_LABEL_KEY: topology,
+        _FMT.ACCELERATOR_COUNT_LABEL_KEY: chips,
+    }
+    node.status.allocatable = {'google.com/tpu': chips}
+    node.status.capacity = {'google.com/tpu': chips}
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
+    node.get_taints.return_value = []
+    return node
+
+
+def _show_gpus(nodes, quantity_filter=None, allocated=None):
+    p = 'sky.provision.kubernetes.utils.'
+    allocated = allocated or {}
+    with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
+         mock.patch(p + 'get_current_kube_config_context_name', return_value='ctx'), \
+         mock.patch('sky.clouds.Kubernetes.existing_allowed_contexts', return_value=['ctx']), \
+         mock.patch(p + 'check_credentials', return_value=[True]), \
+         mock.patch(p + 'detect_accelerator_resource', return_value=True), \
+         mock.patch(p + 'detect_gpu_label_formatter', return_value=[_FMT(), None]), \
+         mock.patch(p + 'get_kubernetes_nodes', return_value=nodes), \
+         mock.patch(p + 'get_allocated_resources_by_node', return_value=({n.metadata.name: allocated.get(n.metadata.name, 0) for n in nodes}, {})), \
+         mock.patch(p + 'get_gpu_resource_key', return_value='nvidia.com/gpu'):
+        return kubernetes_catalog.list_accelerators_realtime(
+            True, None, None, quantity_filter)
+
+
+def test_show_gpus_slice_filter_counts_whole_slice_vms():
+    nodes = [
+        _tpu_node('s1', 'tpu7x', '2x2x2'),
+        _tpu_node('s2', 'tpu7x', '2x2x2')
+    ]
+    _, capacity, available = _show_gpus(nodes, quantity_filter=8)
+    assert capacity['tpu7x'] == 8
+    assert available['tpu7x'] == 8
+    # A VM with chips in use does not count as free.
+    _, _, available = _show_gpus(nodes, quantity_filter=8, allocated={'s1': 4})
+    assert available['tpu7x'] == 4
+
+
+def test_show_gpus_skips_slices_skypilot_cannot_launch():
+    """TPU v4 has no multi-host shape in SkyPilot."""
+    nodes = [
+        _tpu_node('v4', 'tpu-v4-podslice', '4x4'),
+        _tpu_node('s1', 'tpu7x', '2x2x2')
+    ]
+    counts, _, _ = _show_gpus(nodes)
+    assert 'tpu-v4-podslice' not in counts
+    assert [int(i.accelerator_count) for i in counts['tpu7x']] == [8]
