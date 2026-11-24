@@ -199,6 +199,25 @@ def _check_user_named_volumes(
         workspaces_core.check_volume_write_permission(user, name)
 
 
+def _check_requested_queues(
+        entrypoint: Union['dag_lib.Dag', 'task_lib.Task']) -> None:
+    """Checks that each task's queue is allowed in its workspace."""
+    tasks = ([entrypoint]
+             if isinstance(entrypoint, task_lib.Task) else entrypoint.tasks)
+    for task in tasks:
+        for resources in task.resources:
+            job_config = resources.cluster_config_overrides or {}
+            for cloud in ('kubernetes', 'slurm'):
+                queue = ((job_config.get(cloud) or {}).get('quota') or
+                         {}).get('queue')
+                try:
+                    skypilot_config.check_active_workspace_queue(cloud, queue)
+                except ValueError as e:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.QueueNotAllowedError(
+                            f'Task {task.name or ""!r}: {e}') from None
+
+
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     request_name: request_names.AdminPolicyRequestName,
@@ -221,8 +240,11 @@ def apply(
         - The new copy of dag after applying the policy
         - The new copy of skypilot config after applying the policy.
     """
+    # Only new submissions are checked; relaunches and recoveries were
+    # checked when submitted.
     if not at_client_side and request_name not in _VOLUME_CHECK_EXEMPT_REQUESTS:
         _check_user_named_volumes(entrypoint)
+        _check_requested_queues(entrypoint)
     dag, config = _apply(entrypoint, request_name, request_options,
                          at_client_side)
     if not at_client_side:

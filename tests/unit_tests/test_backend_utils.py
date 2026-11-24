@@ -1,3 +1,4 @@
+import contextlib
 import os
 import pathlib
 from unittest import mock
@@ -8,6 +9,7 @@ from sky import backends
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import skypilot_config
 from sky.backends import backend_utils
@@ -19,6 +21,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import yaml_utils
+from sky.utils.db import db_utils
 
 
 @pytest.fixture(autouse=True)
@@ -278,6 +281,99 @@ def test_write_cluster_config_merges_pod_fields_kubernetes(
     ]
     # They get there through the merge, not as a template variable.
     assert 'pod_fields' not in mock_fill_template.call_args[0][1]
+
+
+def _use_config(tmp_path, cloud: str, config: str = '') -> None:
+    """Allows only queue team-a in the default workspace, plus `config`."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        f'workspaces: {{default: {{{cloud}: {{quota: '
+        f'{{allowed_queues: [team-a]}}}}}}}}\n{config}',
+        encoding='utf-8')
+    os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = str(config_path)
+    skypilot_config.reload_config()
+
+
+@pytest.mark.parametrize(
+    'config,task_config,allowed',
+    [
+        # The queue can come from config the user sends with the request,
+        ('kubernetes: {quota: {queue: team-b}}', None, False),
+        ('kubernetes: {kueue: {local_queue_name: team-b}}', None, False),
+        # or from a label the task sets on the pod.
+        ('', {
+            'kubernetes': {
+                'custom_metadata': {
+                    'labels': {
+                        'kueue.x-k8s.io/queue-name': 'team-b'
+                    }
+                }
+            }
+        }, False),
+        ('kubernetes: {quota: {queue: team-a}}', None, True),
+        ('', None, True),
+    ])
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+@mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+            return_value=[])
+def test_write_cluster_config_checks_final_queue_kubernetes(
+        _, tmp_path, config, task_config, allowed):
+    """The queue a pod ends up in must be allowed, however it was set."""
+    _use_config(tmp_path, 'kubernetes', config)
+    with (contextlib.nullcontext()
+          if allowed else pytest.raises(exceptions.PermissionDeniedError,
+                                        match="Queue 'team-b' is not allowed")):
+        backend_utils.write_cluster_config(
+            to_provision=Resources(cloud=clouds.Kubernetes(),
+                                   instance_type='4CPU--16GB',
+                                   _cluster_config_overrides=task_config),
+            num_nodes=1,
+            cluster_config_template='kubernetes-ray.yml.j2',
+            cluster_name='display',
+            local_wheel_path=pathlib.Path('/tmp/fake'),
+            wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+            region=clouds.Region(name='fake-context'),
+            dryrun=True,
+            keep_launch_fields_in_existing_config=True)
+
+
+@pytest.mark.parametrize('sbatch_options,allowed', [
+    ({
+        'qos': 'team-b'
+    }, False),
+    ({
+        'q': 'team-b'
+    }, False),
+    ({
+        'qos': 'team-a'
+    }, True),
+])
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+def test_write_cluster_config_checks_final_queue_slurm(tmp_path, sbatch_options,
+                                                       allowed):
+    """The QoS a Slurm job ends up with must be allowed."""
+    _use_config(tmp_path, 'slurm')
+    resources = mock.MagicMock(cloud=clouds.Slurm())
+    resources.make_deploy_variables.return_value = {
+        'sbatch_options': sbatch_options
+    }
+    # Stop right after the check; the rest needs a real Slurm cluster.
+    with mock.patch.object(
+            skypilot_config,
+            'get_effective_region_config',
+            side_effect=StopIteration), pytest.raises(
+                StopIteration if allowed else exceptions.PermissionDeniedError):
+        backend_utils.write_cluster_config(
+            to_provision=resources,
+            num_nodes=1,
+            cluster_config_template='slurm-ray.yml.j2',
+            cluster_name='display',
+            local_wheel_path=pathlib.Path('/tmp/fake'),
+            wheel_hash='fake',
+            region=clouds.Region(name='fake-cluster'),
+            dryrun=True)
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',
@@ -923,3 +1019,47 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
         source='/etc/config', target='~/.sky/file_mounts/etc/config')
     assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
+
+
+class _PicklableHandle:
+    launched_resources = None
+    cluster_name_on_cloud = 'on-cloud'
+    launched_nodes = 1
+
+
+@pytest.mark.parametrize('include_managed', [False, True])
+def test_glob_does_not_report_hidden_managed_clusters_as_missing(
+        monkeypatch, tmp_path, include_managed):
+    monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+    # Debug mode shows managed clusters too.
+    monkeypatch.delenv('SKYPILOT_DEBUG', raising=False)
+    monkeypatch.setattr(
+        global_user_state, '_db_manager',
+        db_utils.DatabaseManager('state',
+                                 global_user_state.create_table,
+                                 post_init_fn=lambda _: global_user_state.
+                                 _sqlite_supports_returning()))
+    for name, is_managed in (('web-1', False), ('web-job-7', True)):
+        global_user_state.add_or_update_cluster(
+            cluster_name=name,
+            cluster_handle=_PicklableHandle(),
+            requested_resources=set(),
+            ready=True,
+            is_managed=is_managed)
+    monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
+                        lambda **kwargs: {constants.SKYPILOT_DEFAULT_WORKSPACE})
+    monkeypatch.setattr(
+        'sky.utils.resources_utils.get_readable_resources_repr',
+        lambda handle, simplified_only: ('', None)
+        if simplified_only else ('', ''))
+    info = mock.MagicMock()
+    monkeypatch.setattr(backend_utils.logger, 'info', info)
+
+    records = backend_utils.get_clusters(refresh=common.StatusRefreshMode.NONE,
+                                         cluster_names=['web-*'],
+                                         all_users=True,
+                                         _include_is_managed=include_managed)
+
+    expected = {'web-1', 'web-job-7'} if include_managed else {'web-1'}
+    assert {record['name'] for record in records} == expected
+    assert not any('not found' in str(call) for call in info.call_args_list)

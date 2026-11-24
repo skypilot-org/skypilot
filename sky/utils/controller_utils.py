@@ -626,7 +626,8 @@ def shared_controller_vars_to_fill(
         if workspace is not None:
             # This config is replayed on recovery; pin the id, which an admin
             # policy may have set as a name, so it is never re-resolved as a
-            # name another workspace may have taken since.
+            # name another workspace may have taken since. The pool check
+            # (serve_utils.get_pool_refusal) also relies on it being an id.
             local_user_config['active_workspace'] = (
                 skypilot_config.resolve_workspace_ref(workspace, workspaces))
         if controller.value.controller_type == 'jobs':
@@ -1558,6 +1559,8 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     used += ((config.short_worker_config.garanteed_parallelism +
               config.short_worker_config.burstable_parallelism) *
              server_config.SHORT_WORKER_MEM_GB * 1024)
+    used += (config.heavy_worker_config.burstable_parallelism *
+             server_config.HEAVY_WORKER_MEM_GB * 1024)
     if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
         # Server workers are resident too, and the parent process with them.
         used += ((config.num_server_workers + 1) *

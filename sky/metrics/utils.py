@@ -198,6 +198,15 @@ SKY_APISERVER_BLOB_CHECK_SIZE_BYTES = prom.Histogram(
     buckets=[2**exponent for exponent in range(10, 37, 2)],
 )
 
+SKY_APISERVER_STORED_RESULTS_TOTAL = prom.Counter(
+    'sky_apiserver_stored_results_total',
+    'Request results stored outside the requests table', ['name'])
+
+SKY_APISERVER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_stored_result_bytes_total',
+    'Bytes of request results stored outside the requests table, as encoded '
+    'and as compressed on disk', ['name', 'form'])
+
 # Total number of API server requests per user.
 # This is a separate metric to avoid high cardinality in the primary metric.
 SKY_APISERVER_REQUESTS_BY_USER_TOTAL = prom.Counter(
@@ -559,6 +568,12 @@ SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
 SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'sky_apiserver_short_executors',
     'Total number of short-running request executors in the API server',
+    multiprocess_mode='livesum',
+)
+
+SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
+    'sky_apiserver_heavy_executors',
+    'Number of free heavy request executors in the API server',
     multiprocess_mode='livesum',
 )
 
@@ -2096,15 +2111,47 @@ async def add_cluster_name_label(metrics_text: str,
                                    replace_existing)
 
 
+# node-exporter's InfiniBand / RoCE series, one per RDMA device port. Per node
+# (no pod label): the GPU dashboard's node network panel joins them to DCGM's
+# series on (cluster, node).
+_NODE_RDMA_METRICS = (
+    # tx/rx bytes: the GPU dashboard's node network panel.
+    'node_infiniband_port_data_transmitted_bytes_total',
+    'node_infiniband_port_data_received_bytes_total',
+    # Work-completion errors. A NIC can fail every multi-node job while its
+    # link stays up at full rate with no link errors; these are what rise then.
+    'node_infiniband_req_cqes_errors_total',
+    'node_infiniband_req_cqes_flush_errors_total',
+    'node_infiniband_resp_cqes_errors_total',
+    'node_infiniband_resp_cqes_flush_errors_total',
+    'node_infiniband_req_remote_invalid_request_errors_total',
+    # Link drops, recoveries and physical-layer errors.
+    'node_infiniband_link_downed_total',
+    'node_infiniband_link_error_recovery_total',
+    'node_infiniband_symbol_error_total',
+    'node_infiniband_port_errors_received_total',
+    'node_infiniband_local_link_integrity_errors_total',
+    # RoCE transport retransmits and ack timeouts.
+    'node_infiniband_roce_adp_retransmits_total',
+    'node_infiniband_local_ack_timeout_errors_total',
+    # Negotiated link rate: a port that trained below its rated speed.
+    'node_infiniband_rate_bytes_per_second',
+)
+
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
-# CPU/memory, kube_pod_labels, and cAdvisor container metrics (per-pod
-# CPU/Memory in the Telemetry section joins on (pod, namespace) with
-# kube_pod_labels — same join shape the GPU panels use to filter by SkyPilot
-# cluster name).
+# CPU/memory, node RDMA throughput, errors and link changes, kube_pod_labels,
+# and cAdvisor container metrics (per-pod CPU/Memory in the Telemetry section
+# joins on (pod, namespace) with kube_pod_labels — same join shape the GPU
+# panels use to filter by SkyPilot cluster name).
 GPU_METRICS_MATCH_PATTERNS = [
     '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
     'kube_pod_labels',
     'node_cpu_seconds_total{mode="idle"}',
+    '{__name__=~"' + '|'.join(_NODE_RDMA_METRICS) + '"}',
+    # Link drops of the RDMA network interfaces (rdma* for RoCE, ib* for
+    # InfiniBand), one per drop. A flapping RoCE port leaves
+    # node_infiniband_link_downed_total at 0; this is what rises.
+    'node_network_carrier_down_changes_total{device=~"rdma.*|ib.*"}',
     'container_cpu_usage_seconds_total{container!="",container!="POD"}',
     'container_memory_working_set_bytes{container!="",container!="POD"}',
     # GPU allocation metrics — pod requests + node capacity for nvidia/amd

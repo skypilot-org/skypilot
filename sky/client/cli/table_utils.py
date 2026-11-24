@@ -363,6 +363,17 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
+class ModalVolumeTable(RunPodVolumeTable):
+    """The Modal volume table: the same columns as RunPod's.
+
+    Modal Volumes have no size, so SIZE shows '-'.
+    """
+
+    def format(self) -> str:
+        """Format the Modal volume table for display."""
+        return 'Modal Volumes:\n' + str(self.table)
+
+
 def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
@@ -399,6 +410,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()
+        elif volume_type == volume.VolumeType.MODAL_VOLUME.value:
+            modal_table = ModalVolumeTable(volume_list, show_all)
+            table_str += modal_table.format()
     if table_str:
         return table_str
     else:

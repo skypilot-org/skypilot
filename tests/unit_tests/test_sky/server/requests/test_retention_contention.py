@@ -1,11 +1,16 @@
-"""SQLite retention query and transaction budgets on the native schema."""
+"""Retention cleanup on the native SQLite schema: the query, transaction
+budgets, and taking turns when servers share the request backend."""
+import os
 import sqlite3
+import time
 from unittest import mock
 
 import pytest
 import pytest_asyncio
 
 from sky.server.requests import requests
+from sky.utils import leader_election
+from sky.utils import locks
 from sky.utils.db import db_utils
 
 
@@ -169,3 +174,109 @@ async def test_invalid_batch_size(batch_size):
     with pytest.raises(ValueError, match='positive'):
         await requests.clean_finished_requests_with_retention(
             0, batch_size=batch_size)
+
+
+@pytest.fixture(name='gc_lock')
+def gc_lock_fixture(monkeypatch, tmp_path):
+    monkeypatch.delenv(leader_election.ENV_VAR_BACKEND, raising=False)
+    monkeypatch.setattr(locks, 'SKY_LOCKS_DIR', str(tmp_path / 'locks'))
+    monkeypatch.setattr(
+        locks,
+        '_detect_lock_type',  # pylint: disable=protected-access
+        lambda: 'filelock')
+    return locks.get_lock(requests._REQUESTS_GC_LOCK_ID)  # pylint: disable=protected-access
+
+
+@pytest.fixture(name='shared')
+def shared_backend(retention, monkeypatch):
+    db, backend = retention
+    monkeypatch.setattr(backend, 'shared_across_servers', True)
+    return db
+
+
+def remaining(db):
+    return [
+        row[0] for row in db.conn.execute('SELECT request_id FROM requests')
+    ]
+
+
+def stale_log(tmp_path, request_id):
+    path = tmp_path / 'logs' / f'{request_id}.log'
+    path.parent.mkdir(exist_ok=True)
+    path.touch()
+    mtime = time.time() - 2 * requests.bs.GC_GRACE_SECONDS
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+@pytest.mark.asyncio
+async def test_shared_backend_skips_rows_while_another_server_deletes(
+        shared, gc_lock, monkeypatch, tmp_path):
+    insert(shared, 'expired')
+    orphan = stale_log(tmp_path, 'orphan')
+    delete = mock.AsyncMock()
+    monkeypatch.setattr(requests, '_delete_requests', delete)
+    with gc_lock.acquire(blocking=False):
+        await requests.clean_finished_requests_with_retention(0)
+    delete.assert_not_awaited()
+    assert remaining(shared) == ['expired']
+    assert not orphan.exists()
+
+
+@pytest.mark.asyncio
+async def test_shared_backend_deletes_and_releases_role(shared, gc_lock):
+    insert(shared, 'expired')
+    await requests.clean_finished_requests_with_retention(0)
+    assert remaining(shared) == []
+    with gc_lock.acquire(blocking=False):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_shared_backend_releases_role_on_error(shared, gc_lock,
+                                                     monkeypatch):
+    insert(shared, 'expired')
+    monkeypatch.setattr(requests, '_delete_requests',
+                        mock.AsyncMock(side_effect=RuntimeError('db down')))
+    with pytest.raises(RuntimeError, match='db down'):
+        await requests.clean_finished_requests_with_retention(0)
+    with gc_lock.acquire(blocking=False):
+        pass
+
+
+class _LostRole:
+    """An elector that wins the bid and fails every renewal."""
+    renew_interval_seconds = 0.
+
+    def __init__(self):
+        self.released = False
+
+    def try_acquire(self):
+        return True
+
+    def renew(self):
+        return False
+
+    def release(self):
+        self.released = True
+
+
+@pytest.mark.asyncio
+async def test_shared_backend_stops_when_role_is_lost(shared, monkeypatch):
+    for request_id in ('a', 'b', 'c'):
+        insert(shared, request_id)
+    role = _LostRole()
+    monkeypatch.setattr(requests.leader_election, 'get_elector',
+                        lambda *args, **kwargs: role)
+    await requests.clean_finished_requests_with_retention(0, batch_size=1)
+    assert len(remaining(shared)) == 2
+    assert role.released
+
+
+@pytest.mark.asyncio
+async def test_unshared_backend_deletes_regardless_of_role(retention, gc_lock):
+    db, _ = retention
+    insert(db, 'expired')
+    with gc_lock.acquire(blocking=False):
+        await requests.clean_finished_requests_with_retention(0)
+    assert remaining(db) == []

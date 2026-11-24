@@ -93,9 +93,7 @@ class UserResolver:
         user = self._id_to_user.get(user_id)
         if user is None:
             return None
-        if user.name and len(self._name_to_ids.get(user.name, [])) == 1:
-            return user.name
-        return user_id
+        return self._name_entry(user) or user_id
 
     def entries_for(self, user_id: str) -> List[str]:
         """Return all ``allowed_users`` entries that resolve to ``user_id``.
@@ -108,9 +106,21 @@ class UserResolver:
         if user is None:
             return [user_id]
         entries = [user_id]
-        if user.name and len(self._name_to_ids.get(user.name, [])) == 1:
-            entries.append(user.name)
+        name = self._name_entry(user)
+        if name:
+            entries.append(name)
         return entries
+
+    def _name_entry(self, user: models.User) -> Optional[str]:
+        """The user's name if an ``allowed_users`` entry of it means them.
+
+        It must be unique and must not be another user's id: an entry that is
+        an id always means that id (see ``resolve_allowed_entries``).
+        """
+        if (user.name and len(self._name_to_ids.get(user.name, [])) == 1 and
+                user.name not in self._id_to_user):
+            return user.name
+        return None
 
     def resolve_allowed_entries(self, allowed: Iterable[str]) -> List[str]:
         """Resolve raw ``allowed_users`` entries to user_ids.

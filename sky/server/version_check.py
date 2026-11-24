@@ -18,6 +18,9 @@ logger = sky_logging.init_logger(__name__)
 VERSION_CACHE_FILE = pathlib.Path.home() / '.sky' / 'version_cache.json'
 # Cache TTL: 1 day in seconds
 CACHE_TTL_SECONDS = 24 * 60 * 60
+# Well under the TTL, so the cached hint is never much older than the TTL; a
+# check before expiry is a cache hit, not a fetch.
+CHECK_INTERVAL_SECONDS = 60 * 60
 
 # Dev version pattern - skip checking for dev versions
 DEV_VERSION_PATTERN = re.compile(r'^.*-dev\d*$', re.IGNORECASE)
@@ -124,6 +127,9 @@ def get_latest_versions() -> Optional[str]:
 def get_latest_version_for_current() -> Optional[str]:
     """Get latest stable release version for notifications.
 
+    Reads the cache only, whatever its age: `check_versions_periodically` is
+    the only fetcher, so a request never waits on PyPI.
+
     Returns:
         Latest stable release version (not nightly or dev). Returns None
         if current version is dev, if no latest version is available, or
@@ -133,7 +139,8 @@ def get_latest_version_for_current() -> Optional[str]:
     if _is_dev_version(sky.__version__):
         return None
 
-    latest_version = get_latest_versions()
+    cache = _load_cache()
+    latest_version = cache.get('release_version') if cache else None
 
     # Only return if latest version exists and is newer than current
     if latest_version:
@@ -148,15 +155,14 @@ def get_latest_version_for_current() -> Optional[str]:
 
 
 async def check_versions_periodically():
-    """Background task to check PyPI versions periodically (daily)."""
+    """Background task to refetch PyPI versions once the cache expires."""
     while True:
         try:
             # Check versions (will use cache if valid,
             # otherwise fetch from PyPI)
-            get_latest_versions()
+            await asyncio.to_thread(get_latest_versions)
             logger.debug('Version check completed')
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Error in periodic version check: {e}')
 
-        # Sleep for 1 day (in seconds)
-        await asyncio.sleep(CACHE_TTL_SECONDS)
+        await asyncio.sleep(CHECK_INTERVAL_SECONDS)

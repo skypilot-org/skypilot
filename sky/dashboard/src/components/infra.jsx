@@ -49,6 +49,7 @@ import {
 import {
   CLOUDS_LIST,
   MANAGED_JOBS_SUMMARY_ARGS,
+  canonicalizeCloudName,
 } from '@/data/connectors/constants';
 import {
   runSkyCheck,
@@ -423,6 +424,60 @@ export function sortContextsByLoadState(
     .map((context, index) => ({ context, index, rank: rank(context) }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .map(({ context }) => context);
+}
+
+/**
+ * The "(workspaces: a, b, ...)" text under a context name. It is capped at
+ * two lines; when the names don't fit, it ends in an ellipsis with a
+ * "Show more" button below it that expands the full list in place.
+ */
+function ContextWorkspaces({ workspaces, workspaceName }) {
+  const textRef = React.useRef(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const text = `(workspaces: ${workspaces.map(workspaceName).join(', ')})`;
+
+  // Show the button only when the collapsed text is actually cut off.
+  React.useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el || expanded) return undefined;
+    let active = true;
+    const check = () => {
+      if (active) setOverflows(el.scrollHeight > el.clientHeight + 1);
+    };
+    check();
+    // A late web font can change the line count without resizing the
+    // clamped box, so check again once fonts finish loading.
+    document.fonts?.ready.then(check);
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);
+    observer?.observe(el);
+    return () => {
+      active = false;
+      observer?.disconnect();
+    };
+  }, [text, expanded]);
+
+  return (
+    <div className="text-sm text-content-tertiary mt-1.5">
+      <div
+        ref={textRef}
+        className={`break-words ${expanded ? '' : 'line-clamp-2'}`}
+      >
+        {text}
+      </div>
+      {(overflows || expanded) && (
+        <button
+          type="button"
+          className="mt-0.5 text-blue-fg hover:underline"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
 }
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
@@ -965,10 +1020,10 @@ export function InfrastructureSection({
                             )}
                           </div>
                           {workspaces.length > 0 && (
-                            <div className="text-sm text-content-tertiary mt-1.5">
-                              (workspaces:{' '}
-                              {workspaces.map(workspaceName).join(', ')})
-                            </div>
+                            <ContextWorkspaces
+                              workspaces={workspaces}
+                              workspaceName={workspaceName}
+                            />
                           )}
                         </td>
                         <td
@@ -1178,10 +1233,10 @@ export function InfrastructureSection({
                         </span>
                       </div>
                       {workspaces.length > 0 && (
-                        <div className="text-sm text-content-tertiary mt-1.5 truncate">
-                          (workspaces:{' '}
-                          {workspaces.map(workspaceName).join(', ')})
-                        </div>
+                        <ContextWorkspaces
+                          workspaces={workspaces}
+                          workspaceName={workspaceName}
+                        />
                       )}
                     </div>
                     <PluginSlot
@@ -3156,7 +3211,8 @@ export function GPUs() {
       const cloudCounts = {};
       jobs.forEach((job) => {
         if (job.cloud) {
-          cloudCounts[job.cloud] = (cloudCounts[job.cloud] || 0) + 1;
+          const cloudName = canonicalizeCloudName(job.cloud);
+          cloudCounts[cloudName] = (cloudCounts[cloudName] || 0) + 1;
         }
       });
       setCloudJobCounts(cloudCounts);
@@ -3184,7 +3240,8 @@ export function GPUs() {
       const cloudCounts = {};
       clusters.forEach((cluster) => {
         if (cluster.cloud) {
-          cloudCounts[cluster.cloud] = (cloudCounts[cluster.cloud] || 0) + 1;
+          const cloudName = canonicalizeCloudName(cluster.cloud);
+          cloudCounts[cloudName] = (cloudCounts[cloudName] || 0) + 1;
         }
       });
       setCloudClusterCounts(cloudCounts);

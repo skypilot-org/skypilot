@@ -190,6 +190,21 @@ def test_kubernetes_still_gets_both_commands(tmp_path):
     assert 'from sky.skylet.ray_patches' not in variables['ray_patches_cmd']
 
 
+def test_kubernetes_runtime_check_asks_for_the_clusters_ray(tmp_path):
+    """The pod skips the PyPI prefetch when this check passes before E7.
+
+    Without the variable the pod renders `if ; then`, a syntax error in
+    STEP 2 on every launch; with the wrong version an old cluster would
+    count as prebuilt and skip a prefetch it needs.
+    """
+    other = '2.4.0'
+    variables = _captured_variables(status_lib.ClusterStatus.UP, other,
+                                    tmp_path)
+    check = variables['ray_installed_check_command']
+    assert '{ray_version}' not in check
+    assert f'grep {other}' in check
+
+
 def test_the_marker_does_not_move_the_config_hash(tmp_path):
     """Otherwise every pre-existing cluster loses `--fast` exactly once.
 
