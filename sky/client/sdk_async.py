@@ -17,11 +17,9 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import aiohttp
-import colorama
 
 from sky import admin_policy
 from sky import catalog
-from sky import exceptions
 from sky import sky_logging
 from sky.client import common as client_common
 from sky.client import interactive_utils
@@ -30,11 +28,9 @@ from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
-from sky.server.requests import requests as requests_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common
-from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -74,6 +70,7 @@ DEFAULT_STREAM_CONFIG = StreamConfig()
 
 
 @usage_lib.entrypoint
+@client_common.return_sync_call_result
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 async def get(request_id: str) -> Any:
@@ -103,42 +100,15 @@ async def get(request_id: str) -> Any:
                 API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS))
 
         try:
-            request_task = None
-            if response.status == 200:
-                request_task = requests_lib.Request.decode(
-                    payloads.RequestPayload(**await response.json()))
-            elif response.status == 500:
-                try:
-                    # A failed request's payload is nested under 'detail'
-                    # (mirrors the sync sdk.get).
-                    request_task = requests_lib.Request.decode(
-                        payloads.RequestPayload(
-                            **(await response.json()).get('detail')))
-                    logger.debug(f'Got request with error: {request_task.name}')
-                except Exception:  # pylint: disable=broad-except
-                    request_task = None
-            if request_task is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Failed to get request {request_id}: '
-                        f'{response.status} {await response.text()}')
-            error = request_task.get_error()
-            if error is not None:
-                error_obj = error['object']
-                if env_options.Options.SHOW_DEBUG_INFO.get():
-                    stacktrace = getattr(error_obj, 'stacktrace',
-                                         str(error_obj))
-                    logger.error('=== Traceback on SkyPilot API Server ===\n'
-                                 f'{stacktrace}')
-                with ux_utils.print_exception_no_traceback():
-                    raise error_obj
-            if request_task.status == requests_lib.RequestStatus.CANCELLED:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.RequestCancelled(
-                        f'{colorama.Fore.YELLOW}Current {request_task.name!r} '
-                        f'request ({request_task.request_id}) is cancelled by '
-                        f'another process. {colorama.Style.RESET_ALL}')
-            return request_task.get_return_value()
+            try:
+                body = await response.json()
+            except (aiohttp.ContentTypeError, ValueError):
+                body = None
+            # A successful result can be large and is never shown.
+            text = ('' if response.status == 200 and body is not None else await
+                    response.text())
+            return client_common.request_result(request_id, response.status,
+                                                body, lambda: text)
         finally:
             response.close()
 
@@ -222,6 +192,7 @@ async def _stream_and_get(
     )
 
 
+@client_common.return_sync_call_result
 async def stream_and_get(
     request_id: Optional[str] = None,
     log_path: Optional[str] = None,

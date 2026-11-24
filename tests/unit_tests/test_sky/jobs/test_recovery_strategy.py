@@ -1039,6 +1039,43 @@ async def test_launch_adopted_request_failure_takes_the_retry_path(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('error', [
+    exceptions.StorageWorkspaceError('taken'),
+    exceptions.InvalidClusterNameError('bad name'),
+    exceptions.ResourcesMismatchError('mismatch'),
+])
+async def test_recovery_launch_fails_on_terminal_precheck(monkeypatch, error):
+    """Recovery calls _launch with raise_on_failure=False and retries every
+    None forever, so a failure no retry can fix must raise instead."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._refresh_priority_from_persisted_dag = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(side_effect=error)
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None,
+                               raise_on_failure=False,
+                               recovery=True)
+    assert e.value.reasons == [error]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('error', [
+    exceptions.StorageUploadError('flaky upload'),
+    exceptions.NoCloudAccessError('expired credentials'),
+    exceptions.VolumeNotReadyError('not ready'),
+])
+async def test_recovery_launch_retries_other_prechecks(monkeypatch, error):
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._refresh_priority_from_persisted_dag = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(side_effect=error)
+
+    assert await executor._launch(
+        max_retry=None, raise_on_failure=False, recovery=True) is None
+
+
+@pytest.mark.asyncio
 async def test_launch_adopted_parked_request_that_vanishes_launches_fresh(
         monkeypatch):
     executor = _make_launch_executor()
@@ -2005,6 +2042,25 @@ async def test_infeasible_request_fails_prechecks(monkeypatch):
 
     with pytest.raises(exceptions.ProvisionPrechecksError):
         await executor._launch(max_retry=None, raise_on_failure=True)
+
+
+@pytest.mark.parametrize('raise_on_failure', [True, False])
+@pytest.mark.asyncio
+async def test_queue_not_allowed_fails_prechecks(monkeypatch, raise_on_failure):
+    """A disallowed queue fails the launch, in recovery too, without retry."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _through_request_store(
+            exceptions.QueueNotAllowedError(
+                "Queue 'b' is not allowed in workspace 'w'."))
+    ])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None,
+                               raise_on_failure=raise_on_failure)
+
+    assert "Queue 'b' is not allowed" in str(e.value.reasons[0])
 
 
 @pytest.mark.asyncio

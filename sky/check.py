@@ -27,6 +27,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -710,11 +711,11 @@ def _unstored_enabled_cloud_names(workspace: str,
         return ()
 
 
-# One plain dict per request: it holds state rather than a recomputable result,
-# so nothing may expire or evict an entry before the request ends.
-@annotations.lru_cache(scope='request', maxsize=1)
-def _reader_rechecked(
-) -> Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]:
+_ReaderRechecked = Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]
+_READER_RECHECKED_VAR = 'check.reader_rechecked'
+
+
+def _reader_rechecked() -> _ReaderRechecked:
     """Clouds that non-storing callers' re-checks found enabled in this request.
 
     Keyed by workspace, capability and config fingerprint. `recheck_clouds`
@@ -722,7 +723,21 @@ def _reader_rechecked(
     without it being stored. Reads only look up, so they add no entries. This
     relies on the re-check and those reads running in one request in one
     process under one config, as they do within `Optimizer.optimize`.
+
+    It holds state rather than a recomputable result, so nothing may expire,
+    evict or clear an entry before the request ends: it lives in the request's
+    context, which requests sharing the process do not share.
     """
+    ctx = context_lib.get()
+    if ctx is None:
+        return _process_reader_rechecked()
+    return ctx.vars.setdefault(_READER_RECHECKED_VAR, {})
+
+
+# Without a context the process runs one request at a time, and clears this
+# at each request start.
+@annotations.lru_cache(scope='request', maxsize=1)
+def _process_reader_rechecked() -> _ReaderRechecked:
     return {}
 
 
@@ -972,8 +987,10 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     else:
         cloud_type = cloud
     if isinstance(cloud_type, sky_clouds.SSH):
-        # Get the cluster names by reading from the node pools file
-        contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+        # Pools set up or not, but only those this workspace allows, as for
+        # Kubernetes contexts: others may belong to workspaces the caller
+        # cannot see.
+        contexts = sky_clouds.SSH.allowed_node_pool_contexts()
     elif isinstance(cloud_type, sky_clouds.Slurm):
         # Get the cluster names from SLURM config
         contexts = sky_clouds.Slurm.existing_allowed_clusters()
@@ -1006,18 +1023,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                 f'{str_to_format}'
                 f'{colorama.Style.RESET_ALL}')
 
-    # For SSH, determine which contexts are disabled due to allowed_node_pools
-    disabled_due_to_allowed_node_pools = set()
-    if isinstance(cloud_type, sky_clouds.SSH):
-        # Get all node pool contexts from file
-        all_node_pool_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
-        # Get allowed contexts (after filtering)
-        allowed_contexts = sky_clouds.SSH.existing_allowed_contexts()
-        # Contexts that exist in file but not in allowed list are disabled
-        # due to allowed_node_pools configuration
-        disabled_due_to_allowed_node_pools = (set(all_node_pool_contexts) -
-                                              set(allowed_contexts))
-
     # Format the context info with consistent styling
     contexts_formatted = []
     for i, context in enumerate(filtered_contexts):
@@ -1035,13 +1040,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             if ctx2text is not None:
                 if context in ctx2text:
                     text_suffix = f': {ctx2text[context]}'
-                elif (isinstance(cloud_type, sky_clouds.SSH) and
-                      context in disabled_due_to_allowed_node_pools):
-                    # Context is disabled due to allowed_node_pools config
-                    text_suffix = (': ' + _red_color('disabled. ') +
-                                   _dim_color('Reason: Not included in '
-                                              'allowed_node_pools '
-                                              'configuration.'))
                 else:
                     # Default case - not set up
                     text_suffix = (': ' + _red_color('disabled. ') + _dim_color(

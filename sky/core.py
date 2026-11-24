@@ -27,7 +27,6 @@ from sky.backends import cloud_vm_ray_backend
 from sky.backends import task_codegen
 from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
-from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server.requests import request_names
@@ -50,6 +49,7 @@ from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
+from sky.workspaces import visibility
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -1892,6 +1892,11 @@ def realtime_kubernetes_gpu_availability(
         - context (str): The Kubernetes context.
         - availability_list (List[models.RealtimeGpuAvailability]): A list
             of RealtimeGpuAvailability objects for that context.
+        Contexts without matching GPUs are left out, so the list is empty
+        when no queried context has one.
+
+    Raises:
+        ValueError: If every queried context is known to be unreachable.
     """
     if context is None:
         # Include contexts from both Kubernetes and SSH clouds
@@ -1954,7 +1959,6 @@ def realtime_kubernetes_gpu_availability(
 
     availability_lists: List[Tuple[str,
                                    List[models.RealtimeGpuAvailability]]] = []
-    cumulative_count = 0
     parallel_queried = subprocess_utils.run_in_parallel(
         lambda ctx: _realtime_kubernetes_gpu_availability_single(
             context=ctx,
@@ -1962,31 +1966,12 @@ def realtime_kubernetes_gpu_availability(
             quantity_filter=quantity_filter), context_list)
 
     cloud_identity = 'ssh' if is_ssh else 'kubernetes'
-    cloud_identity_capital = 'SSH' if is_ssh else 'Kubernetes'
-
     for ctx, queried in zip(context_list, parallel_queried):
-        cumulative_count += len(queried)
         if len(queried) == 0:
             # don't add gpu results for clusters that don't have any
             logger.debug(f'No gpus found in {cloud_identity} cluster {ctx}')
             continue
         availability_lists.append((ctx, queried))
-
-    if cumulative_count == 0:
-        err_msg = f'No GPUs found in any {cloud_identity_capital} clusters. '
-        debug_msg = 'To further debug, run: sky check '
-        if name_filter is not None:
-            gpu_info_msg = f' {name_filter!r}'
-            if quantity_filter is not None:
-                gpu_info_msg += (' with requested quantity'
-                                 f' {quantity_filter}')
-            err_msg = (f'Resources{gpu_info_msg} not found '
-                       f'in {cloud_identity_capital} clusters. ')
-            debug_msg = (f'To show available accelerators on {cloud_identity}, '
-                         f' run: sky gpus list --cloud {cloud_identity} ')
-        full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
-                        debug_msg)
-        raise ValueError(full_err_msg)
     return availability_lists
 
 
@@ -2133,6 +2118,34 @@ def get_all_contexts() -> List[str]:
     # For now, assuming get_ssh_node_pool_contexts already returns them
     # in the desired format (e.g., 'ssh-my-cluster')
     return sorted(list(set(kube_contexts + ssh_contexts)))
+
+
+def get_every_workspace_contexts() -> List[str]:
+    """``get_all_contexts`` plus contexts that only other workspaces allow.
+
+    For server-side readers that run without a request workspace, such as the
+    metrics federation. It names contexts the caller's workspaces may not
+    allow: do not return it to a user as is.
+    """
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {})
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return sorted(
+        set(get_all_contexts()) |
+        visibility.visible_for_workspaces(workspaces, 'kubernetes'))
+
+
+def get_workspace_contexts() -> List[str]:
+    """Kubernetes and SSH node pool contexts of the workspaces the user reads.
+
+    Unlike ``get_all_contexts``, contexts that only other workspaces allow are
+    left out, so this is safe to return to any user.
+    """
+    workspaces = list(
+        workspaces_core.workspaces_for_user(common_utils.get_current_user().id))
+    return sorted(
+        visibility.visible_for_workspaces(workspaces, 'kubernetes') |
+        visibility.visible_for_workspaces(workspaces, 'ssh'))
 
 
 def create_debug_dump(request_ids: Optional[List[str]] = None,

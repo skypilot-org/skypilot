@@ -430,12 +430,48 @@ FAQs
 
 * **Does SkyPilot support TPUs on GKE?**
 
-  SkyPilot supports single-host TPU topologies on GKE (e.g., 1x1, 2x2, 2x4). To use TPUs, add it to the accelerator field in your task YAML:
+  SkyPilot supports single-host TPU topologies on GKE (e.g., 1x1, 2x2, 2x4), and multi-host slices of TPU v6e and Ironwood (TPU7x). To use TPUs, add it to the accelerator field in your task YAML:
 
   .. code-block:: yaml
 
     resources:
       accelerators: tpu-v5-lite-podslice:1  # or tpu-v5-lite-device, tpu-v5p-slice
+
+  The count is the number of TPU chips. If you ask for more chips than one TPU VM has, SkyPilot launches a multi-host slice of that size and splits the request into one pod per VM, each taking all of its VM's chips. For example, ``tpu-v6e-16`` is a 4x4 slice of 4 VMs with 4 chips each, so it runs as 4 pods:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v6e-16  # 4 pods, one per 4-chip VM of a 4x4 slice
+
+  The pods of a slice are launched as one unit:
+
+  - They are all placed on the VMs of one slice, and the launch succeeds only when every pod is running.
+  - SkyPilot sets the TPU worker environment (``TPU_WORKER_ID``, ``TPU_WORKER_HOSTNAMES``, ``TPU_PROCESS_ADDRESSES``) for the task's ``run`` commands on each pod, so JAX and the TPU runtime see one slice. ``setup`` commands and shells opened on a pod do not get these values.
+  - ``num_nodes`` counts slices: ``num_nodes: 2`` with ``tpu-v6e-16`` runs 8 pods on two slices.
+  - A task on an existing multi-host TPU cluster must request the same slice and use every slice of the cluster.
+
+  TPU v6e with 8 chips exists both as one 8-chip VM and as a ``2x4`` slice of two 4-chip VMs. ``tpu-v6e-8`` is the single VM; add ``accelerator_args`` to get the slice:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v6e-8
+      accelerator_args:
+        multi_host: true  # a 2x4 slice: 2 pods, one per 4-chip VM
+
+  Ironwood is requested by its GKE accelerator name and chip count. Each Ironwood VM has 4 chips:
+
+  - ``tpu7x:4`` is one VM (``2x2x1``).
+  - ``tpu7x:8`` and larger are multi-host slices. For example, ``tpu7x:8`` is a ``2x2x2`` slice of 2 VMs, run as 2 pods.
+  - Google's own ``tpu7x-<N>`` names count TensorCores (two per chip), so they are not accepted.
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu7x:8  # 2 pods, one per VM of a 2x2x2 slice
+
+  A request runs only on TPU VMs of its own generation and slice shape. A single-VM request such as ``tpu7x:4`` runs on a single-host ``2x2x1`` VM, never on one VM of a ``2x2x2`` or larger slice, even though each slice VM also has 4 chips. The VMs of a slice are wired together, and the TPU runtime expects every VM of the slice to take part.
 
 * **I am using a custom image. How can I speed up the pod startup time?**
 
@@ -447,7 +483,8 @@ FAQs
 
     # Install system dependencies
     RUN apt update -y && \
-        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl wget -y && \
+        apt install fuse3 -y && \
         rm -rf /var/lib/apt/lists/*
 
     # Install SkyPilot python dependencies into a dedicated runtime venv.
@@ -462,6 +499,16 @@ FAQs
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
+* **Can pods run without internet access?**
+
+  Yes, with the SkyPilot default images, or with a custom image that pre-installs the dependencies as shown above. In both ``skypilot-nightly`` lines of the recipe, use your API server's package and version instead (``skypilot==<version>`` or ``skypilot-nightly==<version>``, see ``sky api info``), and rebuild the image when you upgrade the server: each pod installs the server's SkyPilot package without internet access only if all of its dependencies are already in the image.
+
+  Keep ``rsync`` and ``curl`` from the recipe's system packages, and ``fuse3`` for storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes: SkyPilot installs missing ones at pod startup, which needs package access. The others may be left out. Without ``openssh-server`` the cluster still launches, but ``ssh <cluster>``, VS Code and ``mpirun`` between nodes do not work; pods on host networking (``hostNetwork: true`` in ``kubernetes.pod_config``, or the default on OCI with RoCE) require it.
+
+  Pod startup then downloads nothing. ``kubernetes.enable_docker``, storage mounts in ``MOUNT`` and ``MOUNT_CACHED`` modes, and the jobs and serve controllers still download their own tools.
+
+  For internal package mirrors, set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>` to your APT mirrors, or to ``[]`` when pods can reach no package source, so that launches do not also wait on the built-in public ones; and set uv's index variables such as ``UV_DEFAULT_INDEX`` as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`. uv itself has no mirror setting and must be in the image.
 
 * **Are multi-node jobs supported on Kubernetes?**
 

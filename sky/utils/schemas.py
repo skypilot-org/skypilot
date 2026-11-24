@@ -782,6 +782,9 @@ def get_volume_schema():
                     'cleanup_on_deletion': {
                         'type': 'boolean',
                     },
+                    'environment_name': {
+                        'type': 'string',
+                    },
                 },
             },
             **_LABELS_SCHEMA,
@@ -1545,6 +1548,11 @@ def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
     if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
+    if cloud == 'modal':
+        # A Modal cluster is a Modal container, which has its own identity
+        # (see sky/provision/modal/modal_utils.py); modal ignores a token
+        # there. Other clusters, e.g. a jobs controller, still get the token.
+        return RemoteIdentityOptions.NO_UPLOAD.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
 
@@ -1631,6 +1639,16 @@ _SBATCH_OPTIONS_SCHEMA = {
     },
 }
 
+# The queues a workspace's jobs can use. Unset means any queue.
+_ALLOWED_QUEUES_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'string',
+        # One queue name per entry.
+        'pattern': r'^[^,\s]+$',
+    },
+}
+
 # `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
 # `quota.account` the account it is charged to (`sbatch --account`), mirroring
 # `kubernetes.quota.queue`. Permissive so plugins can layer their own
@@ -1650,6 +1668,7 @@ _SLURM_QUOTA_SCHEMA = {
             'type': 'string',
             'minLength': 1,
         },
+        'allowed_queues': _ALLOWED_QUEUES_SCHEMA,
     },
 }
 
@@ -2280,6 +2299,10 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
+                'subnet_id': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',
@@ -2540,6 +2563,9 @@ def get_config_schema():
                                 'type': 'string',
                             },
                             'image_tag_gpu': {
+                                'type': 'string',
+                            },
+                            'oci_config_profile': {
                                 'type': 'string',
                             },
                             'vcn_ocid': {
@@ -2958,6 +2984,7 @@ def get_config_schema():
                                 'queue': {
                                     'type': 'string',
                                 },
+                                'allowed_queues': _ALLOWED_QUEUES_SCHEMA,
                             },
                         },
                         'context_configs': {
@@ -3357,6 +3384,12 @@ def get_config_schema():
                     'max_launching_jobs_per_user': {
                         'type': 'integer',
                         'minimum': 1,
+                    },
+                    # Opt-in for the deprecated managed-job `event_callback`
+                    # (off by default); see
+                    # sky.jobs.utils.event_callbacks_allowed.
+                    'allow_event_callback': {
+                        'type': 'boolean',
                     },
                     **_extra_jobs_properties,
                 },),

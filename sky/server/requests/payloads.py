@@ -198,6 +198,11 @@ class RequestBody(BasePayload):
     # and keeps the pre-upgrade (loopback) behavior; see `stamp_request_body`
     # and the override logic in `executor.py`.
     from_loopback: bool = False
+    # The account that made an impersonated call, which usage metrics
+    # attribute the request to. Set server-side in `stamp_request_body`; a
+    # client-sent value is overwritten.
+    impersonator_id: Optional[str] = None
+    impersonator_name: Optional[str] = None
     # Whether the server authenticated the caller, so the users row and its
     # role exist and the worker need not upsert them. Set server-side in
     # `stamp_request_body`; a client-sent value is overwritten. Relies on every
@@ -240,6 +245,8 @@ class RequestBody(BasePayload):
         kwargs.pop('workspace_access', None)
         kwargs.pop('from_loopback', None)
         kwargs.pop('authenticated', None)
+        kwargs.pop('impersonator_id', None)
+        kwargs.pop('impersonator_name', None)
         return kwargs
 
     @property
@@ -607,6 +614,9 @@ class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
     purge: bool = False
+    # Keep a k8s-hostpath volume's files even if it was registered with
+    # cleanup_on_deletion.
+    no_cleanup: bool = False
 
 
 class VolumeListBody(RequestBody):

@@ -3,10 +3,12 @@ import json
 import typing
 from typing import Dict, List, Optional, Union
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.schemas.api import responses
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import versions
 from sky.server.requests import payloads
 from sky.usage import usage_lib
@@ -168,18 +170,32 @@ def ls(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def delete(names: List[str],
-           purge: bool = False) -> server_common.RequestId[None]:
+           purge: bool = False,
+           no_cleanup: bool = False) -> server_common.RequestId[None]:
     """Deletes volumes.
 
     Args:
         names: List of volume names to delete.
         purge: If True, delete the volume from the database even if the
           deletion API fails.
+        no_cleanup: If True, keep the files of a k8s-hostpath volume even if
+          it was registered with cleanup_on_deletion.
 
     Returns:
         The request ID of the delete request.
     """
-    body = payloads.VolumeDeleteBody(names=names, purge=purge)
+    if no_cleanup:
+        remote_api_version = versions.get_remote_api_version()
+        if (remote_api_version is None or remote_api_version <
+                server_constants.MIN_VOLUME_NO_CLEANUP_API_VERSION):
+            raise exceptions.APINotSupportedError(
+                'The API server does not support `no_cleanup` and would '
+                'delete the files of k8s-hostpath volumes; upgrade it to a '
+                'version that supports API_VERSION >= '
+                f'{server_constants.MIN_VOLUME_NO_CLEANUP_API_VERSION}.')
+    body = payloads.VolumeDeleteBody(names=names,
+                                     purge=purge,
+                                     no_cleanup=no_cleanup)
     response = server_common.make_authenticated_request(
         'POST', '/volumes/delete', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)

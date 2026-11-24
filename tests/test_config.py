@@ -18,6 +18,7 @@ import sky
 from sky import skypilot_config
 import sky.exceptions
 from sky.server import common as server_common
+from sky.server import config_db
 from sky.server import plugins
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
@@ -1238,6 +1239,26 @@ def test_client_cannot_override_workspace_read_access(monkeypatch, tmp_path):
         }}):
         assert skypilot_config.get_nested(
             ('workspace_config', 'read_access'), None) is None
+
+
+def test_client_cannot_enable_event_callbacks(monkeypatch, tmp_path):
+    """A client override must not enable managed-job event callbacks."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        jobs:
+            allow_event_callback: false
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'jobs': {
+            'allow_event_callback': True
+        }}):
+        assert skypilot_config.get_nested(
+            ('jobs', 'allow_event_callback'), None) is False
 
 
 def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
@@ -2949,6 +2970,201 @@ def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
 
 
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
+                                             from_loopback) -> None:
+    """Auto-mounts attach volumes unchecked, so a remote client cannot add
+    them, at the top level or per context; a loopback client still can."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              auto_mounts: [{volume_name: server-vol, mount_paths: [/s]}]
+              context_configs:
+                ctx1:
+                  auto_mounts: [{volume_name: server-ctx-vol, mount_paths: [/s]}]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    client_mounts = [{'volume_name': 'theirs', 'mount_paths': ['/t']}]
+    warn = mock.patch.object(skypilot_config.logger, 'warning')
+    with warn as mock_warning, skypilot_config.override_skypilot_config(
+        {
+            'kubernetes': {
+                'auto_mounts': client_mounts,
+                'provision_timeout': 123,
+                'context_configs': {
+                    'ctx1': {
+                        'auto_mounts': client_mounts
+                    },
+                    'ctx2': {
+                        'auto_mounts': client_mounts,
+                        'provision_timeout': 456
+                    },
+                },
+            }
+        },
+            from_loopback=from_loopback):
+        got = [
+            skypilot_config.get_effective_region_config(cloud='kubernetes',
+                                                        region=region,
+                                                        keys=('auto_mounts',))
+            for region in (None, 'ctx1', 'ctx2')
+        ]
+        assert skypilot_config.get_effective_region_config(
+            cloud='kubernetes', region='ctx2',
+            keys=('provision_timeout',)) == 456
+    warned = ' '.join(str(c) for c in mock_warning.call_args_list)
+    if from_loopback:
+        assert got == [client_mounts] * 3
+        assert 'auto_mounts' not in warned
+    else:
+        # The user is told their entries were ignored.
+        assert 'kubernetes.auto_mounts' in warned
+        assert 'kubernetes.context_configs.ctx1.auto_mounts' in warned
+        server_mounts = [{'volume_name': 'server-vol', 'mount_paths': ['/s']}]
+        assert got == [
+            server_mounts,
+            [{
+                'volume_name': 'server-ctx-vol',
+                'mount_paths': ['/s']
+            }], server_mounts
+        ]
+
+
+@pytest.mark.parametrize(
+    'cloud,quota,error',
+    [
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('kubernetes', {
+            'allowed_queues': ['q']
+        },
+         "Workspace 'team-a' has allowed queues \\['q'\\] but no default queue"
+        ),
+        ('kubernetes', {}, None),
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        ('slurm', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        # A Slurm QoS can be a comma-separated list; each name must be allowed.
+        ('slurm', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('slurm', {
+            'queue': 'q,bad',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,bad' of workspace 'team-a' is not in its allowed"),
+        # A Kueue queue is a single name.
+        ('kubernetes', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,other' of workspace 'team-a' is not in its allowed"
+        ),
+        # Names are compared exactly.
+        ('slurm', {
+            'queue': 'q, other',
+            'allowed_queues': ['q', 'other']
+        },
+         "Default queue 'q, other' of workspace 'team-a' is not in its allowed"
+        ),
+        # A queue read back from rendered YAML can be a number.
+        ('kubernetes', {
+            'queue': 123,
+            'allowed_queues': ['123']
+        }, None),
+        ('slurm', {
+            'queue': 123,
+            'allowed_queues': ['other']
+        }, "Default queue '123' of workspace 'team-a' is not in its allowed"),
+    ])
+def test_check_queue_allowed_for_default_queue(cloud, quota, error) -> None:
+    """A workspace's default queue must be in its allowed queues."""
+    workspace_config = {cloud: {'quota': quota}}
+    if error is None:
+        skypilot_config.check_queue_allowed('team-a',
+                                            workspace_config,
+                                            cloud,
+                                            quota.get('queue'),
+                                            is_default=True)
+    else:
+        with pytest.raises(ValueError, match=error):
+            skypilot_config.check_queue_allowed('team-a',
+                                                workspace_config,
+                                                cloud,
+                                                quota.get('queue'),
+                                                is_default=True)
+
+
+def test_update_config_refuses_default_queue_outside_allowed_queues(
+        monkeypatch, tmp_path) -> None:
+    """Saving a default queue that is not allowed leaves the file as it was."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    config_path = tmp_path / 'server_config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            workspaces:
+              team-a:
+                kubernetes:
+                  quota:
+                    queue: team-q
+                    allowed_queues: [team-q]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        str(config_path))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    queue_key = ('workspaces', 'team-a', 'kubernetes', 'quota', 'queue')
+    new_config.set_nested(queue_key, 'other-q')
+    with pytest.raises(ValueError, match="'other-q'"):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+    assert yaml_utils.read_yaml(str(config_path)) == {
+        'workspaces': {
+            'team-a': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'team-q',
+                        'allowed_queues': ['team-q'],
+                    }
+                }
+            }
+        }
+    }
+
+    # Adding the new default to the list lets the save through.
+    new_config.set_nested(
+        ('workspaces', 'team-a', 'kubernetes', 'quota', 'allowed_queues'),
+        ['team-q', 'other-q'])
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert yaml_utils.read_yaml(str(config_path)) == {
+        'workspaces': {
+            'team-a': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'other-q',
+                        'allowed_queues': ['team-q', 'other-q'],
+                    }
+                }
+            }
+        }
+    }
+
+
 # --- The server config is reloaded only when its source changed -------------
 
 
@@ -2993,20 +3209,21 @@ def _label() -> str:
 
 def _sqlite_config_db(monkeypatch, value: str) -> str:
     """Backs the config_yaml overlay with SQLite; returns a URL to use."""
-    db = db_utils.DatabaseManager('config', skypilot_config._create_table)
+    config_db.ensure_config_db_schema()
+    db = db_utils.DatabaseManager('config', config_db._create_table)
     # Created before the URL is set, so the engine is SQLite.
     engine = db.get_engine()
-    monkeypatch.setattr(skypilot_config, '_db_manager', db)
+    monkeypatch.setattr(config_db, '_db_manager', db)
     _set_config_yaml_row(engine, value)
     return str(engine.url)
 
 
 def _set_config_yaml_row(engine, value: str) -> None:
-    stmt = sqlite.insert(skypilot_config.config_yaml_table).values(
+    stmt = sqlite.insert(config_db.config_yaml_table).values(
         key=skypilot_config.API_SERVER_CONFIG_KEY, value=value)
     stmt = stmt.on_conflict_do_update(
-        index_elements=[skypilot_config.config_yaml_table.c.key],
-        set_={skypilot_config.config_yaml_table.c.value: value})
+        index_elements=[config_db.config_yaml_table.c.key],
+        set_={config_db.config_yaml_table.c.value: value})
     with engine.begin() as conn:
         conn.execute(stmt)
 
@@ -3027,7 +3244,7 @@ def test_server_config_db_value_change_reloads(server_config_file, monkeypatch):
     assert _label() == 'db-a'
     assert counts == {'parse': 1, 'lock': 1}
 
-    _set_config_yaml_row(skypilot_config._db_manager.get_engine(),
+    _set_config_yaml_row(config_db.get_engine(),
                          'aws:\n  labels:\n    k: db-b\n')
     skypilot_config.safe_reload_config()
     assert _label() == 'db-b'
@@ -3324,8 +3541,9 @@ def test_server_config_db_url_change_without_a_row_reloads(
     skypilot_config.reload_config()
     assert _label() == 'a'
 
-    db = db_utils.DatabaseManager('config', skypilot_config._create_table)
-    monkeypatch.setattr(skypilot_config, '_db_manager', db)
+    config_db.ensure_config_db_schema()
+    db = db_utils.DatabaseManager('config', config_db._create_table)
+    monkeypatch.setattr(config_db, '_db_manager', db)
     monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI,
                        str(db.get_engine().url))
     with pytest.raises(ValueError, match='no other config is allowed'):

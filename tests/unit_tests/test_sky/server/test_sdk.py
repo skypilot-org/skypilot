@@ -249,9 +249,9 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             [mock.call(test_endpoint_2),
              mock.call(test_endpoint_2)])
 
-    # Test with invalid endpoint
+    # Test with an unsupported scheme
     with pytest.raises(click.BadParameter):
-        client_sdk.api_login("invalid_endpoint")
+        client_sdk.api_login('ftp://invalid_endpoint')
 
     # Test with endpoint ending with a slash
     test_endpoint_with_slash = "http://test3.skypilot.co/"
@@ -356,6 +356,41 @@ def _mock_healthy_check():
     return mock_check
 
 
+@pytest.mark.parametrize(
+    'endpoint,expected',
+    [
+        # No scheme: https:// is added.
+        ('test.skypilot.co/', 'https://test.skypilot.co'),
+        ('test.skypilot.co:8443', 'https://test.skypilot.co:8443'),
+        ('1.2.3.4:30050', 'https://1.2.3.4:30050'),
+        ('[::1]:46580', 'https://[::1]:46580'),
+        ('a.co/?next=http://x', 'https://a.co/?next=http://x'),
+        # An explicit scheme is kept.
+        ('https://1.2.3.4:46580', 'https://1.2.3.4:46580'),
+        ('http://test.skypilot.co/', 'http://test.skypilot.co'),
+    ])
+def test_api_login_endpoint_without_scheme(monkeypatch: pytest.MonkeyPatch,
+                                           tmp_path: Path, endpoint: str,
+                                           expected: str):
+    """An endpoint with no scheme gets https:// added."""
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(endpoint)
+
+    mock_check.assert_called_with(expected)
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['endpoint'] == expected
+
+
 def test_api_login_with_env_endpoint(monkeypatch: pytest.MonkeyPatch,
                                      tmp_path: Path):
     """Login uses the env var endpoint and does not write it to the config."""
@@ -426,6 +461,38 @@ def test_api_login_env_endpoint_with_conflicting_flag(
 
     with pytest.raises(RuntimeError, match='already set to'):
         client_sdk.api_login("http://other.skypilot.co")
+
+
+@pytest.mark.parametrize(
+    'env_value,flag',
+    [
+        # Scheme-less env var: login and later commands both use https://.
+        ('api.example.com', None),
+        # Same server with and without the scheme is not a conflict.
+        ('https://api.example.com', 'api.example.com'),
+        ('api.example.com', 'https://api.example.com'),
+    ])
+def test_api_login_env_endpoint_without_scheme(monkeypatch: pytest.MonkeyPatch,
+                                               tmp_path: Path, env_value: str,
+                                               flag):
+    """Login and later commands resolve a scheme-less env var the same way."""
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_value)
+    monkeypatch.delenv(constants.OVERRIDE_CONSOLIDATION_MODE, raising=False)
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(flag)
+
+    mock_check.assert_called_with('https://api.example.com')
+    server_common.get_server_url.cache_clear()
+    assert server_common.get_server_url() == 'https://api.example.com'
 
 
 def test_api_login_env_endpoint_with_matching_flag(

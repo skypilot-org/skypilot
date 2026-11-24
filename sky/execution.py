@@ -360,8 +360,10 @@ def _execute(
                 for resource in task.resources:
                     resource.set_kubernetes_identity(_kubernetes_identity)
         dag.resolve_and_validate_volumes()
+        # Exec mounts nothing, so it must not mark the volumes as attached.
         if (not _is_launched_by_jobs_controller and
-                not _is_launched_by_sky_serve_controller):
+                not _is_launched_by_sky_serve_controller and _request_name !=
+                request_names.AdminPolicyRequestName.CLUSTER_EXEC):
             # Only process pre-mount operations on API server.
             dag.pre_mount_volumes()
         for task in dag.tasks:

@@ -13,6 +13,28 @@ jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
   PluginSlot: () => null,
 }));
+// Workspace names and writability come from a hook with its own fetch; tests
+// set them here instead of through the cache.
+const mockWorkspaces = { config: {} };
+jest.mock('@/hooks/useWorkspacesConfig', () => {
+  const actual = jest.requireActual('@/hooks/useWorkspacesConfig');
+  return {
+    __esModule: true,
+    ...actual,
+    useWorkspacesConfig: () => ({
+      workspacesConfig: mockWorkspaces.config,
+      isWorkspaceWritable: (ws) =>
+        mockWorkspaces.config[ws || 'default']?.writable !== false,
+      loaded: true,
+    }),
+  };
+});
+// The caller's role, for the admin-only delete of a k8s-hostpath volume.
+const mockRole = { role: 'admin' };
+jest.mock('@/data/connectors/client', () => ({
+  ...jest.requireActual('@/data/connectors/client'),
+  getCurrentUserInfo: jest.fn(() => Promise.resolve(mockRole)),
+}));
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
@@ -28,6 +50,7 @@ import {
 } from '@testing-library/react';
 import dashboardCache from '@/lib/cache';
 import { useTableColumns } from '@/plugins/PluginProvider';
+import { getCurrentUserInfo } from '@/data/connectors/client';
 import { VolumesTable } from '@/components/volumes';
 
 // A CSI provisioner's refusal, long enough that the cell must truncate it.
@@ -398,5 +421,83 @@ describe('VolumesTable sorting by a plugin column', () => {
     sortValue.mockClear();
     fireEvent.click(screen.getByText('Mount Path'));
     expect(sortValue).toHaveBeenCalledTimes(names.length);
+  });
+});
+
+describe('VolumesTable workspace column', () => {
+  afterEach(() => {
+    mockWorkspaces.config = {};
+  });
+
+  const inWorkspace = (name, workspace, workspaceName) => ({
+    ...volume(name),
+    workspace,
+    ...(workspaceName ? { workspace_name: workspaceName } : {}),
+  });
+
+  it('shows the name the server sends', async () => {
+    const { container } = await renderTable([
+      inWorkspace('vol-b', 'ws-b-id', 'team-b'),
+    ]);
+
+    expect(headers(container)).toContain('Workspace');
+    expect(screen.getByText('team-b')).toBeTruthy();
+  });
+
+  it('names the workspace itself for a server that sends only the id', async () => {
+    mockWorkspaces.config = { 'ws-b-id': { name: 'team-b' } };
+    await renderTable([inWorkspace('vol-b', 'ws-b-id')]);
+
+    expect(screen.getByText('team-b')).toBeTruthy();
+  });
+
+  it('disables delete only in a workspace the user cannot write', async () => {
+    mockWorkspaces.config = {
+      'ws-a': { writable: true },
+      'ws-b': { writable: false },
+    };
+    const { container } = await renderTable([
+      inWorkspace('vol-a', 'ws-a', 'team-a'),
+      inWorkspace('vol-b', 'ws-b', 'team-b'),
+    ]);
+
+    const deleteButton = (name) =>
+      Array.from(container.querySelectorAll('table tbody tr'))
+        .find((row) => row.textContent.includes(name))
+        .querySelector('button[title="Delete volume"]');
+    expect(deleteButton('vol-a').disabled).toBe(false);
+    expect(deleteButton('vol-b').disabled).toBe(true);
+    expect(deleteButton('vol-b').closest('span').title).toMatch(/Read-only/);
+  });
+});
+
+describe('VolumesTable delete of a k8s-hostpath volume', () => {
+  afterEach(() => {
+    mockRole.role = 'admin';
+  });
+
+  const deleteButton = (container, name) =>
+    Array.from(container.querySelectorAll('table tbody tr'))
+      .find((row) => row.textContent.includes(name))
+      .querySelector('button[title="Delete volume"]');
+
+  it.each([
+    ['user', 'vol-hp', true],
+    ['user', 'vol-pvc', false],
+    ['admin', 'vol-hp', false],
+  ])('for a %s, %s disabled: %s', async (role, name, disabled) => {
+    mockRole.role = role;
+    const { container } = await renderTable([
+      { ...volume('vol-hp'), type: 'k8s-hostpath' },
+      volume('vol-pvc'),
+    ]);
+    // Let the role land, so an enabled button is not just a role not yet known.
+    await waitFor(() => expect(getCurrentUserInfo).toHaveBeenCalled());
+    await act(async () => {});
+
+    expect(deleteButton(container, name).disabled).toBe(disabled);
+    expect(deleteButton(container, name).closest('span').title).toBe(
+      disabled ? 'Only an admin can delete k8s-hostpath volumes' : ''
+    );
   });
 });

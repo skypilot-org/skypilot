@@ -224,10 +224,7 @@ def _list_accelerators(
     configured_tolerations = kubernetes_utils.get_configured_tolerations(
         context)
 
-    for node in nodes:
-        # Check if node is ready
-        node_is_ready = node.is_ready()
-        node_is_cordoned = node.is_cordoned()
+    def _is_tainted(node) -> bool:
         node_taints = node.get_taints(
             exclude_cordon=True,
             exclude_not_ready=True,
@@ -238,7 +235,46 @@ def _list_accelerators(
         # does not make the node un-schedulable for the user's workloads.
         # Without configured tolerations, every retained taint has
         # `tolerated=False` so this is equivalent to `len(node_taints) > 0`.
-        node_is_tainted = kubernetes_utils.has_untolerated_taint(node_taints)
+        return kubernetes_utils.has_untolerated_taint(node_taints)
+
+    # A multi-host TPU slice is one GKE node pool and is only usable whole:
+    # its VMs count as free only when every VM of the pool is ready,
+    # schedulable and idle.
+    # A pool also counts as busy when fewer of its VMs are visible than the
+    # slice has (a pool still scaling up, or allowed_nodes listing only some
+    # of its VMs), or when a VM has fewer allocatable chips than it has (each
+    # slice pod requests all chips of its VM).
+    pool_key = kubernetes_utils.GKE_NODEPOOL_LABEL_KEY
+    busy_slice_pools: Set[str] = set()
+    pool_vms: Dict[str, int] = collections.defaultdict(int)
+    pool_vms_needed: Dict[str, int] = {}
+    for node in nodes:
+        labels = node.metadata.labels or {}
+        if not (kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in labels and
+                kubernetes_utils.is_multi_host_tpu(labels)):
+            continue
+        pool = labels.get(pool_key, '')
+        pool_vms[pool] += 1
+        formatter = kubernetes_utils.GKELabelFormatter
+        pool_vms_needed[pool] = (
+            kubernetes_utils.reduce_tpu_topology(
+                labels[formatter.TPU_TOPOLOGY_LABEL_KEY]) //
+            max(1, int(labels[formatter.ACCELERATOR_COUNT_LABEL_KEY])))
+        allocatable_chips = kubernetes_utils.get_node_accelerator_count(
+            context, node.status.allocatable, gpu_resource_key=gpu_resource_key)
+        if (not node.is_ready() or node.is_cordoned() or _is_tainted(node) or
+                allocated_qty_by_node.get(node.metadata.name, 0) > 0 or
+                allocatable_chips < int(
+                    labels[formatter.ACCELERATOR_COUNT_LABEL_KEY])):
+            busy_slice_pools.add(pool)
+    busy_slice_pools.update(pool for pool, needed in pool_vms_needed.items()
+                            if pool_vms[pool] < needed)
+
+    for node in nodes:
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+        node_is_cordoned = node.is_cordoned()
+        node_is_tainted = _is_tainted(node)
 
         for key in keys:
             if key in node.metadata.labels:
@@ -249,10 +285,15 @@ def _list_accelerators(
                 if not accelerator_name:
                     continue
 
-                # Exclude multi-host TPUs from being processed.
-                # TODO(Doyoung): Remove the logic when adding support for
-                # multi-host TPUs.
-                if kubernetes_utils.is_multi_host_tpu(node.metadata.labels):
+                # One VM of a multi-host TPU slice is requested as the whole
+                # slice, so its requestable quantity is the slice's chips.
+                # Slices of a shape SkyPilot cannot launch are skipped.
+                multi_host_slice_chips = (
+                    kubernetes_utils.launchable_tpu_slice_chips(
+                        accelerator_name, node.metadata.labels))
+                if (multi_host_slice_chips is None and
+                        kubernetes_utils.is_multi_host_tpu(
+                            node.metadata.labels)):
                     continue
 
                 # Check if name_filter regex matches the accelerator_name
@@ -291,7 +332,10 @@ def _list_accelerators(
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
                     # provisioned, but TPUs are considered as an atomic unit.
-                    if kubernetes_utils.is_tpu_on_gke(accelerator_name):
+                    if multi_host_slice_chips is not None:
+                        accelerators_qtys.add(
+                            (accelerator_name, multi_host_slice_chips))
+                    elif kubernetes_utils.is_tpu_on_gke(accelerator_name):
                         accelerators_qtys.add(
                             (accelerator_name, accelerator_capacity))
                     else:
@@ -306,7 +350,14 @@ def _list_accelerators(
                             accelerators_qtys.add(
                                 (accelerator_name, accelerator_capacity))
 
-                if accelerator_capacity >= min_quantity_filter:
+                if multi_host_slice_chips is not None:
+                    # Each VM adds its own chips. A slice only serves a request
+                    # for exactly its size, so a quantity filter must match it.
+                    if quantity_filter in (None, multi_host_slice_chips):
+                        total_accelerators_capacity[accelerator_name] = (
+                            total_accelerators_capacity.get(
+                                accelerator_name, 0) + accelerator_capacity)
+                elif accelerator_capacity >= min_quantity_filter:
                     quantized_count = (
                         min_quantity_filter *
                         (accelerator_capacity // min_quantity_filter))
@@ -336,7 +387,18 @@ def _list_accelerators(
                 allocated_qty = allocated_qty_by_node[node.metadata.name]
                 accelerators_available = accelerator_count - allocated_qty
 
-                if accelerators_available >= min_quantity_filter:
+                if multi_host_slice_chips is not None:
+                    # A slice VM's chips count as free only when its whole
+                    # slice (node pool) is ready and idle.
+                    pool = node.metadata.labels.get(pool_key, '')
+                    if (quantity_filter in (None, multi_host_slice_chips) and
+                            pool not in busy_slice_pools and
+                            accelerators_available == accelerator_count and
+                            accelerator_count > 0):
+                        total_accelerators_available[accelerator_name] = (
+                            total_accelerators_available.get(
+                                accelerator_name, 0) + accelerator_count)
+                elif accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
                     if quantized_availability > 0:
