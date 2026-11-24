@@ -8,6 +8,7 @@ from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.usage import usage_lib
+from sky.utils import annotations
 from sky.utils import context
 
 if typing.TYPE_CHECKING:
@@ -20,6 +21,7 @@ if typing.TYPE_CHECKING:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def up(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
@@ -54,6 +56,7 @@ def up(
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def update(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
@@ -90,6 +93,7 @@ def update(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def down(
     service_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
@@ -125,6 +129,7 @@ def down(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def terminate_replica(service_name: str, replica_id: int,
                       purge: bool) -> server_common.RequestId[None]:
     """Tears down a specific replica for the given service.
@@ -159,6 +164,7 @@ def terminate_replica(service_name: str, replica_id: int,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def status(
     service_names: Optional[Union[str, List[str]]]
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
@@ -226,6 +232,7 @@ def status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
+@annotations.client_api
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
@@ -304,6 +311,7 @@ def tail_logs(service_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def sync_down_logs(service_name: str,
                    local_dir: str,
                    *,
