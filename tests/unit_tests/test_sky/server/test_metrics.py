@@ -2275,3 +2275,36 @@ def test_federation_targets_leave_out_known_unreachable_contexts(monkeypatch):
                         lambda: [])
     assert metrics._FederationTargets()._prologue() == (['up'], [])
     split.assert_called_once_with(['up'])
+
+
+def test_process_monitor_reports_the_peak_rss_of_the_window(monkeypatch):
+    """process_monitor reports the highest RSS seen in the current 30 s
+    window, not only the latest 1 s sample, and starts over each window."""
+    mb = 1024 * 1024
+    # RSS per 1 s sample: a spike at the second sample, then low again; the
+    # last sample falls in a new 30 s window.
+    samples = [300 * mb, 1800 * mb, 310 * mb, 305 * mb, 320 * mb]
+    clock = {'now': 1000.0}
+    stop = threading.Event()
+    reported = []
+
+    class FakeProcess:
+
+        def memory_info(self):
+            return types.SimpleNamespace(rss=samples[len(reported)])
+
+        def cpu_times(self):
+            return types.SimpleNamespace(user=0.0, system=0.0)
+
+    def fake_sleep(_):
+        reported.append(metrics.peak_rss_bytes)
+        clock['now'] += 1 if len(reported) < len(samples) - 1 else 30
+        if len(reported) == len(samples):
+            stop.set()
+
+    monkeypatch.setattr(metrics.psutil, 'Process', lambda pid: FakeProcess())
+    monkeypatch.setattr(
+        metrics, 'time',
+        types.SimpleNamespace(time=lambda: clock['now'], sleep=fake_sleep))
+    metrics.process_monitor('worker:test', stop)
+    assert reported == [300 * mb, 1800 * mb, 1800 * mb, 1800 * mb, 320 * mb]
