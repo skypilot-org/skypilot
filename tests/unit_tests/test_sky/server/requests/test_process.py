@@ -967,23 +967,28 @@ def test_shutdown_stops_workers_when_counting_a_break_fails():
 
 
 def test_shutdown_stops_workers_when_counting_a_start_failure_fails():
-    """If counting a worker's failed start raises during shutdown, shutdown
-    still stops the other workers."""
-    pool = PoolExecutor(max_workers=1, initializer=raise_in_init)
-    future = pool.submit(dummy_task)
-    with pytest.raises(concurrent.futures.process.BrokenProcessPool):
-        future.result(timeout=60)
-    pids = list(pool._processes)
-    # As if shutdown ran before the pool was marked broken: record_break does
-    # nothing and shutdown's own read of the start-up pipe counts the failure.
-    with unittest.mock.patch.object(PoolExecutor, 'record_break'), \
-            unittest.mock.patch.object(
-                metrics_utils.SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL,
+    """If counting a failed start raises during shutdown, shutdown still
+    stops a worker that is busy with a task."""
+    pool = PoolExecutor(max_workers=1)
+    pid = pool.submit(get_pid).result(timeout=60)
+    # Keep the worker busy, so only shutdown's kill can stop it.
+    pool.submit(dummy_task, 120)
+    # A start failure waiting on the start-up pipe when shutdown reads it.
+    ready_writer = pool._initargs[0]
+    requests_process._send_start_signal(ready_writer,
+                                        requests_process._START_FAILED)
+    try:
+        with unittest.mock.patch.object(
+                metrics_utils.
+                SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL,
                 'labels',
                 side_effect=OSError('metrics dir full')) as labels:
-        pool.shutdown()
-    assert labels.called
-    assert all(_wait_until(lambda p=p: not _pid_alive(p)) for p in pids)
+            pool.shutdown()
+        assert labels.called
+        assert _wait_until(lambda: not _pid_alive(pid))
+    finally:
+        if _pid_alive(pid):
+            os.kill(pid, signal.SIGKILL)
 
 
 @requires_warm_start
