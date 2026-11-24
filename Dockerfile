@@ -7,8 +7,9 @@ FROM python:3.13.18-slim AS gcloud-apt-install
 # install layer doesn't bake in a stale version via buildx registry caching
 # (the RUN command's hash is the cache key, so without a version specifier
 # the layer is reused indefinitely from whatever apt resolved at first build).
-# 567.0.0 ships gsutil 5.37, which replaced OpenSSL.crypto.sign with the
-# cryptography library — required after pyopenssl 24.3 dropped that API (#8070).
+# Keep at 567.0.0 or newer: gsutil 5.37 (bundled since 567.0.0) replaced
+# OpenSSL.crypto.sign with the cryptography library — required after
+# pyopenssl 24.3 dropped that API (#8070).
 ARG GCLOUD_VERSION=594.0.1-0
 
 RUN apt-get update && \
@@ -122,7 +123,7 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    curl -LO "https://dl.k8s.io/release/v1.34.13/bin/linux/$ARCH/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/v1.35.10/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl
 
