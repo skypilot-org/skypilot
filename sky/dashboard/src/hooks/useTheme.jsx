@@ -28,10 +28,10 @@ const ThemeContext = createContext({
 const readStoredTheme = () => {
   try {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    // Light until someone picks Dark or System.
-    return isTheme(stored) ? stored : THEME_LIGHT;
+    // Follow the OS until someone picks Light or Dark.
+    return isTheme(stored) ? stored : THEME_SYSTEM;
   } catch (e) {
-    return THEME_LIGHT;
+    return THEME_SYSTEM;
   }
 };
 
@@ -39,7 +39,7 @@ export function ThemeProvider({ children }) {
   // The server render has no storage; nothing rendered below depends on the
   // value before mount, so reading it lazily on the client is safe.
   const [theme, setThemeState] = useState(() =>
-    typeof window === 'undefined' ? THEME_LIGHT : readStoredTheme()
+    typeof window === 'undefined' ? THEME_SYSTEM : readStoredTheme()
   );
   const [systemDark, setSystemDark] = useState(() =>
     typeof window === 'undefined'
