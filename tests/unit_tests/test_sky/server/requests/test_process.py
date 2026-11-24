@@ -282,9 +282,10 @@ def _gated_pids(gate_dir, prefix):
     }
 
 
-def _release_one_at_a_time(executor, gate_dir, total):
+def _release_one_at_a_time(executor, gate_dir, total, after_release=None):
     """Releases gated workers one by one, checking at every step that no more
-    than _WARM_START_MAX_STARTING workers are starting at once."""
+    than _WARM_START_MAX_STARTING workers are starting at once. Calls
+    after_release() after each release, before the next check."""
     cap = requests_process._WARM_START_MAX_STARTING
     released = set()
     while len(released) < total:
@@ -300,6 +301,17 @@ def _release_one_at_a_time(executor, gate_dir, total):
         pid = min(waiting())
         open(os.path.join(gate_dir, f'go.{pid}'), 'w', encoding='utf-8').close()
         released.add(pid)
+        if after_release is not None:
+            after_release()
+
+
+def block_until(path, seconds):
+    """Task that keeps its worker busy until `path` exists (at most
+    `seconds`). Returns whether it saw `path`, i.e. did not time out."""
+    deadline = time.monotonic() + seconds
+    while not os.path.exists(path) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return os.path.exists(path)
 
 
 def busy_task(started_path, seconds):
@@ -457,20 +469,34 @@ def test_pool_executor_warm_start_caps_starting_workers(tmp_path):
 def test_pool_executor_warm_start_caps_workers_started_by_submits(tmp_path):
     """Tasks submitted during warm start wait for a ready worker instead of
     starting more workers, so the limit on workers starting at once holds at
-    every step."""
-    gate_dir = str(tmp_path)
+    every step, including when every ready worker is busy."""
+    gate_dir = str(tmp_path / 'gate')
+    os.makedirs(gate_dir)
+    finish = str(tmp_path / 'finish')
     executor = PoolExecutor(max_workers=6,
                             warm_start=True,
                             initializer=gated_start,
                             initargs=(gate_dir, 60))
+    futures = []
+
+    def submit_blocking_tasks():
+        # More tasks than ready workers, so no submit finds an idle worker.
+        futures.extend(
+            executor.submit(block_until, finish, 300) for _ in range(2))
+
     try:
         assert _wait_until(lambda: len(executor._processes) >= 1)
-        futures = [executor.submit(get_pid) for _ in range(6)]
-        _release_one_at_a_time(executor, gate_dir, 6)
+        submit_blocking_tasks()
+        _release_one_at_a_time(executor,
+                               gate_dir,
+                               6,
+                               after_release=submit_blocking_tasks)
+        open(finish, 'w', encoding='utf-8').close()
         assert all(f.result(timeout=60) for f in futures)
         assert executor._warm_start_done.wait(60)
         assert len(executor._processes) == 6
     finally:
+        open(finish, 'w', encoding='utf-8').close()
         executor.shutdown()
 
 
