@@ -253,6 +253,13 @@ jobs:
           PLATFORM_NAME=$(echo "${{ matrix.platform }}" | sed 's/\//-/g')
           echo "name=$PLATFORM_NAME" >> $GITHUB_OUTPUT
 
+      # APT_REFRESH changes once a week, so the cached apt-get upgrade layer
+      # in the Dockerfile is rebuilt at least weekly and picks up Debian
+      # security updates; other layers keep using the build cache.
+      - name: Compute apt refresh key
+        id: apt-refresh
+        run: echo "key=$(date -u +%G%V)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Docker image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
@@ -262,6 +269,7 @@ jobs:
           tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
           build-args: |
             INSTALL_FROM_SOURCE=${{ needs.prepare.outputs.install_from_source }}
+            APT_REFRESH=${{ steps.apt-refresh.outputs.key }}
           cache-from: |
             type=gha,scope=${{ steps.platform.outputs.name }}
           cache-to: |
