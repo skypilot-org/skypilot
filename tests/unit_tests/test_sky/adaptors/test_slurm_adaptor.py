@@ -754,7 +754,8 @@ class TestGetJobNodes:
             assert 'for h in worker-1 worker-10' in second_call
             assert 'getent ahostsv4' in second_call
 
-    def test_get_job_nodes_hostname_resolution_failure(self):
+    @pytest.mark.parametrize('allow_empty', [False, True])
+    def test_get_job_nodes_hostname_resolution_failure(self, allow_empty):
         """Test error handling when hostname resolution fails."""
 
         client = slurm.SlurmClient(
@@ -778,7 +779,22 @@ class TestGetJobNodes:
 
             with pytest.raises(RuntimeError,
                                match='Failed to resolve hostnames'):
-                client.get_job_nodes('12345')
+                client.get_job_nodes('12345', allow_empty=allow_empty)
+
+    @pytest.mark.parametrize('allow_empty', [False, True])
+    def test_get_job_nodes_rejects_unusable_command_output(self, allow_empty):
+        client = slurm.SlurmClient('localhost', 22, 'root', None)
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'node1\n', '')
+            with pytest.raises(RuntimeError, match='No nodes found'):
+                client.get_job_nodes('12345', allow_empty=allow_empty)
+
+    def test_get_job_nodes_rejects_failed_squeue_with_allow_empty(self):
+        client = slurm.SlurmClient('localhost', 22, 'root', None)
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (1, '', 'squeue: Invalid job id')
+            with pytest.raises(exceptions.CommandError):
+                client.get_job_nodes('12345', allow_empty=True)
 
 
 class TestGetAllJobsGres:

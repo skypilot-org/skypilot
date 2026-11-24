@@ -1543,7 +1543,7 @@ class TestGetCommandRunners:
 
 
 class TestQueryInstances:
-    """Tests manifest-backed Slurm stopped status."""
+    """Tests Slurm allocation and snapshot status."""
 
     def test_manifest_reports_each_rank_stopped(self, monkeypatch):
         client = mock.MagicMock()
@@ -1631,6 +1631,39 @@ class TestQueryInstances:
         assert statuses == {
             instance.slurm_utils.instance_id('booting-job', 'node-a'):
                 (instance.status_lib.ClusterStatus.INIT, None)
+        }
+
+    @pytest.mark.parametrize('retry_if_missing', [False, True])
+    def test_configuring_job_without_nodes_is_init(self, monkeypatch,
+                                                   retry_if_missing):
+        client = instance.slurm.SlurmClient('localhost', 22, 'testuser', None)
+        monkeypatch.setattr(instance, '_make_slurm_client',
+                            mock.MagicMock(return_value=client))
+        monkeypatch.setattr(
+            client, 'query_jobs', lambda name, states:
+            (['booting-job'] if states == ['configuring'] else []))
+        monkeypatch.setattr(instance.time, 'sleep', mock.MagicMock())
+
+        def run_slurm_command(cmd):
+            # Execute the real adapter command with an empty squeue NodeList.
+            # A hostlist lookup is unexpected when Slurm assigned no nodes.
+            shell = ('squeue() { printf "\\n"; }; '
+                     'scontrol() { return 1; }; ')
+            result = subprocess.run(['sh', '-c', shell + cmd],
+                                    check=False,
+                                    capture_output=True,
+                                    text=True)
+            return result.returncode, result.stdout, result.stderr
+
+        monkeypatch.setattr(client, '_run_slurm_cmd', run_slurm_command)
+
+        statuses = instance.query_instances('test-cluster',
+                                            _CLUSTER,
+                                            provider_config=_PROVIDER_CONFIG,
+                                            retry_if_missing=retry_if_missing)
+
+        assert statuses == {
+            'booting-job': (instance.status_lib.ClusterStatus.INIT, None)
         }
 
     def test_container_snapshot_denial_keeps_status_unknown(self, mock_client):
