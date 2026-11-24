@@ -65,12 +65,12 @@ def test_exact_node_range_is_released(num_nodes, requested):
     client.cancel_job.assert_not_called()
 
 
-# --- A changed shape is refused on this partition only. ---
+# --- A changed shape is refused, as not retryable. ---
 
 
 def test_raised_cpus_cancel_and_refuse_with_a_fix():
     client = _client(cpus_per_task='8')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
     client.cancel_job.assert_called_once_with('123')
     client.release_job.assert_not_called()
@@ -92,7 +92,7 @@ def test_raised_cpus_cancel_and_refuse_with_a_fix():
 def test_raised_cpus_without_a_memory_request_names_no_memory(memory):
     # Without --mem, MaxMemPerCPU cannot be the cause, so the hint is left out.
     client = _client(cpus_per_task='8')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client, memory=memory)
     client.cancel_job.assert_called_once_with('123')
     message = str(e.value)
@@ -103,7 +103,7 @@ def test_raised_cpus_without_a_memory_request_names_no_memory(memory):
 
 def test_changed_node_count_cancels_and_refuses():
     client = _client(num_nodes='2')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError,
+    with pytest.raises(exceptions.ProvisionUnsupportedError,
                        match='2 nodes instead of the 1 requested'):
         _check(client)
     client.cancel_job.assert_called_once_with('123')
@@ -114,7 +114,7 @@ def test_changed_node_count_cancels_and_refuses():
 def test_widened_node_range_cancels_and_refuses(num_nodes, requested):
     # A range lets Slurm run the job on more (or fewer) nodes than requested.
     client = _client(num_nodes=num_nodes)
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError,
+    with pytest.raises(exceptions.ProvisionUnsupportedError,
                        match=f'{num_nodes} nodes instead of the {requested} '
                        'requested'):
         _check(client, num_nodes=requested)
@@ -124,7 +124,7 @@ def test_widened_node_range_cancels_and_refuses(num_nodes, requested):
 
 def test_refusal_is_not_wrapped_or_cancelled_twice():
     client = _client(cpus_per_task='8')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
     assert str(e.value).startswith('Slurm would run cluster')
     client.cancel_job.assert_called_once_with('123')
@@ -158,7 +158,7 @@ def test_job_with_priority_zero_and_another_reason_is_held(reason):
 def test_pending_unheld_job_with_changed_shape_says_would_run():
     # The hold was dropped but the job waits for resources: not started.
     client = _client(cpus_per_task='8', reason='Resources')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
     message = str(e.value)
     assert message.startswith('Slurm would run cluster')
@@ -168,13 +168,13 @@ def test_pending_unheld_job_with_changed_shape_says_would_run():
 
 def test_held_job_with_another_reason_and_changed_shape_says_would_run():
     client = _client(cpus_per_task='8', reason='BadConstraints', priority='0')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
     assert str(e.value).startswith('Slurm would run cluster')
     assert 'cancelled before it started' in str(e.value)
 
 
-# --- A shape that cannot be parsed is refused outright: it will not change. ---
+# --- A shape that cannot be parsed is refused as well: it will not change. ---
 
 
 @pytest.mark.parametrize('cpus_per_task, num_nodes', [
@@ -187,7 +187,6 @@ def test_unparseable_shape_is_refused_and_cancelled(cpus_per_task, num_nodes):
     client = _client(cpus_per_task=cpus_per_task, num_nodes=num_nodes)
     with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
-    assert not isinstance(e.value, exceptions.ProvisionUnsupportedInZoneError)
     assert 'Could not read the shape' in str(e.value)
     assert 'Slurm job 123 was cancelled before it started.' in str(e.value)
     client.cancel_job.assert_called_once_with('123')
@@ -256,7 +255,7 @@ def test_job_no_longer_held_with_kept_shape_is_kept(job_state, reason):
 
 def test_running_job_with_changed_shape_is_cancelled_without_claiming_held():
     client = _client(cpus_per_task='8', job_state='RUNNING', reason='None')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
     message = str(e.value)
     # It runs already: Slurm "runs" it so, not "would run" it so.
@@ -270,7 +269,7 @@ def test_running_job_with_changed_shape_is_cancelled_without_claiming_held():
 def test_running_job_that_cannot_be_cancelled_says_it_may_be_running():
     client = _client(cpus_per_task='8', job_state='RUNNING', reason='None')
     client.cancel_job.side_effect = RuntimeError('ssh down')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
     message = str(e.value)
     assert 'could not be cancelled and may be running' in message
@@ -297,7 +296,7 @@ def test_job_no_longer_pending_or_running_is_not_cancelled(job_state):
 
 def test_refusal_says_the_job_was_cancelled():
     client = _client(cpus_per_task='8')
-    with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
         _check(client)
     assert 'Slurm job 123 was cancelled before it started.' in str(e.value)
     assert 'scancel' not in str(e.value)
@@ -307,7 +306,7 @@ def test_failed_cancel_of_a_held_job_says_still_held():
     client = _client(cpus_per_task='8')
     client.cancel_job.side_effect = RuntimeError('ssh down')
     with mock.patch.object(slurm_instance.logger, 'warning') as warning:
-        with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+        with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
             _check(client)
     message = str(e.value)
     assert 'Slurm job 123 could not be cancelled and is still held' in message
@@ -376,14 +375,13 @@ def test_interrupted_cancel_warns_if_it_fails():
 
 def test_job_left_under_the_submission_hold_is_recognised():
     client = mock.Mock()
-    fields = {
+    client.get_job_fields.return_value = {
         'JobId': '123',
         'JobState': 'PENDING',
         'Reason': 'JobHeldUser',
-        'Command': '/home/u/.sky_provision/c.sh',
+        'Priority': '0',
     }
-    client.get_job_fields.return_value = fields
-    assert slurm_instance._left_held_fields(client, '123') == fields
+    assert slurm_instance._is_left_held(client, '123') is True
     client.get_job_fields.assert_called_once_with('123')
 
 
@@ -401,7 +399,7 @@ def test_job_not_under_the_submission_hold_is_not_recognised(
         'Reason': reason,
         'Priority': priority,
     }
-    assert slurm_instance._left_held_fields(client, '123') is None
+    assert slurm_instance._is_left_held(client, '123') is False
 
 
 def test_held_job_with_another_reason_is_recognised_as_left_held():
@@ -411,13 +409,13 @@ def test_held_job_with_another_reason_is_recognised_as_left_held():
         'Reason': 'BadConstraints',
         'Priority': '0',
     }
-    assert slurm_instance._left_held_fields(client, '123') is not None
+    assert slurm_instance._is_left_held(client, '123') is True
 
 
 def test_unreadable_job_is_not_recognised_as_left_held():
     client = mock.Mock()
     client.get_job_fields.side_effect = RuntimeError('ssh down')
-    assert slurm_instance._left_held_fields(client, '123') is None
+    assert slurm_instance._is_left_held(client, '123') is False
 
 
 # --- Parsing. ---

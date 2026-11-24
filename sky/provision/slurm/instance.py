@@ -436,13 +436,12 @@ def _release_if_request_kept(client: 'slurm.SlurmClient', job_id: str,
     rather than left behind, unless it is no longer pending or running.
 
     Raises:
-        exceptions.ProvisionUnsupportedInZoneError: Slurm changed the
-            request, or holds the job for an administrator, on this
-            partition. Another partition may still serve the request.
-        exceptions.ProvisionUnsupportedError: The job's shape could not be
-            parsed from `scontrol show job`.
-        RuntimeError: A Slurm command failed, or the job was no longer
-            pending or running; worth retrying.
+        exceptions.ProvisionUnsupportedError: Slurm changed the request, or
+            its shape could not be parsed from `scontrol show job`. Failover
+            blocks this candidate, which is this partition only, and tries
+            the next; the error is not retried.
+        RuntimeError: A Slurm command failed, the job was no longer pending
+            or running, or an administrator held it; worth retrying.
     """
     refused = False
     try:
@@ -565,7 +564,7 @@ def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
                     f'{slurm_cpus_per_task}, or less --memory.')
         # Pending (held or not), it has not started: Slurm would run it so.
         verb = 'would run' if state == 'PENDING' else 'runs'
-        raise _Refusal(exceptions.ProvisionUnsupportedInZoneError,
+        raise _Refusal(exceptions.ProvisionUnsupportedError,
                        f'Slurm {verb} cluster {cluster_name!r} on partition '
                        f'{partition!r} with {" and ".join(changes)}, so the '
                        'launch was refused there rather than run (and '
@@ -587,28 +586,20 @@ def _verify_and_release(client: 'slurm.SlurmClient', job_id: str,
                        detail=f' Error: {e}') from e
 
 
-def _left_held_fields(client: 'slurm.SlurmClient',
-                      job_id: str) -> Optional[Dict[str, str]]:
-    """A reused job's fields, if it is pending under a user hold.
+def _is_left_held(client: 'slurm.SlurmClient', job_id: str) -> bool:
+    """Whether a reused job is pending under a user hold (_is_user_held).
 
-    A launch submits its job held and releases it once verified. A launch
-    that died in between without cleaning up (e.g. its process was killed)
-    leaves the job pending under a user hold, never having run its batch
-    script. `hold` is a protected option in slurm.sbatch_options, so such a
-    hold is normally SkyPilot's own (sbatch also takes abbreviations, e.g.
-    `--ho`, which that check does not catch); _recover_left_held_job checks
-    that the job is the one this launch would have submitted. A job that is
-    not held (see _is_user_held), e.g. held by an administrator, or whose
-    fields cannot be read, gives None.
+    A launch submits its job held and releases it once verified, so a launch
+    that died in between leaves its job like this. `hold` is a protected
+    option in slurm.sbatch_options, so such a hold is normally SkyPilot's
+    own. A job whose fields cannot be read is not taken to be held.
     """
     try:
         fields = client.get_job_fields(job_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not check Slurm job {job_id} for a hold: {e}')
-        return None
-    if _is_user_held(fields):
-        return fields
-    return None
+        return False
+    return _is_user_held(fields)
 
 
 def _wait_for_job_nodes(
@@ -816,12 +807,6 @@ def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     This path is assumed to be on a shared NFS mount accessible by all nodes.
     """
     return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
-
-
-def _ready_signal_path(base_dir: str, cluster_name_on_cloud: str) -> str:
-    """The file the batch script creates once the allocation is ready."""
-    return (f'{_sky_cluster_home_dir(base_dir, cluster_name_on_cloud)}'
-            '/.sky_sbatch_ready')
 
 
 def _snapshot_dir(base_dir: str,
@@ -1267,88 +1252,6 @@ def _wait_for_job_ready(
         time.sleep(poll_interval_seconds)
 
 
-def _wait_for_new_allocation(
-    client: 'slurm.SlurmClient',
-    login_node_runner: command_runner.SlurmLoginNodeCommandRunner,
-    job_id: str,
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    slurm_cluster: str,
-    partition: str,
-    provision_timeout: int,
-    on_pending: Callable[[str, Optional[str], Optional[int]], None],
-    ready_signal: str,
-    sbatch_log_base_dir: str,
-) -> common.ProvisionRecord:
-    """Wait for a job this launch let run to get its nodes and be ready.
-
-    Used for a newly submitted job and for one an earlier launch left held:
-    neither had run its batch script before this launch, so both wait for
-    its nodes and then for the batch script's ready signal.
-    """
-    _record_allocation(cluster_name, slurm_cluster, job_id)
-
-    _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                        on_pending)
-    _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
-    nodes, _ = client.get_job_nodes(job_id)
-    # Reset spinner since nodes are now allocated
-    rich_utils.force_update_status(
-        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
-    created_instance_ids = [
-        slurm_utils.instance_id(job_id, node) for node in nodes
-    ]
-
-    # No timeout for job initialization: once nodes are allocated, the
-    # provision has effectively succeeded. Container image pulls and
-    # package installation can take a long time for large images, and
-    # should not be subject to the provision timeout (which is meant for
-    # the Slurm scheduler queue, not for container setup).
-
-    # Wait for the sbatch script to create the cluster's sky directories,
-    # to avoid a race condition where post-provision commands try to
-    # access the directories before they are created.
-    slurm_log = _sbatch_log_path(sbatch_log_base_dir, job_id)
-
-    # Stream logs in background thread for visibility if debug mode
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-
-        def _stream_logs():
-            login_node_runner.run(['tail', '-n', '10', '-f', '--', slurm_log],
-                                  require_outputs=False,
-                                  stream_logs=True)
-
-        log_thread = threading.Thread(target=_stream_logs, daemon=True)
-        log_thread.start()
-
-    try:
-        _wait_for_job_ready(
-            login_node_runner,
-            client,
-            job_id,
-            ready_signal,
-            slurm_log,
-        )
-    except (RuntimeError, exceptions.CommandError) as e:
-        _, stdout, _ = login_node_runner.run(['cat', '--', slurm_log],
-                                             require_outputs=True,
-                                             stream_logs=False)
-        if stdout:
-            logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
-                         f'{stdout}'
-                         f'=== End of Slurm job logs ===')
-        raise e
-
-    return common.ProvisionRecord(provider_name='slurm',
-                                  region=region,
-                                  zone=partition,
-                                  cluster_name=cluster_name_on_cloud,
-                                  head_instance_id=created_instance_ids[0],
-                                  resumed_instance_ids=[],
-                                  created_instance_ids=created_instance_ids)
-
-
 def _cancel_and_wait_until_gone(client: 'slurm.SlurmClient', job_id: str,
                                 cluster_name_on_cloud: str,
                                 description: str) -> None:
@@ -1376,69 +1279,6 @@ def _cancel_and_wait_until_gone(client: 'slurm.SlurmClient', job_id: str,
                 f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s later; check it with '
                 f'`squeue -j {job_id}`.')
         time.sleep(POLL_INTERVAL_SECONDS)
-
-
-def _recover_left_held_job(
-    client: 'slurm.SlurmClient',
-    provider_config: Dict[str, Any],
-    job_id: str,
-    fields: Dict[str, str],
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    slurm_cluster: str,
-    partition: str,
-    num_nodes: int,
-    resources: Dict[str, Any],
-    provision_timeout: int,
-    on_pending: Callable[[str, Optional[str], Optional[int]], None],
-) -> Optional[common.ProvisionRecord]:
-    """Check, release and wait for a job an earlier launch left held.
-
-    Its batch script has not run yet, so it is checked and waited for exactly
-    like a new job. It keeps its ID, so jobs that depend on it (e.g. afterok)
-    still do. That is only done if it is the job this launch would submit:
-    the same batch script, which the ready signal and log paths it waits on
-    are tied to, on the same partition. Otherwise it is cancelled, so that
-    the caller submits a new job in its place.
-
-    Returns:
-        The job's record once it is ready, or None if it was cancelled
-        instead and is gone.
-
-    Raises:
-        RuntimeError: The job is not the one this launch would submit and
-            could not be cancelled, or is still listed after the cancel; or
-            checking it failed for a reason worth retrying.
-        exceptions.ProvisionUnsupportedError: See _release_if_request_kept.
-    """
-    # Resolved while the job is still held, so that a failure here leaves
-    # nothing running.
-    login_node_runner = _make_login_node_runner(provider_config)
-    sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    script_path = _sbatch_provision_script_path(sky_base_dir,
-                                                cluster_name_on_cloud)
-    command = fields.get('Command')
-    job_partition = fields.get('Partition')
-    if command != script_path or job_partition != partition:
-        foreign = (f'Slurm job {job_id} for cluster {cluster_name!r} was left '
-                   f'held by an earlier launch, but runs {command!r} on '
-                   f'partition {job_partition!r}, not {script_path!r} on '
-                   f'{partition!r} as this launch would')
-        _cancel_and_wait_until_gone(client, job_id, cluster_name_on_cloud,
-                                    foreign)
-        logger.info(f'{foreign}, so it was cancelled; submitting a new job.')
-        return None
-    logger.info(f'Slurm job {job_id} for cluster {cluster_name!r} was left '
-                'held by an earlier launch; checking it before releasing it.')
-    _release_if_request_kept(client, job_id, cluster_name, partition,
-                             math.ceil(float(resources['cpus'])), num_nodes,
-                             resources['memory'])
-    return _wait_for_new_allocation(
-        client, login_node_runner, job_id, region, cluster_name,
-        cluster_name_on_cloud, slurm_cluster, partition,
-        provision_timeout, on_pending,
-        _ready_signal_path(sky_base_dir, cluster_name_on_cloud), sky_base_dir)
 
 
 @timeline.event
@@ -1510,6 +1350,21 @@ def _create_virtual_instance(
     num_nodes = config.count
     on_pending = _make_pending_callback(cluster_name, partition)
 
+    if len(existing_jobs) == 1 and _is_left_held(client, existing_jobs[0]):
+        # An earlier launch was killed between its held submission and the
+        # release. The job never ran; it is replaced rather than released, as
+        # it was submitted with that launch's options (e.g. its account), not
+        # necessarily this one's. Jobs that depend on it (e.g. afterok) lose
+        # their target: getting the shape and billing right comes first.
+        job_id = existing_jobs[0]
+        left_held = (f'Slurm job {job_id} for cluster {cluster_name!r} was '
+                     'left held by an earlier launch')
+        _cancel_and_wait_until_gone(client, job_id, cluster_name_on_cloud,
+                                    left_held)
+        logger.info(f'{left_held}; it was cancelled, and a new job is '
+                    'submitted.')
+        existing_jobs = []
+
     if existing_jobs:
         assert len(existing_jobs) == 1, (
             f'Multiple jobs found with name {cluster_name_on_cloud}: '
@@ -1518,20 +1373,6 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
-        left_held_fields = _left_held_fields(client, job_id)
-        if left_held_fields is not None:
-            record = _recover_left_held_job(client, provider_config, job_id,
-                                            left_held_fields, region,
-                                            cluster_name, cluster_name_on_cloud,
-                                            slurm_cluster, partition, num_nodes,
-                                            config.node_config,
-                                            provision_timeout, on_pending)
-            if record is not None:
-                return record
-            # It was cancelled: a new job is submitted below.
-            existing_jobs = []
-
-    if existing_jobs:
         _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
@@ -1595,7 +1436,7 @@ def _create_virtual_instance(
     if snapshot_manifest is not None:
         _validate_snapshot_files(login_node_runner, snapshot_dir,
                                  snapshot_manifest)
-    ready_signal = _ready_signal_path(sky_base_dir, cluster_name_on_cloud)
+    ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
 
     # For non-Docker Hub registries, pyxis/enroot requires '#' separator
     # between registry and path. See:
@@ -2006,11 +1847,66 @@ touch {sky_cluster_home_dir}/.hushlogin
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
-    return _wait_for_new_allocation(client, login_node_runner, job_id, region,
-                                    cluster_name, cluster_name_on_cloud,
-                                    slurm_cluster, partition, provision_timeout,
-                                    on_pending, ready_signal,
-                                    sbatch_log_base_dir)
+    _record_allocation(cluster_name, slurm_cluster, job_id)
+
+    _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                        on_pending)
+    _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
+    nodes, _ = client.get_job_nodes(job_id)
+    # Reset spinner since nodes are now allocated
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
+    created_instance_ids = [
+        slurm_utils.instance_id(job_id, node) for node in nodes
+    ]
+
+    # No timeout for job initialization: once nodes are allocated, the
+    # provision has effectively succeeded. Container image pulls and
+    # package installation can take a long time for large images, and
+    # should not be subject to the provision timeout (which is meant for
+    # the Slurm scheduler queue, not for container setup).
+
+    # Wait for the sbatch script to create the cluster's sky directories,
+    # to avoid a race condition where post-provision commands try to
+    # access the directories before they are created.
+    slurm_log = _sbatch_log_path(sbatch_log_base_dir, job_id)
+
+    # Stream logs in background thread for visibility if debug mode
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+
+        def _stream_logs():
+            login_node_runner.run(['tail', '-n', '10', '-f', '--', slurm_log],
+                                  require_outputs=False,
+                                  stream_logs=True)
+
+        log_thread = threading.Thread(target=_stream_logs, daemon=True)
+        log_thread.start()
+
+    try:
+        _wait_for_job_ready(
+            login_node_runner,
+            client,
+            job_id,
+            ready_signal,
+            slurm_log,
+        )
+    except (RuntimeError, exceptions.CommandError) as e:
+        _, stdout, _ = login_node_runner.run(['cat', '--', slurm_log],
+                                             require_outputs=True,
+                                             stream_logs=False)
+        if stdout:
+            logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
+                         f'{stdout}'
+                         f'=== End of Slurm job logs ===')
+        raise e
+
+    return common.ProvisionRecord(provider_name='slurm',
+                                  region=region,
+                                  zone=partition,
+                                  cluster_name=cluster_name_on_cloud,
+                                  head_instance_id=created_instance_ids[0],
+                                  resumed_instance_ids=[],
+                                  created_instance_ids=created_instance_ids)
 
 
 @common_utils.retry

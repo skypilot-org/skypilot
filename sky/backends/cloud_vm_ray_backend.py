@@ -838,9 +838,6 @@ class RetryingVmProvisioner(object):
         if blocked_resources:
             # blocked_resources is not None and not empty.
             self._blocked_resources.update(blocked_resources)
-        # Entries of _blocked_resources added for a zone that refused the
-        # request (ProvisionUnsupportedInZoneError), with its reason.
-        self._zone_refusals: Dict[resources_lib.Resources, str] = {}
 
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
@@ -1094,17 +1091,6 @@ class RetryingVmProvisioner(object):
 
         insufficient_resources = None
         last_error_reason: Optional[str] = None
-        # Provisioning attempts made in this loop, and the reasons of those
-        # refused by their zones (ProvisionUnsupportedInZoneError).
-        num_provision_attempts = 0
-        zone_refusals: List[str] = []
-        # Refusals not shown yet: each is shown once another zone is tried,
-        # or else by the error the loop ends with.
-        unshown_refusals: List[exceptions.ProvisionUnsupportedInZoneError] = []
-        # Zones skipped because an earlier attempt's zone refused the request,
-        # with its reason, and zones skipped for any other block.
-        skipped_refusals: List[str] = []
-        num_other_skipped_zones = 0
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
                                        prev_cluster_ever_up):
@@ -1124,11 +1110,6 @@ class RetryingVmProvisioner(object):
                                 zone=zone.name).should_be_blocked_by(
                                     blocked_resources):
                             remaining_unblocked_zones.remove(zone)
-                            if blocked_resources in self._zone_refusals:
-                                skipped_refusals.append(
-                                    self._zone_refusals[blocked_resources])
-                            else:
-                                num_other_skipped_zones += 1
                             break
                 if not remaining_unblocked_zones:
                     # Skip the region if all zones are blocked.
@@ -1339,12 +1320,6 @@ class RetryingVmProvisioner(object):
                                     f'{region.name}{colorama.Style.RESET_ALL}'
                                     f'{zone_str}.'))
                         assert handle.cluster_yaml is not None
-                        # Why the zones before this one were not used.
-                        for refusal in unshown_refusals:
-                            logger.warning(
-                                common_utils.format_exception(refusal))
-                        unshown_refusals.clear()
-                        num_provision_attempts += 1
                         provision_record = provisioner.bulk_provision(
                             to_provision.cloud,
                             region,
@@ -1380,38 +1355,6 @@ class RetryingVmProvisioner(object):
                         # Pausing to wait on an external condition: keep the
                         # resources for resume, do not tear down or fail over.
                         raise
-                    except exceptions.ProvisionUnsupportedInZoneError as e:
-                        # Only these zones cannot serve the request: block
-                        # them and try the candidate's other zones.
-                        last_error_reason = str(e)
-                        zone_refusals.append(str(e))
-                        CloudVmRayBackend().post_teardown_cleanup(
-                            handle,
-                            terminate=not prev_cluster_ever_up,
-                            remove_from_db=False,
-                            failover=True,
-                        )
-                        refused_zones: List[Optional[str]] = ([
-                            None
-                        ] if zones is None else [zone.name for zone in zones])
-                        for zone_name in refused_zones:
-                            refused = to_provision.copy(zone=zone_name)
-                            _add_to_blocked_resources(self._blocked_resources,
-                                                      refused)
-                            self._zone_refusals[refused] = str(e)
-                        if prev_cluster_status is not None:
-                            # A relaunch only tries the zones the cluster was
-                            # in; past them, _yield_zones ends the loop with
-                            # an error of its own that reads as a capacity
-                            # failure. The refusal is the reason, and the
-                            # caller decides what follows (an INIT cluster is
-                            # retried with the requested resources, and the
-                            # zones blocked here stay blocked).
-                            with ux_utils.print_exception_no_traceback():
-                                raise exceptions.ProvisionUnsupportedError(
-                                    str(e)) from e
-                        unshown_refusals.append(e)
-                        continue
                     except exceptions.ProvisionUnsupportedError as e:
                         # The request itself cannot be served here, so the
                         # remaining zones of this candidate cannot help. Tear
@@ -1583,20 +1526,6 @@ class RetryingVmProvisioner(object):
                 CloudVmRayBackend().teardown_no_lock(
                     handle, terminate=terminate_or_stop, remove_from_db=False)
 
-        refusal_reasons = skipped_refusals + zone_refusals
-        if (refusal_reasons and len(zone_refusals) == num_provision_attempts and
-                not num_other_skipped_zones):
-            # Every zone refused the request itself, now or in an earlier
-            # attempt, and none failed for capacity: the candidate cannot
-            # serve it either.
-            header = (f'No zone of {to_provision.cloud} {region.name} can '
-                      'serve this request as requested:')
-            reasons = '\n'.join(dict.fromkeys(refusal_reasons))
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ProvisionUnsupportedError(
-                    f'{header}\n{reasons}')
-        # A refusal still unshown came last, so it is the reason the message
-        # below gives.
         message = self._insufficient_resources_msg(
             to_provision,
             requested_resources,
