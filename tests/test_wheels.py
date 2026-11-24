@@ -15,8 +15,18 @@ from sky.backends import wheel_utils
 from sky.skylet import constants
 
 
-def test_build_wheels():
-    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
+@pytest.fixture
+def isolated_wheel_cache(tmp_path, monkeypatch):
+    """Per-test wheel cache so xdist workers do not race on ~/.sky/wheels."""
+    wheel_dir = tmp_path / 'wheels'
+    wheel_dir.mkdir()
+    monkeypatch.setattr(wheel_utils, 'WHEEL_DIR', wheel_dir)
+    monkeypatch.setattr(wheel_utils, '_WHEEL_LOCK_PATH',
+                        tmp_path / '.wheels_lock')
+    return wheel_dir
+
+
+def test_build_wheels(isolated_wheel_cache):
     start = time.time()
     wheel_path, _ = wheel_utils.build_sky_wheel()
     assert wheel_path.exists()
@@ -30,20 +40,18 @@ def test_build_wheels():
     assert duration_cached < duration
 
     # simulate uncleaned symlinks due to interruption
-    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
-    wheel_utils.WHEEL_DIR.mkdir()
-    (wheel_utils.WHEEL_DIR / 'sky').symlink_to(wheel_utils.SKY_PACKAGE_PATH,
-                                               target_is_directory=True)
-    for root, _, _ in os.walk(str(wheel_utils.WHEEL_DIR)):
+    shutil.rmtree(isolated_wheel_cache, ignore_errors=True)
+    isolated_wheel_cache.mkdir()
+    (isolated_wheel_cache / 'sky').symlink_to(wheel_utils.SKY_PACKAGE_PATH,
+                                              target_is_directory=True)
+    for root, _, _ in os.walk(str(isolated_wheel_cache)):
         # set file date to 1970-01-01 00:00 UTC
         os.utime(root, (0, 0))
     wheel_path, _ = wheel_utils.build_sky_wheel()
     assert wheel_path.exists()
 
-    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
 
-
-def test_unchanged_rebuild_refreshes_cache():
+def test_unchanged_rebuild_refreshes_cache(isolated_wheel_cache):  # pylint: disable=unused-argument
     """A source mtime bump that leaves the wheel unchanged rebuilds once.
 
     Creating a ``__pycache__`` directory at runtime (the first import of a
@@ -51,25 +59,21 @@ def test_unchanged_rebuild_refreshes_cache():
     changing the wheel. The rebuild it triggers produces the cached hash, and
     the cache must then count as fresh again.
     """
-    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
-    try:
-        _, wheel_hash = wheel_utils.build_sky_wheel()
+    _, wheel_hash = wheel_utils.build_sky_wheel()
 
-        time.sleep(1.1)
-        os.utime(wheel_utils.SKY_PACKAGE_PATH / 'backends')
+    time.sleep(1.1)
+    os.utime(wheel_utils.SKY_PACKAGE_PATH / 'backends')
 
-        with mock.patch.object(wheel_utils,
-                               '_build_sky_wheel',
-                               wraps=wheel_utils._build_sky_wheel) as build:
-            _, rebuilt_hash = wheel_utils.build_sky_wheel()
-            assert build.call_count == 1
-            assert rebuilt_hash == wheel_hash
+    with mock.patch.object(wheel_utils,
+                           '_build_sky_wheel',
+                           wraps=wheel_utils._build_sky_wheel) as build:
+        _, rebuilt_hash = wheel_utils.build_sky_wheel()
+        assert build.call_count == 1
+        assert rebuilt_hash == wheel_hash
 
-            for _ in range(2):
-                wheel_utils.build_sky_wheel()
-            assert build.call_count == 1
-    finally:
-        shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
+        for _ in range(2):
+            wheel_utils.build_sky_wheel()
+        assert build.call_count == 1
 
 
 def test_pip_missing_uv_environment():
