@@ -1473,7 +1473,7 @@ def _request_execution_wrapper(request_id: str,
         try:
             # Capture the peak RSS while the request's result is still
             # referenced.
-            peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            peak_rss = max(proc.memory_info().rss, metrics_lib.latest_rss_bytes)
             # Unreference the request's payload and result before
             # release_memory() so that their memory can be returned too.
             return_value = request_task = None

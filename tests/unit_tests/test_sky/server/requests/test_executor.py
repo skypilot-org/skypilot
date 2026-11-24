@@ -1832,6 +1832,35 @@ async def test_wrapper_releases_result_before_release_memory(
     ]
 
 
+@pytest.mark.asyncio
+async def test_wrapper_request_peak_rss_ignores_window_peak(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """A request's recorded peak uses the latest RSS sample, not the worker's
+    30 s window peak, which can hold an earlier request's spike."""
+    req = requests_lib.Request(request_id='peak-isolated',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    # An earlier request left a 64 GB spike in this worker's window peak.
+    spike = 64 * 1024 * 1024 * 1024
+    monkeypatch.setattr(executor.metrics_lib, 'peak_rss_bytes', spike)
+    monkeypatch.setattr(executor.metrics_lib, 'latest_rss_bytes', 0)
+    recorded = []
+    monkeypatch.setattr(
+        executor, '_record_memory_metrics',
+        lambda *args, **_: recorded.append(args[3]))  # args[3] is peak_rss.
+
+    executor._request_execution_wrapper('peak-isolated',
+                                        ignore_return_value=False)
+
+    assert len(recorded) == 1
+    assert recorded[0] < spike
+
+
 _MB = 1024 * 1024
 
 
