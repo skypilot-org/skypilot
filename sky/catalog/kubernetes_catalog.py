@@ -242,7 +242,8 @@ def _list_accelerators(
     # schedulable and idle.
     # A pool also counts as busy when fewer of its VMs are visible than the
     # slice has (a pool still scaling up, or allowed_nodes listing only some
-    # of its VMs).
+    # of its VMs), or when a VM has fewer allocatable chips than it has (each
+    # slice pod requests all chips of its VM).
     pool_key = kubernetes_utils.GKE_NODEPOOL_LABEL_KEY
     busy_slice_pools: Set[str] = set()
     pool_vms: Dict[str, int] = collections.defaultdict(int)
@@ -259,8 +260,12 @@ def _list_accelerators(
             kubernetes_utils.reduce_tpu_topology(
                 labels[formatter.TPU_TOPOLOGY_LABEL_KEY]) //
             max(1, int(labels[formatter.ACCELERATOR_COUNT_LABEL_KEY])))
+        allocatable_chips = kubernetes_utils.get_node_accelerator_count(
+            context, node.status.allocatable, gpu_resource_key=gpu_resource_key)
         if (not node.is_ready() or node.is_cordoned() or _is_tainted(node) or
-                allocated_qty_by_node.get(node.metadata.name, 0) > 0):
+                allocated_qty_by_node.get(node.metadata.name, 0) > 0 or
+                allocatable_chips < int(
+                    labels[formatter.ACCELERATOR_COUNT_LABEL_KEY])):
             busy_slice_pools.add(pool)
     busy_slice_pools.update(pool for pool, needed in pool_vms_needed.items()
                             if pool_vms[pool] < needed)

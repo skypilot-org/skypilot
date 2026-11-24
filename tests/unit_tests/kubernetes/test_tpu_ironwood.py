@@ -3,8 +3,11 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky import resources as resources_lib
+from sky import task as sky_task
 from sky.adaptors import gcp
+from sky.backends import cloud_vm_ray_backend
 from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import accelerator_registry
@@ -337,3 +340,54 @@ def test_show_gpus_partial_slice_is_not_free():
     ]
     _, _, available = _show_gpus(nodes, quantity_filter=8)
     assert available['tpu7x'] == 0
+
+
+def test_show_gpus_slice_with_withdrawn_chips_is_not_free():
+    """A slice pod requests all chips of its VM, so a VM whose device plugin
+    withdrew chips (allocatable below the chip count) makes its slice busy."""
+    nodes = [
+        _tpu_node('a1', 'tpu7x', '2x2x2', pool='a'),
+        _tpu_node('a2', 'tpu7x', '2x2x2', pool='a')
+    ]
+    nodes[0].status.allocatable = {'google.com/tpu': '2'}
+    _, _, available = _show_gpus(nodes, quantity_filter=8)
+    assert available['tpu7x'] == 0
+
+
+def test_v6e_8_opt_in_mismatch_message_names_the_difference():
+    slice_8 = _k8s('tpu-v6e-8', {'multi_host': True})
+    vm_8 = _k8s('tpu-v6e-8')
+    error = kubernetes_utils.tpu_slice_fit_error(vm_8, 1, slice_8, 1)
+    assert 'tpu-v6e-slice:8 on one VM' in error
+    assert 'tpu-v6e-slice:8 as a 2-VM multi-host slice' in error
+    assert 'multi_host: true' in error
+
+
+@pytest.mark.parametrize('requested,task_nodes,fits', [
+    ('tpu7x:4', 1, False),
+    ('tpu7x:8', 1, False),
+    ('tpu7x:8', 2, True),
+])
+def test_check_resources_fit_cluster_on_a_slice_cluster(requested, task_nodes,
+                                                        fits):
+    """A cluster of two 2-VM tpu7x:8 slices (four pods) only runs a task that
+    uses the same slice shape on both slices."""
+    launched = resources_lib.Resources(infra='kubernetes/ctx',
+                                       accelerators='tpu7x:8')
+    handle = mock.MagicMock()
+    handle.cluster_name = 'iw'
+    handle.launched_resources = launched
+    handle.launched_task_nodes = 2
+    handle.launched_nodes = 4
+    task = sky_task.Task(run='echo hi', num_nodes=task_nodes)
+    task.set_resources(
+        resources_lib.Resources(infra='kubernetes/ctx', accelerators=requested))
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    with mock.patch.object(cloud_vm_ray_backend.global_user_state,
+                           'get_status_from_cluster_name',
+                           return_value=None):
+        if fits:
+            assert backend.check_resources_fit_cluster(handle, task) is not None
+        else:
+            with pytest.raises(exceptions.ResourcesMismatchError, match='TPU'):
+                backend.check_resources_fit_cluster(handle, task)

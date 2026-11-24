@@ -547,10 +547,14 @@ def tpu_slice_fit_error(resources: 'resources_lib.Resources',
         return None
     if requested_shape != launched_shape:
         if launched_shape is not None and launched_multi:
-            return (f'The task requests TPU {requested_shape[0]}:'
-                    f'{requested_shape[1]}, but the cluster runs '
-                    f'{launched_shape[0]}:{launched_shape[1]} as one '
-                    'multi-host slice per task node')
+            message = (
+                f'The task requests TPU {_describe_tpu_shape(requested_shape)}, '
+                f'but the cluster runs '
+                f'{_describe_tpu_shape(launched_shape)} per task node')
+            if requested_shape[:2] == launched_shape[:2]:
+                message += ('; set accelerator_args: {multi_host: true} to '
+                            'request the same slice')
+            return message
         return (f'The task requests a multi-host TPU slice '
                 f'({requested_shape[0]}:{requested_shape[1]}), but the '
                 'cluster has none')
@@ -578,6 +582,13 @@ def launchable_tpu_slice_chips(accelerator: str,
             int(node_labels[GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY])):
         return None
     return chips
+
+
+def _describe_tpu_shape(shape: Tuple[str, int, int]) -> str:
+    acc_type, chips, vms = shape
+    if vms > 1:
+        return f'{acc_type}:{chips} as a {vms}-VM multi-host slice'
+    return f'{acc_type}:{chips} on one VM'
 
 
 def _tpu_request_shape(
