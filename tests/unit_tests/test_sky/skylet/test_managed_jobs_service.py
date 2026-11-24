@@ -8,10 +8,12 @@ from unittest import mock
 import filelock
 import grpc
 import pytest
+import sqlalchemy
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
+from sky.schemas.generated import jobsv1_pb2
 from sky.schemas.generated import managed_jobsv1_pb2
 from sky.skylet import constants
 from sky.skylet import services
@@ -850,3 +852,48 @@ class TestCancelJobs:
         assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         assert "are scheduled to be cancelled" in response.message.lower()
         context_mock.abort.assert_not_called()
+
+
+class TestSetJobInfoWithoutJobId:
+    """Test class for the JobsService SetJobInfoWithoutJobId RPC method."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, _mock_managed_jobs_db_conn):
+        self.engine = _mock_managed_jobs_db_conn
+        self.service = services.JobsServiceImpl()
+
+    def test_more_jobs_than_tasks(self):
+        """--num-jobs N with fewer than N tasks: each job gets every task,
+        with that task's is_primary_in_job_group."""
+        request = jobsv1_pb2.SetJobInfoWithoutJobIdRequest(
+            name='group',
+            workspace='default',
+            entrypoint='sky jobs launch',
+            pool='p',
+            pool_hash='h',
+            task_ids=[0, 1],
+            task_names=['head', 'worker'],
+            resources_str='1x[CPU:1+]',
+            metadata_jsons=['{}', '{}'],
+            num_jobs=3,
+            execution='parallel',
+            is_primary_in_job_groups=[True, False])
+        context_mock = mock.Mock()
+
+        # The pool exists and is in the request's workspace.
+        with mock.patch.object(services.serve_utils,
+                               'get_pool_refusal',
+                               return_value=None):
+            response = self.service.SetJobInfoWithoutJobId(
+                request, context_mock)
+
+        context_mock.abort.assert_not_called()
+        assert len(response.job_ids) == 3
+        spot = state.spot_table
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                sqlalchemy.select(spot.c.spot_job_id, spot.c.task_id,
+                                  spot.c.is_primary_in_job_group)).fetchall()
+        assert sorted(rows) == sorted((job_id, task_id, task_id == 0)
+                                      for job_id in response.job_ids
+                                      for task_id in (0, 1))
