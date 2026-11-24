@@ -2120,6 +2120,20 @@ def get_all_contexts() -> List[str]:
     return sorted(list(set(kube_contexts + ssh_contexts)))
 
 
+def get_every_workspace_contexts() -> List[str]:
+    """``get_all_contexts`` plus contexts that only other workspaces allow.
+
+    For server-side readers that run without a request workspace, such as the
+    metrics federation; never return it to a user.
+    """
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {})
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return sorted(
+        set(get_all_contexts()) |
+        visibility.visible_for_workspaces(workspaces, 'kubernetes'))
+
+
 def get_workspace_contexts() -> List[str]:
     """Kubernetes and SSH node pool contexts of the workspaces the user reads.
 

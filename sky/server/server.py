@@ -3636,11 +3636,12 @@ def _get_local_contexts() -> List[str]:
     Uses the same detection as the metrics federation routes, so the
     dashboard and the federation always agree on which contexts are
     local (their series are queried with cluster="" instead of a
-    context name). Non-blocking: verdicts come from the detection cache,
-    so this never stalls the event loop on a slow context.
+    context name). Verdicts come from the detection cache, so a slow context
+    never stalls it, but listing every workspace's contexts parses the
+    kubeconfig: call it off the event loop.
     """
     local_contexts, _ = metrics_utils.split_local_remote_contexts(
-        core.get_all_contexts())
+        core.get_every_workspace_contexts())
     return local_contexts
 
 
