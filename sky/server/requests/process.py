@@ -267,8 +267,10 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
           killed for using too much memory, or crashed).
         Otherwise a ready worker died, and it counts as a crash while serving.
         """
+        # 'stopped' counts too: shutdown can stop warm start before it sees
+        # that the pool broke.
         if self._warm_start_thread is None or self._warm_start_end not in (
-                None, 'broken'):
+                None, 'broken', 'stopped'):
             return False
         if self.start_failures > 0 or (self._ready_count == 0 and
                                        self._warm_start_started > 0):

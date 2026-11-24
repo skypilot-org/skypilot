@@ -915,8 +915,8 @@ def test_pool_break_at_boot_is_counted_without_a_request():
         original = executor._executor
         # No request is sent: warm start notices the break and counts it.
         assert _wait_until(
-            lambda: _pool_broken(pool, 'warm_start') == warm_before + 1)
-        assert _start_failures(pool, 'died') == died_before + 1
+            lambda: _pool_broken(pool, 'warm_start') == warm_before + 1 and
+            _start_failures(pool, 'died') == died_before + 1)
         # A later request replaces the pool without counting the break again.
         executor.submit_until_success(dummy_task)
         assert executor._executor is not original
@@ -938,6 +938,38 @@ def test_pool_break_is_counted_on_shutdown_without_a_request():
     assert _pool_broken(pool, 'serving') == serving_before
     executor.shutdown()
     assert _pool_broken(pool, 'serving') == serving_before + 1
+
+
+@requires_warm_start
+def test_boot_break_found_by_shutdown_counts_as_warm_start(tmp_path):
+    """If shutdown stops warm start before warm start sees that the pool
+    broke, the break still counts as "warm_start", not "serving"."""
+    pool = 'shutdown-boot-break-test'
+    warm_before = _pool_broken(pool, 'warm_start')
+    serving_before = _pool_broken(pool, 'serving')
+    marker = str(tmp_path / 'first')
+    executor = PoolExecutor(max_workers=2,
+                            warm_start=True,
+                            name=pool,
+                            initializer=first_fast_rest_slow,
+                            initargs=(marker, 30))
+    assert _wait_until(lambda: executor.drain_start_signals() >= 0 and executor.
+                       _ready_count == 1 and len(executor._processes) == 2)
+    # Keep warm start from counting the break, as if shutdown stopped it
+    # first.
+    with unittest.mock.patch.object(PoolExecutor, 'record_break'):
+        with open(marker, encoding='utf-8') as f:
+            ready_pid = int(f.read())
+        starting_pid = (set(executor._processes) - {ready_pid}).pop()
+        os.kill(starting_pid, signal.SIGKILL)
+        assert _wait_until(lambda: executor._broken)
+        executor._warm_start_stop.set()
+        executor._warm_start_thread.join(30)
+    # As shutdown would see it: warm start stopped, pool broken.
+    executor._warm_start_end = 'stopped'
+    executor.shutdown()
+    assert _pool_broken(pool, 'warm_start') == warm_before + 1
+    assert _pool_broken(pool, 'serving') == serving_before
 
 
 @requires_warm_start
