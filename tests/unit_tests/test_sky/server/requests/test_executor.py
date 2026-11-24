@@ -3447,10 +3447,10 @@ async def test_caller_usage_of_an_inline_request(in_process_env,
     [
         (None, None, None, False),
         ('0', None, None, False),
-        # SQLite: nothing to exhaust.
+        # SQLite: no database connections to run out of.
         ('1', None, None, True),
         ('true', None, None, True),
-        # Postgres without a pooler: stay on demand.
+        # Postgres without a pooler: workers start on demand.
         ('1', 'postgresql://u:p@db:5432/sky', None, False),
         # Postgres behind a pooler.
         ('1', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', True),
@@ -3458,7 +3458,7 @@ async def test_caller_usage_of_an_inline_request(in_process_env,
     ])
 def test_eager_workers_enabled(monkeypatch, flag, db_uri, pool_hostport,
                                expected):
-    """Warm start needs the flag and, on Postgres, a connection pooler."""
+    """Warm start needs the flag, and on Postgres also a connection pooler."""
     env = {
         'SKYPILOT_EAGER_EXECUTOR_WORKERS': flag,
         constants.ENV_VAR_DB_CONNECTION_URI: db_uri,
@@ -3511,7 +3511,7 @@ def test_request_worker_passes_eager_workers_flag(monkeypatch, enabled):
 
 
 def test_eager_workers_warns_without_memory_aware_sizing(monkeypatch):
-    """Eager start stays on but warns when pools are not sized to fit."""
+    """Warm start stays on, but warns when memory-aware sizing is off."""
     monkeypatch.setenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', '1')
     monkeypatch.delenv('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', raising=False)
     monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI, raising=False)
