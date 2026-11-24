@@ -1,6 +1,5 @@
 """Tests for Slurm cloud implementation."""
 
-import inspect
 import os
 from pathlib import Path
 import re
@@ -1635,6 +1634,26 @@ class TestProvisionTimeoutPassthrough:
         mock_ssh_runner.return_value = mock_runner
         return mock_client, mock_runner
 
+    # A job left under SkyPilot's submission hold, as this launch would have
+    # submitted it.
+    _LEFT_HELD_FIELDS = {
+        'JobId': '77',
+        'JobState': 'PENDING',
+        'Reason': 'JobHeldUser',
+        'Command': '/home/testuser/.sky_provision/test-held.sh',
+        'Partition': 'gpu',
+        'NumNodes': '1-1',
+        'CPUs/Task': '2',
+    }
+
+    def _launch(self, config=None):
+        return slurm_instance._create_virtual_instance(
+            region='us-west-2',
+            cluster_name='test-held',
+            cluster_name_on_cloud='test-held',
+            config=config or self._reuse_config(),
+        )
+
     @patch('sky.provision.slurm.instance._wait_for_job_ready')
     @patch('sky.provision.slurm.instance._record_nodes_allocated')
     @patch('sky.provision.slurm.instance._record_allocation')
@@ -1656,20 +1675,9 @@ class TestProvisionTimeoutPassthrough:
         held_job_check.side_effect = _REAL_RELEASE_IF_REQUEST_KEPT
         mock_client, mock_runner = self._reuse_mocks(
             mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
-            mock_get_proctrack_type, ['77'], {
-                'JobId': '77',
-                'JobState': 'PENDING',
-                'Reason': 'JobHeldUser',
-                'NumNodes': '1-1',
-                'CPUs/Task': '2',
-            })
+            mock_get_proctrack_type, ['77'], dict(self._LEFT_HELD_FIELDS))
 
-        record = slurm_instance._create_virtual_instance(
-            region='us-west-2',
-            cluster_name='test-held',
-            cluster_name_on_cloud='test-held',
-            config=self._reuse_config(),
-        )
+        record = self._launch()
 
         mock_client.submit_job.assert_not_called()
         mock_client.cancel_job.assert_not_called()
@@ -1703,29 +1711,77 @@ class TestProvisionTimeoutPassthrough:
             mock_record_allocation, mock_record_nodes_allocated,
             mock_wait_for_job_ready, held_job_check):
         """A job left held whose shape Slurm changed is cancelled and the
-        launch refused, as for a new job; nothing waits on it."""
+        launch refused on this partition, as for a new job; nothing waits on
+        it."""
         del mock_record_nodes_allocated
         held_job_check.side_effect = _REAL_RELEASE_IF_REQUEST_KEPT
         mock_client, _ = self._reuse_mocks(
             mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
-            mock_get_proctrack_type, ['77'], {
-                'JobId': '77',
-                'JobState': 'PENDING',
-                'Reason': 'JobHeldUser',
-                'NumNodes': '1',
-                'CPUs/Task': '4',
-            })
+            mock_get_proctrack_type, ['77'],
+            dict(self._LEFT_HELD_FIELDS, **{'CPUs/Task': '4'}))
 
-        with pytest.raises(exceptions.ProvisionUnsupportedError,
+        with pytest.raises(exceptions.ProvisionUnsupportedInZoneError,
                            match='4 CPUs per task instead of the 2 requested'):
-            slurm_instance._create_virtual_instance(
-                region='us-west-2',
-                cluster_name='test-held',
-                cluster_name_on_cloud='test-held',
-                config=self._reuse_config(),
-            )
+            self._launch()
 
         mock_client.cancel_job.assert_called_once_with('77')
+        mock_client.release_job.assert_not_called()
+        mock_client.submit_job.assert_not_called()
+        mock_record_allocation.assert_not_called()
+        mock_wait_for_job_nodes.assert_not_called()
+        mock_wait_for_job_ready.assert_not_called()
+
+    @pytest.mark.parametrize('mismatch', [
+        {
+            'Command': '/old/base/.sky_provision/test-held.sh'
+        },
+        {
+            'Partition': 'cpu'
+        },
+        {
+            'Command': None
+        },
+    ])
+    @patch('sky.provision.slurm.instance._wait_for_job_ready')
+    @patch('sky.provision.slurm.instance._record_allocation')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_reused_job_left_held_from_another_script_is_not_released(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_record_allocation, mock_wait_for_job_ready, held_job_check,
+            mismatch):
+        """A job left held that this launch would not have submitted (another
+        batch script, e.g. under an older sky_base_dir, or another partition)
+        is cancelled rather than waited on for a ready signal it may never
+        write, and the attempt fails retryably for failover."""
+        fields = dict(self._LEFT_HELD_FIELDS)
+        for key, value in mismatch.items():
+            if value is None:
+                del fields[key]
+            else:
+                fields[key] = value
+        mock_client, _ = self._reuse_mocks(mock_ssh_runner, mock_slurm_client,
+                                           mock_get_partition_info,
+                                           mock_get_proctrack_type, ['77'],
+                                           fields)
+
+        with pytest.raises(RuntimeError) as e:
+            self._launch()
+
+        assert not isinstance(e.value, exceptions.ProvisionUnsupportedError)
+        message = str(e.value)
+        assert 'Slurm job 77' in message
+        assert 'so it was not released' in message
+        assert "'/home/testuser/.sky_provision/test-held.sh' on 'gpu'" in (
+            message)
+        assert 'Slurm job 77 was cancelled before it started.' in message
+        mock_client.cancel_job.assert_called_once_with('77')
+        held_job_check.assert_not_called()
         mock_client.release_job.assert_not_called()
         mock_client.submit_job.assert_not_called()
         mock_record_allocation.assert_not_called()
@@ -1745,20 +1801,13 @@ class TestProvisionTimeoutPassthrough:
         leaves the job held (for the next launch) rather than running."""
         mock_client, _ = self._reuse_mocks(mock_ssh_runner, mock_slurm_client,
                                            mock_get_partition_info,
-                                           mock_get_proctrack_type, ['77'], {
-                                               'JobState': 'PENDING',
-                                               'Reason': 'JobHeldUser'
-                                           })
+                                           mock_get_proctrack_type, ['77'],
+                                           dict(self._LEFT_HELD_FIELDS))
         config = self._reuse_config()
         config.provider_config['sky_base_dir'] = 'not/absolute'
 
         with pytest.raises(RuntimeError, match='must be an absolute path'):
-            slurm_instance._create_virtual_instance(
-                region='us-west-2',
-                cluster_name='test-held',
-                cluster_name_on_cloud='test-held',
-                config=config,
-            )
+            self._launch(config)
 
         held_job_check.assert_not_called()
         mock_client.release_job.assert_not_called()
@@ -1805,12 +1854,7 @@ class TestProvisionTimeoutPassthrough:
                                            mock_get_proctrack_type, ['77'],
                                            job_fields)
 
-        record = slurm_instance._create_virtual_instance(
-            region='us-west-2',
-            cluster_name='test-held',
-            cluster_name_on_cloud='test-held',
-            config=self._reuse_config(),
-        )
+        record = self._launch()
 
         held_job_check.assert_not_called()
         mock_client.release_job.assert_not_called()
@@ -1823,50 +1867,103 @@ class TestProvisionTimeoutPassthrough:
         assert record.head_instance_id == slurm_utils.instance_id('77', 'node1')
         assert record.created_instance_ids == []
 
-    @pytest.mark.parametrize('existing_jobs', [[], ['77']])
-    @patch('sky.provision.slurm.instance._wait_for_new_allocation',
-           autospec=True)
+    @pytest.mark.parametrize('ready_error', [None, RuntimeError('job exited')])
+    @pytest.mark.parametrize('existing_jobs, job_id', [([], '78'),
+                                                       (['77'], '77')])
+    @patch('sky.provision.slurm.instance._wait_for_job_ready')
+    @patch('sky.provision.slurm.instance._record_nodes_allocated')
+    @patch('sky.provision.slurm.instance._record_allocation')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.'
            'SlurmLoginNodeCommandRunner')
-    def test_new_and_recovered_jobs_share_the_post_submission_wait(
+    def test_new_and_recovered_jobs_are_waited_for_the_same_way(
             self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
-            mock_get_proctrack_type, mock_wait_for_new_allocation,
-            held_job_check, existing_jobs):
-        """A new job and a job left held go through the same wait, with the
-        same ready signal and log directory."""
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_record_allocation, mock_record_nodes_allocated,
+            mock_wait_for_job_ready, held_job_check, existing_jobs, job_id,
+            ready_error):
+        """A new job and a job left held are waited for alike: nodes, then the
+        same ready signal; and when readiness fails, the job's batch log is
+        shown and the error raised."""
         del held_job_check
-        mock_client, mock_runner = self._reuse_mocks(mock_ssh_runner,
-                                                     mock_slurm_client,
-                                                     mock_get_partition_info,
-                                                     mock_get_proctrack_type,
-                                                     existing_jobs, {
-                                                         'JobState': 'PENDING',
-                                                         'Reason': 'JobHeldUser'
-                                                     })
-        job_id = existing_jobs[0] if existing_jobs else '78'
+        mock_client, mock_runner = self._reuse_mocks(
+            mock_ssh_runner, mock_slurm_client,
+            mock_get_partition_info, mock_get_proctrack_type, existing_jobs,
+            dict(self._LEFT_HELD_FIELDS))
+        slurm_log = f'/home/testuser/.sky_provision/slurm-{job_id}.out'
+        mock_runner.run.side_effect = lambda cmd, **kwargs: (
+            (44, '', '')
+            if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
+            (0, 'srun: error: something\n', '')
+            if cmd == ['cat', '--', slurm_log] else (0, '', ''))
+        mock_wait_for_job_ready.side_effect = ready_error
 
-        record = slurm_instance._create_virtual_instance(
-            region='us-west-2',
-            cluster_name='test-held',
-            cluster_name_on_cloud='test-held',
-            config=self._reuse_config(),
-        )
+        with patch.object(slurm_instance.logger, 'error') as log_error:
+            if ready_error is None:
+                record = self._launch()
+                assert record.created_instance_ids == [
+                    slurm_utils.instance_id(job_id, 'node1')
+                ]
+            else:
+                with pytest.raises(RuntimeError, match='job exited'):
+                    self._launch()
 
-        assert record is mock_wait_for_new_allocation.return_value
-        mock_wait_for_new_allocation.assert_called_once()
-        call_args = mock_wait_for_new_allocation.call_args
-        bound = inspect.signature(slurm_instance._wait_for_new_allocation).bind(
-            *call_args.args, **call_args.kwargs)
-        assert bound.arguments['client'] is mock_client
-        assert bound.arguments['login_node_runner'] is mock_runner
-        assert bound.arguments['job_id'] == job_id
-        assert bound.arguments['ready_signal'] == (
-            '/home/testuser/.sky_clusters/test-held/.sky_sbatch_ready')
-        assert bound.arguments['sbatch_log_base_dir'] == '/home/testuser'
-        assert bound.arguments['provision_timeout'] == 120
+        mock_record_allocation.assert_called_once_with('test-held',
+                                                       'test-slurm', job_id)
+        mock_wait_for_job_nodes.assert_called_once_with(mock_client, job_id,
+                                                        120, 'gpu', mock.ANY)
+        mock_wait_for_job_ready.assert_called_once_with(
+            mock_runner, mock_client, job_id,
+            '/home/testuser/.sky_clusters/test-held/.sky_sbatch_ready',
+            slurm_log)
+        if ready_error is None:
+            log_error.assert_not_called()
+        else:
+            assert 'srun: error: something' in log_error.call_args.args[0]
+
+    @patch('sky.provision.slurm.instance._wait_for_job_ready')
+    @patch('sky.provision.slurm.instance._record_nodes_allocated')
+    @patch('sky.provision.slurm.instance._record_allocation')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_new_job_with_changed_shape_is_refused_before_any_wait(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_record_allocation, mock_record_nodes_allocated,
+            mock_wait_for_job_ready, held_job_check):
+        """A new job whose shape Slurm changed is cancelled and the refusal
+        reaches the caller; nothing is recorded or waited on."""
+        held_job_check.side_effect = _REAL_RELEASE_IF_REQUEST_KEPT
+        mock_client, _ = self._reuse_mocks(
+            mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, [],
+            dict(self._LEFT_HELD_FIELDS, **{
+                'JobId': '78',
+                'CPUs/Task': '4'
+            }))
+
+        with pytest.raises(exceptions.ProvisionUnsupportedInZoneError) as e:
+            self._launch()
+
+        assert '4 CPUs per task instead of the 2 requested' in str(e.value)
+        assert 'Slurm job 78 was cancelled before it started.' in str(e.value)
+        mock_client.submit_job.assert_called_once_with('gpu',
+                                                       'test-held',
+                                                       mock.ANY,
+                                                       hold=True)
+        mock_client.cancel_job.assert_called_once_with('78')
+        mock_client.release_job.assert_not_called()
+        mock_record_allocation.assert_not_called()
+        mock_record_nodes_allocated.assert_not_called()
+        mock_wait_for_job_nodes.assert_not_called()
+        mock_wait_for_job_ready.assert_not_called()
 
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')

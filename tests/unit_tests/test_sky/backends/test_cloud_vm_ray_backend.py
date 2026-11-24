@@ -1047,3 +1047,157 @@ class TestProvisionExistingClusterError:
                 self._provision(status_lib.ClusterStatus.INIT, **error)
         optimize.assert_called_once()
         assert not e.value.no_failover
+
+
+class _ZoneResources:
+    """The parts of a launchable Resources the zone loop uses."""
+
+    def __init__(self, cloud, region='slurm-cluster', zone=None):
+        self.cloud = cloud
+        self.region = region
+        self.zone = zone
+        self.ports = None
+        self.use_spot = False
+        self.instance_type = '2CPU--8GB'
+
+    def assert_launchable(self):
+        return self
+
+    def copy(self, **kwargs):
+        attrs = {'region': self.region, 'zone': self.zone}
+        attrs.update(kwargs)
+        return _ZoneResources(self.cloud, **attrs)
+
+    def should_be_blocked_by(self, blocked):
+        return (blocked.region in (None, self.region) and
+                blocked.zone in (None, self.zone))
+
+
+class TestZoneScopedRefusal:
+    """A ProvisionUnsupportedInZoneError blocks only the zone that raised it.
+
+    E.g. one Slurm partition's MaxMemPerCPU raises the job's CPUs; another
+    partition may still run the job as requested.
+    """
+
+    @staticmethod
+    def _refusal(partition):
+        return exceptions.ProvisionUnsupportedInZoneError(
+            f'Slurm would run cluster on partition {partition!r} with 8 CPUs '
+            'per task instead of the 4 requested.')
+
+    def _retry_zones(self, tmp_path, outcomes, partitions=('a', 'b')):
+        """Runs the zone loop over `partitions`, one bulk_provision outcome
+        (an exception, or a record) per attempt."""
+        provisioner = object.__new__(cloud_vm_ray_backend.RetryingVmProvisioner)
+        provisioner._blocked_resources = set()  # pylint: disable=protected-access
+        provisioner._extra_launch_context = None  # pylint: disable=protected-access
+        provisioner._is_launched_by_jobs_controller = False  # pylint: disable=protected-access
+        provisioner._local_wheel_path = MagicMock()  # pylint: disable=protected-access
+        provisioner._wheel_hash = 'h'  # pylint: disable=protected-access
+        provisioner._is_managed = False  # pylint: disable=protected-access
+        provisioner.log_dir = str(tmp_path)
+        cloud = MagicMock()
+        cloud.PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+        cloud.OPEN_PORTS_VERSION = clouds.OpenPortsVersion.UPDATABLE
+        cloud.check_quota_available.return_value = True
+        cloud.yield_cloud_specific_failover_overrides.return_value = [None]
+        to_provision = _ZoneResources(cloud)
+        zones = [[clouds.Zone(name=p)] for p in partitions]
+        bulk_provision = MagicMock(side_effect=outcomes)
+        backend = MagicMock()
+        with patch.object(provisioner, '_yield_zones',
+                          return_value=iter(zones)), \
+                patch.object(cloud_vm_ray_backend,
+                             '_get_cluster_config_template',
+                             return_value='t.j2'), \
+                patch('sky.provision.get_registered_provisioner',
+                      return_value=None), \
+                patch.object(backend_utils, 'write_cluster_config',
+                             return_value={
+                                 'ray': 'c.yaml',
+                                 'cluster_name_on_cloud': 'c-1234'
+                             }), \
+                patch.object(cloud_vm_ray_backend, 'CloudVmRayResourceHandle'), \
+                patch.object(cloud_vm_ray_backend, 'global_user_state'), \
+                patch.object(cloud_vm_ray_backend, 'CloudVmRayBackend',
+                             return_value=backend), \
+                patch.object(cloud_vm_ray_backend.provisioner,
+                             'bulk_provision', bulk_provision), \
+                patch.object(cloud_vm_ray_backend.logger,
+                             'warning') as warning:
+            try:
+                result = provisioner._retry_zones(  # pylint: disable=protected-access
+                    to_provision,
+                    1,
+                    requested_resources=set(),
+                    dryrun=False,
+                    stream_logs=False,
+                    cluster_name='c',
+                    cloud_user_identity=None,
+                    prev_cluster_status=None,
+                    prev_handle=None,
+                    prev_cluster_ever_up=False,
+                    skip_if_config_hash_matches=None,
+                    volume_mounts=None,
+                    task=MagicMock())
+            except Exception as e:  # pylint: disable=broad-except
+                result = e
+        tried = [c.args[2][0].name for c in bulk_provision.call_args_list]
+        blocked = {(r.region, r.zone) for r in provisioner._blocked_resources}  # pylint: disable=protected-access
+        warnings = [c.args[0] for c in warning.call_args_list]
+        return result, tried, blocked, backend, warnings
+
+    def test_refused_partition_fails_over_to_the_next(self, tmp_path):
+        record = MagicMock()
+        result, tried, blocked, backend, warnings = self._retry_zones(
+            tmp_path, [self._refusal('a'), record])
+        assert result['provision_record'] is record
+        assert tried == ['a', 'b']
+        assert blocked == {('slurm-cluster', 'a')}
+        # What the refused attempt left is torn down, as for other failures.
+        backend.post_teardown_cleanup.assert_called_once()
+        # Why partition b is used instead is shown.
+        assert any("partition 'a'" in w for w in warnings)
+
+    def test_every_partition_refusing_is_a_refusal_with_the_reasons(
+            self, tmp_path):
+        result, tried, blocked, _, _ = self._retry_zones(
+            tmp_path,
+            [self._refusal('a'), self._refusal('b')])
+        assert tried == ['a', 'b']
+        assert blocked == {('slurm-cluster', 'a'), ('slurm-cluster', 'b')}
+        # Not "no resources right now": the candidate cannot serve the
+        # request, and the user sees why for each partition.
+        assert isinstance(result, exceptions.ProvisionUnsupportedError)
+        assert not isinstance(result,
+                              exceptions.ProvisionUnsupportedInZoneError)
+        assert "partition 'a'" in str(result)
+        assert "partition 'b'" in str(result)
+
+    def test_a_refusal_with_another_failure_is_retryable_with_the_reason(
+            self, tmp_path):
+        result, tried, _, _, _ = self._retry_zones(
+            tmp_path, [self._refusal('a'),
+                       RuntimeError('scontrol: timed out')])
+        assert tried == ['a', 'b']
+        assert isinstance(result, exceptions.ResourcesUnavailableError)
+        assert not result.no_failover
+        assert "Reason: Slurm would run cluster on partition 'a'" in str(result)
+
+    def test_a_transient_failure_fails_over_and_stays_retryable(self, tmp_path):
+        # What a failed scontrol raises: as any provisioning error before.
+        result, tried, blocked, _, _ = self._retry_zones(
+            tmp_path, [RuntimeError('Could not read Slurm job 1'),
+                       MagicMock()])
+        assert tried == ['a', 'b']
+        assert blocked == {('slurm-cluster', 'a')}
+        assert 'provision_record' in result
+
+    def test_a_cluster_wide_refusal_still_ends_the_zone_loop(self, tmp_path):
+        result, tried, _, _, _ = self._retry_zones(
+            tmp_path,
+            [exceptions.ProvisionUnsupportedError('unreadable shape')])
+        assert tried == ['a']
+        assert isinstance(result, exceptions.ProvisionUnsupportedError)
+        assert str(result) == 'unreadable shape'

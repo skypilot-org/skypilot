@@ -289,6 +289,19 @@ class ProvisionUnsupportedError(Exception):
     pass
 
 
+class ProvisionUnsupportedInZoneError(ProvisionUnsupportedError):
+    """Raised when a request cannot ever be satisfied in the given zones.
+
+    Unlike its base class, it says nothing about the candidate's other zones,
+    which may serve the request as it is: e.g. one Slurm partition's limits
+    change the job's shape, and another partition's would not. Failover
+    blocks only the zones that refused and tries the rest. If every zone it
+    tries refuses, the candidate is treated as unusable, as for the base
+    class.
+    """
+    pass
+
+
 class SkyPilotExcludeArgsBaseException(Exception):
     """Base class for exceptions that don't need args while serialization.
 

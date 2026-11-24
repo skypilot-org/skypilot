@@ -1091,6 +1091,10 @@ class RetryingVmProvisioner(object):
 
         insufficient_resources = None
         last_error_reason: Optional[str] = None
+        # Provisioning attempts made in this loop, and those refused by the
+        # zones they were made in (ProvisionUnsupportedInZoneError).
+        num_provision_attempts = 0
+        zone_refusals: List[exceptions.ProvisionUnsupportedInZoneError] = []
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
                                        prev_cluster_ever_up):
@@ -1320,6 +1324,7 @@ class RetryingVmProvisioner(object):
                                     f'{region.name}{colorama.Style.RESET_ALL}'
                                     f'{zone_str}.'))
                         assert handle.cluster_yaml is not None
+                        num_provision_attempts += 1
                         provision_record = provisioner.bulk_provision(
                             to_provision.cloud,
                             region,
@@ -1355,6 +1360,25 @@ class RetryingVmProvisioner(object):
                         # Pausing to wait on an external condition: keep the
                         # resources for resume, do not tear down or fail over.
                         raise
+                    except exceptions.ProvisionUnsupportedInZoneError as e:
+                        # Only these zones cannot serve the request: block
+                        # them and try the candidate's other zones. Shown
+                        # now, as the reason a later zone is used instead,
+                        # and because a relaunch's single attempt does not
+                        # reach the summary below.
+                        logger.warning(common_utils.format_exception(e))
+                        last_error_reason = str(e)
+                        zone_refusals.append(e)
+                        CloudVmRayBackend().post_teardown_cleanup(
+                            handle,
+                            terminate=not prev_cluster_ever_up,
+                            remove_from_db=False,
+                            failover=True,
+                        )
+                        FailoverCloudErrorHandlerV2.update_blocklist_on_error(
+                            self._blocked_resources, to_provision, region,
+                            zones, e)
+                        continue
                     except exceptions.ProvisionUnsupportedError as e:
                         # The request itself cannot be served here, so the
                         # remaining zones of this candidate cannot help. Tear
@@ -1526,6 +1550,13 @@ class RetryingVmProvisioner(object):
                 CloudVmRayBackend().teardown_no_lock(
                     handle, terminate=terminate_or_stop, remove_from_db=False)
 
+        if zone_refusals and len(zone_refusals) == num_provision_attempts:
+            # Every zone tried refused the request itself, none for capacity,
+            # so the candidate cannot serve it either.
+            reasons = dict.fromkeys(str(e) for e in zone_refusals)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ProvisionUnsupportedError(
+                    '\n'.join(reasons)) from zone_refusals[-1]
         message = self._insufficient_resources_msg(
             to_provision,
             requested_resources,
