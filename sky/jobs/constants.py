@@ -26,6 +26,11 @@ DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
                               'root_job_id', 'parent_job_id', 'parent_task_id',
                               'dynamic_task_index')
 
+# Structural job_events.code values for PENDING launch attempts. A retry kind
+# may itself contain a colon, so strip only the prefix when reading it.
+LAUNCH_RETRY_CODE_PREFIX = 'launch_retry:'
+LAUNCH_PARKED_CODE = 'launch_parked'
+
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
 CONSOLIDATED_SIGNAL_PATH = runtime_utils.expanduser('~/.sky/signals/')

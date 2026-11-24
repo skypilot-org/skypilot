@@ -9,6 +9,7 @@ Covers the two layers of the feature:
 """
 import asyncio
 import contextlib
+import os
 import threading
 import time
 from unittest.mock import AsyncMock
@@ -26,6 +27,7 @@ from sky.jobs import controller
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_utils
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import controller_utils
@@ -717,6 +719,45 @@ class TestEmergencyRecoveryState:
                                               asyncio.Condition(lock=lock)):
             pass
         assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('cancel', [False, True])
+    async def test_launch_slot_waiter_gauge(self, _mock_managed_jobs_db_conn,
+                                            monkeypatch, cancel):
+        _seed_job(_mock_managed_jobs_db_conn, status='STARTING')
+        monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+        monkeypatch.setattr(controller_utils, 'LAUNCHES_PER_WORKER', 1)
+        starting = {2}
+        lock = asyncio.Lock()
+        signal = asyncio.Condition(lock)
+        waiting = asyncio.Event()
+        original_wait = signal.wait
+
+        async def notify_wait():
+            waiting.set()
+            return await original_wait()
+
+        monkeypatch.setattr(signal, 'wait', notify_wait)
+        gauge = metrics_utils.SKY_MANAGED_JOBS_CONTROLLER_LAUNCH_SLOT_WAITERS.labels(
+            pid=str(os.getpid()))
+
+        async def launch():
+            async with scheduler.scheduled_launch(1, starting, lock, signal):
+                assert gauge._value.get() == 0
+
+        task = asyncio.create_task(launch())
+        await asyncio.wait_for(waiting.wait(), timeout=5)
+        assert gauge._value.get() == 1
+        if cancel:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            async with signal:
+                starting.remove(2)
+                signal.notify()
+            await asyncio.wait_for(task, timeout=5)
+        assert gauge._value.get() == 0
 
     @pytest.mark.asyncio
     async def test_scheduled_launch_enters_with_reserved_slot(

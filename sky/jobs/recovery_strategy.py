@@ -24,6 +24,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
+from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
@@ -206,13 +207,6 @@ _KIND_LAUNCH_STREAM_FAILED = 'launch_stream_failed'
 _SUBMIT_CLUSTER_PREEMPTED = '_cluster_preempted'
 _SUBMIT_STATUS_TRANSIENT = '_status_transient'
 _SUBMIT_CHECKS_EXHAUSTED = '_checks_exhausted'
-
-# job_events.code values. The retry prefix keeps the kinds in one namespace so
-# an inventory can select them with a single LIKE. The kind may itself contain
-# a colon (`kubernetes:ApiException`), so recover it by splitting once, not by
-# taking the last field.
-_CODE_LAUNCH_RETRY_PREFIX = 'launch_retry:'
-_CODE_LAUNCH_PARKED = 'launch_parked'
 
 # A leading token shaped like an exception class, in the message of a bare
 # Exception. See _error_kind for why this is parsed and why it is this narrow.
@@ -1408,7 +1402,7 @@ class StrategyExecutor:
                             self.job_id,
                             self.task_id,
                             reason=parked_reason,
-                            code=_CODE_LAUNCH_PARKED)
+                            code=jobs_constants.LAUNCH_PARKED_CODE)
                         parked_reason = None
                     resumed_request_id = await self._wait_for_parked_request(
                         parked_request_id)
@@ -2011,8 +2005,9 @@ class StrategyExecutor:
                 # retry_code is None only if a path reached here without
                 # saying why; leave the column NULL and count nothing rather
                 # than inventing a kind, so that case stays visible.
-                code = (None if retry_code is None else
-                        f'{_CODE_LAUNCH_RETRY_PREFIX}{retry_code}')
+                code = (
+                    None if retry_code is None else
+                    f'{jobs_constants.LAUNCH_RETRY_CODE_PREFIX}{retry_code}')
                 await state.set_backoff_pending_async(self.job_id,
                                                       self.task_id,
                                                       code=code)

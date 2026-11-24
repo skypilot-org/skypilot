@@ -21,6 +21,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
+from sky.jobs import constants as jobs_constants
 from sky.jobs import runtime as managed_job_runtime
 from sky.provision import observation as provision_observation
 from sky.skylet import constants
@@ -2155,6 +2156,131 @@ def get_status_counts_by_workspace_user_cloud(
     return [(row[0], row[1], row[2], str(row[3]), int(row[4])) for row in rows]
 
 
+def _batch_pool_available() -> sqlalchemy.sql.elements.ColumnElement:
+    """Batch coordinators run one at a time in each pool."""
+    info = job_info_table.c
+    busy_pools = sqlalchemy.select(info.pool).where(
+        info.pool.is_not(None),
+        info.is_batch.is_(True),
+        info.schedule_state.in_(_claimed_schedule_states()),
+    ).correlate(None)
+    return sqlalchemy.or_(info.is_batch.isnot(True), ~info.pool.in_(busy_pools))
+
+
+def _claimed_schedule_states() -> List[str]:
+    return [
+        state.value for state in (ManagedJobScheduleState.LAUNCHING,
+                                  ManagedJobScheduleState.ALIVE,
+                                  ManagedJobScheduleState.ALIVE_WAITING,
+                                  ManagedJobScheduleState.ALIVE_BACKOFF)
+    ]
+
+
+def get_controller_wait_counts(
+    max_launching_jobs_per_user: Optional[int],
+) -> List[Tuple[Optional[str], Optional[str], str, int]]:
+    """Count WAITING jobs once each, including those awaiting reattachment."""
+    reason = sqlalchemy.case(
+        (_unfinished_dependency_exists(), 'dependency'),
+        (~_batch_pool_available(), 'batch_pool'),
+        (_has_live_task(), 'reattachment'),
+        (~_not_held_by_launch_limit(max_launching_jobs_per_user), 'user_limit'),
+        else_='controller_claim').label('reason')
+    info = job_info_table.c
+    query = sqlalchemy.select(
+        info.workspace,
+        info.user_hash,
+        reason,
+        sqlalchemy.func.count(),  # pylint: disable=not-callable
+    ).where(
+        info.schedule_state == ManagedJobScheduleState.WAITING.value).group_by(
+            info.workspace, info.user_hash, 'reason')
+    with orm.Session(_db_manager.get_engine()) as session:
+        return [(ws, user, why, count)
+                for ws, user, why, count in session.execute(query)]
+
+
+def get_launch_stage_counts(
+) -> List[Tuple[Optional[str], Optional[str], str, int]]:
+    """Count launch-stage *tasks* on claimed jobs from their recorded state.
+
+    A group can have members in different stages. A serial pipeline's later
+    tasks do not enter this population until their predecessor finishes.
+    """
+    info, task, event = job_info_table.c, spot_table.c, job_events_table.c
+    pending = ManagedJobStatus.PENDING.value
+    starting = ManagedJobStatus.STARTING.value
+    recovering = ManagedJobStatus.RECOVERING.value
+    jobs_and_tasks = spot_table.join(job_info_table,
+                                     task.spot_job_id == info.spot_job_id)
+    active_step = sqlalchemy.or_(task.task_id == 0,
+                                 info.execution == DagExecution.PARALLEL.value,
+                                 task.eligible_at.is_not(None),
+                                 task.submitted_at.is_not(None),
+                                 task.status != pending)
+    active = sqlalchemy.select(
+        info.workspace,
+        info.user_hash,
+        info.schedule_state,
+        task.spot_job_id,
+        task.task_id,
+        task.status,
+        task.status_override,
+        task.submitted_at,
+    ).select_from(jobs_and_tasks).where(
+        info.schedule_state.in_(_claimed_schedule_states()),
+        task.end_at.is_(None),
+        task.status.in_([pending, starting, recovering]),
+        active_step,
+    ).cte('active_launch_tasks')
+    launch = active.c
+
+    # A task that returned to PENDING may be parked or retrying. Read its
+    # newest PENDING event even if uncoded. Restrict the event scan to these
+    # jobs, *once per job*: looking it up separately per task would traverse a
+    # large parallel group's history once for each of its members.
+    parked_or_retrying = sqlalchemy.and_(launch.status == pending,
+                                         launch.submitted_at.is_not(None))
+    pending_job_ids = sqlalchemy.select(
+        launch.spot_job_id).where(parked_or_retrying)
+    latest = sqlalchemy.select(
+        event.spot_job_id,
+        event.task_id,
+        sqlalchemy.func.max(event.id).label('event_id'),
+    ).where(event.new_status == pending,
+            event.spot_job_id.in_(pending_job_ids)).group_by(
+                event.spot_job_id, event.task_id).subquery()
+    tasks_with_event = active.outerjoin(
+        latest,
+        sqlalchemy.and_(launch.spot_job_id == latest.c.spot_job_id,
+                        launch.task_id == latest.c.task_id)).outerjoin(
+                            job_events_table, event.id == latest.c.event_id)
+    reported_pending = launch.status_override == pending
+    pending_stage = sqlalchemy.case(
+        (event.code.startswith(jobs_constants.LAUNCH_RETRY_CODE_PREFIX,
+                               autoescape=True), 'retry_pending'),
+        (event.code == jobs_constants.LAUNCH_PARKED_CODE,
+         sqlalchemy.case((reported_pending, 'reported_queue'), else_='parked')),
+        else_='unknown_pending')
+    stage = sqlalchemy.case(
+        (sqlalchemy.and_(launch.status == starting, reported_pending),
+         'reported_queue'), (launch.status == recovering, 'recovering'),
+        (launch.schedule_state
+         == ManagedJobScheduleState.ALIVE_BACKOFF.value, 'retry_pending'),
+        (parked_or_retrying, pending_stage),
+        else_='starting').label('stage')
+    query = sqlalchemy.select(
+        launch.workspace,
+        launch.user_hash,
+        stage,
+        sqlalchemy.func.count(),  # pylint: disable=not-callable
+    ).select_from(tasks_with_event).group_by(launch.workspace, launch.user_hash,
+                                             'stage')
+    with orm.Session(_db_manager.get_engine()) as session:
+        return [(ws, user, phase, count)
+                for ws, user, phase, count in session.execute(query)]
+
+
 def get_recovery_event_counts_by_source_workspace(
 ) -> List[Tuple[str, Optional[str], int]]:
     """Return recovery job_events counts grouped by source/workspace.
@@ -3252,24 +3378,6 @@ async def get_waiting_job_async(
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        # Subquery: pools that already have an active *batch* job.
-        # Batch coordinator jobs (ds.map()) are serialized one-at-a-time
-        # per pool, so we skip WAITING batch jobs whose pool already has
-        # another active batch job.  Regular (non-batch) pool jobs are
-        # unaffected — they can run concurrently on the same pool.
-        active_batch_states = [
-            ManagedJobScheduleState.LAUNCHING.value,
-            ManagedJobScheduleState.ALIVE.value,
-            ManagedJobScheduleState.ALIVE_WAITING.value,
-            ManagedJobScheduleState.ALIVE_BACKOFF.value,
-        ]
-        busy_batch_pools_subq = sqlalchemy.select(job_info_table.c.pool,).where(
-            sqlalchemy.and_(
-                job_info_table.c.pool.isnot(None),
-                job_info_table.c.is_batch.is_(True),
-                job_info_table.c.schedule_state.in_(active_batch_states),
-            )).correlate(None).scalar_subquery()
-
         # Select the highest priority waiting job for update (locks the row).
         # Batch jobs are skipped when their pool already has an active batch
         # job; non-batch jobs (including regular pool jobs) are always eligible.
@@ -3282,12 +3390,7 @@ async def get_waiting_job_async(
                 job_info_table.c.schedule_state.in_([
                     ManagedJobScheduleState.WAITING.value,
                 ]),
-                sqlalchemy.or_(
-                    # Non-batch jobs: always eligible.
-                    job_info_table.c.is_batch.isnot(True),
-                    # Batch jobs: only if pool has no active batch job.
-                    ~job_info_table.c.pool.in_(busy_batch_pools_subq),
-                ),
+                _batch_pool_available(),
                 # A job waits until every job it depends on is DONE.
                 ~_unfinished_dependency_exists(),
                 _not_held_by_launch_limit(max_launching_jobs_per_user),

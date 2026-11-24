@@ -64,6 +64,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import file_content_utils
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_utils
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.utils import controller_utils
@@ -468,7 +469,12 @@ async def scheduled_launch(
                     len(starting) < controller_utils.LAUNCHES_PER_WORKER):
                 break
             logger.info('Too many jobs starting, waiting for a slot')
-            await starting_signal.wait()
+            waiter = (
+                metrics_utils.SKY_MANAGED_JOBS_CONTROLLER_LAUNCH_SLOT_WAITERS.
+                labels(pid=str(os.getpid())).track_inprogress()
+                if metrics_utils.METRICS_ENABLED else contextlib.nullcontext())
+            with waiter:
+                await starting_signal.wait()
 
     logger.info(f'Starting job {job_id}')
 

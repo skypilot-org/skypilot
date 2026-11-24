@@ -4759,6 +4759,12 @@ class ControllerManager:
         """Monitor the job loop."""
         logger.info(f'Starting monitor loop for pid {self._pid}...')
         pid_str = str(self._pid)
+        if metrics_lib.METRICS_ENABLED:
+            # Materialize zero before the first slot wait on this process.
+            metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_LAUNCH_SLOT_WAITERS.labels(
+                pid=pid_str)
+            metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_HARD_JOB_LIMIT.labels(
+                pid=pid_str).set(controller_utils.MAX_JOBS_PER_WORKER)
 
         while True:
             async with self._job_tasks_lock:
@@ -4778,12 +4784,6 @@ class ControllerManager:
                 metrics_lib.SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER.labels(
                     pid=pid_str).set(controller_utils.LAUNCHES_PER_WORKER)
 
-            if starting_count >= controller_utils.LAUNCHES_PER_WORKER:
-                # launching a job takes around 1 minute, so lets wait half that
-                # time
-                await asyncio.sleep(30)
-                continue
-
             # Normally, 200 jobs can run on each controller. But if we have a
             # ton of controllers, we need to limit the number of jobs that can
             # run on each controller, to achieve a total of 2000 jobs across all
@@ -4799,6 +4799,12 @@ class ControllerManager:
                     pid=pid_str).set(max_jobs)
                 metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_MAX_COST_UNITS.labels(
                     pid=pid_str).set(max_units)
+
+            if starting_count >= controller_utils.LAUNCHES_PER_WORKER:
+                # launching a job takes around 1 minute, so lets wait half that
+                # time
+                await asyncio.sleep(30)
+                continue
 
             # Claim while under the cap, whatever the next job costs: the claim
             # order stays strictly by priority, and the cap is exceeded by

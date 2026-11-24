@@ -4548,6 +4548,35 @@ class TestJobCostUnits:
     class _StopLoop(Exception):
         pass
 
+    @pytest.mark.asyncio
+    async def test_capacity_gauges_when_launch_slots_full(self, monkeypatch):
+        manager = ControllerManager('test-uuid')
+        manager.starting.add(1)
+        metrics = controller_module.metrics_lib
+        limits = controller_module.controller_utils
+        monkeypatch.setattr(metrics, 'METRICS_ENABLED', True)
+        monkeypatch.setattr(limits, 'LAUNCHES_PER_WORKER', 1)
+        monkeypatch.setattr(limits, 'MAX_JOBS_PER_WORKER', 20)
+        monkeypatch.setattr(limits, 'MAX_TOTAL_RUNNING_JOBS', 40)
+        monkeypatch.setattr(limits, 'get_number_of_jobs_controllers', lambda: 4)
+
+        async def stop_at_slot_limit(seconds):
+            assert seconds == 30
+            raise self._StopLoop()
+
+        monkeypatch.setattr(controller_module.asyncio, 'sleep',
+                            stop_at_slot_limit)
+        with pytest.raises(self._StopLoop):
+            await manager.monitor_loop()
+
+        labels = {'pid': str(manager._pid)}
+        assert metrics.SKY_MANAGED_JOBS_CONTROLLER_HARD_JOB_LIMIT.labels(
+            **labels)._value.get() == 20
+        assert metrics.SKY_MANAGED_JOBS_CONTROLLER_MAX_COST_UNITS.labels(
+            **labels)._value.get() == 10 * limits.JOB_COST_UNITS
+        assert metrics.SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT.labels(
+            **labels)._value.get() == 1
+
     async def _claim_until_capped(self, tmp_path, costs, max_jobs_per_worker,
                                   max_total_running_jobs):
         """Runs monitor_loop until it stops claiming; returns the (jobs, cost

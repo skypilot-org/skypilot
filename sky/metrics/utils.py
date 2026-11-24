@@ -1122,6 +1122,20 @@ SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT = prom.Gauge(
     multiprocess_mode='liveall',
 )
 
+SKY_MANAGED_JOBS_CONTROLLER_LAUNCH_SLOT_WAITERS = prom.Gauge(
+    'sky_managed_jobs_controller_launch_slot_waiters',
+    'Claimed jobs waiting to acquire a launch slot on this controller',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_HARD_JOB_LIMIT = prom.Gauge(
+    'sky_managed_jobs_controller_hard_job_limit',
+    'Maximum number of jobs this controller may hold regardless of cost',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
 SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
     'sky_managed_jobs_controller_running_count',
     'Number of running job tasks on this controller process, including '
