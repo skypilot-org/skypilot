@@ -262,6 +262,53 @@ def hang_until(marker, seconds):
         time.sleep(0.05)
 
 
+def gated_start(gate_dir, seconds):
+    """Initializer that signals it is starting, then waits until the test
+    releases this worker by pid (at most `seconds`)."""
+    pid = os.getpid()
+    open(os.path.join(gate_dir, f'started.{pid}'), 'w',
+         encoding='utf-8').close()
+    release = os.path.join(gate_dir, f'go.{pid}')
+    deadline = time.monotonic() + seconds
+    while not os.path.exists(release) and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+
+def _gated_pids(gate_dir, prefix):
+    return {
+        int(name.split('.', 1)[1])
+        for name in os.listdir(gate_dir)
+        if name.startswith(prefix + '.')
+    }
+
+
+def _release_one_at_a_time(executor, gate_dir, total):
+    """Releases gated workers one by one, checking at every step that no more
+    than _WARM_START_MAX_STARTING workers are starting at once."""
+    cap = requests_process._WARM_START_MAX_STARTING
+    released = set()
+    while len(released) < total:
+        expected = min(cap, total - len(released))
+
+        def waiting():
+            return _gated_pids(gate_dir, 'started') - released
+
+        assert _wait_until(lambda: len(waiting()) == expected)
+        # Over several warm-start polls, no worker beyond the cap starts.
+        assert not _wait_until(
+            lambda: len(executor._processes) > len(released) + cap, timeout=0.5)
+        pid = min(waiting())
+        open(os.path.join(gate_dir, f'go.{pid}'), 'w', encoding='utf-8').close()
+        released.add(pid)
+
+
+def busy_task(started_path, seconds):
+    """Task that signals it is running, then sleeps `seconds`."""
+    open(started_path, 'w', encoding='utf-8').close()
+    time.sleep(seconds)
+    return True
+
+
 def first_fast_rest_slow(marker, seconds):
     """Initializer: the first worker starts at once and writes its pid to
     `marker`; every other worker sleeps `seconds` first."""
@@ -390,20 +437,15 @@ def test_pool_executor_serves_tasks_during_warm_start():
 @requires_warm_start
 def test_pool_executor_warm_start_caps_starting_workers(tmp_path):
     """Warm start never has more than _WARM_START_MAX_STARTING workers
-    starting at once, and every worker runs the pool initializer."""
-    marker = str(tmp_path / 'go')
+    starting at once, at every step until the pool is full, and every
+    worker runs the pool initializer."""
+    gate_dir = str(tmp_path)
     executor = PoolExecutor(max_workers=5,
                             warm_start=True,
-                            initializer=hang_until,
-                            initargs=(marker, 60))
+                            initializer=gated_start,
+                            initargs=(gate_dir, 60))
     try:
-        cap = requests_process._WARM_START_MAX_STARTING
-        assert _wait_until(lambda: len(executor._processes) == cap)
-        # The started workers are stuck starting: warm start must not add
-        # more over many of its polls.
-        assert not _wait_until(lambda: len(executor._processes) > cap,
-                               timeout=1)
-        open(marker, 'w', encoding='utf-8').close()
+        _release_one_at_a_time(executor, gate_dir, 5)
         assert executor._warm_start_done.wait(60)
         assert len(executor._processes) == 5
         assert executor._ready_count == 5
@@ -414,19 +456,17 @@ def test_pool_executor_warm_start_caps_starting_workers(tmp_path):
 @requires_warm_start
 def test_pool_executor_warm_start_caps_workers_started_by_submits(tmp_path):
     """Tasks submitted during warm start wait for a ready worker instead of
-    starting more workers, so the limit on workers starting at once holds."""
-    marker = str(tmp_path / 'go')
+    starting more workers, so the limit on workers starting at once holds at
+    every step."""
+    gate_dir = str(tmp_path)
     executor = PoolExecutor(max_workers=6,
                             warm_start=True,
-                            initializer=hang_until,
-                            initargs=(marker, 60))
+                            initializer=gated_start,
+                            initargs=(gate_dir, 60))
     try:
-        cap = requests_process._WARM_START_MAX_STARTING
-        assert _wait_until(lambda: len(executor._processes) == cap)
+        assert _wait_until(lambda: len(executor._processes) >= 1)
         futures = [executor.submit(get_pid) for _ in range(6)]
-        assert not _wait_until(lambda: len(executor._processes) > cap,
-                               timeout=1)
-        open(marker, 'w', encoding='utf-8').close()
+        _release_one_at_a_time(executor, gate_dir, 6)
         assert all(f.result(timeout=60) for f in futures)
         assert executor._warm_start_done.wait(60)
         assert len(executor._processes) == 6
@@ -970,19 +1010,23 @@ def test_shutdown_does_not_count_a_break_after_start_up():
     assert _pool_broken(pool, 'serving') == serving_before
 
 
-def test_shutdown_stops_workers_when_counting_a_break_fails():
+def test_shutdown_stops_workers_when_counting_a_break_fails(tmp_path):
     """If counting a broken pool raises, shutdown still stops a worker that
     is busy with a task."""
     executor = PoolExecutor(max_workers=1)
     proc = psutil.Process(executor.submit(get_pid).result(timeout=60))
     # Keep the worker busy, so only shutdown's kill can stop it.
-    executor.submit(dummy_task, 120)
+    started = str(tmp_path / 'running')
+    executor.submit(busy_task, started, 120)
+    shut_down = False
     try:
+        assert _wait_until(lambda: os.path.exists(started))
         with unittest.mock.patch.object(
                 PoolExecutor,
                 'record_break',
                 side_effect=RuntimeError('metrics down')) as record_break:
             start = time.monotonic()
+            shut_down = True
             executor.shutdown()
         assert record_break.called
         assert _wait_until(lambda: not _alive(proc), timeout=30)
@@ -990,26 +1034,32 @@ def test_shutdown_stops_workers_when_counting_a_break_fails():
     finally:
         if _alive(proc):
             proc.kill()
+        if not shut_down:
+            executor.shutdown()
 
 
-def test_shutdown_stops_workers_when_counting_a_start_failure_fails():
+def test_shutdown_stops_workers_when_counting_a_start_failure_fails(tmp_path):
     """If counting a failed start raises during shutdown, shutdown still
     stops a worker that is busy with a task."""
     pool = PoolExecutor(max_workers=1)
     proc = psutil.Process(pool.submit(get_pid).result(timeout=60))
     # Keep the worker busy, so only shutdown's kill can stop it.
-    pool.submit(dummy_task, 120)
+    started = str(tmp_path / 'running')
+    pool.submit(busy_task, started, 120)
     # A start failure waiting on the start-up pipe when shutdown reads it.
     ready_writer = pool._initargs[0]
     requests_process._send_start_signal(ready_writer,
                                         requests_process._START_FAILED)
+    shut_down = False
     try:
+        assert _wait_until(lambda: os.path.exists(started))
         with unittest.mock.patch.object(
                 metrics_utils.
                 SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL,
                 'labels',
                 side_effect=OSError('metrics dir full')) as labels:
             start = time.monotonic()
+            shut_down = True
             pool.shutdown()
         assert labels.called
         # The task sleeps 120 s, so only shutdown's kill can end it this soon.
@@ -1018,6 +1068,8 @@ def test_shutdown_stops_workers_when_counting_a_start_failure_fails():
     finally:
         if _alive(proc):
             proc.kill()
+        if not shut_down:
+            pool.shutdown()
 
 
 @requires_warm_start
