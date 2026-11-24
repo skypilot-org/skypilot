@@ -1806,7 +1806,7 @@ class _FederationTargets:
         skypilot_config.reload_config()
         annotations.clear_request_level_cache()
         contexts = [
-            ctx for ctx in core.get_all_contexts()
+            ctx for ctx in core.get_every_workspace_contexts()
             if kubernetes_utils.known_unreachable_reason(ctx) is None
         ]
         _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
@@ -1918,9 +1918,9 @@ def gpu_metrics_debug() -> dict:
     default_path = os.path.expanduser('~/.kube/config')
 
     # Check what contexts are visible before and after cache clear
-    pre_clear_contexts = core.get_all_contexts()
+    pre_clear_contexts = core.get_every_workspace_contexts()
     annotations.clear_request_level_cache()
-    post_clear_contexts = core.get_all_contexts()
+    post_clear_contexts = core.get_every_workspace_contexts()
 
     # Check kubeconfig file existence
     if kubeconfig_env != 'NOT_SET':

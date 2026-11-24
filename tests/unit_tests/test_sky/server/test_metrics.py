@@ -2266,7 +2266,7 @@ def test_federation_targets_leave_out_known_unreachable_contexts(monkeypatch):
         metrics.kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS',
         [lambda context: 'proxy is down' if context == 'down' else None])
     monkeypatch.setattr(metrics.skypilot_config, 'reload_config', lambda: None)
-    monkeypatch.setattr(metrics.core, 'get_all_contexts',
+    monkeypatch.setattr(metrics.core, 'get_every_workspace_contexts',
                         lambda: ['up', 'down'])
     split = MagicMock(return_value=([], ['up']))
     monkeypatch.setattr(metrics.metrics_utils, 'split_local_remote_contexts',

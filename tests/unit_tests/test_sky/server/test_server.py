@@ -350,6 +350,20 @@ async def test_all_contexts_scopes_authenticated_users(auth_user, func):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('auth_user',
+                         [models.User(id='alice-id', name='alice'), None])
+async def test_dashboard_config_scopes_local_contexts_to_caller(
+        monkeypatch, auth_user):
+    seen = []
+    monkeypatch.setattr(server, '_get_local_contexts',
+                        lambda user: seen.append(user) or [])
+    request = mock.MagicMock()
+    request.state.auth_user = auth_user
+    await server.dashboard_config(request)
+    assert seen == [auth_user]
+
+
+@pytest.mark.asyncio
 async def test_enabled_clouds_respect_auth_user():
     """Test that enabled_clouds endpoint passes auth_user to schedule_request_async.
 
@@ -1242,7 +1256,7 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
             'label': 'Malformed entry without regex or url',
         }])
     monkeypatch.setattr(server, '_get_local_contexts',
-                        lambda: ['kind-local-named'])
+                        lambda user: ['kind-local-named'])
 
     client = TestClient(server.app)
     response = client.get('/dashboard_config')
@@ -1290,7 +1304,7 @@ def test_dashboard_config_endpoint_sanitizes_scope(monkeypatch):
             'url': 'https://wiki.internal.example.com',
             'scope': 'cluster',
         }])
-    monkeypatch.setattr(server, '_get_local_contexts', lambda: [])
+    monkeypatch.setattr(server, '_get_local_contexts', lambda user: [])
 
     client = TestClient(server.app)
     response = client.get('/dashboard_config')
@@ -1328,7 +1342,7 @@ def test_dashboard_config_endpoint_omits_local_contexts_on_failure(monkeypatch):
     monkeypatch.setattr(skypilot_config, 'get_nested',
                         lambda keys, default: default)
 
-    def _boom():
+    def _boom(user):
         raise RuntimeError('kubeconfig exploded')
 
     monkeypatch.setattr(server, '_get_local_contexts', _boom)
