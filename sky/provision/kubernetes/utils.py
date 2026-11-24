@@ -546,11 +546,12 @@ def tpu_slice_fit_error(resources: 'resources_lib.Resources',
     if not launched_multi and not requested_multi:
         return None
     if requested_shape != launched_shape:
-        return (f'The task requests TPU {requested_shape[0]}:'
-                f'{requested_shape[1]}, but the cluster runs '
-                f'{launched_shape[0]}:{launched_shape[1]} as one multi-host '
-                'slice per task node' if launched_multi else
-                f'The task requests a multi-host TPU slice '
+        if launched_shape is not None and launched_multi:
+            return (f'The task requests TPU {requested_shape[0]}:'
+                    f'{requested_shape[1]}, but the cluster runs '
+                    f'{launched_shape[0]}:{launched_shape[1]} as one '
+                    'multi-host slice per task node')
+        return (f'The task requests a multi-host TPU slice '
                 f'({requested_shape[0]}:{requested_shape[1]}), but the '
                 'cluster has none')
     if task_num_nodes != launched_task_nodes:
