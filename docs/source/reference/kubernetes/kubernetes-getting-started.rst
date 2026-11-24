@@ -447,8 +447,18 @@ FAQs
   The pods of a slice are launched as one unit:
 
   - They are all placed on the VMs of one slice, and the launch succeeds only when every pod is running.
-  - SkyPilot sets the TPU worker environment (``TPU_WORKER_ID``, ``TPU_WORKER_HOSTNAMES``, ``TPU_PROCESS_ADDRESSES``) on each pod, so JAX and the TPU runtime see one slice.
+  - SkyPilot sets the TPU worker environment (``TPU_WORKER_ID``, ``TPU_WORKER_HOSTNAMES``, ``TPU_PROCESS_ADDRESSES``) for the task's ``run`` commands on each pod, so JAX and the TPU runtime see one slice. ``setup`` commands and shells opened on a pod do not get these values.
   - ``num_nodes`` counts slices: ``num_nodes: 2`` with ``tpu-v6e-16`` runs 8 pods on two slices.
+  - A task on an existing multi-host TPU cluster must request the same slice and use every slice of the cluster.
+
+  TPU v6e with 8 chips exists both as one 8-chip VM and as a ``2x4`` slice of two 4-chip VMs. ``tpu-v6e-8`` is the single VM; add ``accelerator_args`` to get the slice:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v6e-8
+      accelerator_args:
+        multi_host: true  # a 2x4 slice: 2 pods, one per 4-chip VM
 
   Ironwood is requested by its GKE accelerator name and chip count. Each Ironwood VM has 4 chips:
 

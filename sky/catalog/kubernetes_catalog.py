@@ -249,11 +249,15 @@ def _list_accelerators(
                 if not accelerator_name:
                     continue
 
-                # Exclude multi-host TPUs from being processed.
-                # TODO(Doyoung): Remove the logic when adding support for
-                # multi-host TPUs.
+                # One VM of a multi-host TPU slice is requested as the whole
+                # slice, so its requestable quantity is the slice's chips.
+                multi_host_slice_chips = None
                 if kubernetes_utils.is_multi_host_tpu(node.metadata.labels):
-                    continue
+                    topology_key = (kubernetes_utils.GKELabelFormatter.
+                                    TPU_TOPOLOGY_LABEL_KEY)
+                    multi_host_slice_chips = (
+                        kubernetes_utils.reduce_tpu_topology(
+                            node.metadata.labels[topology_key]))
 
                 # Check if name_filter regex matches the accelerator_name
                 regex_flags = 0 if case_sensitive else re.IGNORECASE
@@ -291,7 +295,10 @@ def _list_accelerators(
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
                     # provisioned, but TPUs are considered as an atomic unit.
-                    if kubernetes_utils.is_tpu_on_gke(accelerator_name):
+                    if multi_host_slice_chips is not None:
+                        accelerators_qtys.add(
+                            (accelerator_name, multi_host_slice_chips))
+                    elif kubernetes_utils.is_tpu_on_gke(accelerator_name):
                         accelerators_qtys.add(
                             (accelerator_name, accelerator_capacity))
                     else:

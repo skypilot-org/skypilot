@@ -516,6 +516,58 @@ def tpu_worker_env_vars(tags: Optional[Dict[str, str]]) -> Dict[str, str]:
     }
 
 
+def tpu_slice_fit_error(resources: 'resources_lib.Resources',
+                        task_num_nodes: int,
+                        launched_resources: 'resources_lib.Resources',
+                        launched_task_nodes: int) -> Optional[str]:
+    """Why a task cannot run on an existing multi-host TPU cluster, or None.
+
+    On a multi-host GKE TPU slice every VM of the slice takes part in one TPU
+    runtime, so a task that requests TPUs must request the same slice shape
+    and use every slice of the cluster. Otherwise a single-VM request would
+    run across a whole slice, or a one-slice job could be spread over two
+    slices. Tasks that request no TPU, and clusters without a multi-host
+    slice, are not restricted here.
+    """
+    launched_shape = _tpu_request_shape(launched_resources)
+    requested_shape = _tpu_request_shape(resources)
+    if requested_shape is None:
+        return None
+    launched_multi = launched_shape is not None and launched_shape[2] > 1
+    requested_multi = requested_shape[2] > 1
+    if not launched_multi and not requested_multi:
+        return None
+    if requested_shape != launched_shape:
+        return (f'The task requests TPU {requested_shape[0]}:'
+                f'{requested_shape[1]}, but the cluster runs '
+                f'{launched_shape[0]}:{launched_shape[1]} as one multi-host '
+                'slice per task node' if launched_multi else
+                f'The task requests a multi-host TPU slice '
+                f'({requested_shape[0]}:{requested_shape[1]}), but the '
+                'cluster has none')
+    if task_num_nodes != launched_task_nodes:
+        return (f'The task requests {task_num_nodes} TPU slice(s), but the '
+                f'cluster has {launched_task_nodes}; a multi-host TPU task '
+                'must use every slice of the cluster')
+    return None
+
+
+def _tpu_request_shape(
+    resources: Optional['resources_lib.Resources']
+) -> Optional[Tuple[str, int, int]]:
+    """(GKE TPU type, chips, VMs per slice) a resource asks for, or None."""
+    if resources is None or not resources.accelerators or len(
+            resources.accelerators) != 1:
+        return None
+    acc, count = next(iter(resources.accelerators.items()))
+    if not is_tpu_on_gke(acc):
+        return None
+    acc_type, chips = normalize_tpu_accelerator(acc, count)
+    shape = get_tpu_multi_host_shape(
+        acc_type, chips, multi_host_requested(resources.accelerator_args))
+    return acc_type, chips, shape.vms_per_slice if shape is not None else 1
+
+
 def tpu_vms_per_slice(resources: Optional['resources_lib.Resources']) -> int:
     """Cluster nodes per task node for ``resources``.
 
@@ -1653,8 +1705,8 @@ class GKEAutoscaler(Autoscaler):
             # This node does not have TPUs.
             return False
         if cls._is_node_multi_host_tpu(node_pool_resource_labels):
-            # This node is a multi-host TPU.
-            # multi-host TPUs are not supported in SkyPilot yet.
+            # One VM of a multi-host slice never serves a single-host
+            # request; slices are matched by _node_pool_is_tpu_slice().
             return False
         node_tpu_type = node_pool_resource_labels['goog-gke-accelerator-type']
         # infer chip count from instance type
@@ -3294,8 +3346,8 @@ def check_instance_fits(
         for node in node_list:
             if acc_type == node.metadata.labels[
                     GKELabelFormatter.TPU_LABEL_KEY]:
-                # TODO(Doyoung): Update the logic when adding support for
-                # multi-host TPUs.
+                # A single-host request never runs on one VM of a
+                # multi-host slice (slices are checked separately).
                 if is_multi_host_tpu(node.metadata.labels):
                     continue
                 node_tpu_chip_count = int(node.metadata.labels[
@@ -3714,8 +3766,8 @@ def get_accelerator_label_key_values(
             # during scheduling.
             for node_name, label_list in node_labels.items():
                 node_metadata_labels = dict(label_list)
-                # TODO(Doyoung): Update the logic when adding support for
-                # multi-host TPUs.
+                # A single-host request never runs on one VM of a
+                # multi-host slice (slices are checked separately).
                 if is_multi_host_tpu(node_metadata_labels):
                     continue
                 for label, value in label_list:
@@ -5593,7 +5645,6 @@ def _get_kubernetes_node_info(
                 raise
 
     node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
-    has_multi_host_tpu = False
 
     for node in nodes:
         accelerator_name = None
@@ -5710,13 +5761,6 @@ def _get_kubernetes_node_info(
             accelerators_available = max(
                 0, accelerator_allocatable - allocated_qty)
 
-        # Exclude multi-host TPUs from being processed.
-        # TODO(Doyoung): Remove the logic when adding support for
-        # multi-host TPUs.
-        if is_multi_host_tpu(node.metadata.labels):
-            has_multi_host_tpu = True
-            continue
-
         node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
@@ -5734,14 +5778,9 @@ def _get_kubernetes_node_info(
             is_cordoned=node.is_cordoned(),
             taints=node_taints,
         )
-    hint = ''
-    if has_multi_host_tpu:
-        hint = ('(Note: Multi-host TPUs are detected and excluded from the '
-                'display as multi-host TPUs are not supported.)')
-
     return models.KubernetesNodesInfo(
         node_info_dict=node_info_dict,
-        hint=hint,
+        hint='',
     )
 
 

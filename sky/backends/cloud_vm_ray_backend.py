@@ -3362,7 +3362,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fit_num_nodes = (handle.launched_nodes
                          if skip_num_nodes_check else task.num_nodes *
                          kubernetes_utils.tpu_vms_per_slice(launched_resources))
+        tpu_slice_error = None
         for resource in task.resources:
+            slice_error = kubernetes_utils.tpu_slice_fit_error(
+                resource, handle.launched_task_nodes
+                if skip_num_nodes_check else task.num_nodes, launched_resources,
+                handle.launched_task_nodes)
+            if slice_error is not None:
+                tpu_slice_error = tpu_slice_error or slice_error
+                requested_resource_list.append(f'{task.num_nodes}x {resource}')
+                continue
             if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
@@ -3372,6 +3381,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 break
             else:
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
+
+        if valid_resource is None and tpu_slice_error is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    f'{tpu_slice_error}. {mismatch_str}')
 
         if valid_resource is None:
             for example_resource in task.resources:

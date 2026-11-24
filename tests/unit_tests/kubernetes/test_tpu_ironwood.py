@@ -1,8 +1,11 @@
 """Tests for Ironwood (TPU7x) GKE TPUs on Kubernetes."""
+from unittest import mock
+
 import pytest
 
 from sky import resources as resources_lib
 from sky.adaptors import gcp
+from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import accelerator_registry
 
@@ -141,3 +144,87 @@ def test_gke_api_error_falls_back_to_optimistic_scheduling(monkeypatch):
     ctx = 'gke_my-project_us-central1-c_my-cluster'
     assert _GKE.can_create_new_instance_of_type(ctx, '8CPU--64GB--tpu7x:4')
     assert _GKE.get_available_machine_types(ctx) == []
+
+
+def _k8s(accelerators, accelerator_args=None):
+    return resources_lib.Resources(infra='kubernetes',
+                                   accelerators=accelerators,
+                                   accelerator_args=accelerator_args)
+
+
+@pytest.mark.parametrize(
+    'requested,task_nodes,launched,launched_nodes,ok',
+    [
+        # A single-VM request never runs on a slice.
+        ('tpu7x:4', 1, 'tpu7x:8', 1, False),
+        # A slice request does not fit a single-VM cluster.
+        ('tpu7x:8', 1, 'tpu7x:4', 1, False),
+        # Different slice shapes.
+        ('tpu7x:8', 1, 'tpu7x:16', 1, False),
+        ('tpu-v6e-16', 1, 'tpu-v6e-32', 1, False),
+        # Same slice, every slice of the cluster.
+        ('tpu7x:8', 1, 'tpu7x:8', 1, True),
+        ('tpu7x:8', 2, 'tpu7x:8', 2, True),
+        ('tpu-v6e-16', 1, 'tpu-v6e-slice:16', 1, True),
+        # One slice of a two-slice cluster.
+        ('tpu7x:8', 1, 'tpu7x:8', 2, False),
+        # Single-host clusters keep the existing rules.
+        ('tpu7x:4', 1, 'tpu7x:4', 2, True),
+        ('tpu-v6e-slice:4', 1, 'tpu-v6e-slice:8', 1, True),
+        # Tasks without a TPU request are not restricted.
+        (None, 1, 'tpu7x:8', 2, True),
+    ])
+def test_tpu_slice_fit_error(requested, task_nodes, launched, launched_nodes,
+                             ok):
+    error = kubernetes_utils.tpu_slice_fit_error(_k8s(requested), task_nodes,
+                                                 _k8s(launched), launched_nodes)
+    assert (error is None) == ok, error
+
+
+def test_v6e_8_opt_in_slice_must_match():
+    slice_8 = _k8s('tpu-v6e-8', {'multi_host': True})
+    vm_8 = _k8s('tpu-v6e-8')
+    assert kubernetes_utils.tpu_slice_fit_error(vm_8, 1, slice_8, 1)
+    assert kubernetes_utils.tpu_slice_fit_error(slice_8, 1, vm_8, 1)
+    assert kubernetes_utils.tpu_slice_fit_error(slice_8, 1, slice_8, 1) is None
+
+
+@pytest.mark.parametrize('name', ['TPU7x', 'Tpu7X'])
+def test_mixed_case_ironwood_goes_to_kubernetes(name):
+    r = resources_lib.Resources(accelerators=f'{name}:4')
+    assert r.cloud is not None and r.cloud.canonical_name() == 'kubernetes'
+
+
+def test_show_gpus_lists_a_slice_vm_by_slice_size():
+    """A VM of a 2x2x2 slice is requested as the whole slice (8 chips)."""
+
+    def _node(name, topology):
+        node = mock.MagicMock()
+        node.metadata.name = name
+        node.metadata.labels = {
+            _FMT.TPU_LABEL_KEY: 'tpu7x',
+            _FMT.TPU_TOPOLOGY_LABEL_KEY: topology,
+            _FMT.ACCELERATOR_COUNT_LABEL_KEY: '4',
+        }
+        node.status.allocatable = {'google.com/tpu': '4'}
+        node.status.capacity = {'google.com/tpu': '4'}
+        node.is_ready.return_value = True
+        node.is_cordoned.return_value = False
+        node.get_taints.return_value = []
+        return node
+
+    nodes = [_node('s1', '2x2x2'), _node('s2', '2x2x2'), _node('v1', '2x2x1')]
+    p = 'sky.provision.kubernetes.utils.'
+    with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
+         mock.patch(p + 'get_current_kube_config_context_name', return_value='ctx'), \
+         mock.patch('sky.clouds.Kubernetes.existing_allowed_contexts', return_value=['ctx']), \
+         mock.patch(p + 'check_credentials', return_value=[True]), \
+         mock.patch(p + 'detect_accelerator_resource', return_value=True), \
+         mock.patch(p + 'detect_gpu_label_formatter', return_value=[_FMT(), None]), \
+         mock.patch(p + 'get_kubernetes_nodes', return_value=nodes), \
+         mock.patch(p + 'get_allocated_resources_by_node', return_value=({'s1': 0, 's2': 0, 'v1': 0}, {})), \
+         mock.patch(p + 'get_gpu_resource_key', return_value='nvidia.com/gpu'):
+        counts, capacity, _ = kubernetes_catalog.list_accelerators_realtime(
+            True, None, None, None)
+    assert sorted(int(i.accelerator_count) for i in counts['tpu7x']) == [4, 8]
+    assert capacity['tpu7x'] == 12
