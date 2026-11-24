@@ -237,6 +237,9 @@ def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
 
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())
+# No pod-config hooks, which could add their own tolerations: the test pins
+# what core merges in.
+@mock.patch.object(kubernetes_utils, '_POD_CONFIG_HOOKS', [])
 @mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
             return_value=[])
 @mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
