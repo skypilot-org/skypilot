@@ -477,6 +477,10 @@ def get_tpu_multi_host_shape(
         chips_per_vm=GKE_TPU_MULTI_HOST_CHIPS_PER_VM[acc_type])
 
 
+# GKE node label naming a node's node pool. A multi-host TPU node pool is
+# exactly one slice.
+GKE_NODEPOOL_LABEL_KEY = 'cloud.google.com/gke-nodepool'
+
 # Tags the Kubernetes provisioner puts on the pods of a multi-host TPU slice
 # (see instance._tag_tpu_multi_host_workers()).
 TPU_WORKER_ID_TAG = 'skypilot-tpu-worker-id'
@@ -3201,7 +3205,8 @@ def get_node_snapshot_label_keys(context: str) -> List[str]:
     """Returns the node label keys that accelerator availability reads.
 
     These are the GPU label formatters' keys, the GKE TPU keys that
-    is_multi_host_tpu() reads, and the allowed_nodes label_selector keys.
+    is_multi_host_tpu() reads, the GKE node pool key (which multi-host TPU
+    slice a node belongs to), and the allowed_nodes label_selector keys.
     Formatters match label keys exactly, so nodes with only these labels give
     the same result as the full node objects.
     """
@@ -3209,8 +3214,9 @@ def get_node_snapshot_label_keys(context: str) -> List[str]:
         key for formatter in LABEL_FORMATTER_REGISTRY
         for key in formatter.get_label_keys()
     }
-    keys.update((GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY,
-                 GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY))
+    keys.update(
+        (GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY,
+         GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY, GKE_NODEPOOL_LABEL_KEY))
     allowed_nodes = get_allowed_nodes_config(context) or {}
     keys.update(allowed_nodes.get('label_selector') or {})
     return sorted(keys)

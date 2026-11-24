@@ -308,3 +308,17 @@ def test_show_gpus_skips_slices_skypilot_cannot_launch():
     counts, _, _ = _show_gpus(nodes)
     assert 'tpu-v4-podslice' not in counts
     assert [int(i.accelerator_count) for i in counts['tpu7x']] == [8]
+
+
+def test_show_gpus_tainted_vm_makes_its_slice_busy():
+    nodes = [
+        _tpu_node('a1', 'tpu7x', '2x2x2', pool='a'),
+        _tpu_node('a2', 'tpu7x', '2x2x2', pool='a')
+    ]
+    taint = mock.MagicMock()
+    taint.tolerated = False
+    nodes[0].get_taints.return_value = [taint]
+    with mock.patch('sky.provision.kubernetes.utils.has_untolerated_taint',
+                    side_effect=lambda taints: bool(taints)):
+        _, _, available = _show_gpus(nodes, quantity_filter=8)
+    assert available['tpu7x'] == 0

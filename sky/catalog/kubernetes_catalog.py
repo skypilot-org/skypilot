@@ -26,9 +26,6 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-# GKE node label naming the node pool; one multi-host TPU slice is one pool.
-_GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
-
 _PULL_FREQUENCY_HOURS = 7
 
 # We keep pull_frequency_hours so we can remotely update the default image paths
@@ -227,21 +224,7 @@ def _list_accelerators(
     configured_tolerations = kubernetes_utils.get_configured_tolerations(
         context)
 
-    # A multi-host TPU slice is one GKE node pool and is only usable whole:
-    # its VMs count as free only when every VM of the pool is ready and idle.
-    busy_slice_pools: Set[str] = set()
-    for node in nodes:
-        labels = node.metadata.labels or {}
-        if (kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in labels and
-                kubernetes_utils.is_multi_host_tpu(labels) and
-            (not node.is_ready() or node.is_cordoned() or
-             allocated_qty_by_node.get(node.metadata.name, 0) > 0)):
-            busy_slice_pools.add(labels.get(_GKE_NODEPOOL_LABEL, ''))
-
-    for node in nodes:
-        # Check if node is ready
-        node_is_ready = node.is_ready()
-        node_is_cordoned = node.is_cordoned()
+    def _is_tainted(node) -> bool:
         node_taints = node.get_taints(
             exclude_cordon=True,
             exclude_not_ready=True,
@@ -252,7 +235,26 @@ def _list_accelerators(
         # does not make the node un-schedulable for the user's workloads.
         # Without configured tolerations, every retained taint has
         # `tolerated=False` so this is equivalent to `len(node_taints) > 0`.
-        node_is_tainted = kubernetes_utils.has_untolerated_taint(node_taints)
+        return kubernetes_utils.has_untolerated_taint(node_taints)
+
+    # A multi-host TPU slice is one GKE node pool and is only usable whole:
+    # its VMs count as free only when every VM of the pool is ready,
+    # schedulable and idle.
+    pool_key = kubernetes_utils.GKE_NODEPOOL_LABEL_KEY
+    busy_slice_pools: Set[str] = set()
+    for node in nodes:
+        labels = node.metadata.labels or {}
+        if (kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in labels and
+                kubernetes_utils.is_multi_host_tpu(labels) and
+            (not node.is_ready() or node.is_cordoned() or _is_tainted(node) or
+             allocated_qty_by_node.get(node.metadata.name, 0) > 0)):
+            busy_slice_pools.add(labels.get(pool_key, ''))
+
+    for node in nodes:
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+        node_is_cordoned = node.is_cordoned()
+        node_is_tainted = _is_tainted(node)
 
         for key in keys:
             if key in node.metadata.labels:
@@ -368,7 +370,7 @@ def _list_accelerators(
                 if multi_host_slice_chips is not None:
                     # A slice VM's chips count as free only when its whole
                     # slice (node pool) is ready and idle.
-                    pool = node.metadata.labels.get(_GKE_NODEPOOL_LABEL, '')
+                    pool = node.metadata.labels.get(pool_key, '')
                     if (quantity_filter in (None, multi_host_slice_chips) and
                             pool not in busy_slice_pools and
                             accelerators_available == accelerator_count and
