@@ -304,6 +304,94 @@ def _build_sbatch_directives(sbatch_options: Dict[str, Any],
     return '\n' + auto_time + user_block
 
 
+def _leading_int(value: str) -> int:
+    """The integer a Slurm field starts with ('8', '1-1' -> 1, '2+' -> 2)."""
+    match = re.match(r'\d+', value or '')
+    if match is None:
+        raise ValueError(f'not a count: {value!r}')
+    return int(match.group(0))
+
+
+def _requested_memory_gb(memory: Any) -> float:
+    """The memory the batch script requests with --mem, in GB; 0 if none."""
+    try:
+        return max(float(memory), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _cancel_quietly(client: 'slurm.SlurmClient', job_id: str) -> None:
+    try:
+        client.cancel_job(job_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to cancel held Slurm job {job_id}: {e}. '
+                       f'Cancel it manually with: scancel {job_id}')
+
+
+def _release_if_request_kept(client: 'slurm.SlurmClient', job_id: str,
+                             cluster_name: str, partition: str,
+                             cpus_per_task: int, num_nodes: int,
+                             memory: Any) -> None:
+    """Release a held job only if Slurm kept the requested shape.
+
+    Slurm can adjust a job at submission: when the requested memory exceeds
+    the partition's MaxMemPerCPU, it raises the CPUs per task. The job would
+    then run, and be accounted for, on resources the user never asked for. A
+    held job already shows Slurm's adjusted shape and cannot start, so it is
+    compared with the request here: if Slurm kept it, the job is released;
+    otherwise it is cancelled and the launch refused, before anything is
+    allocated. A job whose shape cannot be read is cancelled as well.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: Slurm changed the request, or
+            the held job could not be verified or released.
+    """
+    try:
+        fields = client.get_job_fields(job_id)
+        slurm_cpus_per_task = _leading_int(fields.get('CPUs/Task', ''))
+        slurm_num_nodes = _leading_int(fields.get('NumNodes', ''))
+    except Exception as e:  # pylint: disable=broad-except
+        _cancel_quietly(client, job_id)
+        raise exceptions.ProvisionUnsupportedError(
+            f'Could not verify the shape Slurm gave job {job_id} for '
+            f'cluster {cluster_name!r}, so it was cancelled: {e}') from e
+
+    changes = []
+    if slurm_cpus_per_task != cpus_per_task:
+        changes.append(f'{slurm_cpus_per_task} CPUs per task instead of the '
+                       f'{cpus_per_task} requested')
+    if slurm_num_nodes != num_nodes:
+        changes.append(f'{slurm_num_nodes} nodes instead of the {num_nodes} '
+                       'requested')
+    if changes:
+        _cancel_quietly(client, job_id)
+        hint = ''
+        # Only a --mem request can make Slurm raise the CPUs for MaxMemPerCPU;
+        # without one (the batch script then sends no --mem) the cause is
+        # something else, and naming the memory would mislead.
+        if slurm_cpus_per_task > cpus_per_task and _requested_memory_gb(memory):
+            memory_gb = common_utils.format_float(_requested_memory_gb(memory))
+            hint = (
+                f' This usually means the requested memory ({memory_gb} GB) '
+                f'exceeds what {cpus_per_task} CPUs may use on partition '
+                f'{partition!r} (its MaxMemPerCPU). Request --cpus '
+                f'{slurm_cpus_per_task}, or lower --memory.')
+        raise exceptions.ProvisionUnsupportedError(
+            f'Slurm would run cluster {cluster_name!r} with '
+            f'{" and ".join(changes)}, so the launch was refused rather '
+            f'than run (and accounted) on resources that were not '
+            f'requested; Slurm job {job_id} was cancelled before it '
+            f'started.{hint}')
+
+    try:
+        client.release_job(job_id)
+    except Exception as e:  # pylint: disable=broad-except
+        _cancel_quietly(client, job_id)
+        raise exceptions.ProvisionUnsupportedError(
+            f'Could not release held Slurm job {job_id} for cluster '
+            f'{cluster_name!r}, so it was cancelled: {e}') from e
+
+
 def _wait_for_job_nodes(
     client: 'slurm.SlurmClient',
     job_id: str,
@@ -1493,7 +1581,15 @@ touch {sky_cluster_home_dir}/.hushlogin
         tgt_path = provision_script_path
         login_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
 
-    job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
+    # Submitted held: Slurm may adjust the request at submission, and the job
+    # must not start (or be accounted) until the shape is verified.
+    job_id = client.submit_job(partition,
+                               cluster_name_on_cloud,
+                               tgt_path,
+                               hold=True)
+    _release_if_request_kept(client, job_id, cluster_name, partition,
+                             math.ceil(float(resources['cpus'])), num_nodes,
+                             resources['memory'])
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')

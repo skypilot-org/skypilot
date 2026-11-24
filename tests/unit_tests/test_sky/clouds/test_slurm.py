@@ -1404,6 +1404,15 @@ class TestProvisionTimeoutPassthrough:
     """Test that provision_timeout from provider_config is used in
     _create_virtual_instance."""
 
+    @pytest.fixture(autouse=True)
+    def held_job_check(self):
+        """Stub the held-job verification, which test_held_job_check.py
+        covers on its own; these tests are about the script and launch flow.
+        """
+        with patch('sky.provision.slurm.instance._release_if_request_kept'
+                  ) as check:
+            yield check
+
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
@@ -1486,6 +1495,87 @@ class TestProvisionTimeoutPassthrough:
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.'
            'SlurmLoginNodeCommandRunner')
+    def test_job_is_submitted_held_and_verified_first(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes, held_job_check):
+        """The job is submitted held and verified before anything waits on
+        its allocation."""
+        from sky.adaptors.slurm import SlurmPartition
+        from sky.provision import common
+
+        mock_get_partition_info.return_value = SlurmPartition(name='gpu',
+                                                              is_default=False,
+                                                              maxtime=7 * 24 *
+                                                              60 * 60,
+                                                              default_time=None)
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        mock_client = mock.MagicMock()
+        mock_client.query_jobs.return_value = []
+        mock_client.get_job_nodes.return_value = (['node1'], {
+            'node1': '10.0.0.5'
+        })
+        mock_slurm_client.return_value = mock_client
+
+        mock_runner = mock.MagicMock()
+        mock_runner.command_as_user.side_effect = shlex.join
+        mock_runner.run.side_effect = lambda cmd, **kwargs: (
+            (44, '', '')
+            if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
+            (0, '', ''))
+        mock_runner.get_remote_home_dir.return_value = '/home/testuser'
+        mock_ssh_runner.return_value = mock_runner
+
+        held_job_check.side_effect = (
+            lambda *args: mock_wait_for_job_nodes.assert_not_called())
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 120,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 2,
+                'memory': 8,
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        slurm_instance._create_virtual_instance(
+            region='us-west-2',
+            cluster_name='test-held',
+            cluster_name_on_cloud='test-held',
+            config=config,
+        )
+
+        mock_client.submit_job.assert_called_once_with('gpu',
+                                                       'test-held',
+                                                       mock.ANY,
+                                                       hold=True)
+        held_job_check.assert_called_once_with(
+            mock_client, mock_client.submit_job.return_value, 'test-held',
+            'gpu', 2, 1, 8)
+        mock_wait_for_job_nodes.assert_called_once()
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
     def test_explicit_timeout_passthrough(self, mock_ssh_runner,
                                           mock_slurm_client,
                                           mock_get_partition_info,
@@ -1559,6 +1649,15 @@ class TestProvisionTimeoutPassthrough:
 
 class TestCreateVirtualInstance:
     """Test slurm_instance._create_virtual_instance() script generation."""
+
+    @pytest.fixture(autouse=True)
+    def held_job_check(self):
+        """Stub the held-job verification, which test_held_job_check.py
+        covers on its own; these tests are about the script and launch flow.
+        """
+        with patch('sky.provision.slurm.instance._release_if_request_kept'
+                  ) as check:
+            yield check
 
     def _setup_mocks(self, mock_ssh_runner, mock_slurm_client,
                      mock_get_partition_info, partition_name):
@@ -1980,7 +2079,7 @@ srun() {{
             '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
         submitted = {}
 
-        def check_submit(partition, cluster_name, tgt_path):
+        def check_submit(partition, cluster_name, tgt_path, hold=False):
             del partition, cluster_name, tgt_path
             submitted['cleanup_seen'] = any(
                 call.args[0] == cleanup_script
