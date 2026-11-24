@@ -503,6 +503,13 @@ spec:
               notifempty
               copytruncate
           }
+          /root/.sky/serve/*/controller.log {
+              size {{ .Values.apiService.logs.retention.size }}
+              rotate 1
+              missingok
+              notifempty
+              copytruncate
+          }
           EOF
           while true; do
             logrotate -s /var/lib/logrotate/status /etc/logrotate.conf

@@ -1076,6 +1076,15 @@ tests:
           content:
             name: logrotate
 
+  - it: should rotate serve controller logs
+    set:
+      apiService.serveServerLog: true
+      apiService.logs.retention.enabled: true
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "/root/.sky/serve/\\*/controller.log \\{\\s+size 10M\\s+rotate 1\\s+missingok\\s+notifempty\\s+copytruncate\\s+\\}"
+
   - it: should not include logrotate sidecar when serveServerLog is false
     set:
       apiService.serveServerLog: false
