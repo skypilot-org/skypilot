@@ -577,25 +577,22 @@ SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
     multiprocess_mode='livesum',
 )
 
-# A guaranteed executor pool breaks when any of its workers dies (e.g. OOM or a
-# crash in the worker initializer) and is replaced on the next submit. `phase`
-# is `warm_start` when the pool broke while boot-time warm start was starting
-# its workers and they failed to start (one reported a start-up error, none
-# had become ready yet, or one exited before it became ready), and `serving`
-# otherwise. Pools that replace a broken one start workers on demand.
+# Guaranteed executor pools replaced because a worker died.
+#   phase="warm_start": a worker failed to start during boot-time warm start.
+#   phase="serving": any other break, e.g. a worker crashed or ran out of
+#   memory while serving requests.
 SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL = prom.Counter(
     'sky_apiserver_executor_pool_broken_total',
     'Guaranteed executor pools found broken and replaced, by pool and phase',
     ['pool', 'phase'],
 )
 
-# Executor workers that exited before finishing start-up (importing SkyPilot
-# and running the initializer), as opposed to failing in a task. `reason` is
-# `error` when start-up raised, `died` when the process exited first (killed,
-# crashed or aborted). Workers of a guaranteed pool that exited while starting
-# are only distinguishable during warm start; otherwise they show up in
-# SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL. Failures in a guaranteed pool are
-# counted when the broken pool is replaced (on the next submit) or shut down.
+# Executor workers that failed to start (import SkyPilot and run the
+# initializer); failures while serving a request are not counted.
+#   reason="error": start-up raised an exception.
+#   reason="died": the process exited before it was ready (killed, crashed).
+# In guaranteed pools, "died" is only counted during warm start; other deaths
+# show up as pool_broken{phase="serving"}.
 SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL = prom.Counter(
     'sky_apiserver_executor_worker_start_failures_total',
     'Executor workers that failed to start, by pool and reason',
