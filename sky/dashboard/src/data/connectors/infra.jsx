@@ -11,6 +11,9 @@ import dashboardCache from '@/lib/cache';
 import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
 
+// GKE TPU names: tpu-v6e-slice, tpu-v5p-slice, tpu7x (Ironwood).
+const isTpuName = (name) => /^tpu[-0-9]/.test(name);
+
 /**
  * Returns true iff `nodeData` (a `KubernetesNodeInfo`-shaped object from
  * the API) should be excluded from free-GPU availability counts — i.e.,
@@ -876,14 +879,14 @@ export async function getCloudGPUs() {
       }))
       .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
     const tpus = Object.keys(allGPUs)
-      .filter((gpu) => gpu.startsWith('tpu-'))
+      .filter((gpu) => isTpuName(gpu))
       .map((gpu) => ({
         gpu_name: gpu,
         gpu_quantities: allGPUs[gpu].join(', '),
       }))
       .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
     const otherGPUs = Object.keys(allGPUs)
-      .filter((gpu) => !COMMON_GPUS.includes(gpu) && !gpu.startsWith('tpu-'))
+      .filter((gpu) => !COMMON_GPUS.includes(gpu) && !isTpuName(gpu))
       .map((gpu) => ({
         gpu_name: gpu,
         gpu_quantities: allGPUs[gpu].join(', '),

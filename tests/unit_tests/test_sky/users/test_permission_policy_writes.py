@@ -19,6 +19,7 @@ from sky import global_user_state
 from sky import models
 from sky import skypilot_config
 from sky.users import permission
+from sky.users import resolver as resolver_lib
 from sky.utils.db import migration_utils
 from sky.workspaces import core
 
@@ -306,6 +307,81 @@ def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
         service.resync_workspace_policies_for_new_user('alice')
     assert _rows(engine, 'p') == {('alice', 'ws-a', '*'),
                                   ('alice', 'ws-b', '*')}
+
+
+def test_new_users_resync_grants_a_batch_under_one_lock(service, engine,
+                                                        monkeypatch):
+    # Each user already holds one grant, so a lookup keyed on one user misses;
+    # ws-a is partly granted, so skipping a workspace with any grant misses.
+    service.add_workspace_policy('ws-a', ['alice'])
+    service.add_workspace_policy('ws-c', ['bob'])
+    workspaces = {
+        'ws-a': {
+            'private': True,
+            'allowed_users': ['alice', 'bob-name']
+        },
+        'ws-b': {
+            'private': True,
+            'allowed_users': ['alice']
+        },
+        'ws-c': {
+            'private': True,
+            'allowed_users': ['bob-name']
+        },
+        'ws-open': {
+            'allowed_users': ['carol']
+        },
+    }
+    config_locks = []
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda *a, **k: copy.deepcopy(workspaces))
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(
+        skypilot_config, 'get_skypilot_config_lock',
+        lambda *a, **k: config_locks.append(1) or contextlib.nullcontext())
+    resolver = mock.Mock()
+    resolver.entries_for.side_effect = {
+        'alice': ['alice'],
+        'bob': ['bob', 'bob-name'],
+        'carol': ['carol'],
+    }.get
+    with mock.patch('sky.users.resolver.UserResolver',
+                    return_value=resolver), _policy_commits(engine) as counts:
+        service.resync_workspace_policies_for_new_users(
+            ['alice', 'bob', 'carol', 'alice'])
+    assert config_locks == [1]
+    assert counts['commits'] == 1
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sqlalchemy.text('SELECT v0, v1, v2 FROM casbin_rule '
+                            'WHERE ptype = \'p\'')).fetchall()
+    # A list, not a set: an existing or repeated grant must not be re-inserted.
+    assert sorted(tuple(r) for r in rows) == [('alice', 'ws-a', '*'),
+                                              ('alice', 'ws-b', '*'),
+                                              ('bob', 'ws-a', '*'),
+                                              ('bob', 'ws-c', '*')]
+
+
+def test_new_user_resync_ignores_a_username_that_is_another_users_id(
+        service, engine, monkeypatch):
+    # 'c0ffee00' is alice's id; bob's username happens to equal it.
+    workspaces = {'ws-a': {'private': True, 'allowed_users': ['c0ffee00']}}
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda *a, **k: copy.deepcopy(workspaces))
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(skypilot_config, 'get_skypilot_config_lock',
+                        lambda *a, **k: contextlib.nullcontext())
+    users = [
+        models.User(id='c0ffee00', name='alice'),
+        models.User(id='b0b0b0b0', name='c0ffee00')
+    ]
+    with mock.patch('sky.users.resolver.UserResolver',
+                    return_value=resolver_lib.UserResolver(users, [])):
+        service.resync_workspace_policies_for_new_users(
+            ['c0ffee00', 'b0b0b0b0'])
+    assert _rows(engine, 'p') == {('c0ffee00', 'ws-a', '*')}
 
 
 def _startup_patches(monkeypatch, service, rules_complete):

@@ -321,10 +321,10 @@ def test_get_kubernetes_node_info():
                    return_value=(collections.defaultdict(int, {mock_gpu_node_1.metadata.name: 2}), {})):
         node_info = utils.get_kubernetes_node_info()
         assert isinstance(node_info, models.KubernetesNodesInfo)
-        # Multi-host TPU node should be excluded
+        # A VM of a multi-host TPU slice is not listed per node.
         assert len(node_info.node_info_dict) == 1
         assert 'node-3' not in node_info.node_info_dict
-        assert '(Note: Multi-host TPUs are detected' in node_info.hint
+        assert 'multi-host TPU slices are not listed' in node_info.hint
 
     # Test case 4: Empty cluster
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
@@ -2132,6 +2132,95 @@ def test_combine_pod_config_fields_kubernetes_cloud():
             'node_config']
         assert 'nodeSelector' in node_config['spec']
         assert node_config['spec']['nodeSelector']['gpu'] == 'true'
+
+
+@pytest.fixture
+def pod_config_hooks(monkeypatch):
+    hooks = []
+    monkeypatch.setattr(utils, '_POD_CONFIG_HOOKS', hooks)
+    return hooks
+
+
+def _cluster_yaml_with_pod():
+    return {
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'ray',
+                            'image': 'rayproject/ray:nightly'
+                        }]
+                    }
+                }
+            }
+        }
+    }
+
+
+def _combine_with_user_pod_config(cluster_yaml_obj, cluster_config_overrides,
+                                  context):
+    user_pod_config = {'spec': {'nodeSelector': {'gpu': 'true'}}}
+
+    def _side_effect(cloud, region, keys, default_value):
+        if keys == ('pod_config',):
+            return copy.deepcopy(user_pod_config)
+        return default_value
+
+    with patch('sky.skypilot_config.get_effective_region_config',
+               side_effect=_side_effect):
+        return utils.combine_pod_config_fields(cluster_yaml_obj,
+                                               cluster_config_overrides,
+                                               context=context)
+
+
+def test_pod_config_hook_edits_merged_config(pod_config_hooks):
+    seen = []
+
+    def add_toleration(cluster_yaml_obj, cluster_config_overrides, context):
+        spec = cluster_yaml_obj['available_node_types']['ray_head_default'][
+            'node_config']['spec']
+        # The user's pod_config is merged before hooks run.
+        seen.append(
+            (dict(spec['nodeSelector']), cluster_config_overrides, context))
+        spec.setdefault('tolerations', []).append({
+            'key': 'example.com/taint',
+            'operator': 'Exists'
+        })
+
+    utils.register_pod_config_hook(add_toleration)
+    cluster_yaml_obj = _cluster_yaml_with_pod()
+    overrides = {'kubernetes': {'pod_config': {}}}
+    result = _combine_with_user_pod_config(cluster_yaml_obj, overrides,
+                                           'my-context')
+
+    assert seen == [({'gpu': 'true'}, overrides, 'my-context')]
+    spec = result['available_node_types']['ray_head_default']['node_config'][
+        'spec']
+    assert spec['tolerations'] == [{
+        'key': 'example.com/taint',
+        'operator': 'Exists'
+    }]
+    # The input is left as it was.
+    assert cluster_yaml_obj == _cluster_yaml_with_pod()
+
+
+def test_pod_config_hooks_run_in_registration_order(pod_config_hooks):
+    order = []
+    utils.register_pod_config_hook(lambda *args: order.append('first'))
+    utils.register_pod_config_hook(lambda *args: order.append('second'))
+    _combine_with_user_pod_config(_cluster_yaml_with_pod(), {}, None)
+    assert order == ['first', 'second']
+
+
+def test_register_pod_config_hook_is_idempotent(pod_config_hooks):
+
+    def hook(cluster_yaml_obj, cluster_config_overrides, context):
+        pass
+
+    utils.register_pod_config_hook(hook)
+    utils.register_pod_config_hook(hook)
+    assert pod_config_hooks == [hook]
 
 
 def test_ssh_cloud_uses_ssh_config_for_provision_timeout():

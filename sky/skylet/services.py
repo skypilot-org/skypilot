@@ -246,8 +246,22 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
         context: grpc.ServicerContext
     ) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:
+        pool = request.pool if request.HasField('pool') else None
+        refusal = None
         try:
-            pool = request.pool if request.HasField('pool') else None
+            if pool is not None:
+                refusal = serve_utils.get_pool_refusal(pool, request.workspace)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+        # Outside the `try`, which would turn these into INTERNAL.
+        if refusal is not None:
+            exists, pool_workspace = refusal
+            if not exists:
+                context.abort(grpc.StatusCode.NOT_FOUND,
+                              f'Pool {pool!r} not found.')
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, pool_workspace or
+                          '')
+        try:
             pool_hash = request.pool_hash if request.HasField(
                 'pool_hash') else None
             user_hash = request.user_hash if request.HasField(
@@ -259,8 +273,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 for md in request.metadata_jsons)
             job_ids = []
             execution = request.execution
-            for i in range(request.num_jobs):
-                is_primary_in_job_group = request.is_primary_in_job_groups[i]
+            for _ in range(request.num_jobs):
                 job_id = managed_job_state.set_job_info_without_job_id(
                     name=request.name,
                     workspace=request.workspace,
@@ -271,10 +284,13 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                     execution=execution,
                     is_batch=is_batch)
                 job_ids.append(job_id)
-                # Set pending state for all tasks
-                for task_id, task_name, metadata_json in zip(
-                        request.task_ids, request.task_names,
-                        request.metadata_jsons):
+                # Set pending state for all tasks. is_primary_in_job_groups
+                # has one entry per task, like the other per-task lists.
+                for (task_id, task_name, metadata_json,
+                     is_primary_in_job_group) in zip(
+                         request.task_ids, request.task_names,
+                         request.metadata_jsons,
+                         request.is_primary_in_job_groups):
                     managed_job_state.set_pending(job_id, task_id, task_name,
                                                   request.resources_str,
                                                   metadata_json,

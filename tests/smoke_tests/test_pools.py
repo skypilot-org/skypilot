@@ -1392,6 +1392,8 @@ def test_pools_num_jobs_option(generic_cloud: str):
     pool_name = f'{name}-pool'
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
     job_config = basic_job_conf(job_name=f'{name}-job',)
+    # Per-pool path so concurrent tests don't clobber each other.
+    ids_file = f'/tmp/job_ids_{pool_name}.txt'
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
@@ -1401,20 +1403,16 @@ def test_pools_num_jobs_option(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Test parallel job launching with --num-jobs 10. The IDs
-                    # are collapsed into a single N-M range (see
-                    # _parse_job_ids_snippet); assert the range spans exactly 10
-                    # jobs rather than hard-coding the start ID, which is not 2
-                    # on a shared/long-lived server DB.
-                    (
-                        's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
-                        'echo "$s"; '
-                        'echo; echo; echo "$s" | grep "Jobs submitted with IDs:" | '
-                        'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | '
-                        # Braces doubled: this string goes through str.format().
-                        'awk -F- \'{{c = $2 - $1 + 1}} END {{exit !(c == 10)}}\'; '
-                        'sleep 5').format(pool_name=pool_name,
-                                          job_yaml=job_yaml.name)
+                    # Test parallel job launching with --num-jobs 10. Count
+                    # the IDs rather than reading one N-M range: the DB is
+                    # shared, so other launches may interleave (e.g. 5-9,11-15).
+                    # `&&`, not `;`: the step's exit code is the check's.
+                    (f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
+                     f'--num-jobs 10 -d -y); echo "$s"; '
+                     f'{_parse_job_ids_snippet("s", ids_file)}; '
+                     f'cat {ids_file}; '
+                     f'[ "$(awk -F, \'{{print NF}}\' {ids_file})" = 10 ] && '
+                     'sleep 5')
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),

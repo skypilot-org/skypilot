@@ -64,6 +64,7 @@ const GKE_TPU_ACCELERATOR_TO_GENERATION = {
   'tpu-v5-lite-podslice': 'v5e',
   'tpu-v5p-slice': 'v5p',
   'tpu-v6e-slice': 'v6e',
+  tpu7x: 'v7x',
 };
 
 export function canonicalizeGpuName(rawName) {

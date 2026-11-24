@@ -65,6 +65,7 @@ PRECHECK_FAILURES = (
     exceptions.StorageSpecError,
     exceptions.StorageError,
     exceptions.VolumeNotReadyError,
+    exceptions.QueueNotAllowedError,
 )
 
 # The precheck failures that fail the job even when raise_on_failure is False,
@@ -75,6 +76,7 @@ TERMINAL_PRECHECK_FAILURES = (
     exceptions.InvalidClusterNameError,
     exceptions.ResourcesMismatchError,
     exceptions.StorageSpecError,
+    exceptions.QueueNotAllowedError,
 )
 
 # Waiting time for job from INIT/PENDING to RUNNING

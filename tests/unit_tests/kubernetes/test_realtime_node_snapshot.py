@@ -186,6 +186,31 @@ _GKE_TPU_PODS = [
     _pod('tpu-job', 'tpu-multi-host', {'google.com/tpu': '4'}),
 ]
 
+
+def _ironwood_vm(name: str, pool: str, ip: str) -> Dict[str, Any]:
+    return _node(name,
+                 labels={
+                     'cloud.google.com/gke-tpu-accelerator': 'tpu7x',
+                     'cloud.google.com/gke-tpu-topology': '2x2x2',
+                     'cloud.google.com/gke-accelerator-count': '4',
+                     'cloud.google.com/gke-nodepool': pool,
+                 },
+                 capacity={'google.com/tpu': '4'},
+                 ip=ip)
+
+
+# Two 2x2x2 Ironwood slices: one VM of slice-a is busy, slice-b is idle.
+_IRONWOOD_SLICE_NODES = [
+    _ironwood_vm('a-1', 'slice-a', '10.0.1.1'),
+    _ironwood_vm('a-2', 'slice-a', '10.0.1.2'),
+    _ironwood_vm('b-1', 'slice-b', '10.0.2.1'),
+    _ironwood_vm('b-2', 'slice-b', '10.0.2.2'),
+]
+
+_IRONWOOD_SLICE_PODS = [
+    _pod('tpu-job', 'a-1', {'google.com/tpu': '4'}),
+]
+
 _NEURON_NODES = [
     _node('trn1',
           labels={'karpenter.k8s.aws/instance-accelerator-name': 'trainium'},
@@ -234,6 +259,7 @@ _TOLERATION = [{
 _CLUSTERS = {
     'gfd': (_GFD_NODES, _GFD_PODS),
     'gke-tpu': (_GKE_TPU_NODES, _GKE_TPU_PODS),
+    'ironwood-slices': (_IRONWOOD_SLICE_NODES, _IRONWOOD_SLICE_PODS),
     'neuron': (_NEURON_NODES, _NEURON_PODS),
     'amd': (_AMD_NODES, _AMD_PODS),
     'custom-key': (_CUSTOM_KEY_NODES, _CUSTOM_KEY_PODS),
@@ -461,5 +487,15 @@ def test_snapshot_label_keys(cluster_env):
     assert {
         'cloud.google.com/gke-tpu-topology',
         'cloud.google.com/gke-accelerator-count',
+        'cloud.google.com/gke-nodepool',
         'pool',
     } <= keys
+
+
+def test_busy_slice_does_not_hide_an_idle_slice(monkeypatch, cluster_env):
+    """Only the idle slice's 8 chips are free, on both paths."""
+    counts, capacity, available = _assert_snapshot_matches_api(
+        monkeypatch, 'ironwood-slices')
+    assert counts['tpu7x'] == [8]
+    assert capacity['tpu7x'] == 16
+    assert available['tpu7x'] == 8

@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, NoReturn, Optional, Set, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
@@ -570,8 +570,8 @@ def _maybe_submit_job_locally(
     pool_hash = None
     if pool is not None:
         pool_hash = serve_state.get_service_hash(pool)
-        # Already checked in the sdk.
-        assert pool_hash is not None, f'Pool {pool} not found'
+        if pool_hash is None:  # Taken down since _launch checked it.
+            _raise_pool_refused(pool, False, None)
     for _ in range(num_jobs):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
@@ -770,23 +770,59 @@ def _submit_remotely(controller: controller_utils.Controllers,
     # Detect batch coordinator jobs (ds.map()) via task metadata.
     is_batch = any(
         t.metadata.get('batch_coordinator', False) for t in dag.tasks)
-    job_ids = backend.set_job_info_without_job_id(
-        handle=local_handle,
-        name=dag.name,
-        workspace=workspace,
-        entrypoint=entrypoint,
-        pool=pool,
-        pool_hash=pool_hash,
-        user_hash=user_hash,
-        task_ids=task_ids,
-        task_names=task_names,
-        resources_str=resources_str,
-        metadata_jsons=metadata_jsons,
-        num_jobs=num_jobs,
-        execution=execution_mode,
-        is_primary_in_job_groups=(is_primary_in_job_groups),
-        is_batch=is_batch)
+    try:
+        job_ids = backend.set_job_info_without_job_id(
+            handle=local_handle,
+            name=dag.name,
+            workspace=workspace,
+            entrypoint=entrypoint,
+            pool=pool,
+            pool_hash=pool_hash,
+            user_hash=user_hash,
+            task_ids=task_ids,
+            task_names=task_names,
+            resources_str=resources_str,
+            metadata_jsons=metadata_jsons,
+            num_jobs=num_jobs,
+            execution=execution_mode,
+            is_primary_in_job_groups=(is_primary_in_job_groups),
+            is_batch=is_batch)
+    except exceptions.PoolRefusedError as e:
+        _raise_pool_refused(pool or '', e.exists, e.workspace)
     return job_ids
+
+
+def _raise_pool_refused(pool: str, exists: bool,
+                        pool_workspace: Optional[str]) -> NoReturn:
+    """Words a pool refusal. A pool in a workspace the caller cannot read is
+    reported as not found, as listings leave it out."""
+    not_found = ValueError(f'Pool {pool!r} not found.')
+    try:
+        pool_workspace = (skypilot_config.resolve_workspace_ref(pool_workspace)
+                          if exists and pool_workspace else None)
+    except ValueError:  # Two workspaces share this name.
+        pool_workspace = None
+    readable, writable = workspaces_core.get_workspace_access_sets()
+    active_workspace = skypilot_config.get_active_workspace()
+    # The request's stacktrace goes to the client, so each raise drops the
+    # chained refusal, which names the workspace.
+    with ux_utils.print_exception_no_traceback():
+        if pool_workspace is None or pool_workspace not in readable:
+            raise not_found from None
+        pool_name = skypilot_config.get_workspace_name(pool_workspace)
+        if pool_workspace == active_workspace:
+            # Only a hand-edited controller config gets here.
+            raise ValueError(
+                f'Pool {pool!r} records workspace {pool_name!r} in a form the '
+                'jobs controller does not match. Re-create the pool.') from None
+        active_name = skypilot_config.get_workspace_name(active_workspace)
+        if pool_workspace in writable:
+            raise ValueError(
+                f'Pool {pool!r} is in workspace {pool_name!r}, not the active '
+                f'workspace {active_name!r}. Switch to workspace '
+                f'{pool_name!r} to use it.') from None
+        raise ValueError(f'Pool {pool!r} is in workspace {pool_name!r}, which '
+                         'is read-only for you.') from None
 
 
 def _client_set_workspace() -> bool:
@@ -1096,6 +1132,12 @@ def _launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
+    # A remote controller checks this when the job is submitted.
+    if pool is not None and managed_job_utils.is_consolidation_mode():
+        refusal = serve_utils.get_pool_refusal(
+            pool, skypilot_config.get_active_workspace())
+        if refusal is not None:
+            _raise_pool_refused(pool, *refusal)
     dag.validate()
     # Every storage the tasks name is checked here, whichever branch of
     # _upload_files_to_controller runs: without a jobs bucket the tasks go
@@ -1604,8 +1646,12 @@ def _maybe_restart_controller(
             jobs_controller_type.value.cluster_name,
             status_lib.ClusterStatus.INIT, 'Jobs controller restarted.',
             global_user_state.ClusterEventType.STATUS_CHANGE)
-        handle = core.start(
-            cluster_name=jobs_controller_type.value.cluster_name)
+        # Job controller is not placed in kueue, as the controller pod is
+        # considered a "system" pod and is not subject to queue limits or
+        # preemption.
+        with skypilot_config.remove_queue_name_from_config():
+            handle = core.start(
+                cluster_name=jobs_controller_type.value.cluster_name)
 
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))

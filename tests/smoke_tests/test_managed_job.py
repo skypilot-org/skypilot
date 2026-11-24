@@ -2079,6 +2079,7 @@ def test_managed_jobs_remote_identity_none(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # Restarts the API server.
 def test_managed_jobs_admin_local_credentials_default_role_user():
     """An admin's managed job may set remote_identity: LOCAL_CREDENTIALS
     while rbac.default_role is user.
@@ -4066,8 +4067,10 @@ def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
                                 text=True,
                                 timeout=60,
                                 check=False)
+        # Match the table row: with SKYPILOT_DEBUG=1, the config dump can
+        # print 'sky-jobs-controller-' on stdout before the table.
         for line in result.stdout.splitlines():
-            if 'sky-jobs-controller-' in line:
+            if line.startswith('sky-jobs-controller-'):
                 return line.split()[0]
         raise RuntimeError('No jobs controller found in sky status.')
 
@@ -5375,8 +5378,10 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
                                     text=True,
                                     timeout=60,
                                     check=False).stdout
+        # Match the table row: with SKYPILOT_DEBUG=1, the config dump can
+        # print 'sky-jobs-controller-' on stdout before the table.
         for line in status_out.splitlines():
-            if 'sky-jobs-controller-' in line:
+            if line.startswith('sky-jobs-controller-'):
                 controller = line.split()[0]
                 break
         if controller is None:

@@ -1069,6 +1069,34 @@ charlie,pw789,invalid_role"""
         assert 'bob: User already exists' in result['creation_errors']
         assert 'charlie: DB error' in result['creation_errors']
 
+    @pytest.mark.parametrize('resync_error', [None, RuntimeError('lock')])
+    @mock.patch('sky.users.permission.permission_service.'
+                'resync_workspace_policies_for_new_users')
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    def test_user_import_resyncs_created_users_once(self,
+                                                    mock_add_or_update_user,
+                                                    mock_update_role,
+                                                    mock_get_user_by_name,
+                                                    mock_resync, resync_error):
+        """Imported users get the grants allowed_users owes them, in one
+        batch, and a failed grant does not fail the import."""
+        mock_get_user_by_name.side_effect = [None, object(), None]  # bob exists
+        mock_resync.side_effect = resync_error
+        csv_content = """username,password,role
+alice,pw123,user
+bob,pw456,user
+charlie,pw789,user"""
+
+        result = server.user_import(
+            payloads.UserImportBody(csv_content=csv_content))
+
+        assert result['success_count'] == 2
+        created = [c.args[0].id for c in mock_add_or_update_user.call_args_list]
+        mock_resync.assert_called_once_with(created)
+        assert len(created) == 2
+
     @pytest.mark.asyncio
     async def test_user_import_invalid_csv(self):
         """Test POST /users/import endpoint with invalid CSV."""
@@ -1099,11 +1127,13 @@ alice,pw123"""
             exc_info.value.detail)
 
     @mock.patch('sky.global_user_state.get_all_users')
-    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.refresh_policy')
+    @mock.patch('sky.users.permission.permission_service.roles_in_memory')
     @mock.patch('sky.users.rbac.get_default_role')
     @pytest.mark.asyncio
     async def test_user_export_success(self, mock_get_default_role,
-                                       mock_get_user_roles, mock_get_all_users):
+                                       mock_roles_in_memory,
+                                       mock_refresh_policy, mock_get_all_users):
         """Test successful GET /users/export endpoint."""
         # Setup
         users = [
@@ -1113,7 +1143,7 @@ alice,pw123"""
         ]
         mock_get_all_users.return_value = users
         mock_get_default_role.return_value = 'user'
-        mock_get_user_roles.side_effect = [
+        mock_roles_in_memory.side_effect = [
             ['admin'],  # alice
             ['user'],  # bob
             []  # charlie (no role)
@@ -1133,11 +1163,15 @@ alice,pw123"""
 
         # Verify function calls
         mock_get_all_users.assert_called_once()
-        assert mock_get_user_roles.call_count == 3
+        mock_refresh_policy.assert_called_once_with()
+        assert mock_roles_in_memory.call_count == 3
 
     @mock.patch('sky.global_user_state.get_all_users')
+    @mock.patch('sky.users.permission.permission_service.refresh_policy')
+    @mock.patch('sky.users.permission.permission_service.roles_in_memory')
     @pytest.mark.asyncio
-    async def test_user_export_empty(self, mock_get_all_users):
+    async def test_user_export_empty(self, mock_roles_in_memory,
+                                     mock_refresh_policy, mock_get_all_users):
         """Test GET /users/export endpoint with no users."""
         # Setup
         mock_get_all_users.return_value = []
@@ -1153,13 +1187,27 @@ alice,pw123"""
 
         # Verify function calls
         mock_get_all_users.assert_called_once()
+        mock_refresh_policy.assert_called_once_with()
+        mock_roles_in_memory.assert_not_called()
 
+    @pytest.mark.parametrize('failing', ['get_all_users', 'refresh_policy'])
     @mock.patch('sky.global_user_state.get_all_users')
+    @mock.patch('sky.users.permission.permission_service.refresh_policy')
+    @mock.patch('sky.users.permission.permission_service.roles_in_memory')
     @pytest.mark.asyncio
-    async def test_user_export_error(self, mock_get_all_users):
+    async def test_user_export_error(self, mock_roles_in_memory,
+                                     mock_refresh_policy, mock_get_all_users,
+                                     failing):
         """Test GET /users/export endpoint with error."""
         # Setup
-        mock_get_all_users.side_effect = Exception('Database error')
+        mock_get_all_users.return_value = [
+            models.User(id='user1', name='alice', password='hash1')
+        ]
+        mocks = {
+            'get_all_users': mock_get_all_users,
+            'refresh_policy': mock_refresh_policy,
+        }
+        mocks[failing].side_effect = Exception('Database error')
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
@@ -1167,6 +1215,7 @@ alice,pw123"""
         assert exc_info.value.status_code == 500
         assert 'Failed to export users' in str(exc_info.value.detail)
         mock_get_all_users.assert_called_once()
+        mock_roles_in_memory.assert_not_called()
 
     @mock.patch('sky.global_user_state.get_user_by_name')
     @mock.patch('sky.users.rbac.get_supported_roles')
@@ -1363,6 +1412,15 @@ def _users_and_tokens(tmp_path, monkeypatch):
     skypilot_config.reload_config()
 
 
+def _policy_loads(monkeypatch, call):
+    service = permission.permission_service
+    # pylint: disable-next=protected-access
+    load = mock.Mock(wraps=service._load_policy_no_lock)
+    monkeypatch.setattr(service, '_load_policy_no_lock', load)
+    call()
+    return load.call_count
+
+
 def _request_as(user_id):
     request = mock.MagicMock(spec=fastapi.Request)
     request.state = mock.MagicMock()
@@ -1445,15 +1503,6 @@ class TestReadableWorkspaceVisibility:
     def test_admin_sees_all_tokens(self):
         assert self._token_ids('admin') == ['t-a', 't-b']
 
-    @staticmethod
-    def _policy_loads(monkeypatch, call):
-        service = permission.permission_service
-        # pylint: disable-next=protected-access
-        load = mock.Mock(wraps=service._load_policy_no_lock)
-        monkeypatch.setattr(service, '_load_policy_no_lock', load)
-        call()
-        return load.call_count
-
     @pytest.mark.parametrize('default', [{}, _PRIVATE_DEFAULT])
     @pytest.mark.parametrize('user_id', ['admin', 'alice', 'vic', 'sa-a'])
     def test_user_list_adds_no_policy_load(self, set_workspaces, default,
@@ -1463,7 +1512,7 @@ class TestReadableWorkspaceVisibility:
             'ws-a': _PRIVATE_A,
             'ws-b': _READ_ONLY_B
         })
-        loads = self._policy_loads(monkeypatch, lambda: self._user_ids(user_id))
+        loads = _policy_loads(monkeypatch, lambda: self._user_ids(user_id))
         # One per role, as for the unfiltered list.
         assert loads == len(rbac.get_supported_roles())
 
@@ -1494,5 +1543,152 @@ class TestReadableWorkspaceVisibility:
 
     def test_token_roles_load_only_for_visible_tokens(self, monkeypatch):
         # One for the admin check, then one for bob's only token.
-        assert self._policy_loads(monkeypatch,
-                                  lambda: self._token_ids('bob')) == 2
+        assert _policy_loads(monkeypatch, lambda: self._token_ids('bob')) == 2
+
+
+def _other_process_enforcer(tmp_path):
+    return casbin.SyncedEnforcer(
+        os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
+        sqlalchemy_adapter.Adapter(
+            sqlalchemy.create_engine(f'sqlite:///{tmp_path}/state.db'),
+            db_class=sqlalchemy_adapter.CasbinRule))
+
+
+@pytest.mark.usefixtures('set_workspaces')
+class TestBatchedPolicyReads:
+    """The export and the token list reload the policy once, not per row, and
+    return what the per-row `get_user_roles` build returned."""
+
+    @staticmethod
+    def _add_users(users):
+        service = permission.permission_service
+        for user_id, roles in users:
+            global_user_state.add_or_update_user(
+                models.User(id=user_id, name=user_id))
+            for role in roles:
+                service.enforcer.add_grouping_policy(user_id, role)
+
+    @staticmethod
+    def _export_per_user():
+        """The export as built with one `get_user_roles` per user."""
+        lines = ['username,password,role']
+        for user in global_user_state.get_all_users():
+            if user.is_service_account():
+                continue
+            roles = permission.permission_service.get_user_roles(user.id)
+            role = roles[0] if roles else rbac.get_default_role()
+            lines.append(f'{user.name or ""},{user.password or ""},'
+                         f'{role or ""}')
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _tokens_per_token(tokens):
+        """The token list as built with per-token `get_user` and roles."""
+        result = {}
+        for token in tokens:
+            creator = global_user_state.get_user(token['creator_user_hash'])
+            sa_user = global_user_state.get_user(
+                token['service_account_user_id'])
+            result[token['token_id']] = (
+                creator.name if creator else 'Unknown',
+                sa_user.name if sa_user else token['token_name'],
+                permission.permission_service.get_user_roles(
+                    token['service_account_user_id']),
+            )
+        return result
+
+    @staticmethod
+    def _tokens_as(user_id):
+        return {
+            token['token_id']:
+            (token['creator_name'], token['service_account_name'],
+             token['service_account_roles'])
+            for token in server.get_service_account_tokens(_request_as(user_id))
+        }
+
+    def _add_edge_users(self):
+        self._add_users([
+            # Stored role differs from the fixed one.
+            (constants.SKYPILOT_SYSTEM_USER_ID, ['viewer']),
+            ('ghost', ['no-such-role']),
+            ('multi', ['viewer', 'admin']),
+            ('roleless', []),
+        ] + [(f'pad-{i}', ['user']) for i in range(10)])
+
+    def _add_tokens(self):
+        self._add_users([('sa-c', ['viewer'])])
+        for token_id, creator, service_account in [
+            ('t-c', None, 'sa-c'),
+            ('t-d', 'gone', 'sa-gone'),
+            ('t-e', 'alice', None),
+        ]:
+            global_user_state.add_service_account_token(token_id, token_id,
+                                                        f'hash-{token_id}',
+                                                        creator,
+                                                        service_account)
+
+    def test_export_reloads_once(self, monkeypatch):
+        self._add_edge_users()
+        loads = _policy_loads(monkeypatch, server.user_export)
+        assert loads == 1
+
+    def test_export_matches_per_user_build(self):
+        self._add_edge_users()
+        lines = server.user_export()['csv_content'].split('\n')
+        expected = self._export_per_user().split('\n')
+        # casbin keeps a user's roles in an unordered set, so which role `[0]`
+        # picks for a multi-role user can change with every reload.
+        multi = [line for line in lines if line.startswith('multi,')]
+        assert multi in (['multi,,viewer'], ['multi,,admin'])
+        assert ([line for line in lines if line not in multi] == [
+            line for line in expected if not line.startswith('multi,')
+        ])
+        assert f'{constants.SKYPILOT_SYSTEM_USER_ID},,admin' in lines
+        assert not any(line.startswith('sa-') for line in lines)
+
+    def test_export_sees_role_change_from_another_process(self, tmp_path):
+        assert 'alice,,user' in server.user_export()['csv_content'].split('\n')
+        other = _other_process_enforcer(tmp_path)
+        other.remove_grouping_policy('alice', 'user')
+        other.add_grouping_policy('alice', 'viewer')
+        assert 'alice,,viewer' in server.user_export()['csv_content'].split(
+            '\n')
+
+    def test_token_list_reloads_once_and_batches_users(self, monkeypatch):
+        self._add_tokens()
+        tokens = global_user_state.get_all_service_account_tokens()
+        assert len(tokens) == 5
+        expected = self._tokens_per_token(tokens)
+        get_users = mock.Mock(wraps=global_user_state.get_users)
+        monkeypatch.setattr(global_user_state, 'get_users', get_users)
+        monkeypatch.setattr(global_user_state, 'get_user',
+                            mock.Mock(side_effect=AssertionError('per row')))
+        # A system caller's admin check does not reload, so every load here
+        # is the list's own.
+        loads = _policy_loads(
+            monkeypatch,
+            lambda: self._tokens_as(constants.SKYPILOT_SYSTEM_USER_ID))
+        assert loads == 1
+        get_users.assert_called_once()
+        assert self._tokens_as(constants.SKYPILOT_SYSTEM_USER_ID) == expected
+        assert expected['t-c'] == ('Unknown', 'sa-c', ['viewer'])
+        assert expected['t-d'] == ('Unknown', 't-d', [])
+        assert expected['t-e'] == ('alice', 't-e', [])
+
+    def test_empty_token_list_reads_nothing(self, monkeypatch):
+        global_user_state.delete_service_account_token('t-a')
+        global_user_state.delete_service_account_token('t-b')
+        failing = mock.Mock(side_effect=RuntimeError('database down'))
+        monkeypatch.setattr(permission.permission_service, 'refresh_policy',
+                            failing)
+        monkeypatch.setattr(global_user_state, 'get_users', failing)
+        assert not self._tokens_as(constants.SKYPILOT_SYSTEM_USER_ID)
+        failing.assert_not_called()
+
+    def test_token_list_sees_role_change_from_another_process(self, tmp_path):
+        caller = constants.SKYPILOT_SYSTEM_USER_ID
+        assert self._tokens_as(caller)['t-a'][2] == ['user']
+        other = _other_process_enforcer(tmp_path)
+        other.remove_grouping_policy('sa-a', 'user')
+        other.add_grouping_policy('sa-a', 'viewer')
+        assert self._tokens_as(caller)['t-a'][2] == ['viewer']
