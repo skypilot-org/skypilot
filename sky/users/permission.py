@@ -15,7 +15,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, ContextManager, Dict, Generator, Iterable,
-                    List, Mapping, Optional, Set, Tuple, TypeVar, Union)
+                    List, Mapping, Optional, Set, Tuple, TypeVar)
 
 from sky.adaptors import common as adaptors_common
 from sky.utils.db import sqlalchemy_deps
@@ -1386,32 +1386,6 @@ class PermissionService:
         # semantics is "allowed", the same answer its admin role gives.
         return enforcer.enforce(user_id, path, method)
 
-    def has_permission(self,
-                       user_id: str,
-                       perm: Union[str, authz.Permission],
-                       scope: Optional[authz.Scope] = None) -> bool:
-        """Whether the user holds `perm` on `scope`.
-
-        Admin holds every permission; anyone else through a custom-role
-        binding. `scope=None` asks whether the user holds it in any scope.
-        Unknown permissions and principals without a recognized role are
-        denied. Built-in roles come from the current policy (`get_user_roles`
-        reloads it when another process changed it); custom roles and bindings
-        from this process's config, which the request executor reloads for
-        every request.
-        """
-        if isinstance(perm, str):
-            found = authz.registry.get(perm)
-            if found is None:
-                logger.warning(f'Permission check for unknown permission '
-                               f'{perm!r}; denying.')
-                return False
-            perm = found
-        system_role = _system_role(user_id)
-        roles = ([system_role]
-                 if system_role is not None else self.get_user_roles(user_id))
-        return self._holds(user_id, roles, perm, scope)
-
     @classmethod
     def _holds_all(cls, user_id: str, roles: List[str],
                    perms: List[authz.Permission]) -> bool:
@@ -2231,7 +2205,9 @@ def requires(
                     bound.apply_defaults()
                     target = scope(bound.arguments)
                 user = common_utils.get_current_user()
-                if not permission_service.has_permission(user.id, perm, target):
+                roles = permission_service.get_user_roles(user.id)
+                # pylint: disable-next=protected-access
+                if not PermissionService._holds(user.id, roles, perm, target):
                     where = (f' on {target.kind.value} {target.name!r}'
                              if target.name is not None else '')
                     raise exceptions.PermissionDeniedError(

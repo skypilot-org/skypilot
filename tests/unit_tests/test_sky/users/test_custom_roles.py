@@ -291,21 +291,21 @@ def _add_user(engine, user_id, name):
             })
 
 
-class TestHasPermission:
+def _allowed(svc, user_id, perm, scope):
+    """The decision `requires` makes for this user and scope."""
+    return svc._holds(user_id, svc.get_user_roles(user_id), perm, scope)
+
+
+class TestScopedCheck:
 
     def test_scope_is_exact(self, service):
         ctx_a = authz.Scope.context('ctx-a')
-        assert service.has_permission('operator', NODE_CORDON, ctx_a)
-        assert not service.has_permission('operator', NODE_CORDON,
-                                          authz.Scope.context('ctx-b'))
-        assert service.has_permission('an_admin', NODE_CORDON,
-                                      authz.Scope.context('ctx-b'))
-        assert not service.has_permission('plain', NODE_CORDON, ctx_a)
-
-    def test_lookup_by_name(self, service):
-        assert service.has_permission('operator', 'node.cordon',
-                                      authz.Scope.context('ctx-a'))
-        assert not service.has_permission('an_admin', 'node.unknown')
+        assert _allowed(service, 'operator', NODE_CORDON, ctx_a)
+        assert not _allowed(service, 'operator', NODE_CORDON,
+                            authz.Scope.context('ctx-b'))
+        assert _allowed(service, 'an_admin', NODE_CORDON,
+                        authz.Scope.context('ctx-b'))
+        assert not _allowed(service, 'plain', NODE_CORDON, ctx_a)
 
     def test_binding_by_unique_username(self, service, policy_engine,
                                         rbac_config, monkeypatch):
@@ -320,11 +320,11 @@ class TestHasPermission:
             }]
         })
         ctx_a = authz.Scope.context('ctx-a')
-        assert service.has_permission('plain', NODE_CORDON, ctx_a)
+        assert _allowed(service, 'plain', NODE_CORDON, ctx_a)
         # A second account with the same name: the name no longer identifies
         # either of them.
         _add_user(policy_engine, 'plain-2', 'pat@example.com')
-        assert not service.has_permission('plain', NODE_CORDON, ctx_a)
+        assert not _allowed(service, 'plain', NODE_CORDON, ctx_a)
 
 
 @pytest.fixture
@@ -542,17 +542,17 @@ class TestNameMatching:
 
     def test_service_account_cannot_squat_a_name(self, by_name, policy_engine):
         _add_typed_user(policy_engine, 'plain', 'alice@example.com', 'sa')
-        assert not by_name.has_permission('plain', NODE_CORDON,
-                                          authz.Scope.context('ctx-a'))
+        assert not _allowed(by_name, 'plain', NODE_CORDON,
+                            authz.Scope.context('ctx-a'))
 
     def test_service_account_with_the_name_does_not_deny_the_person(
             self, by_name, policy_engine):
         _add_typed_user(policy_engine, 'operator', 'alice@example.com', 'sso')
         _add_typed_user(policy_engine, 'plain', 'alice@example.com', 'sa')
-        assert by_name.has_permission('operator', NODE_CORDON,
-                                      authz.Scope.context('ctx-a'))
-        assert not by_name.has_permission('plain', NODE_CORDON,
-                                          authz.Scope.context('ctx-a'))
+        assert _allowed(by_name, 'operator', NODE_CORDON,
+                        authz.Scope.context('ctx-a'))
+        assert not _allowed(by_name, 'plain', NODE_CORDON,
+                            authz.Scope.context('ctx-a'))
 
     def test_name_equal_to_another_users_id_does_not_match(
             self, by_name, policy_engine, rbac_config):
@@ -565,8 +565,8 @@ class TestNameMatching:
                 'contexts': ['ctx-a'],
             }]
         })
-        assert not by_name.has_permission('plain', NODE_CORDON,
-                                          authz.Scope.context('ctx-a'))
+        assert not _allowed(by_name, 'plain', NODE_CORDON,
+                            authz.Scope.context('ctx-a'))
 
 
 def test_untyped_legacy_service_account_cannot_squat_a_name(
@@ -582,12 +582,12 @@ def test_untyped_legacy_service_account_cannot_squat_a_name(
             'contexts': ['ctx-a'],
         }]
     })
-    assert not service.has_permission('sa-legacy', NODE_CORDON,
-                                      authz.Scope.context('ctx-a'))
+    assert not _allowed(service, 'sa-legacy', NODE_CORDON,
+                        authz.Scope.context('ctx-a'))
     # Nor does it make the name ambiguous for the person who owns it.
     _add_typed_user(policy_engine, 'operator', 'alice@example.com', 'sso')
-    assert service.has_permission('operator', NODE_CORDON,
-                                  authz.Scope.context('ctx-a'))
+    assert _allowed(service, 'operator', NODE_CORDON,
+                    authz.Scope.context('ctx-a'))
 
 
 def test_database_error_is_not_turned_into_a_denial(service, monkeypatch):
