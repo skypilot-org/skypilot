@@ -59,6 +59,17 @@ def test_adds_contexts_only_another_workspace_allows(configure):
     assert core.get_every_workspace_contexts() == ['ctx-a', 'ctx-b']
 
 
+def test_ssh_node_pools_are_kept(configure, tmp_path, monkeypatch):
+    """SSH node pools come from get_all_contexts (the pools file), unchanged."""
+    pools = tmp_path / 'ssh_node_pools.yaml'
+    pools.write_text(yaml.safe_dump({'pool-a': {'hosts': ['h']}}))
+    monkeypatch.setattr(ssh_cloud, 'SSH_NODE_POOLS_PATH', str(pools))
+    configure(_CONFIG)
+    assert core.get_every_workspace_contexts() == [
+        'ctx-a', 'ctx-b', 'ssh-pool-a'
+    ]
+
+
 def test_no_other_workspaces_is_get_all_contexts(configure):
     configure({'kubernetes': {'allowed_contexts': ['ctx-c', 'ctx-a']}})
     assert core.get_every_workspace_contexts() == core.get_all_contexts()
@@ -97,12 +108,15 @@ def test_federation_targets_cover_every_workspace(configure, monkeypatch):
     assert remote == ['ctx-a', 'ctx-b']
 
 
-def test_dashboard_local_contexts_match_the_federation(configure):
-    """The dashboard and the federation classify the same contexts."""
+def test_dashboard_local_contexts_match_the_federation(configure, monkeypatch):
+    """The dashboard and the federation classify the same, fresh contexts."""
     configure(_CONFIG)
-    with mock.patch.object(metrics_utils,
-                           'split_local_remote_contexts',
-                           side_effect=lambda contexts:
-                           (list(contexts), [])) as split:
-        assert server._get_local_contexts() == ['ctx-a', 'ctx-b']  # pylint: disable=protected-access
+    refresh = mock.MagicMock()
+    split = mock.MagicMock(side_effect=lambda contexts: (list(contexts), []))
+    monkeypatch.setattr(server.common,
+                        'refresh_workspace_state_for_sync_handler', refresh)
+    monkeypatch.setattr(metrics_utils, 'split_local_remote_contexts', split)
+    local = server._get_local_contexts()  # pylint: disable=protected-access
+    assert local == ['ctx-a', 'ctx-b']
     split.assert_called_once_with(['ctx-a', 'ctx-b'])
+    refresh.assert_called_once_with()

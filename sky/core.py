@@ -2124,7 +2124,8 @@ def get_every_workspace_contexts() -> List[str]:
     """``get_all_contexts`` plus contexts that only other workspaces allow.
 
     For server-side readers that run without a request workspace, such as the
-    metrics federation; never return it to a user.
+    metrics federation. It names contexts the caller's workspaces may not
+    allow: do not return it to a user as is.
     """
     workspaces = set(
         skypilot_config.get_nested(('workspaces',), default_value={}) or {})

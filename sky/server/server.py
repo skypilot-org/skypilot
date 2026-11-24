@@ -3640,6 +3640,9 @@ def _get_local_contexts() -> List[str]:
     never stalls it, but listing every workspace's contexts parses the
     kubeconfig: call it off the event loop.
     """
+    # This worker does not get the executor's per-request config reload; the
+    # federation reloads on every refresh, so match it.
+    common.refresh_workspace_state_for_sync_handler()
     local_contexts, _ = metrics_utils.split_local_remote_contexts(
         core.get_every_workspace_contexts())
     return local_contexts
