@@ -2182,7 +2182,7 @@ def get_controller_wait_counts(
     """Count WAITING jobs once each, including those awaiting reattachment."""
     reason = sqlalchemy.case(
         (_unfinished_dependency_exists(), 'dependency'),
-        (~_batch_pool_available(), 'batch_pool'),
+        (_batch_pool_available().is_not(True), 'batch_pool'),
         (_has_live_task(), 'reattachment'),
         (~_not_held_by_launch_limit(max_launching_jobs_per_user), 'user_limit'),
         else_='controller_claim').label('reason')
