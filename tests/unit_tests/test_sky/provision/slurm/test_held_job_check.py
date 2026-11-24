@@ -135,12 +135,16 @@ def test_unreadable_job_is_cancelled():
 
 
 def test_failed_release_is_cancelled():
+    # Slurm may have taken the release before the error, so the job may have
+    # started: the message does not claim it was cancelled before that.
     client = _client()
     client.release_job.side_effect = RuntimeError('not permitted')
     with pytest.raises(exceptions.ProvisionUnsupportedError,
-                       match='Could not release'):
+                       match='Could not release') as e:
         _check(client)
     client.cancel_job.assert_called_once_with('123')
+    assert 'Slurm job 123 was cancelled.' in str(e.value)
+    assert 'before it started' not in str(e.value)
 
 
 def test_refusal_says_the_job_was_cancelled():
@@ -233,99 +237,47 @@ def test_failed_cancel_before_release_says_still_held(fields):
     client.release_job.assert_not_called()
 
 
-def _left_held_client(job_state='PENDING', reason='JobHeldUser'):
+def test_job_left_under_the_submission_hold_is_recognised():
     client = mock.Mock()
     client.get_job_fields.return_value = {
         'JobId': '123',
-        'JobState': job_state,
-        'Reason': reason,
+        'JobState': 'PENDING',
+        'Reason': 'JobHeldUser',
     }
-    client.query_jobs.return_value = []
-    return client
-
-
-def _cancel_if_left_held(client):
-    return slurm_instance._cancel_if_left_held(client, '123', 'my-cluster',
-                                               'my-cluster-on-cloud')
-
-
-@mock.patch('sky.provision.slurm.instance.time.sleep')
-def test_reused_job_left_held_is_cancelled_for_resubmission(mock_sleep):
-    client = _left_held_client()
-    # Still listed on the first poll after the cancel, gone on the second.
-    client.query_jobs.side_effect = [['123'], []]
-    with mock.patch.object(slurm_instance.logger, 'info') as info:
-        assert _cancel_if_left_held(client) is True
-    client.cancel_job.assert_called_once_with('123')
-    client.release_job.assert_not_called()
-    assert client.query_jobs.call_args_list == [
-        mock.call('my-cluster-on-cloud', ['pending', 'configuring', 'running'])
-    ] * 2
-    mock_sleep.assert_called_once_with(slurm_instance.POLL_INTERVAL_SECONDS)
-    assert 'Slurm job 123' in info.call_args.args[0]
-    assert 'submitting a new job' in info.call_args.args[0]
-
-
-def test_reused_job_left_held_that_cannot_be_cancelled_is_refused():
-    client = _left_held_client()
-    client.cancel_job.side_effect = RuntimeError('ssh down')
-    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
-        _cancel_if_left_held(client)
-    message = str(e.value)
-    assert 'Slurm job 123' in message
-    assert 'could not be cancelled' in message
-    assert 'scancel 123' in message
-    client.query_jobs.assert_not_called()
-
-
-@mock.patch('sky.provision.slurm.instance.time.sleep')
-@mock.patch('sky.provision.slurm.instance.time.time')
-def test_reused_job_left_held_that_lingers_is_refused(mock_time, mock_sleep):
-    # Never waited on: refused once the termination timeout has passed.
-    client = _left_held_client()
-    client.query_jobs.return_value = ['123']
-    timeout = slurm_instance._JOB_TERMINATION_TIMEOUT_SECONDS
-    mock_time.side_effect = [0, 1, timeout / 2, timeout]
-    with pytest.raises(exceptions.ProvisionUnsupportedError) as e:
-        _cancel_if_left_held(client)
-    message = str(e.value)
-    assert 'Slurm job 123' in message
-    assert f'still listed {timeout}s after it was cancelled' in message
-    assert 'squeue -j 123' in message
-    assert 'scancel 123' in message
-    client.cancel_job.assert_called_once_with('123')
-    assert mock_sleep.call_count == 2
+    assert slurm_instance._is_left_held(client, '123') is True
+    client.get_job_fields.assert_called_once_with('123')
 
 
 @pytest.mark.parametrize('job_state, reason', [
     ('RUNNING', 'None'),
+    ('CONFIGURING', 'None'),
     ('PENDING', 'Resources'),
     ('PENDING', 'JobHeldAdmin'),
 ])
-def test_reused_job_not_left_held_is_untouched(job_state, reason):
-    client = _left_held_client(job_state=job_state, reason=reason)
-    assert _cancel_if_left_held(client) is False
-    client.cancel_job.assert_not_called()
-    client.release_job.assert_not_called()
+def test_job_not_under_the_submission_hold_is_not_recognised(job_state, reason):
+    client = mock.Mock()
+    client.get_job_fields.return_value = {
+        'JobState': job_state,
+        'Reason': reason,
+    }
+    assert slurm_instance._is_left_held(client, '123') is False
 
 
-def test_reused_job_that_cannot_be_read_is_untouched():
-    client = _left_held_client()
+def test_unreadable_job_is_not_recognised_as_left_held():
+    client = mock.Mock()
     client.get_job_fields.side_effect = RuntimeError('ssh down')
-    assert _cancel_if_left_held(client) is False
-    client.cancel_job.assert_not_called()
-    client.release_job.assert_not_called()
+    assert slurm_instance._is_left_held(client, '123') is False
 
 
-@pytest.mark.parametrize('value, expected', [('8', 8), ('1-1', 1), ('2+', 2)])
-def test_leading_int(value, expected):
-    assert slurm_instance._leading_int(value) == expected
+@pytest.mark.parametrize('value, expected', [('8', 8), ('16', 16)])
+def test_plain_count(value, expected):
+    assert slurm_instance._plain_count(value) == expected
 
 
-@pytest.mark.parametrize('value', ['', 'N/A', None])
-def test_leading_int_rejects_non_counts(value):
+@pytest.mark.parametrize('value', ['', 'N/A', None, '1-1', '2+', '8 '])
+def test_plain_count_rejects_non_counts(value):
     with pytest.raises(ValueError):
-        slurm_instance._leading_int(value)
+        slurm_instance._plain_count(value)
 
 
 @pytest.mark.parametrize('value, expected', [('1', (1, 1)), ('1-1', (1, 1)),
