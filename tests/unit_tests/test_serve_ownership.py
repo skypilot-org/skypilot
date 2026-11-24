@@ -126,22 +126,57 @@ class TestDown:
                 impl.down(service_names=['bob-svc'])
         terminate.assert_not_called()
 
-    def test_one_denied_name_blocks_the_whole_request(self):
+    def test_own_names_go_down_then_others_are_refused(self):
         with _caller(), _down_env() as terminate:
-            with pytest.raises(exceptions.PermissionDeniedError):
+            with pytest.raises(exceptions.PermissionDeniedError) as e:
                 impl.down(service_names=['alice-svc', 'bob-svc'])
+        assert _terminated(terminate) == ['alice-svc']
+        assert str(e.value).startswith("Terminated 'alice-svc'; ")
+        assert 'bob-svc' in str(e.value)
+
+    def test_only_others_names_are_refused_before_anything(self):
+        with _caller(), _down_env() as terminate:
+            with pytest.raises(exceptions.PermissionDeniedError) as e:
+                impl.down(service_names=['bob-svc', 'legacy-svc'])
         terminate.assert_not_called()
+        assert 'Terminated' not in str(e.value)
 
     def test_pattern_matching_only_own_services(self):
         with _caller(), _down_env() as terminate:
             impl.down(service_names=['alice-*'])
         assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
 
-    def test_pattern_reaching_another_users_service_is_denied(self):
+    @pytest.mark.parametrize('pool', [False, True])
+    def test_pattern_takes_only_own_services(self, pool):
+        records = [dict(r, pool=pool) for r in _RECORDS]
+        noun = 'pool' if pool else 'service'
+        with _caller(), _down_env(records) as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(service_names=['*'], pool=pool)
+        assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
+        assert any(f'Skipped 2 {noun}s not owned by you (1 with no recorded '
+                   'creator' in str(call) for call in info.call_args_list)
+
+    def test_exact_name_also_matched_by_a_pattern_is_refused(self):
         with _caller(), _down_env() as terminate:
-            with pytest.raises(exceptions.PermissionDeniedError):
-                impl.down(service_names=['*'])
+            with pytest.raises(exceptions.PermissionDeniedError) as e:
+                impl.down(service_names=['bob-svc', '*'])
+        assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
+        assert 'bob-svc' in str(e.value)
+        assert 'legacy-svc' not in str(e.value)
+
+    def test_own_name_with_a_pattern_matching_only_others(self):
+        with _caller(), _down_env() as terminate:
+            impl.down(service_names=['alice-svc', 'bob-*'])
+        assert _terminated(terminate) == ['alice-svc']
+
+    def test_pattern_matching_only_others_is_a_no_op(self):
+        with _caller(), _down_env() as terminate, \
+             mock.patch('sky.serve.server.impl.logger.info') as info:
+            impl.down(service_names=['bob-*'])
         terminate.assert_not_called()
+        assert any('Skipped 1 service not owned by you.' in str(call)
+                   for call in info.call_args_list)
 
     def test_pattern_matching_nothing_never_reaches_the_controller(self):
         """An empty list must not be handed over: the controller reads a
@@ -173,7 +208,8 @@ class TestDown:
              mock.patch('sky.serve.server.impl.logger.info') as info:
             impl.down(all=True)
         assert _terminated(terminate) == ['alice-svc', 'alice-svc-2']
-        assert any('Skipped 2 services not owned by you' in str(call)
+        assert any('Skipped 2 services not owned by you (1 with no recorded '
+                   'creator; an admin can tear it down).' in str(call)
                    for call in info.call_args_list)
 
     def test_record_without_creator_is_admin_only(self):
