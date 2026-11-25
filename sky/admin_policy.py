@@ -120,9 +120,10 @@ class UserRequest:
         user_request_body = _UserRequestBody.model_validate_json(body)
         user_dict = yaml_utils.read_yaml_str(
             user_request_body.user) if user_request_body.user != '' else None
-        user = models.User(
-            id=user_dict['id'],
-            name=user_dict['name']) if user_dict is not None else None
+        user = models.User(id=user_dict['id'],
+                           name=user_dict['name'],
+                           user_type=user_dict.get(
+                               'user_type')) if user_dict is not None else None
         return cls(
             task=sky.Task.from_yaml_config(
                 yaml_utils.read_yaml_all_str(user_request_body.task)[0]),

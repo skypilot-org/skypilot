@@ -399,10 +399,18 @@ def test_restful_policy_with_request_options(monkeypatch):
             os.unlink(config_path)
 
 
-def test_restful_policy_with_user(monkeypatch):
+@pytest.mark.parametrize('user_type', [
+    None,
+    models.UserType.SSO.value,
+    models.UserType.SA.value,
+    models.UserType.BASIC.value,
+])
+def test_restful_policy_with_user(monkeypatch, user_type):
     """Test RESTful admin policy receiving user information."""
     with mock.patch('sky.utils.common_utils.get_current_user',
-                    return_value=models.User(id='123', name='test')):
+                    return_value=models.User(id='123',
+                                             name='test',
+                                             user_type=user_type)):
         with PolicyServer() as server:
             ImageIdInspectorPolicy.received_requests.clear()
 
@@ -428,6 +436,7 @@ def test_restful_policy_with_user(monkeypatch):
                 assert request.user is not None
                 assert request.user.id == '123'
                 assert request.user.name == 'test'
+                assert request.user.user_type == user_type
 
                 # Check that we got valid results back
                 assert dag is not None
@@ -719,3 +728,15 @@ def test_complex_task_serialization(monkeypatch):
                 None] == 'docker:pytorch/pytorch:latest'
         finally:
             os.unlink(config_path)
+
+
+def test_policy_request_decodes_legacy_user_without_type():
+    request = sky.UserRequest(
+        task=create_test_task(),
+        skypilot_config=sky.Config(),
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH)
+    body = admin_policy._UserRequestBody.model_validate_json(request.encode())
+    body.user = 'id: user-1\nname: alice\n'
+    decoded = sky.UserRequest.decode(body.model_dump_json())
+    assert decoded.user.id == 'user-1'
+    assert decoded.user.user_type is None
