@@ -1014,6 +1014,10 @@ def get_service_schema():
                         'path': {
                             'type': 'string',
                         },
+                        'scheme': {
+                            'type': 'string',
+                            'enum': ['http', 'https'],
+                        },
                         'initial_delay_seconds': {
                             'type': 'number',
                         },

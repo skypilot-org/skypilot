@@ -10,6 +10,7 @@ import time
 import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple
+import urllib.parse
 
 import colorama
 import filelock
@@ -696,6 +697,7 @@ class ReplicaInfo:
     def probe(
         self,
         readiness_path: str,
+        readiness_scheme: Optional[str],
         post_data: Optional[Dict[str, Any]],
         timeout: int,
         headers: Optional[Dict[str, str]],
@@ -712,12 +714,15 @@ class ReplicaInfo:
         probe_time = time.time()
         try:
             msg = ''
-            # TODO(tian): Support HTTPS in the future.
             url = self.url
             if url is None:
                 logger.info(f'Error when probing {replica_identity}: '
                             'Cannot get the endpoint.')
                 return self, False, probe_time
+            if readiness_scheme is not None:
+                parsed_url = urllib.parse.urlsplit(url)
+                url = urllib.parse.urlunsplit(
+                    parsed_url._replace(scheme=readiness_scheme))
             readiness_path = (f'{url}{readiness_path}')
             logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
@@ -1529,6 +1534,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                             info.probe,
                             (
                                 self._get_readiness_path(info.version),
+                                self._get_readiness_scheme(info.version),
                                 self._get_post_data(info.version),
                                 self._get_readiness_timeout_seconds(
                                     info.version),
@@ -1730,6 +1736,9 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _get_readiness_path(self, version: int) -> str:
         return self._get_version_spec(version).readiness_path
+
+    def _get_readiness_scheme(self, version: int) -> Optional[str]:
+        return self._get_version_spec(version).readiness_scheme
 
     def _get_post_data(self, version: int) -> Optional[Dict[str, Any]]:
         return self._get_version_spec(version).post_data
