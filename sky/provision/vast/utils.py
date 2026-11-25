@@ -5,9 +5,13 @@
 # python sdk.
 #
 """Vast library wrapper for SkyPilot."""
+from importlib import metadata
 from pathlib import Path
+import re
 import shlex
 from typing import Any, Dict, List, Optional
+
+from packaging import version
 
 from sky import sky_logging
 from sky.adaptors import vast
@@ -107,10 +111,46 @@ def launch(name: str,
          catalog/vast_catalog.py for the current construction
          of the type.
     """
-    # Vast.ai SDK v6+ no longer accepts port mappings via the env field, so
-    # `ports` is currently unused. Keep it in the signature for caller
-    # compatibility and future use (port-forwarding is handled separately).
-    del ports
+    requested_ports = set(ports or [])
+    user_port_mappings: Dict[int, int] = {}
+    if requested_ports:
+        # The legacy SDK parses env as a string and silently drops dict keys.
+        # Only require the unified SDK for this feature; other launches retain
+        # their existing dependency requirements and env handling.
+        try:
+            compatible_sdk = all(
+                version.Version(metadata.version(package)) >= version.Version(
+                    '1.0.0') for package in ('vastai-sdk', 'vastai'))
+        except (metadata.PackageNotFoundError, version.InvalidVersion):
+            compatible_sdk = False
+        if not compatible_sdk:
+            raise RuntimeError(
+                'Vast TCP port mappings require vastai-sdk>=1.0.0 and '
+                'vastai>=1.0.0. Upgrade with pip install '
+                '"vastai-sdk>=1.0.0" "vastai>=1.0.0".')
+        user_env = (create_instance_kwargs or {}).get('env')
+        if user_env is not None and not isinstance(user_env, dict):
+            raise ValueError('Vast TCP port mappings require env to be a dict '
+                             'so environment values are preserved exactly.')
+        for key, value in (user_env or {}).items():
+            if not isinstance(key, str) or not key.startswith('-p'):
+                continue
+            match = re.fullmatch(r'-p ([0-9]+):([0-9]+)(?:/tcp)?', key)
+            if match is None or str(value) != '1':
+                raise ValueError('Vast env TCP mapping must use '
+                                 '"-p HOST:CONTAINER" (optionally /tcp) with '
+                                 'value "1" when requesting ports.')
+            host_port, container_port = map(int, match.groups())
+            if not (1 <= host_port <= 65535 and 1 <= container_port <= 65535):
+                raise ValueError('Vast env TCP mapping ports must be between '
+                                 '1 and 65535.')
+            previous_host = user_port_mappings.get(container_port)
+            if ((previous_host is not None and previous_host != host_port) or
+                (container_port in requested_ports and
+                 host_port != container_port)):
+                raise ValueError('Vast env contains a conflicting TCP mapping '
+                                 f'for requested port {container_port}.')
+            user_port_mappings[container_port] = host_port
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
@@ -124,6 +164,10 @@ def launch(name: str,
         f'gpu_name="{gpu_name}"',
         f'cpu_ram>="{cpu_ram}"',
     ]
+    if requested_ports:
+        # This is a lower bound: images/templates may expose additional ports.
+        known_ports = requested_ports | set(user_port_mappings) | {22}
+        query.append(f'direct_port_count>={len(known_ports)}')
     if secure_only:
         query.append('datacenter=true')
         query.append('hosting_type>=1')
@@ -231,9 +275,10 @@ def launch(name: str,
             env_dict.update(user_env)
         elif isinstance(user_env, str):
             # Parse legacy "-e KEY=VAL" style strings for backwards compat
-            import re  # pylint: disable=import-outside-toplevel
             for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
                 env_dict[match.group(1)] = match.group(2)
+    for port in sorted(requested_ports - set(user_port_mappings)):
+        env_dict[f'-p {port}:{port}'] = '1'
     launch_params['env'] = env_dict
 
     new_instance_contract = vast.vast().create_instance(**launch_params)
