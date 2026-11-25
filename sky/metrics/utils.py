@@ -2393,9 +2393,9 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
     if not candidates:
         return matchers
 
-    # Narrowed to clusters actually federated: a cluster excluded by
-    # slurm.allowed_clusters claims nothing, so subtracting its slice here
-    # would drop series no cluster goes on to collect.
+    # Narrowed to clusters actually federated: a cluster no workspace allows
+    # claims nothing, so subtracting its slice here would drop series no
+    # cluster goes on to collect.
     federated = set(get_slurm_metrics_clusters())
     for sibling in candidates:
         if sibling not in federated:
@@ -2440,9 +2440,9 @@ def _with_label_matchers(pattern: str, matchers: List[str]) -> str:
 def get_slurm_metrics_clusters() -> List[str]:
     """Slurm clusters opted into GPU metrics federation.
 
-    A cluster participates when it is allowed by ``slurm.allowed_clusters``
-    (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
-    in ``~/.slurm/config``) *and*
+    A cluster participates when some workspace allows it (the server's
+    ``slurm.allowed_clusters`` or a workspace's override, as with Kubernetes
+    contexts; defaults to every cluster in ``~/.slurm/config``) *and*
     ``slurm.cluster_configs.<name>.prometheus.url`` is set: the URL of a
     Prometheus reachable *from a login node* — the cluster's own, or the
     ``prometheus.via`` cluster's — that scrapes the cluster's node/DCGM
@@ -2452,16 +2452,21 @@ def get_slurm_metrics_clusters() -> List[str]:
     try:
         # pylint: disable=import-outside-toplevel
         from sky import clouds
+        # In-function: visibility imports global_user_state, which imports
+        # this module.
+        from sky.workspaces import visibility
 
-        # Scope federation to the same clusters the rest of SkyPilot uses,
-        # honoring slurm.allowed_clusters (mirrors how the Kubernetes federation
-        # respects allowed_contexts). Defaults to all clusters in
-        # ~/.slurm/config when allowed_clusters is unset.
-        names = clouds.Slurm.existing_allowed_clusters(silent=True)
+        names = set(clouds.Slurm.existing_allowed_clusters(silent=True))
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not enumerate Slurm clusters: {e}')
         return []
-    return [name for name in names if _slurm_prometheus_url(name)]
+    # Clusters only another workspace allows are federated too, as the
+    # Kubernetes federation does with get_every_workspace_contexts().
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {})
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    names |= visibility.visible_for_workspaces(workspaces, 'slurm')
+    return sorted(name for name in names if _slurm_prometheus_url(name))
 
 
 async def get_metrics_for_slurm_cluster(cluster_name: str,
