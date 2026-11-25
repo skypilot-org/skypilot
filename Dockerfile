@@ -32,7 +32,7 @@ ARG INSTALL_FROM_SOURCE=true
 ARG NEXT_BASE_PATH=/dashboard
 WORKDIR /skypilot
 
-RUN pip install --no-cache-dir setuptools==78.1.1
+RUN pip install --no-cache-dir setuptools==80.10.2
 
 # Run NPM and node install in a separate step for caching.
 RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
@@ -131,11 +131,20 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    # azure-cli 2.86 pins msal==1.35.1, and msal 1.35.1 and pyOpenSSL<26.4
+    # cap cryptography<49, which has known CVEs. Override them to releases
+    # that allow cryptography 50. The overrides are also passed when
+    # installing SkyPilot below, which resolves azure-cli again.
+    printf '%s\n' 'msal>=1.39.0,<2' 'pyopenssl>=26.4.0,<27' \
+        'cryptography>=50.0.0,<51' > /tmp/uv-overrides.txt && \
     # Cap azure-cli<2.87.0: 2.87.0 pulls the broken azure-mgmt-storage 25.0.0
     # (see sky/setup_files/dependencies.py).
-    ~/.local/bin/uv pip install --prerelease allow "azure-cli<2.87.0" --system && \
-    # Upgrade setuptools in base image to mitigate CVE-2024-6345
-    ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
+    ~/.local/bin/uv pip install --prerelease allow "azure-cli<2.87.0" \
+        --override /tmp/uv-overrides.txt --system && \
+    # Upgrade setuptools in base image. 80.10.2 vendors wheel and
+    # jaraco.context versions without known CVEs and still ships
+    # pkg_resources, which some bundled tools import (removed in 82).
+    ~/.local/bin/uv pip install --system --upgrade setuptools==80.10.2 && \
     # Upgrade pip in base image: pip<26.2.2 vendors certifi<2026.10.19, which
     # bundles compromised emSign root CAs (GHSA-6q48-6c7w-9gw2)
     ~/.local/bin/uv pip install --system --upgrade "pip>=26.2.2" && \
@@ -151,7 +160,7 @@ COPY --from=process-source /skypilot /skypilot
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
-        ~/.local/bin/uv pip install -e ".[all]" --system; \
+        ~/.local/bin/uv pip install -e ".[all]" --override /tmp/uv-overrides.txt --system; \
     else \
         echo "Installing from wheel file" && \
         WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
@@ -160,9 +169,13 @@ RUN cd /skypilot && \
             ls -la /skypilot/dist/ && \
             exit 1; \
         fi && \
-        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
+        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --override /tmp/uv-overrides.txt --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi && \
+    rm -f /tmp/uv-overrides.txt && \
+    # Ray bundles Java jars (ray/jars) for its Java worker. The image has no
+    # Java runtime and SkyPilot only uses Ray's Python API, so drop them.
+    rm -rf "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/ray/jars" && \
     # Cleanup all caches to reduce the image size
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
