@@ -2,8 +2,9 @@
 import multiprocessing
 from multiprocessing import managers
 import queue
+import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from sky import sky_logging
 from sky.server import common as server_common
@@ -48,9 +49,15 @@ def start_queue_manager(queue_names: List[str],
     def queue_getter(q_obj):
         return lambda: q_obj
 
+    # The server needs a registry of its own: a client in the same process
+    # registers each name again without a getter (see get_queue), and the
+    # server reads the registry it was created with.
+    class ServerManager(managers.BaseManager):
+        pass
+
     for name in queue_names:
         q_obj: queue.Queue = queue.Queue()
-        QueueManager.register(name, callable=queue_getter(q_obj))
+        ServerManager.register(name, callable=queue_getter(q_obj))
 
     # Start long-running manager server.
     # Manager will set socket.SO_REUSEADDR, but BSD and Linux have different
@@ -62,7 +69,7 @@ def start_queue_manager(queue_names: List[str],
     # localhost (127.0.0.1) will succeed, but the Manager won't actually be able
     # to accept connections on localhost.
     # For portability, we use the loopback address instead of *.
-    manager = QueueManager(address=('localhost', port), authkey=b'skypilot')
+    manager = ServerManager(address=('localhost', port), authkey=b'skypilot')
     server = manager.get_server()
     server.serve_forever()
 
@@ -77,7 +84,8 @@ def get_queue(queue_name: str, port: Optional[int] = None) -> queue.Queue:
 
 
 def wait_for_queues_to_be_ready(queue_names: List[str],
-                                queue_server: multiprocessing.Process,
+                                queue_server: Union[multiprocessing.Process,
+                                                    threading.Thread],
                                 port: Optional[int] = None) -> None:
     """Wait for the queues to be ready after queue manager is just started."""
     initial_time = time.time()
@@ -94,8 +102,7 @@ def wait_for_queues_to_be_ready(queue_names: List[str],
                         f'to be ready...')
             time.sleep(0.2)
             if not queue_server.is_alive():
-                raise RuntimeError(
-                    'Queue manager process exited unexpectedly.') from e
+                raise RuntimeError('Queue manager exited unexpectedly.') from e
             if time.time() - initial_time > max_wait_time:
                 raise RuntimeError(
                     f'Request queue, named {queue_names[0]!r}, '
