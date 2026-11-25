@@ -264,7 +264,26 @@ _AUTOSTOP_SCHEMA = {
                 'hook_timeout': {
                     'type': 'integer',
                     'minimum': 1,
-                }
+                },
+                'activity_check': {
+                    'type': 'object',
+                    'required': ['run'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'run': {
+                            'type': 'string',
+                            'minLength': 1,
+                            'maxLength': 16 * 1024,
+                        },
+                        'timeout': {
+                            'type': 'integer',
+                            'minimum': 1,
+                            # The skylet runs its events in sequence; a long
+                            # check would delay the others.
+                            'maximum': 60,
+                        },
+                    },
+                },
             },
         },
     ],
