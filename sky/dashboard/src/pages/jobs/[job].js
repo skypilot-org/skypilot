@@ -422,8 +422,8 @@ function JobDetails({
       message:
         `Re-run job ${jobId}` +
         `${detailJobData?.name ? ` (${detailJobData.name})` : ''} ` +
-        'as a new managed job? It runs the same spec at the same git commit ' +
-        'as the original run.',
+        'as a new managed job? It is launched with the same YAML and ' +
+        'settings as the original run.',
       onConfirm: async () => {
         try {
           setIsRerunning(true);

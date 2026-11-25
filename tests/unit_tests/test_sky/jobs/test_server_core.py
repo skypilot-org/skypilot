@@ -14,7 +14,7 @@ from sky import resources as resources_lib
 from sky import task as task_lib
 from sky.jobs.server import core as jobs_core
 from sky.jobs.state import ManagedJobStatus
-from sky.server.requests import payloads
+from sky.schemas.generated import managed_jobsv1_pb2
 from sky.utils import dag_utils
 
 
@@ -416,7 +416,11 @@ def _record(status=ManagedJobStatus.FAILED,
             pool=None,
             workspace='default',
             user_hash='me'):
-    """A stand-in for one task row of responses.ManagedJobRecord."""
+    """A stand-in for one task row of responses.ManagedJobRecord.
+
+    `dag_yaml` is not a queue field: it is the spec _get_job_spec() returns
+    for the job, kept here so each test states its job in one place.
+    """
     return SimpleNamespace(job_id=job_id,
                            task_id=0,
                            job_name=name,
@@ -438,6 +442,9 @@ def _restart(records,
     queue_mock = queue_mock or mock.MagicMock()
     queue_mock.return_value = (records, len(records), {}, 0, [])
     with mock.patch.object(jobs_core, 'queue_v2_api', queue_mock), \
+         mock.patch.object(jobs_core, '_get_job_spec',
+                           return_value=records[0].dag_yaml if records
+                           else None), \
          mock.patch.object(jobs_core.common_utils, 'get_user_hash',
                            return_value=caller), \
          mock.patch.object(jobs_core.skypilot_config,
@@ -582,7 +589,6 @@ def test_restart_by_name_rejects_an_ambiguous_name():
 
 
 def test_restart_without_stored_spec():
-    # Jobs submitted by a controller that predates restart support.
     record = _record()
     record.dag_yaml = None
     with pytest.raises(exceptions.NotSupportedError, match='not available'):
@@ -704,27 +710,84 @@ def test_restart_into_a_requested_workspace():
     workspace_ctx.assert_not_called()
 
 
-@pytest.mark.parametrize(('fields', 'kept'), [
-    (None, False),
-    (['job_id', 'status'], False),
-    (['job_id', 'dag_yaml'], True),
-])
-def test_queue_v2_returns_dag_yaml_only_when_requested(fields, kept):
-    # The compiled DAG carries plaintext secrets.
-    jobs = [{'job_id': 1, 'dag_yaml': 'secrets: {K: v}'}]
-
-    @jobs_core._drop_unrequested_dag_yaml
-    def fake_queue_v2(refresh, fields=None):
-        del refresh, fields
-        return [dict(j) for j in jobs], 1, {}, 1, []
-
-    result, _, _, _, _ = fake_queue_v2(False, fields=fields)
-    assert ('dag_yaml' in result[0]) == kept
+def test_restart_queries_metadata_only_and_starts_the_controller():
+    # The spec holds secrets: it never goes through the queue. refresh=True
+    # starts a stopped jobs controller, as `sky jobs launch` does.
+    queue = mock.MagicMock()
+    _restart([_record()], queue_mock=queue)
+    assert 'dag_yaml' not in queue.call_args.kwargs['fields']
+    assert queue.call_args.kwargs['refresh'] is True
 
 
-def test_queue_v2_body_drops_dag_yaml_from_client_requests():
-    body = payloads.JobsQueueV2Body(fields=['job_id', 'dag_yaml'])
-    assert body.to_kwargs()['fields'] == ['job_id']
+def _handle(grpc_enabled=True):
+    return mock.MagicMock(is_grpc_enabled_with_flag=grpc_enabled)
+
+
+def test_get_job_spec_in_consolidation_mode_reads_the_database():
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=True), \
+         mock.patch.object(jobs_core.file_content_utils,
+                           'get_job_dag_content',
+                           return_value='spec') as read, \
+         mock.patch.object(jobs_core,
+                           '_maybe_restart_controller') as controller:
+        assert jobs_core._get_job_spec(5) == 'spec'
+    read.assert_called_once_with(5)
+    controller.assert_not_called()
+
+
+@pytest.mark.parametrize('has_spec', [True, False])
+def test_get_job_spec_over_grpc(has_spec):
+    response = managed_jobsv1_pb2.GetJobSpecResponse(
+        dag_yaml='spec') if has_spec else (
+            managed_jobsv1_pb2.GetJobSpecResponse())
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=False), \
+         mock.patch.object(jobs_core, '_maybe_restart_controller',
+                           return_value=_handle()) as controller, \
+         mock.patch.object(jobs_core.backend_utils,
+                           'invoke_skylet_with_retries',
+                           return_value=response):
+        assert jobs_core._get_job_spec(5) == ('spec' if has_spec else None)
+    assert controller.call_args.kwargs['refresh'] is True
+
+
+def _codegen_spec(returncode, stdout, grpc_enabled=True):
+    """Reads a spec from a controller without GetJobSpec (older skylet)."""
+    backend = mock.MagicMock(spec=jobs_core.backends.CloudVmRayBackend)
+    backend.run_on_head.return_value = (returncode, stdout, 'boom')
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=False), \
+         mock.patch.object(jobs_core, '_maybe_restart_controller',
+                           return_value=_handle(grpc_enabled)), \
+         mock.patch.object(
+             jobs_core.backend_utils,
+             'invoke_skylet_with_retries',
+             side_effect=exceptions.SkyletMethodNotImplementedError('old')), \
+         mock.patch.object(jobs_core.backend_utils,
+                           'get_backend_from_handle',
+                           return_value=backend):
+        return jobs_core._get_job_spec(5)
+
+
+@pytest.mark.parametrize('grpc_enabled', [True, False])
+def test_get_job_spec_falls_back_to_codegen_on_an_older_controller(
+        grpc_enabled):
+    payload = jobs_core.message_utils.encode_payload('spec')
+    assert _codegen_spec(0, payload, grpc_enabled) == 'spec'
+
+
+def test_get_job_spec_on_a_controller_that_cannot_read_it():
+    with pytest.raises(exceptions.NotSupportedError, match='upgraded'):
+        _codegen_spec(1, '')
+
+
+def test_get_job_spec_codegen_reads_the_stored_spec():
+    code = jobs_core.managed_job_utils.ManagedJobCodeGen.get_job_spec(5)
+    assert 'file_content_utils.get_job_dag_content(5)' in code
 
 
 class _Proceeded(Exception):

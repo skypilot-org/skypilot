@@ -2,7 +2,6 @@
 import contextlib
 import copy
 import datetime
-import functools
 import inspect
 import ipaddress
 import os
@@ -39,6 +38,7 @@ from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import file_content_utils
 from sky.jobs import runner as managed_job_runner
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -59,6 +59,7 @@ from sky.utils import context as context_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import infra_utils
+from sky.utils import message_utils
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1786,28 +1787,6 @@ def queue_v2_api(
             status_counts, total_no_filter, infra_options)
 
 
-def _drop_unrequested_dag_yaml(func):
-    """Removes `dag_yaml` from queue results unless `fields` asks for it.
-
-    The compiled DAG holds plaintext secrets (and the job's API token), so it
-    is only returned to in-process callers that request it by name, such as
-    restart(). The /jobs/queue/v2 request body strips it from client requests.
-    """
-    signature = inspect.signature(func)
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        result = func(*args, **kwargs)
-        fields = signature.bind(*args, **kwargs).arguments.get('fields')
-        if not fields or 'dag_yaml' not in fields:
-            for job in result[0]:
-                job.pop('dag_yaml', None)
-        return result
-
-    return wrapper
-
-
-@_drop_unrequested_dag_yaml
 @metrics_lib.time_me
 def queue_v2(
     refresh: bool,
@@ -2150,15 +2129,18 @@ def _resolve_job_to_restart(
         job_id: Optional[int],
         job_name: Optional[str]) -> List[responses.ManagedJobRecord]:
     """Returns the task records of the single job named by id or name."""
+    # Metadata only: the job's spec, which holds its secrets, is read
+    # separately by _get_job_spec() and never goes through the queue.
     fields = [
-        'job_id', 'task_id', 'job_name', 'status', 'dag_yaml', 'pool',
-        'workspace', 'user_hash'
+        'job_id', 'task_id', 'job_name', 'status', 'pool', 'workspace',
+        'user_hash'
     ]
     if job_id is not None:
         # All users: the caller may restart a job they can see but did not
         # submit (the dashboard lists every user's jobs). Workspace access is
-        # still enforced by the queue.
-        records, _, _, _, _ = queue_v2_api(refresh=False,
+        # still enforced by the queue. refresh=True starts a stopped jobs
+        # controller, as `sky jobs launch` does.
+        records, _, _, _, _ = queue_v2_api(refresh=True,
                                            all_users=True,
                                            job_ids=[job_id],
                                            fields=fields)
@@ -2169,7 +2151,7 @@ def _resolve_job_to_restart(
     assert job_name is not None
     # By name, only the caller's own jobs: another user's job of the same
     # name must not be picked, nor make the name ambiguous.
-    records, _, _, _, _ = queue_v2_api(refresh=False,
+    records, _, _, _, _ = queue_v2_api(refresh=True,
                                        all_users=False,
                                        name_match=job_name,
                                        fields=fields)
@@ -2185,6 +2167,53 @@ def _resolve_job_to_restart(
                 f'Multiple managed jobs are named {job_name!r} (IDs: '
                 f'{", ".join(map(str, job_ids))}). Restart one by ID instead.')
     return [r for r in records if r.job_id == job_ids[0]]
+
+
+def _get_job_spec(job_id: int) -> Optional[str]:
+    """Returns the DAG YAML a managed job was submitted with, or None.
+
+    The spec holds the job's secrets, so it is read here, for one job, and
+    never exposed through the queue. The caller must already have resolved
+    the job through the queue, which enforces workspace access.
+    """
+    if managed_job_utils.is_consolidation_mode():
+        return file_content_utils.get_job_dag_content(job_id)
+
+    # The controller is up: _resolve_job_to_restart() started it if needed.
+    handle = _maybe_restart_controller(refresh=True,
+                                       stopped_message='',
+                                       spinner_message='Reading job spec')
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_managed_job_spec(
+                        managed_jobsv1_pb2.GetJobSpecRequest(job_id=job_id)))
+            return (response.dag_yaml
+                    if response.HasField('dag_yaml') else None)
+        except exceptions.SkyletMethodNotImplementedError:
+            # A controller older than this server has no GetJobSpec yet; it
+            # picks up new skylet code on its next launch. Read the spec with
+            # generated code instead.
+            pass
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    code = managed_job_utils.ManagedJobCodeGen.get_job_spec(job_id)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False,
+                                                     separate_stderr=True)
+    if returncode != 0:
+        logger.debug(f'Failed to read the spec of managed job {job_id}: '
+                     f'{stderr}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'The jobs controller runs a SkyPilot version that cannot read '
+                f'the spec of managed job {job_id}. It is upgraded on the next '
+                '`sky jobs launch`; retry the restart after that.')
+    return message_utils.decode_payload(stdout)
 
 
 def _assert_restartable(dag: 'sky.Dag', job_id: int) -> None:
@@ -2254,10 +2283,13 @@ def restart(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a finished managed job again, as a new managed job.
 
-    Re-submits the job's compiled DAG, which carries the resolved git commit
-    and the storage its files were uploaded to, so the new job runs the same
-    code on the same resources without the original client's local files.
-    Overrides are applied on top, as for `sky jobs launch`.
+    Behaves like running `sky jobs launch` again with the job's YAML and
+    flags: the stored spec goes through launch() as a new job, with the same
+    admin policy, permission checks and validation. A git workdir is cloned
+    at the ref the job named (a branch resolves to its current head, as on
+    a new launch). Overrides are applied on top, as for `sky jobs launch`.
+    Jobs whose local workdir or file mounts were uploaded for that run
+    cannot be restarted: the upload is removed when the job finishes.
 
     Args:
         job_id: ID of the managed job to restart. Exactly one of job_id and
@@ -2301,14 +2333,12 @@ def restart(
                     'finished jobs can be restarted; cancel it first with '
                     f'`sky jobs cancel {job_id}`.')
 
-    # Every task record of a job carries the same compiled DAG.
-    dag_yaml = next((r.dag_yaml for r in records if r.dag_yaml), None)
+    dag_yaml = _get_job_spec(job_id)
     if not dag_yaml:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'The spec of managed job {job_id} is not available, so it '
-                'cannot be restarted. The job was likely submitted by an older '
-                'jobs controller. Launch it again with `sky jobs launch`.')
+                'cannot be restarted. Launch it again with `sky jobs launch`.')
 
     dag = dag_utils.load_dag_from_yaml_str(dag_yaml)
     _assert_restartable(dag, job_id)

@@ -6309,9 +6309,9 @@ def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
               type=str,
               default=None,
               help=('Launch a finished managed job again, by ID or name, as a '
-                    'new job. It runs the same spec at the same git commit; '
-                    'resource, --env and --secret flags override it. Takes no '
-                    'ENTRYPOINT.'))
+                    'new job, like running `sky jobs launch` again with its '
+                    'YAML and flags. Resource, --env and --secret flags '
+                    'override it. Takes no ENTRYPOINT.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -6376,7 +6376,7 @@ def jobs_launch(
       # Print only the job ID, e.g. to pass it to another command.
       JOB_ID=$(sky jobs launch -y -o id task.yaml)
 
-      # Run finished job 12 again as a new job, at the same git commit.
+      # Run finished job 12 again as a new job.
       sky jobs launch --restart 12
 
       # Run it again on 8 H100s with a different learning rate.

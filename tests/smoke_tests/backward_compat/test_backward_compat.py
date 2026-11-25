@@ -545,9 +545,23 @@ class TestBackwardCompatibility:
             f'echo "$s" | grep -E "Job .* logs: "',
         ]
 
+        # Restart a job that finished in the old version. Its spec was stored
+        # by the old version, and the controller still runs the old version
+        # (it is upgraded on the next launch), so the new server reads the
+        # spec from an old controller. The new job's name must not contain
+        # managed_job_name, so the counts below are unchanged.
+        restart_name = f'rs-{managed_job_name[::-1]}'
+        restart_commands = [
+            f'sky jobs launch -y -d --restart {managed_job_name}-old-1 '
+            f'-n {restart_name}',
+            wait_for_status(restart_name, [sky.ManagedJobStatus.SUCCEEDED]),
+            f'result="$(sky jobs logs --no-follow -n {restart_name})"; '
+            f'echo "$result"; echo "$result" | grep hi',
+        ]
+
         # Combine all commands
         current_commands = (common_initial_commands + sync_down_commands +
-                            version_specific_commands)
+                            restart_commands + version_specific_commands)
 
         # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
         # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
@@ -590,7 +604,9 @@ class TestBackwardCompatibility:
             *self._switch_to_current(*current_commands),
             check_controller_process_count,
         ]
-        teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
+        teardown = (f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n '
+                    f'{managed_job_name}* -y; sky jobs cancel -n '
+                    f'{restart_name} -y')
         self.run_compatibility_test(managed_job_name, commands, teardown)
 
     def test_serve_deployment(self, generic_cloud: str):
@@ -678,6 +694,16 @@ class TestBackwardCompatibility:
              else f'{self.ACTIVATE_CURRENT} && '
              f's="$(sky jobs queue --infra {generic_cloud})" && '
              f'echo "$s" && echo "$s" | grep {job_name}'),
+            # `sky jobs launch --restart`: a server that predates it is
+            # refused by the client with an upgrade hint. Once the base
+            # release has it, restarting the finished job has to work.
+            (f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs launch -y -d --restart {job_name} 2>&1)" || true; '
+             'echo "$s" && echo "$s" | grep "is introduced after the remote '
+             'server version"'
+             if self.BASE_API_VERSION < constants.MIN_JOBS_RESTART_API_VERSION
+             else f'{self.ACTIVATE_CURRENT} && '
+             f'sky jobs launch -y -d --restart {job_name} -n {job_name}-rs'),
             # sync-down: new client, old server. Verifies the server still
             # writes downloaded logs under the path the client expects to
             # rewrite (api_server_user_logs_dir_prefix); regression check
@@ -715,7 +741,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky serve down {cluster_name}-0 -y',
         ]
 
-        teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+        teardown = (f'{self.ACTIVATE_BASE} && sky jobs cancel -y -n '
+                    f'{job_name}-rs; sky down {cluster_name} -y && '
+                    f'sky serve down {cluster_name}* -y')
 
         if generic_cloud == 'kubernetes':
             commands.extend([

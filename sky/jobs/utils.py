@@ -190,7 +190,6 @@ _CLUSTER_HANDLE_FIELDS = [
 # These fields will be mapped to the DB fields in the `_update_fields`.
 _NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + [
     'user_yaml',
-    'dag_yaml',
     'user_name',
     'details',
     # is_job_group is derived from execution column (execution == 'parallel')
@@ -3520,11 +3519,6 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('original_user_yaml_path')
         if 'original_user_yaml_content' not in new_fields:
             new_fields.append('original_user_yaml_content')
-    if 'dag_yaml' in new_fields:
-        if 'dag_yaml_path' not in new_fields:
-            new_fields.append('dag_yaml_path')
-        if 'dag_yaml_content' not in new_fields:
-            new_fields.append('dag_yaml_content')
     # is_job_group is derived from execution column
     if 'is_job_group' in fields:
         if 'execution' not in new_fields:
@@ -5319,6 +5313,17 @@ class ManagedJobCodeGen:
         # Get controller version
         controller_version = controller_constants.SKYLET_VERSION
         print(f"controller_version:{controller_version}", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def get_job_spec(cls, job_id: int) -> str:
+        """Generate code to print one job's stored spec (DAG YAML)."""
+        code = textwrap.dedent(f"""\
+        from sky.jobs import file_content_utils
+        from sky.utils import message_utils
+        dag_yaml = file_content_utils.get_job_dag_content({job_id!r})
+        print(message_utils.encode_payload(dag_yaml), end="", flush=True)
         """)
         return cls._build(code)
 

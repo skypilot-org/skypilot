@@ -13,6 +13,9 @@ service ManagedJobsService {
   rpc CancelJobs(CancelJobsRequest) returns (CancelJobsResponse);
   // Stream managed job logs.
   rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
+  // Get the stored spec (DAG YAML) of one managed job, used to launch it
+  // again. Added in ManagedJobsService v29.
+  rpc GetJobSpec(GetJobSpecRequest) returns (GetJobSpecResponse);
 }
 
 enum ManagedJobStatus {
@@ -178,12 +181,6 @@ message ManagedJobInfo {
   // A dynamic task's ordinal within its root's tree (unset for top-level
   // jobs); `<root_job_id>-<dynamic_task_index>` names it on the CLI.
   optional int64 dynamic_task_index = 44;
-  // The compiled DAG YAML for the job (post file-mount translation, with the
-  // resolved git commit baked in). Only populated when explicitly requested
-  // via the `dag_yaml` field; used by the job re-run feature so the server can
-  // re-submit the exact same job. May contain sensitive resolved values, so it
-  // is never returned unless requested.
-  optional string dag_yaml = 45;
 }
 
 // A pair of internal and external IP addresses
@@ -224,6 +221,16 @@ message GetAllJobIdsByNameRequest {
 
 message GetAllJobIdsByNameResponse {
   repeated int64 job_ids = 1;
+}
+
+message GetJobSpecRequest {
+  int64 job_id = 1;
+}
+
+message GetJobSpecResponse {
+  // The DAG YAML the job was submitted with. Unset if the controller has
+  // no stored spec for the job.
+  optional string dag_yaml = 1;
 }
 
 message CancelJobsRequest {

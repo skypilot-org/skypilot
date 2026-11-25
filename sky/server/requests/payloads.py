@@ -744,14 +744,6 @@ class JobsQueueV2Body(RequestBody):
     submitted_after: Optional[float] = None
     submitted_before: Optional[float] = None
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
-        if kwargs.get('fields'):
-            # The compiled DAG holds plaintext secrets; it is for in-process
-            # callers (job restart) only, never returned to clients.
-            kwargs['fields'] = [f for f in kwargs['fields'] if f != 'dag_yaml']
-        return kwargs
-
 
 class JobsCancelBody(RequestBody):
     """The request body for the jobs cancel endpoint."""

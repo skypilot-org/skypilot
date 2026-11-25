@@ -388,6 +388,12 @@ def test_managed_jobs_restart(generic_cloud: str):
     overrides. Each restart must be a new job that runs the stored spec (the
     original's env value, or the override), while the original job stays as
     it was.
+
+    The first restart happens after the jobs controller has stopped (it is
+    given a one-minute autostop), as when restarting a job from yesterday:
+    like `sky jobs launch`, the restart must start the controller again.
+    Without a separate controller (consolidation mode) there is nothing to
+    stop, and that step is a no-op.
     """
     name = smoke_tests_utils.get_cluster_name()
     orig = f'{name}-orig'
@@ -408,7 +414,8 @@ def test_managed_jobs_restart(generic_cloud: str):
                 f'[ -n "{job_id(label)}" ]')
 
     def row(label):
-        return f'sky jobs queue | grep -E "^{job_id(label)}[[:space:]]"'
+        # -r: the controller may have autostopped since the last step.
+        return f'sky jobs queue -r | grep -E "^{job_id(label)}[[:space:]]"'
 
     def wait_failed(label):
         return (f'for i in $(seq 1 60); do r=$({row(label)}); echo "$r"; '
@@ -416,8 +423,20 @@ def test_managed_jobs_restart(generic_cloud: str):
                 'echo "Timed out waiting for FAILED"; exit 1')
 
     def logs_contain(label, text):
-        return (f's=$(sky jobs logs {job_id(label)} --no-follow); '
+        return (f's=$(sky jobs logs -r {job_id(label)} --no-follow); '
                 f'echo "$s"; echo "$s" | grep "{text}"')
+
+    # A shared remote API server's controller serves other tests too.
+    wait_controller_stopped = 'echo "Shared API server: controller left up"'
+    if not smoke_tests_utils.is_non_docker_remote_api_server():
+        wait_controller_stopped = (
+            'c=$(sky status -u | awk \'/^sky-jobs-controller-/ '
+            '{print $1; exit}\'); '
+            'if [ -z "$c" ]; then echo "No jobs controller"; exit 0; fi; '
+            'for i in $(seq 1 60); do '
+            's=$(sky status -r "$c" | grep "^$c"); echo "$s"; '
+            'echo "$s" | grep -qw STOPPED && exit 0; sleep 20; done; '
+            'echo "Timed out waiting for the controller to stop"; exit 1')
 
     test = smoke_tests_utils.Test(
         'managed_jobs_restart',
@@ -427,8 +446,9 @@ def test_managed_jobs_restart(generic_cloud: str):
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MSG=first '
                 f'\'{run}\''),
             wait_failed('orig'),
+            wait_controller_stopped,
             # Restart as is: a new job, named <name>-rerun-<suffix>, runs the
-            # stored spec, env included.
+            # stored spec, env included. The controller is started again.
             submit('rerun', f'--restart {job_id("orig")}'),
             f'r=$({row("rerun")}); echo "$r"; '
             f'echo "$r" | grep -E "[[:space:]]{orig}-rerun-[0-9a-f]{{6}}[[:space:]]"',
@@ -447,8 +467,12 @@ def test_managed_jobs_restart(generic_cloud: str):
         ],
         f'sky jobs cancel -y -n {orig}; sky jobs cancel -y -n {override}; '
         f'rm -f /tmp/{name}-*.id',
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
-        timeout=30 * 60,
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG:
+                ('tests/test_yamls/'
+                 'low_resource_controller_autostop_sky_config.yaml'),
+        },
+        timeout=45 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
