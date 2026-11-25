@@ -1633,6 +1633,23 @@ class TestQueryInstances:
                 (instance.status_lib.ClusterStatus.INIT, None)
         }
 
+    def test_configuring_job_without_nodes_is_init(self, monkeypatch):
+        client = mock.MagicMock()
+        client.query_jobs.side_effect = (lambda job_name, states: ['123']
+                                         if states == ['configuring'] else [])
+        client.get_job_nodes.return_value = ([], None)
+        monkeypatch.setattr(instance.slurm, 'SlurmClient',
+                            mock.MagicMock(return_value=client))
+
+        statuses = instance.query_instances('test-cluster',
+                                            _CLUSTER,
+                                            provider_config=_PROVIDER_CONFIG,
+                                            retry_if_missing=True)
+
+        assert statuses == {
+            '123': (instance.status_lib.ClusterStatus.INIT, None)
+        }
+
     def test_container_snapshot_denial_keeps_status_unknown(self, mock_client):
         mock_client.query_jobs.return_value = []
         mock_client.test_login_runner.run.return_value = (

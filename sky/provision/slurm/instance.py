@@ -1620,6 +1620,11 @@ def query_instances(
                     statuses[job_id] = (sky_status, reason)
                 else:
                     nodes, _ = client.get_job_nodes(job_id)
+                    if not nodes and state == 'configuring':
+                        # The allocation exists but its node list is not
+                        # available yet. Report it by job id, like pending
+                        # jobs, so it stays visible as INIT.
+                        statuses[job_id] = (sky_status, None)
                     for node in nodes:
                         instance_id = slurm_utils.instance_id(job_id, node)
                         statuses[instance_id] = (sky_status, None)
