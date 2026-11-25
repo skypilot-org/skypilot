@@ -484,7 +484,7 @@ def test_job_count_links_to_filtered_jobs(make_user, make_workspace, seed_job,
           expect=r'must explain that the top-level key must stay',
           apply=run_script("""
             // Hide the editor's error box (ErrorDisplay) for a wrong key.
-            new MutationObserver(() => document.querySelectorAll('.bg-red-50')
+            new MutationObserver(() => document.querySelectorAll('.bg-red-tint')
               .forEach(e => {
                 if (/top-level key must stay/.test(e.textContent))
                   e.style.display = 'none';
@@ -861,6 +861,9 @@ def test_default_workspace_cannot_be_deleted_and_rename_is_admin_only(
     page = open_as(user, '/dashboard/workspaces')
     expect(_row(page, alpha.name),
            f'workspace {alpha.name} must be listed').to_be_visible()
+    # Rename renders once the role is known; absent before then either way.
+    page.recorder.wait_for_response('/users/role',
+                                    'the workspaces page must load the role')
     expect(page.get_by_role('button', name='Rename workspace'),
            'a non-admin must not be offered Rename').to_have_count(0)
 

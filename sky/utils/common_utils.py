@@ -4,6 +4,7 @@ import base64
 import ctypes
 import difflib
 import enum
+import errno
 import functools
 import gc
 import getpass
@@ -21,7 +22,7 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 
 import jsonschema
@@ -641,45 +642,46 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
     try:
         if not argv:
             return argv or []
-
-        result = []
-        i = 0
-
-        while i < len(argv):
-            arg = argv[i]
-
-            # Ensure arg is a string
-            if not isinstance(arg, str):
-                result.append(arg)
-                i += 1
-                continue
-
-            if arg == '--secret' and i + 1 < len(argv):
-                result.append(arg)
-                next_arg = argv[i + 1]
-                # Ensure next_arg is a string and handle redaction safely
-                if isinstance(next_arg, str):
-                    redacted = re.sub(r'^([^=]+)=.*', r'\1=<redacted>',
-                                      next_arg)
-                    result.append(redacted)
-                else:
-                    result.append(next_arg)
-                i += 2
-            elif arg.startswith('--secret='):
-                # Redact only if there's a value after the key
-                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
-                                  arg)
-                result.append(redacted)
-                i += 1
-            else:
-                result.append(arg)
-                i += 1
-
-        return result
+        return redact_flag_values(argv, ('--secret',))
     except Exception:  # pylint: disable=broad-except
         # If anything goes wrong with redaction, return original argv
         # This ensures the command can still execute
         return argv or []
+
+
+def redact_flag_values(argv: List[str], flags: Tuple[str, ...]) -> List[str]:
+    """``argv`` with the value of every ``FLAG K=V`` or ``FLAG=K=V`` replaced
+    by ``<redacted>``, for each flag in ``flags``. The key is kept, and so is
+    a bare ``FLAG K`` (the value comes from the caller's environment).
+
+    Works per token, so a value with spaces or quotes is redacted whole.
+    """
+    result: List[Any] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if not isinstance(arg, str):
+            result.append(arg)
+            i += 1
+            continue
+        if arg in flags and i + 1 < len(argv):
+            result.append(arg)
+            value = argv[i + 1]
+            if isinstance(value, str):
+                value = re.sub(r'^([^=]+)=.*',
+                               r'\1=<redacted>',
+                               value,
+                               flags=re.DOTALL)
+            result.append(value)
+            i += 2
+            continue
+        flag, sep, value = arg.partition('=')
+        if sep and flag in flags:
+            arg = flag + '=' + re.sub(
+                r'^([^=]+)=.*', r'\1=<redacted>', value, flags=re.DOTALL)
+        result.append(arg)
+        i += 1
+    return result
 
 
 def user_and_hostname_hash() -> str:
@@ -1490,3 +1492,61 @@ def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
                 os.remove(tmp_path)
             except FileNotFoundError:
                 pass
+
+
+# errno values link() raises on a filesystem without hard links.
+_LINK_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK})
+
+
+def atomic_create_text(path: str, content: str, mode: int = 0o644) -> bool:
+    """Create ``path`` with ``content`` unless it already exists.
+
+    Like ``atomic_write_text``, the content is staged to a sibling tmp file,
+    so a reader never sees a torn file. But the tmp file is linked into
+    place rather than renamed over the destination: ``link()`` fails with
+    EEXIST when the destination exists, so an existing file is never
+    replaced, even when several processes race to create the same path.
+    That matters on a shared filesystem (NFS / EFS): replacing a file, even
+    by rename, fails a reader on another host that holds a handle to the old
+    file (ESTALE) or whose lookup of the path races the replacement.
+
+    On a filesystem without hard links (``link()`` raises EPERM, ENOTSUP,
+    EXDEV, ...) the tmp file is renamed into place if the destination is
+    still absent, which can replace a file created in between.
+
+    Args:
+        path: The destination file path. The parent directory must already
+            exist.
+        content: The text content to write. Encoded as UTF-8.
+        mode: The Unix file permission bits to apply to the destination
+            file. Defaults to 0o644.
+
+    Returns:
+        True if this call created the file, False if it already existed.
+    """
+    parent_dir = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # mkstemp creates with mode 0o600; chmod to the requested mode.
+        os.chmod(tmp_path, mode)
+        try:
+            os.link(tmp_path, path)
+        except FileExistsError:
+            return False
+        except OSError as e:
+            if e.errno not in _LINK_UNSUPPORTED_ERRNOS:
+                raise
+            if os.path.exists(path):
+                return False
+            os.rename(tmp_path, path)
+        return True
+    finally:
+        # After a link the tmp name is a second name for the file; after a
+        # rename or a failure it is gone or a fragment. Remove it either way.
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass

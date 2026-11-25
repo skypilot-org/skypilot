@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from sky import core
 from sky.clouds import ssh
 from sky.utils import resources_utils
 
@@ -630,6 +631,79 @@ class TestSSHCheckSingleContextForwardsCloud(unittest.TestCase):
         mock_check_credentials.assert_called_once_with('ssh-some-ctx',
                                                        run_optional_checks=True,
                                                        cloud='ssh')
+
+
+def test_allowed_node_pool_contexts_keeps_pools_not_set_up():
+    # Unlike existing_allowed_contexts, no kubeconfig context is needed.
+    with patch.object(ssh.SSH,
+                      'get_ssh_node_pool_contexts',
+                      return_value=['ssh-a', 'ssh-b', 'ssh-c']), \
+         patch('sky.skypilot_config.get_workspace_cloud',
+               return_value={'allowed_node_pools': ['a', 'c']}), \
+         patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+               return_value=[]):
+        assert ssh.SSH.allowed_node_pool_contexts() == ['ssh-a', 'ssh-c']
+
+
+def test_workspace_contexts_union_readable_workspaces_only():
+    # get_all_contexts also feeds metrics federation, which keeps every pool.
+    workspaces = {
+        'ws-a': {
+            'ssh': {
+                'allowed_node_pools': ['a']
+            }
+        },
+        'ws-b': {
+            'ssh': {
+                'allowed_node_pools': ['b']
+            }
+        },
+        'ws-c': {
+            'ssh': {
+                'allowed_node_pools': ['c']
+            }
+        },
+    }
+    targets = {
+        ('ws-a', 'kubernetes'): {'k8s-1'},
+        ('ws-a', 'ssh'): {'ssh-a'},
+        ('ws-b', 'ssh'): {'ssh-b'},
+        ('ws-c', 'ssh'): {'ssh-c'},
+    }
+    with patch('sky.skypilot_config.get_nested',
+               side_effect=lambda keys, default_value=None: workspaces
+               if keys == ('workspaces',) else default_value), \
+         patch('sky.utils.common_utils.get_current_user',
+               return_value=mock.Mock(id='alice-id')), \
+         patch('sky.workspaces.core.workspaces_for_user',
+               return_value={'ws-a': {}, 'ws-b': {}}) as mock_workspaces, \
+         patch('sky.workspaces.visibility._workspace_targets',
+               side_effect=lambda ws, cloud: targets.get((ws, cloud), set())):
+        assert core.get_workspace_contexts() == ['k8s-1', 'ssh-a', 'ssh-b']
+    mock_workspaces.assert_called_once_with('alice-id')
+    with patch.object(ssh.SSH,
+                      'get_ssh_node_pool_contexts',
+                      return_value=['ssh-a', 'ssh-b']), \
+         patch('sky.clouds.Kubernetes.existing_allowed_contexts',
+               return_value=['k8s-1']):
+        assert core.get_all_contexts() == ['k8s-1', 'ssh-a', 'ssh-b']
+
+
+def test_skipped_pool_warning_names_only_allowed_pools():
+    ssh.SSH._ssh_log_skipped_contexts_once.cache_clear()
+    with patch.object(ssh.SSH,
+                      'get_ssh_node_pool_contexts',
+                      return_value=['ssh-a', 'ssh-b']), \
+         patch('sky.skypilot_config.get_workspace_cloud',
+               return_value={'allowed_node_pools': ['a']}), \
+         patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+               return_value=['other']), \
+         patch.object(ssh.logger, 'warning') as mock_warning:
+        assert ssh.SSH.existing_allowed_contexts() == []
+    mock_warning.assert_called_once()
+    message = mock_warning.call_args[0][0]
+    assert 'ssh-a' in message
+    assert 'ssh-b' not in message
 
 
 if __name__ == '__main__':

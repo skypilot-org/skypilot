@@ -18,7 +18,7 @@ call and run their generated code in it, isolated from everything else.
 
 .. tip::
 
-   Sandboxes are part of **SkyPilot Platform**, in limited early access.
+   Sandboxes are part of `SkyPilot Platform <https://skypilot.ai/platform>`_, in limited early access.
    `Sign up here <https://forms.gle/o4keAryXsVazNjyGA>`_; takes 20 seconds.
 
 .. raw:: html
@@ -539,10 +539,10 @@ that context in ``kubernetes.context_configs.<context>`` instead:
 
    - :ref:`volumes-all`: persistent storage you can mount into sandboxes.
    - :ref:`job-groups`: run many parallel jobs and sandboxes together for RL.
-   - :ref:`skypilot-platform`: SkyPilot Platform, including the Secrets
+   - `SkyPilot Platform <https://skypilot.ai/platform>`_: includes the Secrets
      Manager that injects credentials into sandboxes.
 
 .. tip::
 
-   Sandboxes are part of **SkyPilot Platform**, in limited early access.
+   Sandboxes are part of `SkyPilot Platform <https://skypilot.ai/platform>`_, in limited early access.
    `Sign up here <https://forms.gle/o4keAryXsVazNjyGA>`_; takes 20 seconds.

@@ -121,7 +121,7 @@ def _permanent_worker_memory_gb(c: 'config.ServerConfig') -> float:
     """Memory the permanent processes of a ServerConfig are budgeted to use."""
     # +1 for the parent process running the main event loop.
     return (
-        (c.num_server_workers + 1) * config.SERVER_WORKER_MEM_GB +
+        (c.num_server_workers + 1) * config.server_worker_mem_gb() +
         c.long_worker_config.garanteed_parallelism * config.LONG_WORKER_MEM_GB +
         c.short_worker_config.garanteed_parallelism *
         config.SHORT_WORKER_MEM_GB)
@@ -1050,3 +1050,29 @@ class TestExtractUserFromHeader:
         assert user is not None
         assert user.name == 'jwt-user@example.com'
         assert user.id == hashlib.md5(b'jwt-user@example.com').hexdigest()[:8]
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_memory_aware_sizing_uses_server_worker_mem_override(
+        cpu_count, mem_size_gb):
+    """A larger server worker estimate leaves less memory for short workers."""
+    with _memory_aware_sizing(), mock.patch.dict(
+            os.environ,
+        {skylet_constants.ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB: '0.7'}):
+        c = config.compute_server_config(deploy=True, quiet=True)
+        committed_gb = _permanent_worker_memory_gb(c)
+    # 13 resident server processes at 0.7GB = 9.1GB, less the 2GB min-avail
+    # reserve, comes off the top.
+    assert c.long_worker_config.garanteed_parallelism == 24
+    assert c.short_worker_config.garanteed_parallelism == 97
+    assert committed_gb <= 48
+
+
+@pytest.mark.parametrize('raw', ['abc', '0', '-1', 'nan', 'inf'])
+def test_server_worker_mem_override_rejects_invalid(raw):
+    with mock.patch.dict(
+            os.environ,
+        {skylet_constants.ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB: raw}):
+        with pytest.raises(ValueError, match='UVICORN_WORKER_MEM_GB'):
+            config.server_worker_mem_gb()

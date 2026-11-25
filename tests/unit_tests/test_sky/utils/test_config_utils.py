@@ -1362,3 +1362,199 @@ def test_dump_redacted_yaml() -> None:
     assert 'service_account_token: <redacted>' in dumped
     assert 'endpoint: https://api.example.com' in dumped
     assert config_utils.dump_redacted_yaml(None) == '{}\n'
+
+
+_TPU_NAME_FROM_POD = {
+    'name': 'TPU_NAME',
+    'valueFrom': {
+        'fieldRef': {
+            'fieldPath': 'metadata.name'
+        }
+    }
+}
+_FROM_CONFIG_MAP = {'configMapKeyRef': {'name': 'cm', 'key': 'tpu-name'}}
+
+
+def _merged_env(base_item, *override_items):
+    base = {'spec': {'containers': [{'name': 'c', 'env': [base_item]}]}}
+    for item in override_items:
+        config_utils.merge_k8s_configs(
+            base, {'spec': {
+                'containers': [{
+                    'name': 'c',
+                    'env': [item]
+                }]
+            }})
+    return base['spec']['containers'][0]['env']
+
+
+@pytest.mark.parametrize(
+    'override, expected',
+    [
+        # A literal replaces the template's downward-API source.
+        ({
+            'value': 'custom'
+        }, {
+            'value': 'custom'
+        }),
+        # A different source replaces it rather than merging into one
+        # valueFrom with two sources.
+        ({
+            'valueFrom': _FROM_CONFIG_MAP
+        }, {
+            'valueFrom': _FROM_CONFIG_MAP
+        }),
+        # An empty literal is still an override (Kubernetes accepts it).
+        ({
+            'value': ''
+        }, {
+            'value': ''
+        }),
+        # Naming the var without a source keeps the template's.
+        ({}, {
+            'valueFrom': _TPU_NAME_FROM_POD['valueFrom']
+        }),
+    ])
+def test_merge_k8s_configs_env_override_replaces_source(override, expected):
+    env = _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD),
+                      dict(name='TPU_NAME', **override))
+    assert env == [dict(name='TPU_NAME', **expected)]
+
+
+def test_merge_k8s_configs_env_value_from_replaces_literal():
+    env = _merged_env({
+        'name': 'X',
+        'value': '1'
+    }, {
+        'name': 'X',
+        'valueFrom': _FROM_CONFIG_MAP
+    })
+    assert env == [{'name': 'X', 'valueFrom': _FROM_CONFIG_MAP}]
+
+
+def test_merge_k8s_configs_env_layered_overrides_last_source_wins():
+    """Global pod_config then task-level override, as the layers apply."""
+    env = _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+        'name': 'TPU_NAME',
+        'valueFrom': _FROM_CONFIG_MAP
+    }, {
+        'name': 'TPU_NAME',
+        'value': 'task'
+    })
+    assert env == [{'name': 'TPU_NAME', 'value': 'task'}]
+
+
+def test_merge_k8s_configs_env_same_kind_value_from_still_deep_merges():
+    """Adding a field to an existing source keeps the rest of it."""
+    env = _merged_env(
+        {
+            'name': 'S',
+            'valueFrom': {
+                'secretKeyRef': {
+                    'name': 's',
+                    'key': 'k'
+                }
+            }
+        }, {
+            'name': 'S',
+            'valueFrom': {
+                'secretKeyRef': {
+                    'optional': True
+                }
+            }
+        })
+    assert env == [{
+        'name': 'S',
+        'valueFrom': {
+            'secretKeyRef': {
+                'name': 's',
+                'key': 'k',
+                'optional': True
+            }
+        }
+    }]
+
+
+def test_merge_k8s_configs_env_rule_applies_to_init_containers():
+    base = {
+        'spec': {
+            'initContainers': [{
+                'name': 'init',
+                'env': [copy.deepcopy(_TPU_NAME_FROM_POD)]
+            }]
+        }
+    }
+    config_utils.merge_k8s_configs(
+        base, {
+            'spec': {
+                'initContainers': [{
+                    'name': 'init',
+                    'env': [{
+                        'name': 'TPU_NAME',
+                        'value': 'custom'
+                    }]
+                }]
+            }
+        })
+    assert base['spec']['initContainers'][0]['env'] == [{
+        'name': 'TPU_NAME',
+        'value': 'custom'
+    }]
+
+
+def test_merge_k8s_configs_env_malformed_value_from_still_rejected():
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError):
+        _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+            'name': 'TPU_NAME',
+            'valueFrom': 'oops'
+        })
+
+
+def test_merge_k8s_configs_env_empty_value_from_is_a_no_op():
+    env = _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+        'name': 'TPU_NAME',
+        'valueFrom': {}
+    })
+    assert env == [_TPU_NAME_FROM_POD]
+
+
+@pytest.mark.parametrize('base_container', [{
+    'name': 'c',
+    'env': []
+}, {
+    'name': 'c'
+}],
+                         ids=['base-has-env', 'base-lacks-env'])
+def test_merge_k8s_configs_does_not_mutate_override_layers(base_container):
+    """An item appended from one layer must not be changed by a later one."""
+    first = {
+        'spec': {
+            'containers': [{
+                'name': 'c',
+                'env': [{
+                    'name': 'NEW',
+                    'valueFrom': _FROM_CONFIG_MAP
+                }]
+            }]
+        }
+    }
+    first_before = copy.deepcopy(first)
+    base = {'spec': {'containers': [copy.deepcopy(base_container)]}}
+    config_utils.merge_k8s_configs(base, first)
+    config_utils.merge_k8s_configs(
+        base, {
+            'spec': {
+                'containers': [{
+                    'name': 'c',
+                    'env': [{
+                        'name': 'NEW',
+                        'value': 'x'
+                    }]
+                }]
+            }
+        })
+    assert first == first_before
+    assert base['spec']['containers'][0]['env'] == [{
+        'name': 'NEW',
+        'value': 'x'
+    }]

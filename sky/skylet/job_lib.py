@@ -44,6 +44,9 @@ _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 # with pid is the same driver process to guard against the case where
 # the same pid is reused by a different process.
 JOB_CMD_IDENTIFIER = 'echo "SKYPILOT_JOB_ID <{}>"'
+# Printed by the controller when it refuses a pool, followed by JSON
+# `[exists, pool workspace]`.
+POOL_REFUSED_MARKER = 'Pool refused: '
 
 
 def _get_lock_path(job_id: int) -> str:
@@ -1303,7 +1306,21 @@ class JobLibCodeGen:
                 '\n    job_id = managed_job_state.set_job_info_without_job_id('
                 f'{base_kwargs},'
                 f'is_batch={is_batch!r})')
-        code = [
+        code = []
+        if pool is not None:
+            # A controller without the check uses the pool as before.
+            code += [
+                '\nimport json',
+                '\nfrom sky.serve import serve_utils',
+                '\nif hasattr(serve_utils, "get_pool_refusal"):'
+                f'\n  refusal = serve_utils.get_pool_refusal({pool!r}, '
+                f'{workspace!r})'
+                '\n  if refusal is not None:'
+                f'\n    print("{POOL_REFUSED_MARKER}" + json.dumps(refusal), '
+                'flush=True)'
+                '\n    sys.exit(0)',
+            ]
+        code += [
             '\nfrom sky.jobs import state as managed_job_state',
             f'\nnum_jobs = {num_jobs}',
             f'\ntask_ids = {task_ids_str}',

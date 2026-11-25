@@ -466,24 +466,24 @@ function JobDetails({
       <>
         <div className="flex items-center justify-between mb-4">
           <div className="text-base flex items-center">
-            <Link href="/jobs" className="text-sky-blue hover:underline">
+            <Link href="/jobs" className="text-brand hover:underline">
               Managed Jobs
             </Link>
-            <span className="mx-2 text-gray-500">›</span>
+            <span className="mx-2 text-content-tertiary">›</span>
             {taskContext ? (
               <>
                 <Link
                   href={`/jobs/${taskContext.rootId}`}
-                  className="text-sky-blue hover:underline"
+                  className="text-brand hover:underline"
                 >
                   {taskContext.rootId}
                   {taskContext.rootName ? ` (${taskContext.rootName})` : ''}
                 </Link>
-                <span className="mx-2 text-gray-500">›</span>
-                <span className="text-gray-700">
+                <span className="mx-2 text-content-tertiary">›</span>
+                <span className="text-content">
                   Task {taskContext.index}
                   {detailJobData?.name && (
-                    <span className="text-gray-500">
+                    <span className="text-content-tertiary">
                       {' '}
                       ({detailJobData.name})
                     </span>
@@ -494,7 +494,7 @@ function JobDetails({
               <>
                 <Link
                   href={`/jobs/${jobId}`}
-                  className="text-sky-blue hover:underline"
+                  className="text-brand hover:underline"
                 >
                   {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
                 </Link>
@@ -506,7 +506,7 @@ function JobDetails({
                   // Same count as the jobs table's badge: declared tasks plus
                   // the dynamic tasks launched from inside the group, which
                   // are marked in the task list rather than here.
-                  <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
+                  <span className="ml-2 text-xs text-content-tertiary bg-surface-strong px-1.5 py-0.5 rounded">
                     {allTasks.length + launchedJobs.length} tasks
                   </span>
                 )}
@@ -521,7 +521,7 @@ function JobDetails({
               isLoadingControllerLogs) && (
               <div className="flex items-center mr-4">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
+                <span className="ml-2 text-content-tertiary">Loading...</span>
               </div>
             )}
             {canRerun && (
@@ -543,7 +543,7 @@ function JobDetails({
               <button
                 onClick={handleManualRefresh}
                 disabled={loading || isRefreshing}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+                className="text-brand hover:text-brand-bright font-medium inline-flex items-center h-8"
               >
                 <RotateCwIcon className="w-4 h-4 mr-1.5" />
                 {!isMobile && <span>Refresh</span>}
@@ -594,7 +594,7 @@ function JobDetails({
                   <div className="flex items-center justify-between px-4 pt-4">
                     <h3 className="text-lg font-semibold flex items-center">
                       Tasks
-                      <span className="ml-2 text-sm font-normal text-gray-500">
+                      <span className="ml-2 text-sm font-normal text-content-tertiary">
                         ({allTasks.length + launchedJobs.length} tasks
                         {launchedJobs.length > 0 &&
                           `, ${launchedJobs.length} dynamic`}
@@ -637,12 +637,12 @@ function JobDetails({
                           {allTasks.map((task, index) => (
                             <TableRow
                               key={task.task_job_id}
-                              className="hover:bg-gray-50"
+                              className="hover:bg-surface-hover"
                             >
                               <TableCell>
                                 <Link
                                   href={`/jobs/${jobId}/${index}`}
-                                  className="text-blue-600 hover:underline"
+                                  className="text-blue-fg hover:underline"
                                 >
                                   {index}
                                 </Link>
@@ -650,7 +650,7 @@ function JobDetails({
                               <TableCell>
                                 <Link
                                   href={`/jobs/${jobId}/${index}`}
-                                  className="text-blue-600 hover:underline"
+                                  className="text-blue-fg hover:underline"
                                 >
                                   {task.task || `Job ${index}`}
                                   {/* Show Primary badge for primary tasks in job groups with auxiliaries */}
@@ -683,7 +683,7 @@ function JobDetails({
                                       {task.cloud ||
                                         task.infra.split('(')[0].trim()}
                                       {task.infra.includes('(') && (
-                                        <span className="text-gray-500">
+                                        <span className="text-content-tertiary">
                                           {' ' +
                                             task.infra.substring(
                                               task.infra.indexOf('(')
@@ -727,7 +727,7 @@ function JobDetails({
                                         jobStatus: task?.status,
                                       })
                                     }
-                                    className="text-sky-blue hover:text-sky-blue-bright"
+                                    className="text-brand hover:text-brand-bright"
                                   >
                                     <Download className="w-4 h-4" />
                                   </button>
@@ -738,7 +738,7 @@ function JobDetails({
                           {launchedJobs.map((job) => (
                             <TableRow
                               key={`dynamic-${job.id}`}
-                              className="hover:bg-gray-50"
+                              className="hover:bg-surface-hover"
                             >
                               <TableCell>
                                 <Link
@@ -747,7 +747,7 @@ function JobDetails({
                                       ? `/jobs/${jobId}/${job.dynamic_task_index}`
                                       : `/jobs/${job.id}`
                                   }
-                                  className="text-blue-600 hover:underline"
+                                  className="text-blue-fg hover:underline"
                                   title={
                                     job.dynamic_task_index != null
                                       ? `sky jobs cancel ${jobId} --task ${job.dynamic_task_index}`
@@ -764,7 +764,7 @@ function JobDetails({
                                       ? `/jobs/${jobId}/${job.dynamic_task_index}`
                                       : `/jobs/${job.id}`
                                   }
-                                  className="text-blue-600 hover:underline"
+                                  className="text-blue-fg hover:underline"
                                 >
                                   {job.name || `Job ${job.id}`}
                                 </Link>
@@ -783,7 +783,7 @@ function JobDetails({
                                   />
                                 </span>
                                 {job.rows.length > 1 && (
-                                  <span className="ml-1.5 text-xs text-gray-500">
+                                  <span className="ml-1.5 text-xs text-content-tertiary">
                                     {job.rows.length} tasks
                                   </span>
                                 )}
@@ -804,7 +804,7 @@ function JobDetails({
                                       {job.cloud ||
                                         job.infra.split('(')[0].trim()}
                                       {job.infra.includes('(') && (
-                                        <span className="text-gray-500">
+                                        <span className="text-content-tertiary">
                                           {' ' +
                                             job.infra.substring(
                                               job.infra.indexOf('(')
@@ -848,7 +848,7 @@ function JobDetails({
                                         jobStatus: job.status,
                                       })
                                     }
-                                    className="text-sky-blue hover:text-sky-blue-bright"
+                                    className="text-brand hover:text-brand-bright"
                                   >
                                     <Download className="w-4 h-4" />
                                   </button>
@@ -954,7 +954,7 @@ function JobDetails({
                       }}
                     />
                     {!logsSlotHasPlugin && (
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs text-content-tertiary">
                         (Logs are not streaming; click refresh to fetch the
                         latest logs.)
                       </span>
@@ -984,7 +984,7 @@ function JobDetails({
                           <button
                             onClick={downloadLogsZip}
                             disabled={logsDownloading}
-                            className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
+                            className="text-brand hover:text-brand-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
                           >
                             {logsDownloading ? (
                               <CircularProgress size={16} />
@@ -1002,7 +1002,7 @@ function JobDetails({
                       <button
                         onClick={handleLogsRefresh}
                         disabled={isLoadingLogs}
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        className="text-brand hover:text-brand-bright flex items-center"
                       >
                         <RotateCwIcon
                           className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
@@ -1211,7 +1211,7 @@ function ControllerLogsSection({
         >
           <button
             onClick={toggleExpanded}
-            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+            className="flex items-center text-left focus:outline-none hover:text-content transition-colors duration-200"
           >
             {isExpanded ? (
               <ChevronDownIcon className="w-5 h-5 mr-2" />
@@ -1220,7 +1220,7 @@ function ControllerLogsSection({
             )}
             <h3 className="text-lg font-semibold">Controller Logs</h3>
             {!controllerLogsSlotHasPlugin && (
-              <span className="ml-2 text-xs text-gray-500">
+              <span className="ml-2 text-xs text-content-tertiary">
                 (Logs are not streaming; click refresh to fetch the latest
                 logs.)
               </span>
@@ -1249,7 +1249,7 @@ function ControllerLogsSection({
                     <button
                       onClick={downloadControllerZip}
                       disabled={downloading}
-                      className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
+                      className="text-brand hover:text-brand-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
                     >
                       {downloading ? (
                         <CircularProgress size={16} />
@@ -1267,7 +1267,7 @@ function ControllerLogsSection({
                 <button
                   onClick={handleControllerLogsRefresh}
                   disabled={isLoadingControllerLogs}
-                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  className="text-brand hover:text-brand-bright flex items-center"
                 >
                   <RotateCwIcon
                     className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
@@ -1571,11 +1571,11 @@ function JobDetailsContent({
     const defaultLogsContent = (
       <div className="max-h-96 overflow-y-auto" ref={logsContainerRef}>
         {isPending ? (
-          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+          <div className="bg-surface-log flex items-center justify-center py-4 text-content-tertiary">
             <span>Waiting for the job to start; refresh in a few moments.</span>
           </div>
         ) : isRecovering ? (
-          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+          <div className="bg-surface-log flex items-center justify-center py-4 text-content-tertiary">
             <span>
               Waiting for the job to recover; refresh in a few moments.
             </span>
@@ -1630,7 +1630,7 @@ function JobDetailsContent({
         ref={controllerLogsContainerRef}
       >
         {isPreStart ? (
-          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+          <div className="bg-surface-log flex items-center justify-center py-4 text-content-tertiary">
             <span>
               Waiting for the job controller process to start; refresh in a few
               moments.
@@ -1676,7 +1676,11 @@ function JobDetailsContent({
                 const jobGroupHeader = buildJobGroupHeader(jobData);
 
                 if (yamlDocs.length === 0) {
-                  return <div className="text-gray-500">No YAML available</div>;
+                  return (
+                    <div className="text-content-tertiary">
+                      No YAML available
+                    </div>
+                  );
                 } else if (yamlDocs.length === 1) {
                   // Single document - show directly
                   return (
@@ -1690,16 +1694,16 @@ function JobDetailsContent({
                   return (
                     <div className="space-y-4">
                       {/* Toggle for Full YAML vs Per-Job */}
-                      <div className="flex items-center space-x-4 pb-2 border-b border-gray-200">
+                      <div className="flex items-center space-x-4 pb-2 border-b border-line">
                         <button
                           onClick={() => setShowFullYaml(false)}
-                          className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
+                          className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-tint-strong text-blue-fg-strong' : 'text-content-secondary hover:text-content-heavy'}`}
                         >
                           By Job
                         </button>
                         <button
                           onClick={() => setShowFullYaml(true)}
-                          className={`text-sm px-2 py-1 rounded ${showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
+                          className={`text-sm px-2 py-1 rounded ${showFullYaml ? 'bg-blue-tint-strong text-blue-fg-strong' : 'text-content-secondary hover:text-content-heavy'}`}
                         >
                           Full YAML
                         </button>
@@ -1719,7 +1723,7 @@ function JobDetailsContent({
                         yamlDocs.map((doc, index) => (
                           <div
                             key={index}
-                            className="border-b border-gray-200 pb-4 last:border-b-0"
+                            className="border-b border-line pb-4 last:border-b-0"
                           >
                             <button
                               onClick={() => toggleYamlDocExpanded(index)}
@@ -1731,7 +1735,7 @@ function JobDetailsContent({
                                 ) : (
                                   <ChevronRightIcon className="w-4 h-4 mr-2" />
                                 )}
-                                <span className="text-sm font-medium text-gray-700">
+                                <span className="text-sm font-medium text-content">
                                   Job {index + 1}: {doc.preview}
                                 </span>
                               </div>
@@ -1758,7 +1762,7 @@ function JobDetailsContent({
   // full-width rows below. Every field is a label over its value.
   const isEmpty = (v) =>
     v == null || v === '' || v === '-' || v === '–' || v === 'N/A';
-  const dash = <span className="text-gray-400">-</span>;
+  const dash = <span className="text-content-tertiary">-</span>;
   const show = (v) => (isEmpty(v) ? dash : v);
   // Base column count must not be grid-cols-2: a stylesheet loaded later can
   // redefine it and override the breakpoint variants.
@@ -1769,8 +1773,10 @@ function JobDetailsContent({
       key={label}
       className={`min-w-0 ${wide ? 'col-span-full' : ''} ${newRow ? 'min-[1400px]:col-start-1' : ''}`}
     >
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="text-base text-gray-900 mt-1 break-words">{value}</div>
+      <div className="text-sm text-content-tertiary">{label}</div>
+      <div className="text-base text-content-strong mt-1 break-words">
+        {value}
+      </div>
     </div>
   );
   // 'Oct 6, 5:37:41 PM PDT': short enough to stay on one line in a cell.
@@ -1826,7 +1832,7 @@ function JobDetailsContent({
       className="text-sm text-muted-foreground"
     >
       <span>
-        <Link href="/infra" className="text-blue-600 hover:underline">
+        <Link href="/infra" className="text-blue-fg hover:underline">
           {jobData.cloud || jobData.infra.split('(')[0].trim()}
         </Link>
         {jobData.infra.includes('(') &&
@@ -1840,7 +1846,8 @@ function JobDetailsContent({
   const batchBar = () => {
     const completed = jobData.batch_completed_batches || 0;
     const pct = batchTotal > 0 ? Math.round((completed / batchTotal) * 100) : 0;
-    const barColor = completed >= batchTotal ? 'bg-green-500' : 'bg-blue-500';
+    const barColor =
+      completed >= batchTotal ? 'bg-green-solid-soft' : 'bg-blue-solid-soft';
     const isTerminal = [
       'SUCCEEDED',
       'FAILED',
@@ -1853,18 +1860,18 @@ function JobDetailsContent({
     return (
       <span className="block space-y-1.5">
         <span className="flex items-center gap-3">
-          <span className="block w-40 bg-gray-200 rounded-full h-2.5">
+          <span className="block w-40 bg-surface-strong rounded-full h-2.5">
             <span
               className={`block ${barColor} h-2.5 rounded-full transition-all`}
               style={{ width: `${pct}%` }}
             />
           </span>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-content-secondary">
             {completed}/{batchTotal} ({pct}%)
           </span>
         </span>
         {isTerminal && completed < batchTotal && (
-          <span className="block text-xs text-red-600">
+          <span className="block text-xs text-red-fg">
             {batchTotal - completed} batches incomplete
           </span>
         )}
@@ -1874,7 +1881,7 @@ function JobDetailsContent({
   const hasLinks = combinedLinks && Object.keys(combinedLinks).length > 0;
   const pool = renderPoolLink(jobData.pool, jobData.pool_hash, poolsData);
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-[1400px]:grid-cols-4 gap-x-6 gap-y-5 [&_a]:text-blue-600 [&_a]:no-underline [&_a:hover]:underline">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-[1400px]:grid-cols-4 gap-x-6 gap-y-5 [&_a]:text-blue-fg [&_a]:no-underline [&_a:hover]:underline">
       {field(
         taskContext ? 'Task' : 'Job',
         <span className="inline-flex flex-wrap items-center gap-2">
@@ -1895,7 +1902,7 @@ function JobDetailsContent({
           {(jobData.is_batch === true ||
             jobData.batch_total_batches != null) && <BatchBadge />}
           {jobData.is_job_group && (
-            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
+            <span className="px-2 py-0.5 rounded text-xs font-medium bg-surface-strong text-content">
               JobGroup
             </span>
           )}
@@ -1911,7 +1918,7 @@ function JobDetailsContent({
             </Link>
             {taskContext.parentTask && (
               <span className="block">
-                <span className="text-gray-500">launched by</span>{' '}
+                <span className="text-content-tertiary">launched by</span>{' '}
                 <Link href={taskContext.parentTask.href}>
                   {taskContext.parentTask.label}
                 </Link>
@@ -1939,7 +1946,7 @@ function JobDetailsContent({
         <span className="block min-w-0">
           <span className="block">{shortTimestamp(jobData.submitted_at)}</span>
           <span
-            className="flex items-center min-w-0 text-gray-500"
+            className="flex items-center min-w-0 text-content-tertiary"
             title={jobData.user}
           >
             <span className="flex-shrink-0 mr-1">by</span>
@@ -1960,7 +1967,7 @@ function JobDetailsContent({
             : dash}
           {jobData.started_at && (
             <span className="block">
-              <span className="text-gray-500">started</span>{' '}
+              <span className="text-content-tertiary">started</span>{' '}
               <TimestampWithTooltip date={jobData.started_at} />
             </span>
           )}
@@ -1976,7 +1983,7 @@ function JobDetailsContent({
       {batchTotal != null && field('Batch Progress', batchBar())}
       <div
         key="divider-compute"
-        className="hidden min-[1400px]:block col-span-full border-t border-gray-100"
+        className="hidden min-[1400px]:block col-span-full border-t border-line-subtle"
       />
       {field(
         'Requested Resources',
@@ -1990,7 +1997,7 @@ function JobDetailsContent({
               .join('\n')}`}
             className="text-sm text-muted-foreground"
           >
-            <span className="cursor-help border-b border-dotted border-gray-400">
+            <span className="cursor-help border-b border-dotted border-line-stronger">
               {requested}
             </span>
           </NonCapitalizedTooltip>
@@ -2029,7 +2036,7 @@ function JobDetailsContent({
                 .join('\n')}
               className="text-sm text-muted-foreground"
             >
-              <span className="cursor-help border-b border-dotted border-gray-400">
+              <span className="cursor-help border-b border-dotted border-line-stronger">
                 {partitions.join(', ')}
               </span>
             </NonCapitalizedTooltip>
@@ -2064,7 +2071,7 @@ function JobDetailsContent({
                 href={normalizeUrl(url)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800 hover:underline"
+                className="text-blue-fg hover:text-blue-fg-stronger hover:underline"
               >
                 {label}
               </a>
@@ -2109,7 +2116,7 @@ function JobDetailsContent({
         </div>
       )}
       <div key="Entrypoint" className="col-span-full min-w-0">
-        <div className="text-sm text-gray-500">
+        <div className="text-sm text-content-tertiary">
           Entrypoint
           {jobData.entrypoint && (
             <CopyButton
@@ -2122,7 +2129,9 @@ function JobDetailsContent({
         {jobData.entrypoint ? (
           <EntrypointCommand command={jobData.entrypoint} className="mt-1" />
         ) : (
-          <div className="text-base text-gray-900 mt-1 break-words">{dash}</div>
+          <div className="text-base text-content-strong mt-1 break-words">
+            {dash}
+          </div>
         )}
         {yamlBlock}
       </div>

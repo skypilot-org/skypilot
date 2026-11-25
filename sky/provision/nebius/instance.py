@@ -1,6 +1,6 @@
 """Nebius instance provisioning."""
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import sky_logging
@@ -15,7 +15,11 @@ from sky.utils import ux_utils
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
 
-MAX_RETRIES_TO_LAUNCH = 120  # Maximum number of retries
+# Polls (utils.POLL_INTERVAL seconds apart) to wait for a cluster's pending
+# instances without any of them leaving the pending states. The count resets
+# whenever one does, so a large cluster whose nodes come up one by one is not
+# cut off while it is still making progress.
+MAX_RETRIES_TO_LAUNCH = 120
 
 # Poll attempts (utils.POLL_INTERVAL seconds apart) to wait for a cluster's
 # instances to disappear from the provider after DeleteInstance is issued,
@@ -62,24 +66,35 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 
 def _wait_until_no_pending(region: str, cluster_name_on_cloud: str,
                            project_id: str) -> None:
+    """Waits until none of the cluster's instances is in a pending state.
+
+    Times out after MAX_RETRIES_TO_LAUNCH polls in a row in which no pending
+    instance left the pending states, not after a fixed total.
+    """
     retry_count = 0
+    prev_pending: Set[str] = set()
     while retry_count < MAX_RETRIES_TO_LAUNCH:
         instances = _filter_instances(region,
                                       cluster_name_on_cloud,
                                       PENDING_STATUS,
                                       project_id=project_id)
         if not instances:
-            break
-        logger.info(f'Waiting for {len(instances)} instances to be ready '
-                    f'(Attempt {retry_count + 1}/{MAX_RETRIES_TO_LAUNCH}).')
+            return
+        pending = set(instances)
+        if prev_pending - pending:
+            retry_count = 0
+        prev_pending = pending
+        logger.info(f'Waiting for {len(instances)} instances to leave '
+                    f'{"/".join(PENDING_STATUS)} '
+                    f'(Attempt {retry_count + 1}/{MAX_RETRIES_TO_LAUNCH} '
+                    'since one last did).')
         time.sleep(utils.POLL_INTERVAL)
         retry_count += 1
 
-    if retry_count == MAX_RETRIES_TO_LAUNCH:
-        raise TimeoutError(f'Exceeded maximum retries '
-                           f'({MAX_RETRIES_TO_LAUNCH * utils.POLL_INTERVAL}'
-                           f' seconds) while waiting for instances'
-                           f' to be ready.')
+    raise TimeoutError(
+        f'No instance left {"/".join(PENDING_STATUS)} for '
+        f'{MAX_RETRIES_TO_LAUNCH * utils.POLL_INTERVAL} seconds; '
+        f'still waiting on {len(prev_pending)} instances.')
 
 
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,

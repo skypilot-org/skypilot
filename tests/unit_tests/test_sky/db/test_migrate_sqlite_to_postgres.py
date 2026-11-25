@@ -6,9 +6,18 @@ import stat
 from unittest import mock
 
 import pytest
+import sqlalchemy
 import yaml
 
+from sky import global_user_state
+from sky import skypilot_config
+from sky.jobs import state as jobs_state
+from sky.recipes import db as recipes_db
+from sky.serve import serve_state
+from sky.utils.db import db_utils
+from sky.utils.db import kv_cache
 from sky.utils.db import migrate_sqlite_to_postgres as migrate
+from sky.utils.db import migration_utils
 
 _RECIPES_DDL = ('CREATE TABLE recipes (name TEXT PRIMARY KEY, '
                 'description TEXT, content TEXT, recipe_type TEXT, '
@@ -468,3 +477,64 @@ def test_differing_seeded_ssh_key_can_be_retried(pg_source_with_ssh_key):
     init.side_effect = seed_matching_keys
     result = migrate.migrate(root, _CONFIG, _PG_URL)
     assert result['rows']['ssh_key'] == 1
+
+
+def test_source_tables_skips_policy_version(tmp_path):
+    root = tmp_path / 'sky'
+    (root / 'serve').mkdir(parents=True)
+    for relative in ('spot_jobs.db', 'serve/services.db'):
+        sqlite3.connect(root / relative).close()
+    with contextlib.closing(sqlite3.connect(root / 'state.db')) as source:
+        source.execute('CREATE TABLE casbin_rule (id INTEGER)')
+        source.execute('CREATE TABLE rbac_policy_version (id INTEGER)')
+        source.commit()
+    assert set(migrate.source_tables(root)) == {'casbin_rule'}
+
+
+@pytest.fixture()
+def migrated_sources(tmp_path, monkeypatch):
+    """A state.db with RBAC rows, and a target set up by the real init_target.
+
+    The policy version table exists on both sides, created by the same
+    migration, so copying it would collide with the row the target seeds.
+    """
+    # pylint: disable=protected-access
+    root = tmp_path / 'sky'
+    (root / 'serve').mkdir(parents=True)
+    for relative in ('spot_jobs.db', 'serve/services.db'):
+        sqlite3.connect(root / relative).close()
+    source = sqlalchemy.create_engine(f'sqlite:///{root}/state.db')
+    migration_utils.safe_alembic_upgrade(
+        source, migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
+    with source.begin() as conn:
+        conn.execute(
+            sqlalchemy.text('INSERT INTO casbin_rule (ptype, v0, v1) VALUES '
+                            '(\'g\', \'alice\', \'user\'), '
+                            '(\'g\', \'bob\', \'admin\')'))
+    source.dispose()
+
+    _sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
+    # The URL is also handed to psycopg2.connect(), so it has no driver.
+    target = sqlalchemy.create_engine(
+        sqlalchemy.engine.make_url(_PG_URL).set(
+            drivername='postgresql+psycopg2'))
+    monkeypatch.setattr(db_utils, 'get_engine', lambda *_, **__: target)
+    for module in (global_user_state, jobs_state, serve_state, recipes_db,
+                   kv_cache, skypilot_config):
+        monkeypatch.setattr(module._db_manager, '_engine', None)
+    yield root
+    target.dispose()
+    global_user_state._sqlite_supports_returning.cache_clear()
+    _sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_migrate_with_real_schema_skips_policy_version(migrated_sources):
+    result = migrate.migrate(migrated_sources, {}, _PG_URL)
+    assert result['rows']['casbin_rule'] == 2
+    assert 'rbac_policy_version' not in result['rows']
+    # The target's own trigger counted the copied rows.
+    assert _sql('SELECT id, version > 0 FROM rbac_policy_version') == [(1, True)
+                                                                      ]

@@ -16,6 +16,7 @@ from sky.server.server import _SA_LAST_USED_UPDATE_INTERVAL_SECONDS
 from sky.server.server import BearerTokenMiddleware
 from sky.skylet import constants
 from sky.users import token_service as token_service_lib
+from sky.utils import asyncio_utils
 
 # The service-account auth path runs on the request event loop for every
 # request, so its DB lookups must be offloaded. A slow (mocked) DB call that
@@ -50,6 +51,21 @@ def _blocking(return_value, delay: float = _SLOW_DB_SECONDS):
         return return_value
 
     return _call
+
+
+@pytest.fixture(autouse=True)
+def background(monkeypatch):
+    """Holds the auth bookkeeping the middleware runs in the background."""
+    pending = []
+    monkeypatch.setattr(asyncio_utils, 'run_in_background', pending.append)
+    yield pending
+    for coro in pending:
+        coro.close()
+
+
+async def _run_background(pending) -> None:
+    while pending:
+        await pending.pop(0)
 
 
 class TestBearerTokenMiddleware:
@@ -263,7 +279,8 @@ class TestBearerTokenMiddleware:
     async def test_valid_service_account_token_success(self, middleware,
                                                        base_mock_request,
                                                        mock_call_next,
-                                                       mock_token_row):
+                                                       mock_token_row,
+                                                       background):
         """Test middleware with valid service account token."""
         base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
 
@@ -295,6 +312,8 @@ class TestBearerTokenMiddleware:
             # Verify user was set in request state
             assert base_mock_request.state.auth_user.id == 'sa-123456'
             assert base_mock_request.state.auth_user.name == 'test-service-account'
+            mock_update_last_used.assert_not_called()
+            await _run_background(background)
             # last_used must be updated with the DB row's token_id, not
             # the JWT's.
             mock_update_last_used.assert_called_once_with(
@@ -345,7 +364,7 @@ class TestBearerTokenMiddleware:
     @pytest.mark.asyncio
     async def test_stale_last_used_is_updated(self, middleware,
                                               base_mock_request, mock_call_next,
-                                              mock_token_row):
+                                              mock_token_row, background):
         """A row whose last_used_at is older than the interval IS re-written."""
         base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
         mock_token_row['last_used_at'] = int(time.time()) - 3600
@@ -374,6 +393,7 @@ class TestBearerTokenMiddleware:
                                                  mock_call_next)
 
             assert response.status_code == 200
+            await _run_background(background)
             mock_update_last_used.assert_called_once_with(
                 'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
 
@@ -465,7 +485,8 @@ class TestBearerTokenMiddleware:
     async def test_update_last_used_failure_not_fatal(self, middleware,
                                                       base_mock_request,
                                                       mock_call_next,
-                                                      mock_token_row):
+                                                      mock_token_row,
+                                                      background):
         """Test that failure to update last used timestamp doesn't fail authentication."""
         base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
 
@@ -497,6 +518,8 @@ class TestBearerTokenMiddleware:
             # Should still succeed despite update failure
             assert response.status_code == 200
             assert base_mock_request.state.auth_user.id == 'sa-123456'
+            await _run_background(background)
+            mock_update_last_used.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_token_verification_exception(self, middleware,

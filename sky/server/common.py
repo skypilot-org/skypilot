@@ -48,6 +48,7 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
@@ -158,7 +159,8 @@ P = ParamSpec('P')
 
 
 class RequestId(str, Generic[T]):
-    pass
+    # (status code, body) when the server answered a sync call in its response.
+    sync_response: Optional[Tuple[int, Any]] = None
 
 
 ApiVersion = Optional[str]
@@ -188,6 +190,7 @@ class ApiServerStatus(enum.Enum):
 
 @dataclasses.dataclass
 class ApiServerInfo:
+    """What the API server reports in /api/health."""
     status: ApiServerStatus
     api_version: ApiVersion = None
     version: Optional[str] = None
@@ -197,6 +200,7 @@ class ApiServerInfo:
     basic_auth_enabled: bool = False
     error: Optional[str] = None
     latest_version: Optional[str] = None
+    sync_call_max_limit: Optional[int] = None
 
 
 def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
@@ -354,6 +358,26 @@ def get_cookies_from_response(
     return cookies
 
 
+def _check_impersonation_supported(path: str, server_url: str) -> None:
+    """Refuses to impersonate on a server that would ignore the header.
+
+    Until a response has told the client the server's version, asks with a
+    health check first. The server ignores the header on health checks, so
+    that one is safe to send before the version is known.
+    """
+    if (versions.get_remote_api_version() is None and
+            not path.startswith('/api/health')):
+        get_api_server_status(server_url)
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is not None and remote_api_version <
+            server_constants.MIN_IMPERSONATION_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Acting as another user is not supported by the remote API '
+                f'server version {versions.get_remote_version()!r}. Please '
+                'upgrade the remote server.')
+
+
 def _prepare_authenticated_request_params(
         path: str,
         server_url: Optional[str] = None,
@@ -368,6 +392,8 @@ def _prepare_authenticated_request_params(
 
     # Prepare headers and URL for service account authentication
     headers = service_account_auth.get_service_account_headers()
+    if server_constants.IMPERSONATE_USER_HEADER in headers:
+        _check_impersonation_supported(path, server_url)
 
     # Merge with existing headers
     if 'headers' in kwargs:
@@ -399,6 +425,7 @@ def make_authenticated_request(method: str,
                                path: str,
                                server_url: Optional[str] = None,
                                retry: bool = True,
+                               sync_call: bool = False,
                                **kwargs) -> 'requests.Response':
     """Make an authenticated HTTP request to the API server.
 
@@ -410,6 +437,8 @@ def make_authenticated_request(method: str,
         path: API path (e.g., '/api/v1/status')
         server_url: Server URL, defaults to configured server
         retry: Whether to retry on transient errors
+        sync_call: Whether the server may answer with the request's result
+            in the response; see rest.request_without_retry.
         **kwargs: Additional arguments to pass to requests
 
     Returns:
@@ -420,10 +449,13 @@ def make_authenticated_request(method: str,
 
     # Make the request
     if retry:
-        return rest.request(method, url, **kwargs)
+        return rest.request(method, url, sync_call=sync_call, **kwargs)
     else:
         assert method == 'GET', 'Only GET requests can be done without retry'
-        return rest.request_without_retry(method, url, **kwargs)
+        return rest.request_without_retry(method,
+                                          url,
+                                          sync_call=sync_call,
+                                          **kwargs)
 
 
 async def make_authenticated_request_async(
@@ -489,6 +521,20 @@ async def make_authenticated_request_async(
                                                       **kwargs)
 
 
+# A URL scheme at the start of an endpoint (RFC 3986), e.g. `https://`.
+_URL_SCHEME_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*://')
+
+
+def add_default_scheme(endpoint: str) -> str:
+    """Returns the endpoint with https:// added if it has no scheme.
+
+    An empty endpoint is returned as-is.
+    """
+    if not endpoint or _URL_SCHEME_RE.match(endpoint):
+        return endpoint
+    return f'https://{endpoint}'
+
+
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = get_default_server_url()
@@ -504,7 +550,7 @@ def get_server_url(host: Optional[str] = None) -> str:
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
-    return url.rstrip('/')
+    return add_default_scheme(url).rstrip('/')
 
 
 # Shown in place of a basic-auth password when a server URL is printed for
@@ -679,6 +725,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         commit = result.get('commit')
         user = result.get('user')
         latest_version = result.get('latest_version')
+        sync_call_max_limit = result.get('sync_call_max_limit')
+        rest.set_sync_call_max_limit(sync_call_max_limit)
         # Cache basic_auth_enabled and set client user hash on the
         # client-side usage singleton.
         global basic_auth_enabled, client_user_hash
@@ -694,7 +742,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                     commit=commit,
                                     user=user,
                                     basic_auth_enabled=basic_auth_enabled,
-                                    latest_version=latest_version)
+                                    latest_version=latest_version,
+                                    sync_call_max_limit=sync_call_max_limit)
         if api_version is None or version is None or commit is None:
             server_url = endpoint if endpoint is not None else get_server_url()
             logger.warning(f'API server response missing '
@@ -827,6 +876,12 @@ def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
 
 
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
+    if rest.is_sync_response(response) and response.status_code in (200, 500):
+        body = response.json()
+        payload = body if response.status_code == 200 else body['detail']
+        sync_request_id: RequestId[T] = RequestId[T](payload['request_id'])
+        sync_request_id.sync_response = (response.status_code, body)
+        return sync_request_id
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
@@ -872,6 +927,33 @@ def check_local_api_server_enabled_or_raise() -> None:
                 'sky api login -e <endpoint>')
 
 
+def is_running_in_api_server() -> bool:
+    """True if this process is running inside the API server.
+
+    The API server sets ENV_VAR_IS_SKYPILOT_SERVER ('IS_SKYPILOT_SERVER') in its
+    own environment (see _start_api_server), and every in-server child -- most
+    importantly the consolidation-mode jobs/serve controllers, which the API
+    server spawns via subprocess_utils.launch_new_process_tree and which
+    therefore inherit its env -- inherits it. A standalone jobs/serve
+    controller running on its own VM does NOT have it (the VM is not an API
+    server), nor does a fresh CLI shell. The local API server such a
+    controller starts does have it, but it never starts controllers (see
+    start_managed_job_refresh_daemon), so no standalone controller inherits
+    it.
+
+    This is the correct signal for "the API server is THIS process tree, so do
+    not attempt to start a new local one." It is deliberately NOT
+    OVERRIDE_CONSOLIDATION_MODE ('IS_SKYPILOT_JOB_CONTROLLER'): that env is
+    exported by scheduler.start_controller() inside *both* the standalone and
+    the consolidation controller, so is_jobs_consolidation_mode() (in
+    controller_utils) returns True unconditionally in every controller process.
+    Gating auto-start on it would also skip the standalone controller, which
+    *must* start a local API server on its own VM -- breaking non-consolidation
+    mode.
+    """
+    return os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
@@ -879,6 +961,9 @@ def _start_api_server(deploy: bool = False,
                       metrics_port: Optional[int] = None,
                       enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
+    # Local API server needs the DB/ORM stack. Fail with the install hint
+    # before spawning a process that would crash without it.
+    sqlalchemy_deps.require_server_dependencies()
     check_local_api_server_enabled_or_raise()
     server_url = get_server_url(host)
     assert server_url in get_available_local_api_server_urls(), (
@@ -1142,7 +1227,19 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
-        if not is_api_server_local(endpoint):
+        # Surface the error instead of starting a local server when the
+        # endpoint is remote, or when running inside the API server
+        # (consolidation-mode jobs/serve controllers, request handlers,
+        # daemons). Inside the server, the server is THIS process tree, which
+        # is not listening yet or not right now; a second, non-deploy server
+        # started here would run its startup against the live server's state
+        # directory before failing to bind: it removes the jobs consolidation
+        # signal file, resets the local request database, wipes the
+        # prometheus multiproc dir and truncates server.log. Callers handle
+        # the error like any other connection failure. See
+        # is_running_in_api_server for why this is gated on IS_SKYPILOT_SERVER
+        # and not on consolidation mode.
+        if not is_api_server_local(endpoint) or is_running_in_api_server():
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Fail early (before taking the creation lock) if silently starting
@@ -1442,14 +1539,23 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
 
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
-                           using_remote_api_server: bool, user: 'models.User',
-                           request_id: str) -> None:
+                           using_remote_api_server: bool,
+                           user: 'models.User',
+                           request_id: str,
+                           sync_refresh: bool = False) -> None:
     """Reload modules, global variables, and usage message for a new request.
 
     Must be called within the request's context.
+
+    Args:
+        sync_refresh: Passed to annotations.clear_request_level_cache; True
+            when the request shares its process with concurrent requests.
     """
-    # This should be called first to make sure the logger is up-to-date.
-    sky_logging.reload_logger()
+    # This should be called first to make sure the logger is up-to-date. A
+    # process shared with concurrent requests keeps its one handler, whose
+    # level follows each request's context; replacing it races other threads.
+    if not sync_refresh:
+        sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
     # We don't need to grab the lock here because this function is only
@@ -1468,7 +1574,7 @@ def reload_for_new_request(client_entrypoint: Optional[str],
 
     # Clear cache should be called before reload_logger and usage reset,
     # otherwise, the latest env var will not be used.
-    annotations.clear_request_level_cache()
+    annotations.clear_request_level_cache(sync_refresh=sync_refresh)
 
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
@@ -1513,8 +1619,10 @@ def refresh_workspace_state_for_sync_handler() -> None:
     # 'request')`` function) caches its result for the lifetime of one
     # request. Plugin sync handlers don't go through the executor's
     # ``clear_request_level_cache()`` call, so stale entries survive
-    # across requests unless we drop them here.
-    annotations.clear_request_level_cache()
+    # across requests unless we drop them here. Caches with a `keep_if`
+    # (the Kubernetes clients, kept while the kubeconfig is unchanged)
+    # survive: rebuilding them on every call is what made this costly.
+    annotations.clear_request_level_cache(sync_refresh=True)
 
 
 def clear_local_api_server_database() -> None:

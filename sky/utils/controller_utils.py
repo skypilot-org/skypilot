@@ -408,7 +408,7 @@ def _get_cloud_dependencies_installation_commands(
                 '  ARCH="amd64"; '
                 'fi && '
                 '(command -v kubectl &>/dev/null || '
-                '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
+                '(curl -s -LO "https://dl.k8s.io/release/v1.35.10'
                 '/bin/linux/$ARCH/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl)) && '
@@ -496,7 +496,8 @@ def download_and_stream_job_log(
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
         local_dir: str,
         job_ids: Optional[List[str]] = None,
-        on_downloaded: Optional[Callable[[str], None]] = None) -> Optional[str]:
+        on_downloaded: Optional[Callable[[str], None]] = None,
+        stream_to_console: bool = True) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
@@ -508,6 +509,10 @@ def download_and_stream_job_log(
             controller uses this to persist ``local_log_file`` immediately so
             the dashboard can serve the job's logs without waiting for the
             full re-stream to finish.
+        stream_to_console: Whether to re-print the downloaded log to stdout
+            (i.e. into the controller log). When False, the log is only
+            synced down and its local path returned; the synced copy remains
+            the source for ``sky jobs logs`` and the dashboard.
 
     If the log cannot be fetched for any reason, return None.
     """
@@ -548,6 +553,9 @@ def download_and_stream_job_log(
     # dashboard from serving the logs.
     if on_downloaded is not None:
         on_downloaded(log_file)
+
+    if not stream_to_console:
+        return log_file
 
     # Print the logs to the console.
     # TODO(zhwu): refactor this into log_utils, along with the refactoring for
@@ -618,7 +626,8 @@ def shared_controller_vars_to_fill(
         if workspace is not None:
             # This config is replayed on recovery; pin the id, which an admin
             # policy may have set as a name, so it is never re-resolved as a
-            # name another workspace may have taken since.
+            # name another workspace may have taken since. The pool check
+            # (serve_utils.get_pool_refusal) also relies on it being an id.
             local_user_config['active_workspace'] = (
                 skypilot_config.resolve_workspace_ref(workspace, workspaces))
         if controller.value.controller_type == 'jobs':
@@ -1550,10 +1559,12 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     used += ((config.short_worker_config.garanteed_parallelism +
               config.short_worker_config.burstable_parallelism) *
              server_config.SHORT_WORKER_MEM_GB * 1024)
+    used += (config.heavy_worker_config.burstable_parallelism *
+             server_config.HEAVY_WORKER_MEM_GB * 1024)
     if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
         # Server workers are resident too, and the parent process with them.
         used += ((config.num_server_workers + 1) *
-                 server_config.SERVER_WORKER_MEM_GB * 1024)
+                 server_config.server_worker_mem_gb() * 1024)
     return total_memory_mb - used
 
 

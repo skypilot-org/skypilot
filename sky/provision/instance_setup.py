@@ -19,6 +19,7 @@ from sky import provision
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
+from sky.logs import agent as logs_agent
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
@@ -63,6 +64,9 @@ _MAX_RETRY = 6
 # raise the bound (or set it non-positive) for setups that legitimately take
 # longer.
 _DEFAULT_SETUP_COMMAND_TIMEOUT = 1800
+# Printed by the Kubernetes pod startup (kubernetes-ray.yml.j2) when the image
+# has no sshd and it could not be installed.
+NO_SSHD_MARKER = 'WARNING: sshd is not installed in this image'
 _DEFAULT_FILE_MOUNT_TIMEOUT = 600
 
 
@@ -547,7 +551,10 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     digest = hasher.hexdigest()
 
     @_auto_retry()
-    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
+    def _setup_node(runner: command_runner.CommandRunner,
+                    log_path: str) -> bool:
+        """Returns whether the node reported that it has no sshd."""
+        no_sshd = False
         for cmd in setup_commands:
             returncode, stdout, stderr = runner.run_setup(
                 cmd,
@@ -584,13 +591,23 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                     f'(exit code {returncode}). Error: '
                     f'===== stdout ===== \n{stdout}\n'
                     f'===== stderr ====={stderr}')
+            no_sshd = no_sshd or NO_SSHD_MARKER in stdout
+        return no_sshd
 
-    _parallel_ssh_with_cache(_setup_node,
-                             cluster_name,
-                             stage_name='setup_runtime_on_cluster',
-                             digest=digest,
-                             cluster_info=cluster_info,
-                             ssh_credentials=ssh_credentials)
+    # Cached nodes return None and are not counted.
+    results = _parallel_ssh_with_cache(_setup_node,
+                                       cluster_name,
+                                       stage_name='setup_runtime_on_cluster',
+                                       digest=digest,
+                                       cluster_info=cluster_info,
+                                       ssh_credentials=ssh_credentials)
+    ran = [r for r in results if r is not None]
+    num_no_sshd = sum(ran)
+    if num_no_sshd:
+        logger.warning(
+            f'{num_no_sshd} of {len(ran)} nodes have no sshd: ssh to '
+            'the cluster, VS Code and mpirun/pdsh between nodes will not '
+            'work. Install openssh-server in the image.')
 
 
 def _ray_gpu_options(custom_resource: str) -> str:
@@ -1001,6 +1018,10 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
             common_file_mounts, cluster_info.provider_name))
 
 
+class LoggingAgentUnsupportedError(RuntimeError):
+    """The logging agent cannot be installed on a node's platform."""
+
+
 @common.log_function_start_end
 @timeline.event
 def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
@@ -1011,7 +1032,8 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
     _hint_worker_log_path(cluster_name.name_on_cloud, cluster_info,
                           'logging_setup')
 
-    @_auto_retry()
+    @_auto_retry(
+        should_retry=lambda e: not isinstance(e, LoggingAgentUnsupportedError))
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         cmd = logging_agent.get_setup_command(cluster_name)
         logger.info(f'Running command on node: {cmd}')
@@ -1022,6 +1044,16 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
             log_path=log_path,
             source_bashrc=True,
             timeout=_setup_command_timeout())
+        if returncode == logs_agent.UNSUPPORTED_PLATFORM_EXIT_CODE:
+            # The runner merges stderr into stdout unless asked not to.
+            reason = [
+                line[len('SkyPilot: '):]
+                for line in f'{stdout}\n{stderr}'.splitlines()
+                if line.startswith('SkyPilot: ')
+            ]
+            raise LoggingAgentUnsupportedError(
+                reason[-1]
+                if reason else 'cannot install fluent-bit on this node')
         if returncode:
             raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
                                f'(exit code {returncode}). Error: '

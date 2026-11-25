@@ -32,3 +32,10 @@ register_body_twist(
 register_body_twist('srv-users-sa-create-ignores-role',
                     '/users/service-account-tokens',
                     lambda b: {k: v for k, v in b.items() if k != 'role'})
+
+# Rotating a service account token keeps its old expiry instead of the one
+# chosen in the dialog.
+register_body_twist(
+    'srv-users-sa-rotate-ignores-expiry',
+    '/users/service-account-tokens/rotate',
+    lambda b: {k: v for k, v in b.items() if k != 'expires_in_days'})

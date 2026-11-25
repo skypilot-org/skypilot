@@ -94,6 +94,9 @@ class APIHealthResponse(ResponseBaseModel):
     # includes admin-only secrets). Lets the dashboard hide the config UI for
     # non-admins when enabled.
     restrict_config_to_admins: bool = True
+    # The largest `limit` this server accepts in a sync call; unset when the
+    # server does not answer sync calls (see server constants SYNC_CALL_HEADER).
+    sync_call_max_limit: Optional[int] = None
 
 
 class StatusResponse(ResponseBaseModel):
@@ -190,6 +193,12 @@ class StorageRecord(ResponseBaseModel):
     store: List[data.StoreType]
     last_use: str
     status: status_lib.StorageStatus
+    # Optional so an older server's response still validates; storage that
+    # predates the recording of its creator has no user.
+    user_hash: Optional[str] = None
+    user_name: Optional[str] = None
+    workspace: Optional[str] = None
+    workspace_name: Optional[str] = None
 
 
 # TODO (syang) figure out which fields are always present

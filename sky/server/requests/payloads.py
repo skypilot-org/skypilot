@@ -107,6 +107,10 @@ def request_body_env_vars() -> dict:
     # timeouts it puts on its own users upsert from it, so a client must not
     # be able to supply it.
     env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS, None)
+    # The user to act as is sent in a header and only applies to this client's
+    # own requests. Forwarded, it would make any request the server or a
+    # controller later sends with a service account token act as that user.
+    env_vars.pop(constants.IMPERSONATE_USER_ENV_VAR, None)
     # Remove the in-cluster context name - this is only meaningful for the
     # local Kubernetes environment and should not be forwarded to the server,
     # which has its own cluster context configuration.
@@ -194,6 +198,16 @@ class RequestBody(BasePayload):
     # and keeps the pre-upgrade (loopback) behavior; see `stamp_request_body`
     # and the override logic in `executor.py`.
     from_loopback: bool = False
+    # The account that made an impersonated call, which usage metrics
+    # attribute the request to. Set server-side in `stamp_request_body`; a
+    # client-sent value is overwritten.
+    impersonator_id: Optional[str] = None
+    impersonator_name: Optional[str] = None
+    # Whether the server authenticated the caller, so the users row and its
+    # role exist and the worker need not upsert them. Set server-side in
+    # `stamp_request_body`; a client-sent value is overwritten. Relies on every
+    # middleware that sets `request.state.auth_user` ensuring both first.
+    authenticated: bool = False
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -230,6 +244,9 @@ class RequestBody(BasePayload):
         kwargs.pop('client_api_version', None)
         kwargs.pop('workspace_access', None)
         kwargs.pop('from_loopback', None)
+        kwargs.pop('authenticated', None)
+        kwargs.pop('impersonator_id', None)
+        kwargs.pop('impersonator_name', None)
         return kwargs
 
     @property
@@ -597,6 +614,9 @@ class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
     purge: bool = False
+    # Keep a k8s-hostpath volume's files even if it was registered with
+    # cleanup_on_deletion.
+    no_cleanup: bool = False
 
 
 class VolumeListBody(RequestBody):

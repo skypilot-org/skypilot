@@ -26,6 +26,9 @@ run: |
     nodes=${nodes::-1}
     echo "All nodes: ${nodes}"
 
+    # Cap the max message size at 256M: bus bandwidth already plateaus at
+    # ~2M on these instances, while the 512M/1G/2G steps alone take ~4 min
+    # and pushed `sky launch` past the smoke test's 900s timeout.
     /opt/amazon/openmpi/bin/mpirun \
       --allow-run-as-root \
       --tag-output \
@@ -40,7 +43,7 @@ run: |
       --mca btl_tcp_if_exclude lo,docker0,veth_def_agent \
       /usr/local/cuda/efa/test-cuda-12.8/all_reduce_perf \
       -b 8 \
-      -e 2G \
+      -e 256M \
       -f 2 \
       -g 1 \
       -c 5 \

@@ -12,11 +12,12 @@ jest.mock('@/plugins/PluginSlot', () => ({
   ),
 }));
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import {
   InfrastructureSection,
   slurmRequestableCounts,
   countUpSlurmNodes,
+  sortContextsByLoadState,
 } from '@/components/infra';
 
 // The infrastructure table renders one sub-row per GPU type. A Slurm cluster
@@ -349,6 +350,59 @@ describe('InfrastructureSection Kubernetes GPU-type rows', () => {
   });
 });
 
+describe('InfrastructureSection context workspaces', () => {
+  const renderWithWorkspaces = (workspaces) =>
+    renderSection({
+      title: 'Kubernetes',
+      contexts: ['ctx'],
+      groupedPerNodeGPUs: { ctx: [] },
+      contextWorkspaceMap: { ctx: workspaces },
+    });
+
+  // The name cell of the desktop table (the mobile card repeats it).
+  const nameCell = (container) =>
+    container.querySelector('table tbody tr').querySelectorAll('td')[1];
+
+  // jsdom has no layout, so fake the text being taller than its box.
+  const fakeOverflow = () => {
+    jest
+      .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+      .mockReturnValue(500);
+    jest
+      .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+      .mockReturnValue(100);
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  it('lists the workspaces with no button when they fit', () => {
+    const { container } = renderWithWorkspaces(['a', 'b']);
+    expect(normalize(nameCell(container))).toContain('(workspaces: a, b)');
+    expect(within(nameCell(container)).queryByRole('button')).toBeNull();
+  });
+
+  it('expands and collapses a list that does not fit', () => {
+    fakeOverflow();
+    const workspaces = Array.from({ length: 40 }, (_, i) => `ws-${i}`);
+    const { container } = renderWithWorkspaces(workspaces);
+    const cell = nameCell(container);
+    expect(normalize(cell)).toContain(`(workspaces: ${workspaces.join(', ')})`);
+
+    const button = within(cell).getByRole('button', { name: 'Show more' });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(cell.querySelector('.line-clamp-2')).not.toBeNull();
+
+    fireEvent.click(button);
+    const less = within(cell).getByRole('button', { name: 'Show less' });
+    expect(less).toHaveAttribute('aria-expanded', 'true');
+    expect(cell.querySelector('.line-clamp-2')).toBeNull();
+
+    fireEvent.click(less);
+    expect(
+      within(cell).getByRole('button', { name: 'Show more' })
+    ).toBeInTheDocument();
+  });
+});
+
 describe('InfrastructureSection inactive (not-enabled) context rows', () => {
   const K8S_PROPS = {
     title: 'Kubernetes',
@@ -432,5 +486,98 @@ describe('InfrastructureSection inactive (not-enabled) context rows', () => {
     });
     expect(tableRows(container)).toHaveLength(1);
     expect(container.textContent).not.toContain('not enabled');
+  });
+});
+
+describe('sortContextsByLoadState', () => {
+  const contexts = ['a-loading', 'b-ok', 'c-dead', 'd-ok', 'e-loading'];
+  const loadedContexts = new Set(['b-ok', 'c-dead', 'd-ok']);
+  const contextErrors = { 'c-dead': 'Timed out' };
+
+  it('orders loaded, then failed, then loading, keeping input order', () => {
+    expect(
+      sortContextsByLoadState(contexts, { contextErrors, loadedContexts })
+    ).toEqual(['b-ok', 'd-ok', 'c-dead', 'a-loading', 'e-loading']);
+  });
+
+  it('ranks a failed context below loaded ones even if not marked loaded', () => {
+    expect(
+      sortContextsByLoadState(['x', 'y'], {
+        contextErrors: { x: 'boom' },
+        loadedContexts: new Set(['y']),
+      })
+    ).toEqual(['y', 'x']);
+  });
+
+  it('uses isContextLoading when given', () => {
+    expect(
+      sortContextsByLoadState(['p', 'q'], {
+        contextErrors: { p: 'boom' },
+        isContextLoading: () => false,
+      })
+    ).toEqual(['q', 'p']);
+  });
+
+  it('does not mutate its input', () => {
+    const input = [...contexts];
+    sortContextsByLoadState(input, { contextErrors, loadedContexts });
+    expect(input).toEqual(contexts);
+  });
+});
+
+describe('InfrastructureSection context row order', () => {
+  const gpuRow = (context) => [
+    { gpu_name: 'H100', gpu_total: 8, gpu_free: 8, context },
+  ];
+
+  it('puts healthy rows first, then failed, then loading', () => {
+    const { container } = renderSection({
+      title: 'Kubernetes',
+      contexts: ['ctx-dead', 'ctx-a', 'ctx-loading', 'ctx-b'],
+      gpus: [{ gpu_name: 'H100', gpu_total: 16, gpu_free: 16 }],
+      groupedPerContextGPUs: {
+        'ctx-a': gpuRow('ctx-a'),
+        'ctx-b': gpuRow('ctx-b'),
+      },
+      groupedPerNodeGPUs: {},
+      loadedContexts: new Set(['ctx-dead', 'ctx-a', 'ctx-b']),
+      contextErrors: { 'ctx-dead': 'Timed out' },
+    });
+    const order = tableRows(container)
+      .map((row) => row.querySelector('.cursor-pointer'))
+      .filter(Boolean)
+      .map((el) => normalize(el));
+    expect(order.map((t) => t.split(' ')[0])).toEqual([
+      'ctx-a',
+      'ctx-b',
+      'ctx-dead',
+      'ctx-loading',
+    ]);
+  });
+});
+
+describe('InfrastructureSection refreshing overlay', () => {
+  const PROPS = {
+    title: 'Kubernetes',
+    contexts: ['fast', 'slow'],
+    gpus: [],
+    groupedPerContextGPUs: {},
+    groupedPerNodeGPUs: {},
+  };
+  const overlay = (container) =>
+    container.querySelector('.infra-table-refreshing');
+
+  it('does not dim the table while a single context is still loading', () => {
+    const { container } = renderSection({
+      ...PROPS,
+      loadedContexts: new Set(['fast']),
+    });
+    expect(overlay(container)).toBeNull();
+  });
+
+  it('does not dim the table while the whole section reloads', () => {
+    // Refresh / Cmd+R: rows show their own placeholders instead.
+    const { container } = renderSection({ ...PROPS, isLoading: true });
+    expect(overlay(container)).toBeNull();
   });
 });

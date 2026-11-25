@@ -1,6 +1,8 @@
 """Unit tests for sky/server/requests/process.py."""
 from concurrent.futures import Future
 import concurrent.futures.process
+import os
+import signal
 import time
 import unittest.mock
 
@@ -20,6 +22,15 @@ def dummy_task(sleep_time=0.1):
 def failing_task():
     """A task that raises an exception."""
     raise ValueError('Task failed')
+
+
+def killed_task():
+    """A task whose process is killed before it returns."""
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+def none_task():
+    return None
 
 
 def verify_workers_cleanup(executor):
@@ -203,5 +214,16 @@ def test_burstable_executor_pool_recovery():
             # Verify that a new executor was created after the failure
             assert executor._executor is not original_executor
 
+    finally:
+        executor.shutdown()
+
+
+def test_disposable_executor_fails_a_killed_worker():
+    executor = DisposableExecutor(max_workers=1)
+    try:
+        killed = executor.submit(killed_task)
+        with pytest.raises(concurrent.futures.process.BrokenProcessPool):
+            killed.result(timeout=30)
+        assert executor.submit(none_task).result(timeout=30) is None
     finally:
         executor.shutdown()
