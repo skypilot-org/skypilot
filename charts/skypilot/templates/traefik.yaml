@@ -1,0 +1,125 @@
+{{- $ingressNginx := index .Values "ingress-nginx" }}
+{{- $traefik := .Values.traefik | default dict }}
+{{- if $traefik.enabled }}
+{{- $nginxProvider := dig "providers" "kubernetesIngressNGINX" dict $traefik }}
+{{- /* Helm renders a dependency whose condition path is missing, and the
+       Traefik chart's own values set enabled: true. `helm upgrade
+       --reuse-values` from a chart version without Traefik therefore renders
+       Traefik with only its upstream defaults. */}}
+{{- if not $nginxProvider.enabled }}
+{{- if $ingressNginx.enabled }}
+{{- fail "\nThis release runs the bundled ingress-nginx controller, which is retired upstream. This chart version bundles Traefik instead, but `--reuse-values` keeps the values of the chart version this release was first installed with, which have no Traefik settings. Re-run the upgrade with one of:\n  --reset-then-reuse-values --set ingress-nginx.enabled=false   # switch to Traefik; keeps the external address\n  --set traefik.enabled=false                                  # stay on ingress-nginx" }}
+{{- end }}
+{{- fail "\nThe chart's Traefik settings are missing, which happens when `--reuse-values` keeps the values of a chart version without Traefik. Re-run the upgrade with `--reset-then-reuse-values`, or add `--set traefik.enabled=false` if you bring your own ingress controller." }}
+{{- end }}
+{{- if $ingressNginx.enabled }}
+{{- fail "\nEnable only one ingress controller: set ingress-nginx.enabled=false to use Traefik, or traefik.enabled=false to keep ingress-nginx." }}
+{{- end }}
+{{- /* Traefik answers the auth-snippet `return 200` of the service account token
+       bypass itself instead of passing the request on, so token requests would
+       never reach the API server. */}}
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
+{{- fail "\nThe bundled Traefik controller does not support ingress.oauth2-proxy: requests with service account tokens would not reach the API server. Move the settings from ingress.oauth2-proxy.* to auth.oauth.*, where the API server checks logins itself: https://docs.skypilot.co/en/latest/reference/auth.html#oauth-migration-guide\nTo keep ingress.oauth2-proxy, use ingress-nginx instead: --set traefik.enabled=false --set ingress-nginx.enabled=true" }}
+{{- end }}
+{{- if or $ingressNginx.tcp $ingressNginx.udp }}
+{{- fail "\ningress-nginx.tcp and ingress-nginx.udp port mappings are not supported with the bundled Traefik controller. To keep them, use ingress-nginx instead: --set traefik.enabled=false --set ingress-nginx.enabled=true" }}
+{{- end }}
+{{- with $traefik.namespaceOverride }}
+{{- if ne . $.Release.Namespace }}
+{{- fail (printf "\ntraefik.namespaceOverride=%s is not supported: the chart creates the Service in front of Traefik and Traefik's IngressClass permission in the release namespace %s. Remove traefik.namespaceOverride." . $.Release.Namespace) }}
+{{- end }}
+{{- end }}
+{{- with $ingressNginx.namespaceOverride }}
+{{- if ne . $.Release.Namespace }}
+{{- fail (printf "\ningress-nginx.namespaceOverride=%s puts the ingress-nginx controller Service in namespace %s, but the bundled Traefik controller's Service is in the release namespace %s. Switching controllers would replace the load balancer and change its address. To keep the address, stay on ingress-nginx: --set traefik.enabled=false --set ingress-nginx.enabled=true. If a new address is fine, remove ingress-nginx.namespaceOverride." . . $.Release.Namespace) }}
+{{- end }}
+{{- end }}
+{{- $traefikClass := $nginxProvider.ingressClass | default "nginx" }}
+{{- $ingressClasses := dict }}
+{{- if .Values.ingress.enabled }}
+{{- $_ := set $ingressClasses "ingress.ingressClassName" .Values.ingress.ingressClassName }}
+{{- end }}
+{{- if and (not .Values.ingress.unified) .Values.grafana.enabled .Values.grafana.ingress.enableAuthedIngress }}
+{{- $_ := set $ingressClasses "grafana.ingress.ingressClassName" .Values.grafana.ingress.ingressClassName }}
+{{- end }}
+{{- range $key, $class := $ingressClasses }}
+{{- if ne (toString $class) $traefikClass }}
+{{- fail (printf "\n%s is %q, but the bundled Traefik controller serves the IngressClass %q, so that Ingress would not be served. If another ingress controller serves %q, add --set traefik.enabled=false. To have Traefik serve it, add --set traefik.providers.kubernetesIngressNGINX.ingressClass=%s" $key (toString $class) $traefikClass (toString $class) (toString $class)) }}
+{{- end }}
+{{- end }}
+{{- $svc := $ingressNginx.controller.service | default dict }}
+# Traefik's ingress-nginx provider serves Ingresses of this class.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: {{ $traefikClass }}
+  labels:
+    app.kubernetes.io/name: {{ include "skypilot.traefikName" . }}
+    app.kubernetes.io/instance: {{ include "skypilot.traefikInstance" . }}
+spec:
+  controller: {{ $nginxProvider.controllerClass | default "k8s.io/ingress-nginx" }}
+{{- if dig "enabled" true $svc }}
+{{- if dig "external" "enabled" true $svc }}
+---
+# The Service in front of Traefik. It keeps the ingress-nginx controller
+# Service's name, labels and settings, so a release that switches controllers
+# keeps its address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skypilot.ingressControllerServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc) | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- range $key, $value := . }}
+    {{ $key }}: {{ tpl ($value | toString) $ | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $svc "internal" false) | nindent 2 }}
+{{- end }}
+{{- $internal := $svc.internal | default dict }}
+{{- if and $internal.enabled $internal.annotations }}
+---
+# The ingress-nginx chart's internal controller Service, in front of Traefik.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skypilot.ingressControllerServiceName" . }}-internal
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "skypilot.traefikServiceLabels" (dict "root" . "svc" $svc) | nindent 4 }}
+  annotations:
+    {{- range $key, $value := $internal.annotations }}
+    {{ $key }}: {{ tpl ($value | toString) $ | quote }}
+    {{- end }}
+spec:
+  {{- include "skypilot.traefikServiceSpec" (dict "root" . "svc" $svc "s" $internal "internal" true) | nindent 2 }}
+{{- end }}
+{{- end }}
+---
+# Traefik runs with namespaced RBAC; IngressClasses are cluster-scoped.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-%s-traefik-ingressclasses" .Release.Name .Release.Namespace | trunc 63 | trimSuffix "-" }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-%s-traefik-ingressclasses" .Release.Name .Release.Namespace | trunc 63 | trimSuffix "-" }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-%s-traefik-ingressclasses" .Release.Name .Release.Namespace | trunc 63 | trimSuffix "-" }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "skypilot.traefikServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

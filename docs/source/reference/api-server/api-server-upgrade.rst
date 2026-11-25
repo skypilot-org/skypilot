@@ -348,6 +348,43 @@ Verify the API server is able to serve requests and the version is consistent wi
 
 If possible, you can also trigger your pipelines that depend on the API server to verify there is no compatibility issue after the upgrade.
 
+.. _sky-api-server-switch-to-traefik:
+
+Switch from ingress-nginx to Traefik
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Helm chart bundles a Traefik ingress controller instead of ingress-nginx, which is retired upstream and no longer gets security fixes. For an API server installed with a chart that bundled ingress-nginx, the upgrade command in Step 2 stops before changing anything:
+
+.. code-block:: console
+
+    Error: UPGRADE FAILED: execution error at (skypilot/templates/traefik.yaml:11:4):
+    This release runs the bundled ingress-nginx controller, which is retired upstream. This chart version bundles Traefik instead, but `--reuse-values` keeps the values of the chart version this release was first installed with, which have no Traefik settings. Re-run the upgrade with one of:
+      --reset-then-reuse-values --set ingress-nginx.enabled=false   # switch to Traefik; keeps the external address
+      --set traefik.enabled=false                                  # stay on ingress-nginx
+
+To switch to Traefik, upgrade with ``--reset-then-reuse-values`` (Helm 3.14+), which applies the new chart version's defaults and keeps the values you set:
+
+.. code-block:: bash
+
+    helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --reset-then-reuse-values \
+      --set ingress-nginx.enabled=false \
+      --set traefik.enabled=true \
+      --set apiService.image=${IMAGE_REPO}:${VERSION}
+
+The services keep their names and addresses, and the settings under ``ingress-nginx.controller.service`` carry over, including an internal service. Settings under ``ingress-nginx.controller.config`` no longer apply, and ``ingress-nginx.tcp`` and ``ingress-nginx.udp`` port mappings are not supported with Traefik. Expect requests to fail briefly (about 20 seconds) while the Traefik pods start.
+
+Traefik does not write the load balancer address into the status of the Ingress unless you point it at the service. If something reads the address from the Ingress, for example external-dns with its ``ingress`` source, add these flags to the upgrade command:
+
+.. code-block:: bash
+
+      --set traefik.providers.kubernetesIngressNGINX.publishService.enabled=true \
+      --set traefik.providers.kubernetesIngressNGINX.publishService.pathOverride=${NAMESPACE}/${RELEASE_NAME}-ingress-nginx-controller
+
+Traefik does not support OAuth2 Proxy on the ingress (``ingress.oauth2-proxy.enabled``). If your API server uses it, follow the :ref:`OAuth migration guide <oauth-migration-guide>` to move those settings to ``auth.oauth`` in the same upgrade.
+
+To keep ingress-nginx for now, add ``--set traefik.enabled=false`` to the upgrade command in Step 2. If you bring your own ingress controller, add ``--set traefik.enabled=false`` as well.
+
 .. _sky-api-server-vm-upgrade:
 
 Upgrade the API server deployed on VM
@@ -535,7 +572,7 @@ The SkyPilot helm chart automatically configures the ingress resource to achieve
 API compatibility
 -----------------
 
-Starting from ``0.10.0``, SkyPilot guarantees API compatibility between adjacent minor versions, which makes graceful upgrades across minor versions possible. 
+Starting from ``0.10.0``, SkyPilot guarantees API compatibility between adjacent minor versions, which makes graceful upgrades across minor versions possible.
 
 For example, assuming ``0.11.0`` is released, the following table shows one possible upgrade sequence that can upgrade the API server and clients from ``0.10.0`` to ``0.11.0`` without breaking API compatibility:
 

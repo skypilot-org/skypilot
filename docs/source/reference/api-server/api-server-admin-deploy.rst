@@ -71,7 +71,7 @@ Install the SkyPilot Helm chart with the following command:
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
-The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`. To use a different ingress controller, refer to :ref:`sky-api-server-custom-ingress`
+The above command will install a SkyPilot API server and a Traefik ingress controller in the given namespace. Traefik serves the chart's Ingress through its ingress-nginx provider, under a cluster-wide IngressClass named ``nginx``, so a second installation in the same cluster conflicts with the first by default. To deploy multiple API servers, refer to :ref:`Reusing the ingress controller for API server <sky-api-server-helm-multiple-deploy>`. To use a different ingress controller, refer to :ref:`sky-api-server-custom-ingress`.
 
 .. tip::
 
@@ -85,14 +85,14 @@ After the API server is deployed, you can inspect the API server pod status with
 
 You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
-The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using OAuth for API server <api-server-oauth>`.
+The API server above is deployed with basic auth enforced by the ingress controller. To use advanced OAuth2 authentication, refer to :ref:`Using OAuth for API server <api-server-oauth>`.
 
 .. _sky-get-api-server-url:
 
 Step 2: Get the API server URL
 ------------------------------
 
-Once the API server is deployed, we can fetch the API server URL. The chart uses nginx ingress to expose the API server and exposes the ingress to internet using a LoadBalancer service by default. If you are using a Kubernetes cluster without LoadBalancer support, you can use the NodePort option below instead.
+Once the API server is deployed, we can fetch the API server URL. The chart exposes the API server through its Traefik ingress controller, behind a LoadBalancer service by default. If you are using a Kubernetes cluster without LoadBalancer support, you can use the NodePort option below instead.
 
 .. tab-set::
 
@@ -115,7 +115,7 @@ Once the API server is deployed, we can fetch the API server URL. The chart uses
 
         .. tip::
 
-            For fine-grained control over the LoadBalancer service, refer to the `helm values of ingress-nginx <https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx#values>`_. Note that all values should be put under ``ingress-nginx.`` prefix since the ingress-nginx chart is installed as a subchart.
+            The chart renders the services in front of Traefik from ``ingress-nginx.controller.service`` the same way the ingress-nginx chart does, including the internal service (``ingress-nginx.controller.service.internal``). The services keep the ``-ingress-nginx-controller`` names from chart versions that bundled ingress-nginx, so existing deployments keep their addresses.
 
     .. tab-item:: NodePort
         :sync: nodeport-tab
@@ -136,7 +136,7 @@ Once the API server is deployed, we can fetch the API server URL. The chart uses
 
         .. code-block:: console
 
-            $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np --namespace $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
+            $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
             $ HOST=${NODE_IP}:${NODE_PORT}
             $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
@@ -1576,18 +1576,19 @@ If you want to use an existing service account and permissions that meet the :re
 Reusing ingress controller for API server
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-By default, the SkyPilot helm chart will deploy a new ingress-nginx controller when installing the API server. However, the ingress-nginx controller has some cluster-scope resources that will cause conflicts between multiple installations by default. It is recommended to reuse an existing ingress controller if you want to deploy multiple API servers in the same Kubernetes cluster.
+By default, the SkyPilot helm chart deploys a Traefik ingress controller with each API server, and the cluster-wide ``nginx`` IngressClass it serves conflicts between installations. To deploy multiple API servers in the same Kubernetes cluster, reuse one ingress controller.
 
-To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled <helm-values-ingress-nginx-enabled>` to ``false`` and set :ref:`ingress.path <helm-values-ingress-path>` to a unique path for the deploying API server. For example:
+The bundled Traefik only watches its own release's namespace. If the other API servers are in different namespaces, set :ref:`traefik.rbac.namespaced <helm-values-traefik>` to ``false`` on the release that runs Traefik so that it serves Ingresses in all namespaces. Then deploy the other API servers with :ref:`traefik.enabled <helm-values-traefik>` set to ``false``, and give each API server a unique :ref:`ingress.path <helm-values-ingress-path>`. For example:
 
 .. code-block:: bash
 
-    # The first API server, with niginx-ingress controller deployed
+    # The first API server, with the Traefik controller deployed
     # It is assumed that the first API server is already deployed. If it is not deployed yet,
     # add necessary values instead of specifying --reuse-values
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
+        --set traefik.rbac.namespaced=false \
         --set ingress.path=/first-server
 
     # The second API server, reusing the existing ingress controller and using a different path
@@ -1600,11 +1601,11 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
     # Deploy the API server, either in the same namespace or a different namespace
     helm upgrade --install $ANOTHER_RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $ANOTHER_NAMESPACE \
-        --set ingress-nginx.enabled=false \
+        --set traefik.enabled=false \
         --set ingress.path=/second-server \
         --set ingress.authCredentials=$ANOTHER_AUTH_STRING
 
-With the above commands, these two API servers will share the same ingress controller and serves under different paths of the same host. To get the endpoints, follow :ref:`Step 2: Get the API server URL <sky-get-api-server-url>` to get the host from the helm release that has the ingress-nginx controller deployed, and then append the basic auth and path to the host:
+With the above commands, these two API servers will share the same ingress controller and serves under different paths of the same host. To get the endpoints, follow :ref:`Step 2: Get the API server URL <sky-get-api-server-url>` to get the host from the helm release that has the Traefik controller deployed, and then append the basic auth and path to the host:
 
 .. code-block:: bash
 
@@ -1618,14 +1619,14 @@ With the above commands, these two API servers will share the same ingress contr
     $ echo $SECOND_ENDPOINT
     http://skypilot:yourpassword2@1.1.1.1/second-server
 
-The same approach also applies when you have a ingress-nginx controller deployed before installing the SkyPilot API server:
+The same approach also applies when you have an ingress controller serving the ``nginx`` IngressClass deployed before installing the SkyPilot API server:
 
 .. code-block:: bash
 
-    # The first API server, disabling the ingress-nginx controller to reuse the existing one
+    # The first API server, disabling the bundled controller to reuse the existing one
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
-        --set ingress-nginx.enabled=false \
+        --set traefik.enabled=false \
         --set ingress.path=/skypilot
 
 It is a good practice to specify a unique :ref:`ingress.path <helm-values-ingress-path>` too in this case, to avoid conflicts with other backends hosted on the same ingress controller.
@@ -1635,13 +1636,14 @@ It is a good practice to specify a unique :ref:`ingress.path <helm-values-ingres
 Use custom ingress controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-By default, the SkyPilot helm chart will deploy a new ingress-nginx controller when installing the API server. However, you can use a custom ingress controller by disabling the creation of nginx ingress controller and setting :ref:`ingress.ingressClassName <helm-values-ingress-ingressclassname>` to the ingress class name of your controller. In addition, most of the ingress controllers support customizing behavior by setting annotations on the ingress resource. You can set :ref:`ingress.annotations <helm-values-ingress-annotations>` in the helm values to pass annotations to the ingress resource. Here is an example of using a custom ingress controller:
+By default, the SkyPilot helm chart will deploy a Traefik ingress controller when installing the API server. However, you can use a custom ingress controller by disabling the bundled controller and setting :ref:`ingress.ingressClassName <helm-values-ingress-ingressclassname>` to the ingress class name of your controller. In addition, most of the ingress controllers support customizing behavior by setting annotations on the ingress resource. You can set :ref:`ingress.annotations <helm-values-ingress-annotations>` in the helm values to pass annotations to the ingress resource. Here is an example of using a custom ingress controller:
 
 .. code-block:: bash
 
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
+        --set traefik.enabled=false \
         --set ingress-nginx.enabled=false \
         --set ingress.ingressClassName=custom-ingress-class \
         --set ingress.annotations.custom-ingress-annotation=custom-ingress-annotation-value
@@ -1650,7 +1652,7 @@ By default, the SkyPilot helm chart will deploy a new ingress-nginx controller w
 
     .. TODO(aylei): document service account token based authentication and proxy auth for custom ingress controllers.
 
-    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` is only supported when using ingress-nginx controller. Consider using :ref:`OAuth2 <api-server-oauth>` to protect your API server instead.
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` relies on ``nginx.ingress.kubernetes.io`` annotations, which only the bundled Traefik controller and ingress-nginx support. Consider using :ref:`OAuth2 <api-server-oauth>` to protect your API server instead.
 
 
 .. _sky-api-server-cloud-deploy:

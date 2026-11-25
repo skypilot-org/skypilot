@@ -1,0 +1,443 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: traefik_test
+templates:
+  - templates/traefik.yaml
+  - charts/traefik/templates/deployment.yaml
+  - templates/NOTES.txt
+release:
+  name: skypilot
+  namespace: skypilot
+tests:
+  - it: should run Traefik scoped to the release namespace with the long read timeout
+    template: charts/traefik/templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --providers.kubernetesingressnginx.watchnamespace=skypilot
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --entryPoints.web.transport.respondingTimeouts.readTimeout=3600s
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --entryPoints.websecure.transport.respondingTimeouts.readTimeout=3600s
+      # The Grafana Ingress uses configuration-snippet; without this Traefik skips it.
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --providers.kubernetesingressnginx.allowSnippetAnnotations=true
+
+  - it: should render the IngressClass that Traefik's ingress-nginx provider serves
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: IngressClass
+    asserts:
+      - equal:
+          path: metadata.name
+          value: nginx
+      - equal:
+          path: spec.controller
+          value: k8s.io/ingress-nginx
+
+  - it: should keep the ingress-nginx controller Service name and select the Traefik pods
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    asserts:
+      - equal:
+          path: metadata.name
+          value: skypilot-ingress-nginx-controller
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: traefik
+            app.kubernetes.io/instance: skypilot-skypilot
+      - equal:
+          path: spec.ports[0].targetPort
+          value: web
+      - equal:
+          path: spec.ports[1].targetPort
+          value: websecure
+      - equal:
+          path: metadata.annotations["cloud.google.com/l4-rbs"]
+          value: enabled
+
+  - it: should carry over ingress-nginx Service settings
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    set:
+      ingress-nginx.controller.service.type: NodePort
+      ingress-nginx.controller.service.nodePorts.http: 30050
+      ingress-nginx.controller.service.nodePorts.https: 30051
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 30050
+      - equal:
+          path: spec.ports[1].nodePort
+          value: 30051
+
+  # Kubernetes rejects changing spec.loadBalancerClass on a LoadBalancer Service,
+  # so dropping it would fail the switch from ingress-nginx.
+  - it: should carry over loadBalancerClass
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    set:
+      ingress-nginx.controller.service.loadBalancerClass: example.com/lb
+    asserts:
+      - equal:
+          path: spec.loadBalancerClass
+          value: example.com/lb
+
+  - it: should keep an internal-only deployment internal
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.controller.service.external.enabled: false
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        networking.gke.io/load-balancer-type: Internal
+    asserts:
+      - hasDocuments:
+          count: 4
+      - equal:
+          path: metadata.name
+          value: skypilot-ingress-nginx-controller-internal
+        documentSelector:
+          path: kind
+          value: Service
+      - equal:
+          path: metadata.annotations["networking.gke.io/load-balancer-type"]
+          value: Internal
+        documentSelector:
+          path: kind
+          value: Service
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: traefik
+            app.kubernetes.io/instance: skypilot-skypilot
+        documentSelector:
+          path: kind
+          value: Service
+
+  - it: should keep HTTPS-only and custom ports
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    set:
+      ingress-nginx.controller.service.enableHttp: false
+      ingress-nginx.controller.service.ports.https: 8443
+    asserts:
+      - equal:
+          path: spec.ports
+          value:
+            - name: https
+              port: 8443
+              protocol: TCP
+              targetPort: websecure
+              appProtocol: https
+
+  # A load balancer that terminates TLS sends plaintext to the controller's http
+  # port (ingress-nginx's AWS NLB example); it must reach Traefik's web entry
+  # point, not its TLS entry point.
+  - it: should send TLS-terminated traffic to the web entry point
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    set:
+      ingress-nginx.controller.service.targetPorts.https: http
+    asserts:
+      - equal:
+          path: spec.ports[0].targetPort
+          value: web
+      - equal:
+          path: spec.ports[1].name
+          value: https
+      - equal:
+          path: spec.ports[1].targetPort
+          value: web
+
+  - it: should apply the internal Service's own target ports
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller-internal
+    set:
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        networking.gke.io/load-balancer-type: Internal
+      ingress-nginx.controller.service.internal.targetPorts.https: http
+    asserts:
+      - equal:
+          path: spec.ports[1].targetPort
+          value: web
+
+  - it: should refuse a target port with no Traefik equivalent
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.controller.service.targetPorts.https: metrics
+    asserts:
+      - failedTemplate:
+          errorPattern: has no Traefik equivalent
+
+  - it: should keep the Service names of a custom ingress-nginx controller name
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.controller.name: edge
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        networking.gke.io/load-balancer-type: Internal
+    asserts:
+      - containsDocument:
+          kind: Service
+          apiVersion: v1
+          name: skypilot-ingress-nginx-edge
+          any: true
+      - containsDocument:
+          kind: Service
+          apiVersion: v1
+          name: skypilot-ingress-nginx-edge-internal
+          any: true
+
+  # ingress-nginx quoted each annotation value and ran it through tpl;
+  # Kubernetes rejects a Service whose annotation values are not strings.
+  - it: should render Service annotations as strings, with templates expanded
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller
+    set:
+      ingress-nginx.controller.service.annotations:
+        example.com/flag: true
+        example.com/timeout: 3600
+        example.com/name: "{{ .Release.Name }}-lb"
+    asserts:
+      - equal:
+          path: metadata.annotations["example.com/flag"]
+          value: "true"
+      - equal:
+          path: metadata.annotations["example.com/timeout"]
+          value: "3600"
+      - equal:
+          path: metadata.annotations["example.com/name"]
+          value: skypilot-lb
+
+  - it: should render internal Service annotations as strings
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller-internal
+    set:
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        service.beta.kubernetes.io/azure-load-balancer-internal: true
+    asserts:
+      - equal:
+          path: metadata.annotations["service.beta.kubernetes.io/azure-load-balancer-internal"]
+          value: "true"
+
+  - it: should leave IP families to Kubernetes when they are set empty
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller
+    set:
+      ingress-nginx.controller.service.ipFamilies: []
+    asserts:
+      - notExists:
+          path: spec.ipFamilies
+      - equal:
+          path: spec.ipFamilyPolicy
+          value: SingleStack
+
+  - it: should leave the internal Service's IP family policy to Kubernetes when it is set empty
+    template: templates/traefik.yaml
+    documentSelector:
+      path: metadata.name
+      value: skypilot-ingress-nginx-controller-internal
+    set:
+      ingress-nginx.controller.service.internal.enabled: true
+      ingress-nginx.controller.service.internal.annotations:
+        networking.gke.io/load-balancer-type: Internal
+      ingress-nginx.controller.service.internal.ipFamilyPolicy: ""
+    asserts:
+      - notExists:
+          path: spec.ipFamilyPolicy
+      - equal:
+          path: spec.ipFamilies
+          value: [IPv4]
+
+  - it: should refuse an API server Ingress class that Traefik does not serve
+    template: templates/traefik.yaml
+    set:
+      ingress.ingressClassName: custom-ingress-class
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress.ingressClassName is "custom-ingress-class", but the bundled Traefik controller serves the IngressClass "nginx"
+
+  - it: should refuse a Grafana Ingress class that Traefik does not serve
+    template: templates/traefik.yaml
+    set:
+      grafana.enabled: true
+      grafana.ingress.ingressClassName: custom-ingress-class
+    asserts:
+      - failedTemplate:
+          errorPattern: grafana.ingress.ingressClassName is "custom-ingress-class"
+
+  - it: should ignore the Ingress class when the API server Ingress is disabled
+    template: templates/traefik.yaml
+    set:
+      ingress.enabled: false
+      ingress.ingressClassName: custom-ingress-class
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: should serve a custom Ingress class that Traefik is set to
+    set:
+      ingress.ingressClassName: sky-private
+      traefik.providers.kubernetesIngressNGINX.ingressClass: sky-private
+    asserts:
+      - equal:
+          path: metadata.name
+          value: sky-private
+        template: templates/traefik.yaml
+        documentSelector:
+          path: kind
+          value: IngressClass
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --providers.kubernetesingressnginx.ingressClass=sky-private
+        template: charts/traefik/templates/deployment.yaml
+
+  - it: should refuse ingress-nginx TCP and UDP port mappings
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.tcp:
+        "2222": skypilot/ssh:22
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress-nginx.tcp and ingress-nginx.udp port mappings are not supported
+
+  - it: should refuse a Traefik namespace other than the release namespace
+    template: templates/traefik.yaml
+    set:
+      traefik.namespaceOverride: edge
+    asserts:
+      - failedTemplate:
+          errorPattern: traefik.namespaceOverride=edge is not supported
+
+  - it: should refuse an ingress-nginx namespace other than the release namespace
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.namespaceOverride: ingress
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress-nginx.namespaceOverride=ingress puts the ingress-nginx controller Service in namespace ingress
+
+  - it: should accept a namespace override equal to the release namespace
+    template: templates/traefik.yaml
+    set:
+      traefik.namespaceOverride: skypilot
+      ingress-nginx.namespaceOverride: skypilot
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: should bind the IngressClass ClusterRole to Traefik's ServiceAccount
+    template: templates/traefik.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRoleBinding
+    asserts:
+      - equal:
+          path: subjects[0].name
+          value: skypilot-traefik
+      - equal:
+          path: subjects[0].namespace
+          value: skypilot
+
+  - it: should render nothing when Traefik is disabled
+    template: templates/traefik.yaml
+    set:
+      traefik.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should refuse to run both controllers
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: Enable only one ingress controller
+
+  # `helm upgrade --reuse-values` from a chart without Traefik renders Traefik
+  # with only the Traefik chart's own defaults.
+  - it: should explain how to upgrade an ingress-nginx release without Traefik settings
+    template: templates/traefik.yaml
+    set:
+      ingress-nginx.enabled: true
+      traefik.providers.kubernetesIngressNGINX.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: --reset-then-reuse-values --set ingress-nginx.enabled=false
+
+  - it: should refuse ingress-level OAuth2 proxy with Traefik
+    template: templates/traefik.yaml
+    set:
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: https://accounts.google.com
+      ingress.oauth2-proxy.client-id: client-id
+      ingress.oauth2-proxy.client-secret: client-secret
+    asserts:
+      - failedTemplate:
+          errorPattern: Move the settings from ingress.oauth2-proxy.\* to auth.oauth.\*
+
+  - it: should allow API server OAuth with Traefik
+    template: templates/traefik.yaml
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: https://accounts.google.com
+      auth.oauth.client-id: client-id
+      auth.oauth.client-secret: client-secret
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: should keep ingress-level OAuth2 proxy working with ingress-nginx
+    template: templates/traefik.yaml
+    set:
+      traefik.enabled: false
+      ingress-nginx.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: https://accounts.google.com
+      ingress.oauth2-proxy.client-id: client-id
+      ingress.oauth2-proxy.client-secret: client-secret
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should point ingress-nginx releases at the Traefik switch
+    template: templates/NOTES.txt
+    set:
+      ingress-nginx.enabled: true
+      traefik.enabled: false
+    asserts:
+      - matchRegexRaw:
+          pattern: "--reset-then-reuse-values"

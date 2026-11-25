@@ -336,6 +336,8 @@ Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for
 OAuth migration guide
 ^^^^^^^^^^^^^^^^^^^^^
 
+The Helm chart's bundled Traefik ingress controller only supports ``auth.oauth``. If your API server uses ``ingress.oauth2-proxy``, migrate before switching to Traefik.
+
 .. dropdown:: Migration guide for auth proxy based authentication (before SkyPilot v0.10.2)
 
     .. TODO(aylei): Add the nightly version after this change get released
