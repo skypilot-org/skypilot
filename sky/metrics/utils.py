@@ -12,7 +12,7 @@ import shlex
 import subprocess
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 import urllib.parse
 
 import httpx
@@ -2344,7 +2344,9 @@ def get_slurm_prometheus_filters(cluster_name: str) -> Dict[str, str]:
     return filters
 
 
-def slurm_federate_matchers(cluster_name: str) -> List[str]:
+def slurm_federate_matchers(
+        cluster_name: str,
+        federated: Optional[Iterable[str]] = None) -> List[str]:
     """Label matchers appended to this cluster's /federate selectors.
 
     Two sources, both aimed at the same problem: one Prometheus that
@@ -2365,6 +2367,9 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
        is logged instead of silently double-counting. A label this
        cluster already constrains is left alone, since its own filter is
        the more specific statement.
+
+    ``federated`` is the list of clusters being federated; when omitted it
+    is enumerated with get_slurm_metrics_clusters().
     """
     own = get_slurm_prometheus_filters(cluster_name)
     matchers = [
@@ -2393,10 +2398,11 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
     if not candidates:
         return matchers
 
-    # Narrowed to clusters actually federated: a cluster excluded by
-    # slurm.allowed_clusters claims nothing, so subtracting its slice here
-    # would drop series no cluster goes on to collect.
-    federated = set(get_slurm_metrics_clusters())
+    # Narrowed to clusters actually federated: a cluster no workspace allows
+    # claims nothing, so subtracting its slice here would drop series no
+    # cluster goes on to collect.
+    federated = set(
+        get_slurm_metrics_clusters() if federated is None else federated)
     for sibling in candidates:
         if sibling not in federated:
             continue
@@ -2440,9 +2446,9 @@ def _with_label_matchers(pattern: str, matchers: List[str]) -> str:
 def get_slurm_metrics_clusters() -> List[str]:
     """Slurm clusters opted into GPU metrics federation.
 
-    A cluster participates when it is allowed by ``slurm.allowed_clusters``
-    (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
-    in ``~/.slurm/config``) *and*
+    A cluster participates when some workspace allows it (the server's
+    ``slurm.allowed_clusters`` or a workspace's override, as with Kubernetes
+    contexts; defaults to every cluster in ``~/.slurm/config``) *and*
     ``slurm.cluster_configs.<name>.prometheus.url`` is set: the URL of a
     Prometheus reachable *from a login node* — the cluster's own, or the
     ``prometheus.via`` cluster's — that scrapes the cluster's node/DCGM
@@ -2452,21 +2458,28 @@ def get_slurm_metrics_clusters() -> List[str]:
     try:
         # pylint: disable=import-outside-toplevel
         from sky import clouds
+        # In-function: visibility imports global_user_state (through
+        # workspaces.core), which imports this module.
+        from sky.workspaces import visibility
 
-        # Scope federation to the same clusters the rest of SkyPilot uses,
-        # honoring slurm.allowed_clusters (mirrors how the Kubernetes federation
-        # respects allowed_contexts). Defaults to all clusters in
-        # ~/.slurm/config when allowed_clusters is unset.
-        names = clouds.Slurm.existing_allowed_clusters(silent=True)
+        names = set(clouds.Slurm.existing_allowed_clusters(silent=True))
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not enumerate Slurm clusters: {e}')
         return []
-    return [name for name in names if _slurm_prometheus_url(name)]
+    # Clusters only another workspace allows are federated too, as the
+    # Kubernetes federation does with get_every_workspace_contexts().
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {})
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    names |= visibility.visible_for_workspaces(workspaces, 'slurm')
+    return sorted(name for name in names if _slurm_prometheus_url(name))
 
 
-async def get_metrics_for_slurm_cluster(cluster_name: str,
-                                        stats: Optional[FederationStats] = None,
-                                        timeout: float = 30.0) -> str:
+async def get_metrics_for_slurm_cluster(
+        cluster_name: str,
+        stats: Optional[FederationStats] = None,
+        timeout: float = 30.0,
+        federated: Optional[Iterable[str]] = None) -> str:
     """Federate GPU metrics from a Slurm cluster's own Prometheus.
 
     The /federate request is executed *on* a login node (curl) through
@@ -2495,6 +2508,9 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
         timeout: Budget in seconds for the whole fetch. Must fit within the
             per-context timeout in sky/server/metrics.py
             (_PER_CONTEXT_TIMEOUT_SECONDS).
+        federated: The clusters being federated, passed so the sibling
+            filter does not enumerate them again on the event loop. See
+            slurm_federate_matchers().
 
     Raises:
         Exception: If the login-node curl or the federate request fails.
@@ -2511,7 +2527,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     # Scope the pull when the source Prometheus aggregates several fleets;
     # without this every fleet's series would be stamped with this cluster's
     # context. See slurm_federate_matchers().
-    matchers = slurm_federate_matchers(cluster_name)
+    matchers = slurm_federate_matchers(cluster_name, federated)
     query = '&'.join('match[]=' +
                      urllib.parse.quote(_with_label_matchers(pattern, matchers))
                      for pattern in SLURM_GPU_METRICS_MATCH_PATTERNS)
