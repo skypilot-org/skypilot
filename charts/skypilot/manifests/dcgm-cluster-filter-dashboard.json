@@ -585,7 +585,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "InfiniBand / RoCE throughput of each node running this cluster's GPU pods, summed over the node's RDMA ports (node-exporter's node_infiniband_port_data_* counters). Transmit is plotted up, receive down. The counters are per node, so on a shared node they include other workloads' traffic.",
+      "description": "InfiniBand / RoCE throughput of each node running this cluster's GPU pods, summed over the node's RDMA ports (node-exporter's node_infiniband_port_data_* counters). Receive (rx) is plotted up, transmit (tx) down. The counters are per node, so on a shared node they include other workloads' traffic.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -643,7 +643,7 @@
           {
             "matcher": {
               "id": "byFrameRefID",
-              "options": "B"
+              "options": "A"
             },
             "properties": [
               {
@@ -689,7 +689,7 @@
           "expr": "sum by (cluster, node) (\n  irate(node_infiniband_port_data_transmitted_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)",
           "hide": false,
           "instant": false,
-          "legendFormat": "{{node}} tx",
+          "legendFormat": "{{node}} tx (transmit)",
           "range": true,
           "refId": "A"
         },
@@ -702,7 +702,7 @@
           "expr": "sum by (cluster, node) (\n  irate(node_infiniband_port_data_received_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)",
           "hide": false,
           "instant": false,
-          "legendFormat": "{{node}} rx",
+          "legendFormat": "{{node}} rx (receive)",
           "range": true,
           "refId": "B"
         }
