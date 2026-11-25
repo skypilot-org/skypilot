@@ -167,8 +167,10 @@ def test_azure_acr_managed_identity_image():
                 '--location eastus --output none',
                 f'az acr create --resource-group {resource_group} '
                 f'--name {registry_name} --sku Basic --output none',
+                # Import from the MCR mirror of Docker Hub's ubuntu image to
+                # avoid Docker Hub's unauthenticated pull rate limit.
                 f'az acr import --name {registry_name} '
-                '--source docker.io/library/ubuntu:22.04 '
+                '--source mcr.microsoft.com/mirror/docker/library/ubuntu:22.04 '
                 '--image skypilot-ci-test:latest --force --output none',
                 f'az identity create --resource-group {resource_group} '
                 f'--name {identity_name} --output none',
