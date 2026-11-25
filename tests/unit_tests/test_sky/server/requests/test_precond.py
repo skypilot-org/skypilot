@@ -9,15 +9,22 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as api_requests
 from sky.utils import status_lib
 
+_REQUESTS = 'sky.server.requests.requests'
 
-class TestPrecondition(unittest.TestCase):
+
+class TestPrecondition(unittest.IsolatedAsyncioTestCase):
     """Unit tests for Precondition class."""
 
     def setUp(self):
         self.request_id = 'test-request'
 
-    @mock.patch('sky.server.requests.requests.get_request_async')
-    async def test_precondition_timeout(self, mock_get_request):
+    @mock.patch(f'{_REQUESTS}.update_status_msg_async',
+                new_callable=mock.AsyncMock)
+    @mock.patch(f'{_REQUESTS}.set_request_failed_async',
+                new_callable=mock.AsyncMock)
+    @mock.patch(f'{_REQUESTS}.get_request_async', new_callable=mock.AsyncMock)
+    async def test_precondition_timeout(self, mock_get_request, mock_set_failed,
+                                        _):
         """Test Precondition timeout behavior."""
 
         class Timeouted(preconditions.Precondition):
@@ -28,15 +35,15 @@ class TestPrecondition(unittest.TestCase):
         mock_get_request.return_value = mock.MagicMock(
             status=api_requests.RequestStatus.PENDING)
 
-        p = Timeouted(self.request_id, timeout=0.1)
+        p = Timeouted(self.request_id, check_interval=0.01, timeout=0.1)
         result = await p
 
         self.assertFalse(result)
-        api_requests.set_request_failed.assert_called_once()
-        self.assertIsInstance(api_requests.set_request_failed.call_args[0][1],
+        mock_set_failed.assert_awaited_once()
+        self.assertIsInstance(mock_set_failed.await_args.args[1],
                               exceptions.RequestCancelled)
 
-    @mock.patch('sky.server.requests.requests.get_request_async')
+    @mock.patch(f'{_REQUESTS}.get_request_async', new_callable=mock.AsyncMock)
     async def test_precondition_cancelled(self, mock_get_request):
         """Test Precondition cancellation behavior."""
 
@@ -53,8 +60,11 @@ class TestPrecondition(unittest.TestCase):
 
         self.assertFalse(result)
 
-    @mock.patch('sky.server.requests.requests.get_request_async')
-    async def test_precondition_check_exception(self, mock_get_request):
+    @mock.patch(f'{_REQUESTS}.set_request_failed_async',
+                new_callable=mock.AsyncMock)
+    @mock.patch(f'{_REQUESTS}.get_request_async', new_callable=mock.AsyncMock)
+    async def test_precondition_check_exception(self, mock_get_request,
+                                                mock_set_failed):
         """Test Precondition behavior when check raises exception."""
 
         class Errored(preconditions.Precondition):
@@ -69,10 +79,16 @@ class TestPrecondition(unittest.TestCase):
         result = await p
 
         self.assertFalse(result)
-        api_requests.set_request_failed.assert_called_once()
+        mock_set_failed.assert_awaited_once()
 
 
-class TestClusterStartCompletePrecondition(unittest.TestCase):
+# The sync getter blocks the event loop, so it must not be called.
+@mock.patch('sky.global_user_state.get_status_from_cluster_name',
+            side_effect=AssertionError('sync DB read on the event loop'))
+@mock.patch('sky.global_user_state.get_status_from_cluster_name_async',
+            new_callable=mock.AsyncMock)
+@mock.patch(f'{_REQUESTS}.get_request_tasks_async', new_callable=mock.AsyncMock)
+class TestClusterStartCompletePrecondition(unittest.IsolatedAsyncioTestCase):
     """Unit tests for ClusterStartCompletePrecondition class."""
 
     def setUp(self):
@@ -80,63 +96,50 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
         self.request_id = 'test-request'
         self.cluster_name = 'test-cluster'
 
-    @mock.patch('sky.global_user_state.get_cluster_from_name')
-    @mock.patch('sky.server.requests.requests.get_request_tasks')
-    async def test_cluster_up(self, mock_get_tasks, mock_get_cluster):
-        """Test when cluster is UP."""
-        mock_get_cluster.return_value = {'status': status_lib.ClusterStatus.UP}
-        mock_get_tasks.return_value = []
-
+    async def _check(self):
         p = preconditions.ClusterStartCompletePrecondition(
             self.request_id, self.cluster_name)
-        met, msg = await p.check()
+        return await p.check()
+
+    async def test_cluster_up(self, mock_get_tasks, mock_get_status, _):
+        """Test when cluster is UP."""
+        mock_get_status.return_value = status_lib.ClusterStatus.UP
+
+        met, msg = await self._check()
 
         self.assertTrue(met)
         self.assertIsNone(msg)
+        mock_get_status.assert_awaited_once_with(self.cluster_name)
         # Should not check tasks when cluster is UP
         mock_get_tasks.assert_not_called()
 
-    @mock.patch('sky.global_user_state.get_cluster_from_name')
-    @mock.patch('sky.server.requests.requests.get_request_tasks')
-    async def test_cluster_not_found(self, mock_get_tasks, mock_get_cluster):
+    async def test_cluster_not_found(self, mock_get_tasks, mock_get_status, _):
         """Test when cluster is not found and no tasks are running."""
-        mock_get_cluster.return_value = None
+        mock_get_status.return_value = None
         mock_get_tasks.return_value = []
 
-        p = preconditions.ClusterStartCompletePrecondition(
-            self.request_id, self.cluster_name)
-        met, msg = await p.check()
+        met, msg = await self._check()
 
         self.assertTrue(met)
         self.assertIsNone(msg)
 
-    @mock.patch('sky.global_user_state.get_cluster_from_name')
-    @mock.patch('sky.server.requests.requests.get_request_tasks')
-    async def test_cluster_starting(self, mock_get_tasks, mock_get_cluster):
+    async def test_cluster_starting(self, mock_get_tasks, mock_get_status, _):
         """Test when cluster is being started and there are tasks running."""
-        mock_get_cluster.return_value = {
-            'status': status_lib.ClusterStatus.INIT
-        }
+        mock_get_status.return_value = status_lib.ClusterStatus.INIT
         mock_get_tasks.return_value = [mock.MagicMock()]
 
-        p = preconditions.ClusterStartCompletePrecondition(
-            self.request_id, self.cluster_name)
-        met, msg = await p.check()
+        met, msg = await self._check()
 
         self.assertFalse(met)
         self.assertIn('Waiting for cluster', msg)
 
-    @mock.patch('sky.global_user_state.get_cluster_from_name')
-    @mock.patch('sky.server.requests.requests.get_request_tasks')
     async def test_cluster_not_found_but_tasks_running(self, mock_get_tasks,
-                                                       mock_get_cluster):
+                                                       mock_get_status, _):
         """Test when cluster is not found but there are tasks running."""
-        mock_get_cluster.return_value = None
+        mock_get_status.return_value = None
         mock_get_tasks.return_value = [mock.MagicMock()]
 
-        p = preconditions.ClusterStartCompletePrecondition(
-            self.request_id, self.cluster_name)
-        met, msg = await p.check()
+        met = (await self._check())[0]
 
         self.assertFalse(met)
 

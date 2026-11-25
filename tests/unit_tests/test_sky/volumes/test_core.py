@@ -2307,7 +2307,9 @@ class TestVolumeListScopedToNames:
 
         def fake_get_volumes(is_ephemeral=None,
                              workspaces_filter=None,
-                             volume_names=None):
+                             volume_names=None,
+                             limit=None,
+                             after_name=None):
             """Stands in for the database, applying every filter it is given.
 
             Faithful on the point that matters: the filters compose. Dropping
@@ -2315,7 +2317,7 @@ class TestVolumeListScopedToNames:
             caller should not have seen, rather than as an empty result from an
             empty test database.
             """
-            del is_ephemeral
+            del is_ephemeral, limit, after_name
             out = rows
             if workspaces_filter is not None:
                 out = [r for r in out if r['workspace'] in workspaces_filter]

@@ -4,9 +4,11 @@
 These verify the opt-in gating of `_reuse_port_enabled` (env var values,
 uds/fd listeners, platform support) and the socket-level behavior of
 `_bind_reuse_port_socket` (SO_REUSEPORT is set, multiple binds on the same
-address succeed, bind failure exits instead of raising).
+address succeed, bind failure exits instead of raising, spawned children do
+not inherit the socket).
 """
 
+import asyncio
 import socket
 import sys
 
@@ -15,6 +17,7 @@ import uvicorn as uvicorn_lib
 
 from sky.server import uvicorn
 from sky.skylet import constants
+from sky.utils import asyncio_utils
 
 _HAS_SO_REUSEPORT = hasattr(socket, 'SO_REUSEPORT')
 
@@ -102,11 +105,50 @@ def test_bind_reuse_port_socket_allows_multiple_binds():
                 assert sock.getsockopt(socket.SOL_SOCKET,
                                        socket.SO_REUSEPORT) != 0
                 assert sock.getsockname()[1] == port
-                assert sock.get_inheritable()
+                assert not sock.get_inheritable()
         finally:
             sock2.close()
     finally:
         sock1.close()
+
+
+# Prints the port of the listening socket at fd argv[1], or 'absent'.
+_CHILD_FD_PROBE = '\n'.join([
+    'import socket',
+    'import sys',
+    'try:',
+    '    sock = socket.socket(fileno=int(sys.argv[1]))',
+    'except OSError:',
+    '    print("absent")',
+    'else:',
+    '    print(sock.getsockname()[1])',
+    '    sock.detach()',
+])
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+def test_bind_reuse_port_socket_not_inherited_by_spawned_child():
+    """A child spawned by a worker does not hold the worker's listener.
+
+    `spawn_without_fork` passes every inheritable fd to the child. A child
+    that held a worker's listener would keep it in the SO_REUSEPORT group
+    after the worker exits, and the kernel would keep routing new
+    connections to a queue that no worker accepts.
+    """
+    sock = uvicorn._bind_reuse_port_socket(_config())
+    try:
+        sock.listen()
+
+        async def spawn_probe():
+            return await asyncio_utils.spawn_without_fork(
+                [sys.executable, '-c', _CHILD_FD_PROBE,
+                 str(sock.fileno())])
+
+        proc = asyncio.run(spawn_probe())
+        out, _ = proc.communicate(timeout=60)
+    finally:
+        sock.close()
+    assert out.decode().strip() == 'absent'
 
 
 @pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')

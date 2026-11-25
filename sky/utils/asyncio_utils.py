@@ -391,7 +391,8 @@ async def spawn_without_fork(
         # umask. Drop any one of them and this silently reverts to fork(),
         # which is what this function exists to avoid. Python opens its own
         # fds with O_CLOEXEC (PEP 446), so `close_fds=False` passes on stdio
-        # only.
+        # and any fd explicitly made inheritable; keep long-lived fds such as
+        # listening sockets non-inheritable.
         return subprocess.Popen(
             args,
             executable=executable,

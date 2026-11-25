@@ -2,7 +2,9 @@
 
 import contextlib
 import dataclasses
+import functools
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -11,12 +13,15 @@ import pathlib
 import tempfile
 import time
 import typing
-from typing import Dict, Generator, Iterable, Optional, Tuple
+from typing import (Any, Callable, Dict, Generator, Iterable, List, Optional,
+                    Tuple, TypeVar)
 import uuid
 import zipfile
 
+import colorama
 import filelock
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
@@ -25,10 +30,13 @@ from sky.data import storage_utils
 from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -44,6 +52,8 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
+
+F = TypeVar('F', bound=Callable[..., Any])
 
 # The chunk size for downloading the logs from the API server.
 _DOWNLOAD_CHUNK_BYTES = 8192
@@ -504,3 +514,193 @@ def upload_mounts_to_api_server(
         if use_v2:
             return dag, blob_id
     return dag, None
+
+
+def raise_exception_object_on_client(e: BaseException) -> None:
+    """Raise the exception object on the client."""
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stacktrace = getattr(e, 'stacktrace', str(e))
+        logger.error('=== Traceback on SkyPilot API Server ===\n'
+                     f'{stacktrace}')
+    with ux_utils.print_exception_no_traceback():
+        raise e
+
+
+def request_result(request_id: str, status_code: int, body: Any,
+                   text: Callable[[], str]) -> Any:
+    """The result of a request from an /api/get response, or raises its error.
+
+    text returns the raw response body, for the error message.
+    """
+    request_task = None
+    if status_code == 200 and body is not None:
+        request_task = requests_lib.Request.decode(
+            payloads.RequestPayload(**body))
+    elif status_code == 500:
+        try:
+            request_task = requests_lib.Request.decode(
+                payloads.RequestPayload(**body.get('detail')))
+            logger.debug(f'Got request with error: {request_task.name}')
+        except Exception:  # pylint: disable=broad-except
+            request_task = None
+    if request_task is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to get request {request_id}: '
+                               f'{status_code} {text()}')
+    error = request_task.get_error()
+    if error is not None:
+        raise_exception_object_on_client(error['object'])
+    if request_task.status == requests_lib.RequestStatus.CANCELLED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.RequestCancelled(
+                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
+                f'({request_task.request_id}) is cancelled by another process.'
+                f'{colorama.Style.RESET_ALL}')
+    return request_task.get_return_value()
+
+
+def sync_page_size(limit: Optional[int], min_api_version: int) -> Optional[int]:
+    """The page size to fetch a list in as sync calls, or None for one call.
+
+    A list is paged when the server answers sync calls up to a smaller `limit`
+    than asked for (None asks for all of it) and is at least
+    `min_api_version`, so it takes the list's cursor.
+    """
+    max_limit = rest.get_sync_call_max_limit()
+    if max_limit is None or (limit is not None and limit <= max_limit):
+        return None
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version is None or remote_api_version < min_api_version:
+        return None
+    return max_limit
+
+
+def fetch_in_pages(
+    send: Callable[[Any, int], server_common.RequestId],
+    page_size: int,
+    read_page: Callable[[Any, Any], Optional[Tuple[List[Any], int, Any]]],
+    merge: Callable[[Any, List[Any]], Any],
+    limit: Optional[int] = None,
+) -> Optional[server_common.RequestId]:
+    """Fetches a list as sync calls of up to page_size items each.
+
+    send(cursor, size) sends one page; the first cursor is None.
+    read_page(value, cursor) returns the rows of the page sent with `cursor`,
+    how many items they count as against the page size and `limit`, and the
+    cursor of the next page. It returns None when it cannot read the value,
+    or when a row does not come after `cursor`: something on the way dropped
+    the cursor and sent an earlier page again. merge(last_value, rows) builds
+    the result from the last page's value and the rows of every page.
+
+    The list ends at the first empty page or when `limit` items are fetched.
+
+    Returns a request id that carries the combined result, or the request id
+    of a page that failed. Returns None when a page is not answered in its
+    response, read_page returns None, or the server refuses the cursor with
+    QueueCursorNotSupportedError; the caller then fetches the list in one
+    call.
+    """
+    rows: List[Any] = []
+    fetched = 0
+    cursor: Any = None
+    while True:
+        size = page_size
+        if limit is not None:
+            size = min(size, limit - fetched)
+        request_id = send(cursor, size)
+        if request_id.sync_response is None:
+            return None
+        status_code, payload = request_id.sync_response
+        if status_code != 200:
+            return None if _is_cursor_refused(payload) else request_id
+        value = json.loads(payload['return_value'])
+        page = read_page(value, cursor)
+        if page is None:
+            return None
+        page_rows, count, cursor = page
+        rows.extend(page_rows)
+        fetched += count
+        # A short page does not end the list: the server can drop rows after
+        # applying its limit, e.g. records that fail validation.
+        if count == 0 or (limit is not None and fetched >= limit):
+            break
+    request_id.sync_response = (200, {
+        **payload, 'return_value': json.dumps(merge(value, rows))
+    })
+    return request_id
+
+
+def fetch_list_in_pages(
+    send: Callable[[Any, int], server_common.RequestId], page_size: int,
+    cursor_of: Callable[[Dict[str, Any]],
+                        Any], follows: Callable[[Dict[str, Any], Any], bool]
+) -> Optional[server_common.RequestId]:
+    """fetch_in_pages for a request that returns a list of rows.
+
+    cursor_of(row) is the cursor after that row; follows(row, cursor) is
+    whether the row comes after that cursor.
+    """
+
+    def read_page(value: Any,
+                  cursor: Any) -> Optional[Tuple[List[Any], int, Any]]:
+        if not isinstance(value, list):
+            return None
+        if cursor is not None and not all(
+                follows(row, cursor) for row in value):
+            return None
+        return value, len(value), cursor_of(value[-1]) if value else None
+
+    return fetch_in_pages(send, page_size, read_page, lambda _, rows: rows)
+
+
+def _is_cursor_refused(error_body: Any) -> bool:
+    """Whether a sync call failed with QueueCursorNotSupportedError."""
+    try:
+        error = json.loads(error_body['detail']['error'])
+        return error['type'] == exceptions.QueueCursorNotSupportedError.__name__
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def return_sync_call_result(func: F) -> F:
+    """Returns the result a sync call already carries instead of calling func.
+
+    func takes `request_id` and optionally `follow`; with follow=False it
+    returns None, as streaming without following does.
+    """
+    signature = inspect.signature(func)
+
+    def _answer(args, kwargs) -> Tuple[bool, Any]:
+        """(True, result) when the server answered the call in its response."""
+        bound = signature.bind_partial(
+            *args,
+            **{k: v for k, v in kwargs.items() if k in signature.parameters})
+        request_id = bound.arguments.get('request_id')
+        sync_response = getattr(request_id, 'sync_response', None)
+        if sync_response is None:
+            return False, None
+        if not bound.arguments.get('follow', True):
+            return True, None
+        status_code, body = sync_response
+        return True, request_result(str(request_id), status_code, body,
+                                    lambda: str(body))
+
+    if inspect.iscoroutinefunction(inspect.unwrap(func)):
+
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            answered, result = _answer(args, kwargs)
+            if answered:
+                return result
+            return await func(*args, **kwargs)
+
+        return typing.cast(F, async_wrapper)
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        answered, result = _answer(args, kwargs)
+        if answered:
+            return result
+        return func(*args, **kwargs)
+
+    return typing.cast(F, wrapper)

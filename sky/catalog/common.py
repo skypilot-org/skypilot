@@ -164,17 +164,31 @@ class LazyDataFrame:
     def __init__(self, filename: str, update_if_stale_func: Callable[[], bool]):
         self._filename = filename
         self._df: Optional['pd.DataFrame'] = None
+        # mtime of the file when self._df was read. Another process (e.g.
+        # another API server worker) may replace the file on disk; comparing
+        # the mtime makes every process pick up the new copy, not only the
+        # one that downloaded it.
+        self._df_mtime: Optional[float] = None
         self._update_if_stale_func = update_if_stale_func
+
+    def _file_mtime(self) -> Optional[float]:
+        try:
+            return os.path.getmtime(self._filename)
+        except OSError:
+            return None
 
     @annotations.lru_cache(scope='request')
     def _load_df(self) -> 'pd.DataFrame':
-        if self._update_if_stale_func() or self._df is None:
+        updated = self._update_if_stale_func()
+        mtime = self._file_mtime()
+        if updated or self._df is None or mtime != self._df_mtime:
             try:
                 # A catalog whose rows all lack a GPU has an empty
                 # AcceleratorName column, which pandas reads as float. The
                 # .str filters on that column then raise AttributeError.
                 self._df = pd.read_csv(self._filename,
                                        dtype={'AcceleratorName': str})
+                self._df_mtime = mtime
             except Exception as e:  # pylint: disable=broad-except
                 # As users can manually modify the catalog, read_csv can fail.
                 logger.error(f'Failed to read {self._filename}. '

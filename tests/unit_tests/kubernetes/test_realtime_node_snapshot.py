@@ -88,26 +88,32 @@ class _Response(io.BytesIO):
         pass
 
 
-class _CoreApi:
-    """Serves list calls from fixed node and pod objects, counting calls."""
+class _ApiClient:
+    """Serves list calls from fixed node and pod objects, recording paths."""
 
     def __init__(self, nodes: List[Dict[str, Any]], pods: List[Dict[str, Any]]):
         self.nodes = nodes
         self.pods = pods
         self.calls: List[str] = []
 
-    def list_node(self, **kwargs):
+    def call_api(self, path, method, query_params, **kwargs):
         del kwargs
-        self.calls.append('list_node')
-        return _Response(json.dumps({'items': self.nodes}).encode())
+        assert method == 'GET'
+        self.calls.append(path)
+        if path == _NODES_PATH:
+            items = self.nodes
+        else:
+            assert path == _PODS_PATH, path
+            field_selector = dict(query_params)['fieldSelector']
+            excluded = {f.split('!=')[1] for f in field_selector.split(',')}
+            items = [
+                p for p in self.pods if p['status']['phase'] not in excluded
+            ]
+        return _Response(json.dumps({'items': items}).encode())
 
-    def list_pod_for_all_namespaces(self, field_selector: str, **kwargs):
-        del kwargs
-        self.calls.append('list_pod_for_all_namespaces')
-        excluded = {f.split('!=')[1] for f in field_selector.split(',')}
-        pods = [p for p in self.pods if p['status']['phase'] not in excluded]
-        return _Response(json.dumps({'items': pods}).encode())
 
+_NODES_PATH = '/api/v1/nodes'
+_PODS_PATH = '/api/v1/pods'
 
 _h100 = functools.partial(
     _node,
@@ -180,6 +186,31 @@ _GKE_TPU_PODS = [
     _pod('tpu-job', 'tpu-multi-host', {'google.com/tpu': '4'}),
 ]
 
+
+def _ironwood_vm(name: str, pool: str, ip: str) -> Dict[str, Any]:
+    return _node(name,
+                 labels={
+                     'cloud.google.com/gke-tpu-accelerator': 'tpu7x',
+                     'cloud.google.com/gke-tpu-topology': '2x2x2',
+                     'cloud.google.com/gke-accelerator-count': '4',
+                     'cloud.google.com/gke-nodepool': pool,
+                 },
+                 capacity={'google.com/tpu': '4'},
+                 ip=ip)
+
+
+# Two 2x2x2 Ironwood slices: one VM of slice-a is busy, slice-b is idle.
+_IRONWOOD_SLICE_NODES = [
+    _ironwood_vm('a-1', 'slice-a', '10.0.1.1'),
+    _ironwood_vm('a-2', 'slice-a', '10.0.1.2'),
+    _ironwood_vm('b-1', 'slice-b', '10.0.2.1'),
+    _ironwood_vm('b-2', 'slice-b', '10.0.2.2'),
+]
+
+_IRONWOOD_SLICE_PODS = [
+    _pod('tpu-job', 'a-1', {'google.com/tpu': '4'}),
+]
+
 _NEURON_NODES = [
     _node('trn1',
           labels={'karpenter.k8s.aws/instance-accelerator-name': 'trainium'},
@@ -228,6 +259,7 @@ _TOLERATION = [{
 _CLUSTERS = {
     'gfd': (_GFD_NODES, _GFD_PODS),
     'gke-tpu': (_GKE_TPU_NODES, _GKE_TPU_PODS),
+    'ironwood-slices': (_IRONWOOD_SLICE_NODES, _IRONWOOD_SLICE_PODS),
     'neuron': (_NEURON_NODES, _NEURON_PODS),
     'amd': (_AMD_NODES, _AMD_PODS),
     'custom-key': (_CUSTOM_KEY_NODES, _CUSTOM_KEY_PODS),
@@ -265,22 +297,21 @@ _Provider = Callable[[str, List[str]],
                      Optional[plugin_extensions.KubernetesNodeSnapshot]]
 
 
-def _serve(monkeypatch, core_api: _CoreApi,
-           provider: Optional[_Provider]) -> None:
-    """Starts a request served by core_api and the snapshot provider."""
+def _serve(monkeypatch, api: _ApiClient, provider: Optional[_Provider]) -> None:
+    """Starts a request served by api and the snapshot provider."""
     annotations.clear_request_level_cache()
-    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                        lambda context=None: core_api)
+    monkeypatch.setattr('sky.adaptors.kubernetes.api_client',
+                        lambda context=None: api)
     monkeypatch.setattr(plugin_extensions.NodeInfoSource,
                         '_snapshot_provider_func', provider)
 
 
 def _list_realtime(monkeypatch,
-                   core_api: _CoreApi,
+                   api: _ApiClient,
                    provider: Optional[_Provider] = None,
                    name_filter: Optional[str] = None,
                    quantity_filter: Optional[int] = None):
-    _serve(monkeypatch, core_api, provider)
+    _serve(monkeypatch, api, provider)
     qtys, capacity, available = kubernetes_catalog.list_accelerators_realtime(
         gpus_only=True,
         name_filter=name_filter,
@@ -296,7 +327,7 @@ def _list_realtime(monkeypatch,
 
 def _assert_snapshot_matches_api(monkeypatch, cluster: str, **list_kwargs):
     nodes, pods = _CLUSTERS[cluster]
-    api = _CoreApi(nodes, pods)
+    api = _ApiClient(nodes, pods)
     expected = _list_realtime(monkeypatch, api, **list_kwargs)
     assert api.calls, 'the direct path must read the Kubernetes API'
 
@@ -329,7 +360,7 @@ def _assert_snapshot_matches_api(monkeypatch, cluster: str, **list_kwargs):
         return plugin_extensions.KubernetesNodeSnapshot(nodes=trimmed,
                                                         pods=pods)
 
-    snapshot_api = _CoreApi(nodes, pods)
+    snapshot_api = _ApiClient(nodes, pods)
     actual = _list_realtime(monkeypatch,
                             snapshot_api,
                             provider=provider,
@@ -429,15 +460,15 @@ def _not_a_snapshot(context, label_keys):
                          [_unserved, _failing, _malformed, _not_a_snapshot])
 def test_unserved_context_falls_back_to_api(monkeypatch, cluster_env, provider):
     nodes, pods = _CLUSTERS['gfd']
-    expected = _list_realtime(monkeypatch, _CoreApi(nodes, pods))
-    api = _CoreApi(nodes, pods)
+    expected = _list_realtime(monkeypatch, _ApiClient(nodes, pods))
+    api = _ApiClient(nodes, pods)
     assert _list_realtime(monkeypatch, api, provider=provider) == expected
-    assert 'list_pod_for_all_namespaces' in api.calls
+    assert _PODS_PATH in api.calls
 
 
 def test_non_realtime_listing_ignores_snapshot(monkeypatch, cluster_env):
     nodes, pods = _CLUSTERS['gfd']
-    api = _CoreApi(nodes, pods)
+    api = _ApiClient(nodes, pods)
     snapshot = plugin_extensions.KubernetesNodeSnapshot(nodes=[], pods=[])
     _serve(monkeypatch, api, lambda context, label_keys: snapshot)
     qtys = kubernetes_catalog.list_accelerators(gpus_only=True,
@@ -445,7 +476,7 @@ def test_non_realtime_listing_ignores_snapshot(monkeypatch, cluster_env):
                                                 region_filter=_CONTEXT,
                                                 quantity_filter=None)
     assert set(qtys) == {'H100-80GB', 'A100-80GB'}
-    assert 'list_node' in api.calls
+    assert _NODES_PATH in api.calls
 
 
 def test_snapshot_label_keys(cluster_env):
@@ -456,5 +487,15 @@ def test_snapshot_label_keys(cluster_env):
     assert {
         'cloud.google.com/gke-tpu-topology',
         'cloud.google.com/gke-accelerator-count',
+        'cloud.google.com/gke-nodepool',
         'pool',
     } <= keys
+
+
+def test_busy_slice_does_not_hide_an_idle_slice(monkeypatch, cluster_env):
+    """Only the idle slice's 8 chips are free, on both paths."""
+    counts, capacity, available = _assert_snapshot_matches_api(
+        monkeypatch, 'ironwood-slices')
+    assert counts['tpu7x'] == [8]
+    assert capacity['tpu7x'] == 16
+    assert available['tpu7x'] == 8

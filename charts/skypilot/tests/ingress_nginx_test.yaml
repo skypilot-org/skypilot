@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: ingress_nginx_test
+templates:
+  - charts/ingress-nginx/templates/controller-configmap.yaml
+  - templates/NOTES.txt
+tests:
+  - it: should disable HTTP/2 on the bundled controller by default
+    template: charts/ingress-nginx/templates/controller-configmap.yaml
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: data["use-http2"]
+          value: "false"
+
+  # `--set ingress-nginx.controller.config.use-http2=false` passes a boolean.
+  - it: should accept use-http2 as a boolean
+    template: charts/ingress-nginx/templates/controller-configmap.yaml
+    set:
+      ingress-nginx.controller.config.use-http2: false
+    asserts:
+      - equal:
+          path: data["use-http2"]
+          value: "false"
+
+  - it: should not warn when use-http2 is the boolean false
+    template: templates/NOTES.txt
+    set:
+      ingress-nginx.controller.config.use-http2: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: nginx2root
+
+  - it: should not warn about HTTP/2 on a default install
+    template: templates/NOTES.txt
+    asserts:
+      - notMatchRegexRaw:
+          pattern: nginx2root
+
+  # A --reuse-values upgrade from a chart without the use-http2 default renders
+  # with the key unset.
+  - it: should warn when use-http2 is unset
+    template: templates/NOTES.txt
+    release:
+      name: skypilot
+      namespace: skypilot
+    set:
+      ingress-nginx.controller.config.use-http2: null
+    asserts:
+      - matchRegexRaw:
+          pattern: "helm upgrade -n skypilot skypilot skypilot/skypilot"
+      - matchRegexRaw:
+          pattern: "--set ingress-nginx.controller.config.use-http2=false"
+
+  - it: should not warn when the bundled controller is disabled
+    template: templates/NOTES.txt
+    set:
+      ingress-nginx.enabled: false
+      ingress-nginx.controller.config.use-http2: null
+    asserts:
+      - notMatchRegexRaw:
+          pattern: nginx2root

@@ -33,6 +33,7 @@ class TestServerCommonAuth:
         mock_request.assert_called_once_with(
             'GET',
             expected_url,
+            sync_call=False,
             headers={'Authorization': 'Bearer sky_test_token'})
 
         # Should not call cookie jar since Bearer token is present
@@ -67,6 +68,7 @@ class TestServerCommonAuth:
         expected_url = 'https://api.example.com/api/v1/status'
         mock_request.assert_called_once_with('GET',
                                              expected_url,
+                                             sync_call=False,
                                              headers={},
                                              cookies=mock_cookies)
 
@@ -103,6 +105,7 @@ class TestServerCommonAuth:
         expected_url = 'http://127.0.0.1:46580/api/v1/status'
         mock_request.assert_called_once_with('GET',
                                              expected_url,
+                                             sync_call=False,
                                              headers={},
                                              cookies=mock_cookies)
 
@@ -142,6 +145,7 @@ class TestServerCommonAuth:
         expected_url = 'http://127.0.0.1:46580/api/v1/status'
         mock_request.assert_called_once_with('GET',
                                              expected_url,
+                                             sync_call=False,
                                              headers=expected_headers)
 
         assert result == mock_response
@@ -176,6 +180,7 @@ class TestServerCommonAuth:
         expected_url = 'http://127.0.0.1:46580/api/v1/status'
         mock_request.assert_called_once_with('GET',
                                              expected_url,
+                                             sync_call=False,
                                              headers={},
                                              cookies=mock_cookies)
         assert result == mock_response
@@ -206,6 +211,7 @@ class TestServerCommonAuth:
         expected_url = 'http://127.0.0.1:46580/api/v1/status'
         mock_request.assert_called_once_with('GET',
                                              expected_url,
+                                             sync_call=False,
                                              headers={},
                                              cookies=existing_cookies)
 
@@ -236,6 +242,7 @@ class TestServerCommonAuth:
         mock_request.assert_called_once_with(
             'GET',
             expected_url,
+            sync_call=False,
             headers={'Authorization': 'Bearer sky_test_token'})
 
         assert result == mock_response
@@ -270,6 +277,7 @@ class TestServerCommonAuth:
         mock_request.assert_called_once_with(
             'GET',
             expected_url,
+            sync_call=False,
             headers={'Authorization': 'Bearer sky_test_token'})
 
         # Cookie jar should not be called since Authorization header is present

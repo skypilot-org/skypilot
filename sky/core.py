@@ -49,6 +49,7 @@ from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
+from sky.workspaces import visibility
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -123,6 +124,9 @@ def status(
     include_credentials: bool = False,
     summary_response: bool = False,
     include_handle: bool = True,
+    limit: Optional[int] = None,
+    after_launched_at: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -192,19 +196,28 @@ def status(
             provider(s).
         include_credentials: whether to fetch ssh credentials for cluster
             (credentials field in responses.StatusResponse)
+        limit: return at most this many clusters, newest launch first.
+        after_launched_at, after_name: the ``launched_at`` and ``name`` of the
+            last cluster of the previous page; return the clusters after it.
 
     Returns:
         A list of dicts, with each dict containing the information of a
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
+    if (after_launched_at is None) != (after_name is None):
+        raise ValueError('after_launched_at and after_name go together.')
+    common_utils.check_page(limit, after_name is not None)
     clusters = backend_utils.get_clusters(
         refresh=refresh,
         cluster_names=cluster_names,
         all_users=all_users,
         include_credentials=include_credentials,
         summary_response=summary_response,
-        include_handle=include_handle)
+        include_handle=include_handle,
+        limit=limit,
+        after=(None if after_name is None else
+               (typing.cast(int, after_launched_at), after_name)))
 
     status_responses = []
     workspaces = skypilot_config.get_nested(('workspaces',), {})
@@ -1727,21 +1740,30 @@ def job_status(cluster_name: str,
 # = Storage Management =
 # ======================
 @usage_lib.entrypoint
-def storage_ls() -> List[responses.StorageRecord]:
+def storage_ls(
+        limit: Optional[int] = None,
+        after_name: Optional[str] = None) -> List[responses.StorageRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the storages.
 
     Only storage in workspaces the calling user can read is returned, the
     same as for clusters, managed jobs and volumes.
 
+    Args:
+        limit: Return at most this many storages, by name.
+        after_name: Return only storages named after this.
+
     Returns:
         List[responses.StorageRecord]: A list of storage records.
     """
+    common_utils.check_page(limit, after_name is not None)
     # Visibility, not usability: a read-only workspace's storage is listed.
     # None (an admin) lists everything, storage in a workspace since removed
     # from the config included.
     storages = global_user_state.get_storage(
-        workspaces_filter=workspaces_core.get_readable_workspace_names())
+        workspaces_filter=workspaces_core.get_readable_workspace_names(),
+        limit=limit,
+        after_name=after_name)
     users = global_user_state.get_users({
         storage['user_hash']
         for storage in storages
@@ -2117,6 +2139,34 @@ def get_all_contexts() -> List[str]:
     # For now, assuming get_ssh_node_pool_contexts already returns them
     # in the desired format (e.g., 'ssh-my-cluster')
     return sorted(list(set(kube_contexts + ssh_contexts)))
+
+
+def get_every_workspace_contexts() -> List[str]:
+    """``get_all_contexts`` plus contexts that only other workspaces allow.
+
+    For server-side readers that run without a request workspace, such as the
+    metrics federation. It names contexts the caller's workspaces may not
+    allow: do not return it to a user as is.
+    """
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {})
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return sorted(
+        set(get_all_contexts()) |
+        visibility.visible_for_workspaces(workspaces, 'kubernetes'))
+
+
+def get_workspace_contexts() -> List[str]:
+    """Kubernetes and SSH node pool contexts of the workspaces the user reads.
+
+    Unlike ``get_all_contexts``, contexts that only other workspaces allow are
+    left out, so this is safe to return to any user.
+    """
+    workspaces = list(
+        workspaces_core.workspaces_for_user(common_utils.get_current_user().id))
+    return sorted(
+        visibility.visible_for_workspaces(workspaces, 'kubernetes') |
+        visibility.visible_for_workspaces(workspaces, 'ssh'))
 
 
 def create_debug_dump(request_ids: Optional[List[str]] = None,

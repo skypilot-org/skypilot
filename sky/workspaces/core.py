@@ -272,7 +272,23 @@ def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
     # `allowed_users`: they add or remove no infra.
     access_fields = set(_ACCESS_AND_NAME_FIELDS)
     access_fields |= schemas.access_only_workspace_properties()
-    return {k: v for k, v in config.items() if k not in access_fields}
+    stripped = {k: v for k, v in config.items() if k not in access_fields}
+    # Allowed queues are left out. An empty cloud or quota block counts as
+    # no block.
+    for cloud in ('kubernetes', 'slurm'):
+        if cloud not in stripped:
+            continue
+        cloud_config = dict(stripped.pop(cloud) or {})
+        quota = {
+            k: v
+            for k, v in (cloud_config.pop('quota', None) or {}).items()
+            if k != 'allowed_queues'
+        }
+        if quota:
+            cloud_config['quota'] = quota
+        if cloud_config:
+            stripped[cloud] = cloud_config
+    return stripped
 
 
 def _check_workspace_names_unique(old_workspaces: Dict[str, Any],
@@ -400,6 +416,20 @@ def _is_additive_contexts(current_allowed_contexts: Any,
     return False
 
 
+def _narrows_allowed_queues(current_config: Dict[str, Any],
+                            new_config: Dict[str, Any]) -> bool:
+    """Whether the change drops a queue from the allowed queues, or starts
+    limiting queues."""
+    for cloud in ('kubernetes', 'slurm'):
+        old = ((current_config.get(cloud) or {}).get('quota') or
+               {}).get('allowed_queues')
+        new = ((new_config.get(cloud) or {}).get('quota') or
+               {}).get('allowed_queues')
+        if new is not None and (old is None or not set(old) <= set(new)):
+            return True
+    return False
+
+
 def _compare_workspace_configs(
     current_config: Dict[str, Any],
     new_config: Dict[str, Any],
@@ -467,6 +497,13 @@ def _compare_workspace_configs(
     additive_allowed_contexts = (
         current_without_contexts == new_without_contexts and
         _is_additive_contexts(current_allowed_contexts, new_allowed_contexts))
+
+    # Dropping a queue needs the workspace to have no active resources.
+    # TODO(amithadke): Only refuse when active work is in a removed queue, not
+    # when the workspace has any active work.
+    if _narrows_allowed_queues(current_config, new_config):
+        only_user_access_changes = False
+        additive_allowed_contexts = False
 
     return WorkspaceConfigComparison(
         only_user_access_changes=only_user_access_changes,
@@ -1601,6 +1638,7 @@ def resolve_workspace_for_user(
     requested: Optional[str] = None,
     action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
     requested_ref: Optional[str] = None,
+    pick_for_read: bool = False,
 ) -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
 
@@ -1611,7 +1649,10 @@ def resolve_workspace_for_user(
     affects the fallback: for 'read' (vs the 'write' default), when the user
     has *no* writable workspace at all, read-only workspaces are considered so
     a read-only-only user can still resolve an active workspace instead of
-    hitting NoWorkspaceAccessError.
+    hitting NoWorkspaceAccessError, and several of them resolve to the first by
+    name. With ``pick_for_read``, a read by a user with several writable
+    workspaces also resolves to the first by name instead of raising
+    WorkspaceAmbiguousError.
 
     Precedence (a future admin-assignment tier can splice in between
     `preferred_workspace` and the default-fallback step without changing
@@ -1633,13 +1674,17 @@ def resolve_workspace_for_user(
       5. zero accessible -> one-shot policy re-sync and recompute (heals a
          first-login re-sync that failed transiently); still zero ->
          NoWorkspaceAccessError
-      6. multiple, none chosen, no 'default' access -> WorkspaceAmbiguousError
+      6. multiple, none chosen, no 'default' access -> the first by name for
+         a read with ``pick_for_read`` (or a read-only-only user);
+         WorkspaceAmbiguousError otherwise
 
     Args:
         user: the user the resolution is for.
         requested: workspace explicitly named by the caller, or None.
         requested_ref: what the user typed for `requested`, shown in a
             denial instead of the id.
+        pick_for_read: for a read, pick the first workspace by name instead
+            of raising WorkspaceAmbiguousError.
 
     Returns:
         WorkspaceResolution carrying the workspace name + source + optional
@@ -1650,7 +1695,8 @@ def resolve_workspace_for_user(
             requested workspace not accessible (PermissionDeniedError
             subclass).
         exceptions.WorkspaceAmbiguousError: multiple accessible and none
-            chosen, and the user has no access to 'default'.
+            chosen, the user has no access to 'default', and the request is
+            not a read with ``pick_for_read``.
     """
     if requested is not None:
         try:
@@ -1751,20 +1797,17 @@ def resolve_workspace_for_user(
         raise exceptions.NoWorkspaceAccessError(
             f'User {user.name} ({user.id}) has no accessible workspaces.')
 
-    if read_only_only:
-        # Several read-only-visible workspaces and no writable one. Ambiguity
-        # is a *write* problem — a new resource lands in exactly one workspace
-        # and only the user can say which. A read just needs a config context,
-        # and listings filter by every accessible workspace regardless of the
-        # pick, so any candidate serves. Raising here would leave such a user
-        # unable to read ANYTHING (every request resolves the active workspace
-        # first), and `WorkspaceAmbiguousError`'s recovery hint would be a dead
-        # end for them: it says to set a preferred workspace, but
-        # `set_user_preferred_workspace` requires write access. Pick
-        # deterministically instead.
+    if read_only_only or (pick_for_read and
+                          action == workspace_constants.WORKSPACE_ACTION_READ):
+        # Ambiguity is a *write* problem: only the user can say where a new
+        # resource lands. Listings cover every accessible workspace whatever
+        # the pick, and raising would fail every read (e.g. every dashboard
+        # page). By name, so users can tell which workspace their reads use.
         return WorkspaceResolution(
-            workspace=accessible[0],
-            source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY,
+            workspace=min(accessible, key=skypilot_config.get_workspace_name),
+            source=(workspace_constants.WORKSPACE_SOURCE_READ_ONLY
+                    if read_only_only else
+                    workspace_constants.WORKSPACE_SOURCE_READ_FIRST),
             note=drift_note)
 
     # The user is a member of each, so names are safe to show.

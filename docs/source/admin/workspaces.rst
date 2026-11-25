@@ -430,7 +430,9 @@ To keep the list scoped, make every workspace private, including ``default``,
 and add each user only to the workspaces they need. A user whose request does
 not name a workspace then lands in their preferred workspace, or their only
 workspace. A user in several workspaces must pick one with
-``sky workspace use <name>``, or each such request fails as ambiguous.
+``sky workspace use <name>``, or each request that changes something, such
+as a launch, fails as ambiguous. Read requests, such as ``sky status`` and the
+dashboard pages, use the first of those workspaces by name until then.
 A user who is in no workspace and can read none is refused everything. To let
 them still run read requests such as ``sky status``, but not launch, also set
 ``read_access: all`` on ``default``.

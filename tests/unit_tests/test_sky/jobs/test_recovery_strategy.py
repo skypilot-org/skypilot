@@ -2044,6 +2044,25 @@ async def test_infeasible_request_fails_prechecks(monkeypatch):
         await executor._launch(max_retry=None, raise_on_failure=True)
 
 
+@pytest.mark.parametrize('raise_on_failure', [True, False])
+@pytest.mark.asyncio
+async def test_queue_not_allowed_fails_prechecks(monkeypatch, raise_on_failure):
+    """A disallowed queue fails the launch, in recovery too, without retry."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _through_request_store(
+            exceptions.QueueNotAllowedError(
+                "Queue 'b' is not allowed in workspace 'w'."))
+    ])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None,
+                               raise_on_failure=raise_on_failure)
+
+    assert "Queue 'b' is not allowed" in str(e.value.reasons[0])
+
+
 @pytest.mark.asyncio
 async def test_pool_no_cluster_is_not_an_unknown_error(monkeypatch):
     """The commonest benign state must not read as an unknown launch error.

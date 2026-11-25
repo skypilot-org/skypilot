@@ -48,14 +48,18 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.modal import modal_utils
 from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.usage import usage_lib
+from sky.users import permission
+from sky.users import rbac
 from sky.utils import auth_utils
 from sky.utils import cluster_utils
 from sky.utils import command_runner
@@ -202,7 +206,7 @@ _RAY_VERSION_KEY = 'sky_ray_version'
 # cluster is on 2.9.3 -- the pinned version had not changed in 2.5 years.
 # TODO(hailong): one-shot migration constant; drop it once no marker-less
 # clusters remain (every cluster launched from this release on carries one).
-_LEGACY_RAY_VERSION = '2.9.3'
+_LEGACY_RAY_VERSION = constants.SKY_LEGACY_RAY_VERSION
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
 #    zone of the launched cluster is '1a'. If we restore, then on capacity errors
@@ -295,12 +299,6 @@ _TUNNEL_OUTPUT_TAIL_LINES = 100
 
 def _caller_is_viewer() -> bool:
     """Return True iff the executor worker is acting for a viewer user."""
-    # pylint: disable=import-outside-toplevel
-    # In-function import to avoid pulling the permission service into
-    # processes that never need it (e.g. the controller image's CLI
-    # entry point), which would also drag in casbin's import cost.
-    from sky.users import permission
-    from sky.users import rbac as rbac_mod
     user_id = os.environ.get(constants.USER_ID_ENV_VAR)
     if not user_id:
         return False
@@ -313,8 +311,8 @@ def _caller_is_viewer() -> bool:
     except Exception:  # pylint: disable=broad-except
         return False
     # Admin wins over viewer when both roles are present.
-    return (rbac_mod.RoleName.VIEWER.value in roles and
-            rbac_mod.RoleName.ADMIN.value not in roles)
+    return (rbac.RoleName.VIEWER.value in roles and
+            rbac.RoleName.ADMIN.value not in roles)
 
 
 def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
@@ -866,6 +864,165 @@ def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
         f'or {remove_hint}.')
 
 
+def _check_cluster_queue(cloud: str, queue: Optional[str]) -> None:
+    """Checks that the queue a cluster will run in is allowed."""
+    try:
+        skypilot_config.check_active_workspace_queue(cloud, queue)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.QueueNotAllowedError(str(e)) from None
+
+
+def _credential_upload_identity(
+        cloud: clouds.Cloud, region: clouds.Region, cluster_name: str,
+        to_provision: 'resources_lib.Resources',
+        server_only: bool) -> Tuple[str, Set[clouds.Cloud]]:
+    """The launch cloud's remote identity, and the clouds whose local
+    credentials are not uploaded to the cluster.
+
+    With `server_only`, from the server's own config: no client layer, task
+    override or admin policy output.
+    """
+    # Remote identity handling can have 4 cases:
+    # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
+    # 2. SERVICE_ACCOUNT: SkyPilot creates and manages a service account
+    # 3. Custom service account: Use specified service account
+    # 4. NO_UPLOAD: Do not upload any credentials
+    #
+    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In
+    # other cases, we exclude the cloud from credential file uploads after
+    # running required checks.
+    excluded_clouds: Set[clouds.Cloud] = set()
+
+    def get_remote_identity(cloud_str: str,
+                            override_configs: Optional[Dict[str, Any]]) -> Any:
+        if server_only:
+            return skypilot_config.get_server_workspace_region_config(
+                cloud=cloud_str,
+                region=region.name,
+                keys=('remote_identity',),
+                default_value=None)
+        return skypilot_config.get_effective_workspace_region_config(
+            cloud=cloud_str,
+            region=region.name,
+            keys=('remote_identity',),
+            default_value=None,
+            override_configs=override_configs)
+
+    remote_identity_config = get_remote_identity(
+        str(cloud).lower(), to_provision.cluster_config_overrides)
+    remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
+    if isinstance(remote_identity_config, str):
+        remote_identity = remote_identity_config
+    if isinstance(remote_identity_config, list):
+        # Some clouds (e.g., AWS) support specifying multiple service accounts
+        # chosen based on the cluster name. Do the matching here to pick the
+        # correct one.
+        for profile in remote_identity_config:
+            if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
+                remote_identity = list(profile.values())[0]
+                break
+    if (not server_only and isinstance(cloud, clouds.Kubernetes) and
+            not isinstance(to_provision.kubernetes_identity, str) and
+            not common.is_controller_name(cluster_name) and
+            clouds.Kubernetes.task_requests_none(
+                region.name, to_provision.cluster_config_overrides)):
+        # The task's NONE beats a per-context identity here too: a pod with no
+        # API identity must not be handed the kubeconfig either. A fixed
+        # in-process identity and controllers ignore it, as in
+        # make_deploy_resources_variables.
+        remote_identity = schemas.RemoteIdentityOptions.NONE.value
+    if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
+        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
+        # excluded_clouds set, but we must also check if the cloud supports
+        # service accounts.
+        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
+            # If NO_UPLOAD is specified, fall back to default remote identity
+            # for downstream logic but add it to excluded_clouds to skip
+            # credential file uploads.
+            remote_identity = schemas.get_default_remote_identity(
+                str(cloud).lower())
+        elif (not server_only and
+              not cloud.supports_service_account_on_remote()):
+            raise exceptions.InvalidCloudConfigs(
+                'remote_identity: SERVICE_ACCOUNT is specified in '
+                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
+                'is not supported by this cloud. Remove the config or set: '
+                '`remote_identity: LOCAL_CREDENTIALS`.')
+        if isinstance(cloud, clouds.Kubernetes):
+            allowed_contexts = skypilot_config.get_workspace_cloud(
+                'kubernetes').get('allowed_contexts', None)
+            if allowed_contexts is None:
+                allowed_contexts = skypilot_config.get_effective_region_config(
+                    cloud='kubernetes',
+                    region=None,
+                    keys=('allowed_contexts',),
+                    default_value=None)
+            # Exclude both Kubernetes and SSH explicitly since:
+            # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
+            #    inherits from Kubernetes)
+            # 2. Both share the same get_credential_file_mounts() which
+            #    returns the kubeconfig. So if we don't exclude both, the
+            #    unexcluded one will upload the kubeconfig.
+            # TODO(romilb): This is a workaround. The right long-term fix
+            # is to have SSH Node Pools use its own kubeconfig instead of
+            # sharing the global kubeconfig at ~/.kube/config. In the
+            # interim, SSH Node Pools' get_credential_file_mounts can filter
+            # contexts starting with ssh- and create a temp kubeconfig
+            # to upload.
+            # When allowed_contexts is not set, or when it is set for a
+            # non-controller cluster, we exclude kubeconfig upload. Controller
+            # clusters need kubeconfig to manage other K8s clusters.
+            is_controller = controller_utils.Controllers.from_name(
+                cluster_name, expect_exact_match=False) is not None
+            if allowed_contexts is None or not is_controller:
+                excluded_clouds.add(clouds.Kubernetes())
+                excluded_clouds.add(clouds.SSH())
+        else:
+            excluded_clouds.add(cloud)
+
+    for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
+        remote_identity_config = get_remote_identity(cloud_str.lower(), None)
+        if remote_identity_config:
+            if (remote_identity_config ==
+                    schemas.RemoteIdentityOptions.NO_UPLOAD.value):
+                excluded_clouds.add(cloud_obj)
+
+    return remote_identity, excluded_clouds
+
+
+def _refuse_loosening_kubeconfig_upload(
+        cloud: clouds.Cloud, region: clouds.Region, cluster_name: str,
+        to_provision: 'resources_lib.Resources',
+        excluded_clouds: Set[clouds.Cloud]) -> None:
+    """Raises if a non-admin's config uploads the API server's kubeconfig
+    where the server's own config would not.
+
+    Raises:
+        exceptions.InvalidCloudConfigs: if it does.
+    """
+    if not clouds.Kubernetes.uploads_kubeconfig(excluded_clouds):
+        return
+    _, server_excluded = _credential_upload_identity(cloud,
+                                                     region,
+                                                     cluster_name,
+                                                     to_provision,
+                                                     server_only=True)
+    if (clouds.Kubernetes.uploads_kubeconfig(server_excluded) or
+            permission.caller_is_admin()):
+        return
+    if isinstance(cloud, clouds.Kubernetes):
+        raise exceptions.InvalidCloudConfigs(
+            '`remote_identity: LOCAL_CREDENTIALS` would upload the API '
+            f'server\'s kubeconfig to your cluster on {cloud} '
+            f'({region.name}); only an admin can set it, in the API server\'s '
+            'config.')
+    raise exceptions.InvalidCloudConfigs(
+        '`remote_identity: NO_UPLOAD` is set for Kubernetes on the API '
+        'server, so its kubeconfig is not uploaded to clusters; your config '
+        'cannot override it.')
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -880,6 +1037,7 @@ def write_cluster_config(
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
+    storage_mounts: Optional[Dict[str, Any]] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
     extra_template_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
@@ -931,6 +1089,13 @@ def write_cluster_config(
             cluster_name,
             cluster_name_on_cloud,
         ), region, zones, num_nodes, dryrun, volume_mounts)
+    if isinstance(cloud, clouds.Slurm):
+        sbatch_options: Dict[str, Any] = typing.cast(
+            Dict[str, Any],
+            resources_vars.get('sbatch_options') or {})
+        _check_cluster_queue(
+            'slurm',
+            sbatch_options.get('qos') or sbatch_options.get('q'))
     config_dict = {}
 
     specific_reservations = set(
@@ -940,103 +1105,11 @@ def write_cluster_config(
             keys=('specific_reservations',),
             default_value=set()))
 
-    # Remote identity handling can have 4 cases:
-    # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
-    # 2. SERVICE_ACCOUNT: SkyPilot creates and manages a service account
-    # 3. Custom service account: Use specified service account
-    # 4. NO_UPLOAD: Do not upload any credentials
-    #
-    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In
-    # other cases, we exclude the cloud from credential file uploads after
-    # running required checks.
     assert cluster_name is not None
-    excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_effective_workspace_region_config(
-        cloud=str(cloud).lower(),
-        region=region.name,
-        keys=('remote_identity',),
-        default_value=None,
-        override_configs=to_provision.cluster_config_overrides)
-    remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
-    if isinstance(remote_identity_config, str):
-        remote_identity = remote_identity_config
-    if isinstance(remote_identity_config, list):
-        # Some clouds (e.g., AWS) support specifying multiple service accounts
-        # chosen based on the cluster name. Do the matching here to pick the
-        # correct one.
-        for profile in remote_identity_config:
-            if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
-                remote_identity = list(profile.values())[0]
-                break
-    if (isinstance(cloud, clouds.Kubernetes) and
-            not isinstance(to_provision.kubernetes_identity, str) and
-            not common.is_controller_name(cluster_name) and
-            clouds.Kubernetes.task_requests_none(
-                region.name, to_provision.cluster_config_overrides)):
-        # The task's NONE beats a per-context identity here too: a pod with no
-        # API identity must not be handed the kubeconfig either. A fixed
-        # in-process identity and controllers ignore it, as in
-        # make_deploy_resources_variables.
-        remote_identity = schemas.RemoteIdentityOptions.NONE.value
-    if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
-        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
-        # excluded_clouds set, but we must also check if the cloud supports
-        # service accounts.
-        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
-            # If NO_UPLOAD is specified, fall back to default remote identity
-            # for downstream logic but add it to excluded_clouds to skip
-            # credential file uploads.
-            remote_identity = schemas.get_default_remote_identity(
-                str(cloud).lower())
-        elif not cloud.supports_service_account_on_remote():
-            raise exceptions.InvalidCloudConfigs(
-                'remote_identity: SERVICE_ACCOUNT is specified in '
-                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
-                'is not supported by this cloud. Remove the config or set: '
-                '`remote_identity: LOCAL_CREDENTIALS`.')
-        if isinstance(cloud, clouds.Kubernetes):
-            allowed_contexts = skypilot_config.get_workspace_cloud(
-                'kubernetes').get('allowed_contexts', None)
-            if allowed_contexts is None:
-                allowed_contexts = skypilot_config.get_effective_region_config(
-                    cloud='kubernetes',
-                    region=None,
-                    keys=('allowed_contexts',),
-                    default_value=None)
-            # Exclude both Kubernetes and SSH explicitly since:
-            # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
-            #    inherits from Kubernetes)
-            # 2. Both share the same get_credential_file_mounts() which
-            #    returns the kubeconfig. So if we don't exclude both, the
-            #    unexcluded one will upload the kubeconfig.
-            # TODO(romilb): This is a workaround. The right long-term fix
-            # is to have SSH Node Pools use its own kubeconfig instead of
-            # sharing the global kubeconfig at ~/.kube/config. In the
-            # interim, SSH Node Pools' get_credential_file_mounts can filter
-            # contexts starting with ssh- and create a temp kubeconfig
-            # to upload.
-            # When allowed_contexts is not set, or when it is set for a
-            # non-controller cluster, we exclude kubeconfig upload. Controller
-            # clusters need kubeconfig to manage other K8s clusters.
-            is_controller = controller_utils.Controllers.from_name(
-                cluster_name, expect_exact_match=False) is not None
-            if allowed_contexts is None or not is_controller:
-                excluded_clouds.add(clouds.Kubernetes())
-                excluded_clouds.add(clouds.SSH())
-        else:
-            excluded_clouds.add(cloud)
-
-    for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_effective_workspace_region_config(
-            cloud=cloud_str.lower(),
-            region=region.name,
-            keys=('remote_identity',),
-            default_value=None)
-        if remote_identity_config:
-            if (remote_identity_config ==
-                    schemas.RemoteIdentityOptions.NO_UPLOAD.value):
-                excluded_clouds.add(cloud_obj)
-
+    remote_identity, excluded_clouds = _credential_upload_identity(
+        cloud, region, cluster_name, to_provision, server_only=False)
+    _refuse_loosening_kubeconfig_upload(cloud, region, cluster_name,
+                                        to_provision, excluded_clouds)
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     logging_agent = logs.get_logging_agent(cloud=str(cloud).lower(),
@@ -1313,6 +1386,13 @@ def write_cluster_config(
                         last_attached_at=now,
                         status=status_lib.VolumeStatus.IN_USE)
 
+    # Modal mounts buckets into the cluster's Function when it is launched,
+    # so they go into the cluster config rather than being mounted afterwards.
+    modal_cloud_bucket_mounts = []
+    if isinstance(cloud, clouds.Modal):
+        modal_cloud_bucket_mounts = modal_utils.get_cloud_bucket_mount_specs(
+            storage_mounts, dryrun=dryrun)
+
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
@@ -1413,6 +1493,9 @@ def write_cluster_config(
             'ray_installation_commands':
                 (constants.RAY_INSTALLATION_COMMANDS.replace(
                     '{ray_version}', ray_version)),
+            'ray_installed_check_command':
+                (constants.SKY_RAY_INSTALLED_CHECK_CMD.replace(
+                    '{ray_version}', ray_version)),
             'skypilot_wheel_installation_commands':
                 constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
                     '{sky_wheel_hash}',
@@ -1474,6 +1557,7 @@ def write_cluster_config(
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
             'volume_mount_rw_paths': volume_mount_rw_paths,
+            'modal_cloud_bucket_mounts': modal_cloud_bucket_mounts,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
@@ -1515,6 +1599,10 @@ def write_cluster_config(
 
         pod_config: Dict[str, Any] = combined_yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
+        _check_cluster_queue(cloud.canonical_name(),
+                             (pod_config.get('metadata') or {}).get(
+                                 'labels',
+                                 {}).get(k8s_constants.KUEUE_QUEUE_NAME_LABEL))
         # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
         pod_config.pop('deployment_spec', None)
         pod_config.pop('pvc_spec', None)
@@ -1619,6 +1707,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
+            clouds.Modal,
             clouds.Yotta,
         )):
         config = auth.configure_ssh_info(config)
@@ -3790,6 +3879,20 @@ def _update_cluster_status(
             include_user_info=include_user_info,
             summary_response=summary_response)
 
+    # Already recorded as STOPPED and still stopped: only record that the
+    # status was checked. This relies on STOPPED being written only by
+    # remove_cluster(terminate=False) via the post_teardown_cleanup() below,
+    # which removes the SSH config, clears the cached IPs and closes the usage
+    # interval. Anything else that records STOPPED must do the same cleanup,
+    # or refresh will never redo it.
+    if not to_terminate and status == status_lib.ClusterStatus.STOPPED:
+        global_user_state.set_cluster_status(cluster_name,
+                                             status_lib.ClusterStatus.STOPPED)
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+
     backend = backends.CloudVmRayBackend()
     if to_terminate:
         # A refresh re-entering after a failed cleanup has already recorded
@@ -4312,15 +4415,17 @@ class CloudFilter(enum.Enum):
     LOCAL = 'local'
 
 
-def _get_glob_clusters(
-        clusters: List[str],
-        silent: bool = False,
-        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+def _get_glob_clusters(clusters: List[str],
+                       silent: bool = False,
+                       workspaces_filter: Optional[Set[str]] = None,
+                       exclude_managed_clusters: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(
-            cluster, workspaces_filter=workspaces_filter)
+            cluster,
+            workspaces_filter=workspaces_filter,
+            exclude_managed_clusters=exclude_managed_clusters)
         if len(glob_cluster) == 0 and not silent:
             logger.info(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
@@ -4521,6 +4626,8 @@ def get_clusters(
     include_credentials: bool = False,
     summary_response: bool = False,
     include_handle: bool = True,
+    limit: Optional[int] = None,
+    after: Optional[Tuple[int, str]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -4541,6 +4648,10 @@ def get_clusters(
             return clusters from the current user.
         include_credentials: If True, include ssh credentials in the records of
             the clusters the current user owns.
+        limit: If provided, return at most this many clusters, newest launch
+            first.
+        after: If provided, only clusters after this (launched_at, name), the
+            last cluster of the previous page.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -4566,6 +4677,8 @@ def get_clusters(
             logger.debug('Suppressing include_credentials for viewer caller')
             include_credentials = False
 
+    exclude_managed_clusters = not (_include_is_managed or
+                                    env_options.Options.SHOW_DEBUG_INFO.get())
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -4578,14 +4691,14 @@ def get_clusters(
                 non_glob_cluster_names.append(cluster_name)
         cluster_names = non_glob_cluster_names
         if glob_cluster_names:
+            # Otherwise a pattern also matching a managed cluster would
+            # report it as not found below.
             cluster_names += _get_glob_clusters(
                 glob_cluster_names,
                 silent=True,
-                workspaces_filter=accessible_workspaces)
+                workspaces_filter=accessible_workspaces,
+                exclude_managed_clusters=exclude_managed_clusters)
 
-    exclude_managed_clusters = False
-    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
-        exclude_managed_clusters = True
     user_hashes_filter = None
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
@@ -4594,13 +4707,16 @@ def get_clusters(
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
-        summary_response=summary_response)
+        summary_response=summary_response,
+        limit=limit,
+        after=after)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
-    if cluster_names is not None:
+    # A page holds only some of the named clusters.
+    if cluster_names is not None and limit is None:
         record_names = {record['name'] for record in records}
         not_found_clusters = ux_utils.get_non_matched_query(
             cluster_names, record_names)

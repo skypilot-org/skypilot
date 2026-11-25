@@ -1,6 +1,9 @@
 """Unit tests for cluster_event accessors in global_user_state."""
 import time
 
+import sqlalchemy
+from sqlalchemy import orm
+
 from sky import global_user_state
 from sky.skylet import constants
 from sky.utils import status_lib
@@ -455,3 +458,42 @@ def test_latest_cluster_events_chunks_the_name_list(tmp_path, monkeypatch):
     assert events == {
         f'chunk-{i}': (f'Launching (pending: r{i})', 1000 + i) for i in range(5)
     }
+
+
+def test_duplicate_event_is_skipped_before_reading_the_cluster(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    cluster_hash = _add_cluster('c')
+    status_change = global_user_state.ClusterEventType.STATUS_CHANGE
+
+    def add(reason: str) -> None:
+        global_user_state.add_cluster_event('c',
+                                            status_lib.ClusterStatus.UP,
+                                            reason,
+                                            status_change,
+                                            nop_if_duplicate=True)
+
+    add('All nodes up.')
+    statements = []
+    engine = global_user_state._db_manager.get_engine()
+
+    def record(conn, cursor, statement, *args):
+        del conn, cursor, args
+        statements.append(statement)
+
+    sqlalchemy.event.listen(engine, 'before_cursor_execute', record)
+    try:
+        add('All nodes up.')
+    finally:
+        sqlalchemy.event.remove(engine, 'before_cursor_execute', record)
+    # The cluster's hash and its last event; nothing else.
+    assert len(statements) == 2, statements
+
+    table = global_user_state.cluster_event_table
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(table.c.reason, table.c.starting_status,
+                              table.c.ending_status).where(
+                                  table.c.cluster_hash == cluster_hash,
+                                  table.c.type == status_change.value)).all()
+    assert [tuple(r) for r in rows] == [('All nodes up.', 'INIT', 'UP')]

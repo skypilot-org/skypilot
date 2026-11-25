@@ -2633,6 +2633,50 @@ def test_stamp_overwrites_client_from_loopback():
     assert body.from_loopback is True
 
 
+def _body_with_server_env(monkeypatch) -> payloads.RequestBody:
+    """A body built on the server: env_vars captured from os.environ."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    monkeypatch.setenv(constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+                       'postgresql://pool-secret')
+    body = payloads.RequestBody()
+    assert body.env_vars['SKYPILOT_UT_ENV_CANARY'] == 'server-canary'
+    body.env_vars.update(_REMOTE_CLIENT_ENV_VARS)
+    body.env_vars['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] = 'client-token'
+    return body
+
+
+def test_stamp_keeps_only_remote_env_for_remote_request(monkeypatch):
+    body = _body_with_server_env(monkeypatch)
+    executor.stamp_request_body(body,
+                                auth_user=models.User(id='abcd1234',
+                                                      name='alice'))
+    assert body.from_loopback is False
+    assert set(body.env_vars) <= executor._REMOTE_REQUEST_ENV_VARS
+    assert body.env_vars[constants.USER_ID_ENV_VAR] == 'abcd1234'
+    assert body.env_vars[constants.USER_ENV_VAR] == 'alice'
+    assert body.env_vars['SKYPILOT_CLIENT_TYPE'] == 'cli'
+    for value in ('server-canary', 'postgresql://pool-secret', 'client-token'):
+        assert value not in body.model_dump_json()
+
+
+@pytest.mark.parametrize('enforce_containment', [True, False])
+def test_stamp_keeps_loopback_env(monkeypatch, enforce_containment):
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: enforce_containment)
+    monkeypatch.setenv('KUBECONFIG', '/tmp/local-kubeconfig')
+    body = _body_with_server_env(monkeypatch)
+    token = loopback._request_from_loopback.set(True)
+    try:
+        executor.stamp_request_body(body, auth_user=None)
+    finally:
+        loopback._request_from_loopback.reset(token)
+    assert body.from_loopback is True
+    assert body.env_vars['SKYPILOT_UT_ENV_CANARY'] == 'server-canary'
+    assert body.env_vars['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] == 'client-token'
+    assert constants.ENV_VAR_DB_POOL_CONNECTION_URI not in body.env_vars
+    assert ('KUBECONFIG' in body.env_vars) is (not enforce_containment)
+
+
 def test_to_kwargs_drops_from_loopback():
     body = payloads.RequestBody(env_vars={}, from_loopback=True)
     assert 'from_loopback' not in body.to_kwargs()
@@ -3053,6 +3097,38 @@ async def test_policy_handled_request_writes_no_row(in_process_env):
 
 
 @pytest.mark.asyncio
+async def test_policy_sees_sanitized_env(in_process_env, monkeypatch):
+    """The policy may answer the request itself, so the env must already be
+    reduced to what a remote caller may see."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    seen = []
+
+    async def policy(request):
+        seen.append(dict(request.request_body.env_vars))
+        return executor.ExecutionMode.HANDLED
+
+    executor.set_execution_policy(policy)
+    body = _InProcessBody(value='v')
+    assert 'SKYPILOT_UT_ENV_CANARY' in body.env_vars
+    token = loopback._request_from_loopback.set(False)
+    try:
+        await executor.schedule_request_async(
+            request_id='policy-env',
+            request_name='test.in_process',
+            request_body=body,
+            func=_in_process_entrypoint,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            auth_user=models.User(id='abcd1234', name='alice'))
+    finally:
+        loopback._request_from_loopback.reset(token)
+
+    (env,) = seen
+    assert set(env) <= executor._REMOTE_REQUEST_ENV_VARS
+    assert env[constants.USER_ID_ENV_VAR] == 'abcd1234'
+    assert 'server-canary' not in env.values()
+
+
+@pytest.mark.asyncio
 async def test_policy_in_process_request_runs_in_process(
         in_process_env, monkeypatch):
     """IN_PROCESS from the policy records the request and runs it here."""
@@ -3236,8 +3312,8 @@ def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
                         lambda *args: True)
     resolved_for = []
 
-    def fake_resolve(user, action):
-        del action
+    def fake_resolve(user, action, pick_for_read):
+        del action, pick_for_read
         resolved_for.append(user.preferred_workspace)
         return mock.Mock(workspace=constants.SKYPILOT_DEFAULT_WORKSPACE,
                          source='explicit')

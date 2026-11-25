@@ -42,6 +42,25 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 
 
+# ---------- Modal. ----------
+@pytest.mark.modal
+def test_modal_basic():
+    name = smoke_tests_utils.get_cluster_name()
+    resources = smoke_tests_utils.LOW_RESOURCE_ARG
+    test = smoke_tests_utils.Test(
+        'modal_basic',
+        [
+            f'sky launch -y -c {name} --infra modal {resources} '
+            '-- echo modal-launch',
+            f'sky exec {name} -- echo modal-exec',
+            f's=$(sky status {name}); echo "$s"; echo "$s" | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Job Queue. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
@@ -899,6 +918,7 @@ def test_slurm_container_autodown(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
+@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
@@ -4218,6 +4238,7 @@ def _volume_tags_cmd(region: str, name_on_cloud: str, must_be_tagged: bool,
 
 @pytest.mark.aws
 @pytest.mark.no_remote_server  # Restarts the API server to declare a workspace.
+@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
 def test_aws_volume_tagging_degrades_without_permission():
     """`sky launch` must survive credentials that cannot tag EBS volumes.
 

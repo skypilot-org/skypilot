@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 69  # accelerator_args.multi_host for TPU slices on Kubernetes
+API_VERSION = 72  # limit and cursor on cluster/volume/storage/recipe lists
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -65,6 +65,14 @@ MIN_JOBS_DEPENDS_ON_API_VERSION = 64
 # Minimum server API version that accepts the task's `job:` section
 # (`job.wait_for_scheduling_timeout`).
 MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 66
+# Minimum server API version whose managed-jobs queue takes `after_job_id`
+# (a cursor: the page after this top-level job, in job id order). An older
+# server ignores the field and returns the first page again.
+MIN_JOBS_QUEUE_CURSOR_API_VERSION = 71
+# Minimum server API version whose `status`, `volume_list`, `storage_ls` and
+# recipe list take `limit` and a cursor. An older server ignores them and
+# returns the whole list.
+MIN_LIST_CURSOR_API_VERSION = 72
 
 # The HTTP header naming the user an admin service account acts as.
 IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'
@@ -86,6 +94,9 @@ MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
 # its schema, and dropping it on the client would launch different hardware
 # (one 8-chip VM instead of a 2x4 slice), so the client raises instead.
 MIN_TPU_MULTI_HOST_API_VERSION = 69
+# Minimum server API version that accepts `no_cleanup` on volume delete. An
+# older server ignores the field and would wipe the host path anyway.
+MIN_VOLUME_NO_CLEANUP_API_VERSION = 70
 
 # Servers >= this version omit the bulky pickled `handle` from each replica
 # in serve/pool status responses, shipping pre-computed `infra` /
@@ -156,6 +167,13 @@ AUTH_SESSION_TIMEOUT_SECONDS = 300  # 5 minutes
 
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
+
+# Sync calls. A client sends this header with value '1' to ask for the result
+# in the response itself. A response carrying it with value '1' was answered
+# that way: 200 and 500 have the /api/get body, 400 means the arguments do not
+# allow a sync call, and 429 means the server is busy (see Retry-After). Without
+# it, the response is the usual one and the client gets the result via /api/get.
+SYNC_CALL_HEADER = 'X-SkyPilot-Sync'
 
 # Valid empty values for pickled fields (base64-encoded pickled None)
 # base64.b64encode(pickle.dumps(None)).decode('utf-8')

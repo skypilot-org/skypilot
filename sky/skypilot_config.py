@@ -48,6 +48,8 @@ then:
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> None
 """
+from __future__ import annotations
+
 import contextlib
 import copy
 import errno
@@ -64,12 +66,6 @@ import typing
 from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional,
                     Tuple, Union)
 
-import sqlalchemy
-from sqlalchemy import orm
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects import sqlite
-from sqlalchemy.ext import declarative
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -80,16 +76,17 @@ from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
 
     from sky import models
+    from sky.server import config_db as config_db_mod
 else:
     yaml = adaptors_common.LazyImport('yaml')
+    # Server-only; loads SQLAlchemy only when a DB URL is used.
+    config_db_mod = adaptors_common.LazyImport('sky.server.config_db')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -127,15 +124,6 @@ _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
-
-Base = declarative.declarative_base()
-
-config_yaml_table = sqlalchemy.Table(
-    'config_yaml',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('value', sqlalchemy.Text),
-)
 
 
 class ConfigContext:
@@ -661,10 +649,10 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
     # try/finally is required: a caller that lets an exception escape the
     # `with` block would otherwise leak this thread-local workspace to
     # subsequent callers in the same worker process (ProcessPoolExecutor
-    # reuses workers). For most callers the leak is masked because
-    # `override_skypilot_config` resets the current thread's workspace per
-    # request, but tightening this here is the right shape for a
-    # contextmanager and removes the implicit dependency on that reset.
+    # reuses workers). For most callers the leak is masked because the
+    # request executor resets the current thread's workspace per request
+    # (`clear_active_workspace`), but tightening this here is the right shape
+    # for a contextmanager and removes the implicit dependency on that reset.
     try:
         yield
     finally:
@@ -677,6 +665,16 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
                 del _active_workspace_context.workspace
             except AttributeError:
                 pass
+
+
+def clear_active_workspace() -> None:
+    """Forgets this thread's active workspace, e.g. for a fresh request.
+
+    Only this thread's: the module-level thread-local is not rebound, so other
+    threads in this process (e.g. inline API server handlers) keep theirs.
+    """
+    if hasattr(_active_workspace_context, 'workspace'):
+        del _active_workspace_context.workspace
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:
@@ -1014,18 +1012,6 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
     _set_loaded_config_path(config_path)
 
 
-def _create_table(engine: sqlalchemy.engine.Engine):
-    """Initialize the config database with migrations."""
-    migration_utils.safe_alembic_upgrade(
-        engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
-        migration_utils.SKYPILOT_CONFIG_VERSION)
-
-
-# We only store config in the DB when using Postgres,
-# so no need to pass in db_name here.
-_db_manager = db_utils.DatabaseManager(db_name='config',
-                                       create_table_fn=_create_table)
-
 # The last server config load: (fingerprint, config, db URL popped from the
 # file, generation). Replaced by one assignment, so a lock-free reader never
 # pairs a new fingerprint with an old config.
@@ -1043,10 +1029,7 @@ _server_config_swap_lock = threading.Lock()
 
 
 def _read_config_yaml_value() -> Optional[str]:
-    with orm.Session(_db_manager.get_engine()) as session:
-        row = session.query(config_yaml_table).filter_by(
-            key=API_SERVER_CONFIG_KEY).first()
-    return row.value if row else None
+    return config_db_mod.get_config_yaml_value(API_SERVER_CONFIG_KEY)
 
 
 def _swap_in_server_config(generation: int, config: config_utils.Config,
@@ -1229,6 +1212,9 @@ def override_skypilot_config(
             -- MUST pass the request's own from_loopback, so that on a remote
             request the REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS are ignored too.
             Keyword-only, so this is a deliberate choice at every such site.
+
+    Keeps this thread's active workspace unless the override names one, so a
+    new request must call `clear_active_workspace()` before entering this.
     """
     # TODO: allow admin user to extend the disallowed keys or specify
     # allowed keys.
@@ -1238,7 +1224,9 @@ def override_skypilot_config(
         # what the admin wrote (the config editor shows it).
         server_workspace = get_nested(keys=('active_workspace',),
                                       default_value=None)
-        if server_workspace is None:
+        if (server_workspace is None or getattr(_active_workspace_context,
+                                                'workspace', None) is not None):
+            # Keep this thread's workspace, as a non-empty override does.
             yield
             return
         with local_active_workspace_ctx(
@@ -1332,12 +1320,13 @@ def override_skypilot_config(
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Use `sky check` to see if it is defined on the API '
                          'server and try again.')
-    # Reset this thread's active workspace, so that a new request is not
-    # affected by the previous request's workspace. Do not rebind the
-    # module-level thread-local: other threads in this process (e.g. inline
-    # API server handlers) keep theirs.
-    if hasattr(_active_workspace_context, 'workspace'):
-        del _active_workspace_context.workspace
+    # Nested overrides keep this thread's workspace (e.g. the one the request
+    # executor resolved) unless they name one; restored on exit either way.
+    had_workspace = hasattr(_active_workspace_context, 'workspace')
+    prior_workspace = getattr(_active_workspace_context, 'workspace', None)
+    was_overridden = _is_config_overridden()
+    if override_configs.get('active_workspace') is not None:
+        clear_active_workspace()
 
     try:
         common_utils.validate_schema(
@@ -1368,8 +1357,10 @@ def override_skypilot_config(
     finally:
         _get_config_context().server_config = outer_server_config
         _set_loaded_config(original_config)
-        _set_config_overridden(False)
+        _set_config_overridden(was_overridden)
         _set_loaded_config_path_serialized(original_config_path)
+        if had_workspace:
+            _active_workspace_context.workspace = prior_workspace
 
 
 @contextlib.contextmanager
@@ -1673,6 +1664,44 @@ def get_effective_queue_name(cloud: str,
                                               partition=partition)
 
 
+def check_queue_allowed(workspace: str,
+                        workspace_config: Dict[str, Any],
+                        cloud: str,
+                        queue: Optional[str],
+                        is_default: bool = False) -> None:
+    """Checks that `queue` is one of the workspace's allowed queues."""
+    allowed = ((workspace_config.get(cloud) or {}).get('quota') or
+               {}).get('allowed_queues')
+    if allowed is None or (queue is None and not is_default):
+        return
+    name = workspace_config.get('name') or workspace
+    if queue is None:
+        raise ValueError(
+            f'Workspace {name!r} has allowed queues {allowed} but no default '
+            'queue. Set a default queue from the allowed queues.')
+    # A queue read back from rendered YAML can be a number.
+    queue = str(queue)
+    # Slurm takes a comma-separated list of QoS names.
+    queues = queue.split(',') if cloud == 'slurm' else [queue]
+    if all(q in allowed for q in queues):
+        return
+    if is_default:
+        raise ValueError(
+            f'Default queue {queue!r} of workspace {name!r} is not in its '
+            f'allowed queues: {allowed}. Add it to the allowed queues, or '
+            'change the default queue first.')
+    raise ValueError(f'Queue {queue!r} is not allowed in workspace {name!r}. '
+                     f'Allowed queues: {allowed}')
+
+
+def check_active_workspace_queue(cloud: str, queue: Optional[str]) -> None:
+    """Checks that `queue` is allowed in the active workspace."""
+    workspace = get_active_workspace()
+    workspace_config = get_nested(
+        ('workspaces', workspace), default_value=None) or {}
+    check_queue_allowed(workspace, workspace_config, cloud, queue)
+
+
 def get_effective_slurm_account(
         cluster: Optional[str] = None,
         partition: Optional[str] = None,
@@ -1918,6 +1947,18 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
 
+    # A workspace's default queue must be one of its allowed queues.
+    for workspace, workspace_config in (config.get('workspaces') or {}).items():
+        workspace_config = workspace_config or {}
+        for cloud in ('kubernetes', 'slurm'):
+            default_queue = ((workspace_config.get(cloud) or {}).get('quota') or
+                             {}).get('queue')
+            check_queue_allowed(workspace,
+                                workspace_config,
+                                cloud,
+                                default_queue,
+                                is_default=True)
+
     # Capture the currently persisted config before it is overwritten, for
     # save validators and post-save hooks (to_dict() returns a fresh copy).
     old_config: Optional[config_utils.Config] = None
@@ -1947,32 +1988,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if new_db_url and new_db_url != existing_db_url:
             raise ValueError('Cannot change db url while server is running')
         if existing_db_url:
-
-            def _set_config_yaml_to_db(key: str, config: config_utils.Config):
-                engine = _db_manager.get_engine()
-                # Persisting, not logging: this value is read back as the
-                # server config, so it must be the real one. Do not route it
-                # through config_utils.dump_redacted_yaml().
-                config_str = yaml_utils.dump_yaml_str(dict(config))
-                with orm.Session(engine) as session:
-                    if (engine.dialect.name ==
-                            db_utils.SQLAlchemyDialect.SQLITE.value):
-                        insert_func = sqlite.insert
-                    elif (engine.dialect.name ==
-                          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                        insert_func = postgresql.insert
-                    else:
-                        raise ValueError('Unsupported database dialect')
-                    insert_stmnt = insert_func(config_yaml_table).values(
-                        key=key, value=config_str)
-                    do_update_stmt = insert_stmnt.on_conflict_do_update(
-                        index_elements=[config_yaml_table.c.key],
-                        set_={config_yaml_table.c.value: config_str})
-                    session.execute(do_update_stmt)
-                    session.commit()
-
             logger.debug('saving api_server config to db')
-            _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
+            config_db_mod.set_config_yaml(API_SERVER_CONFIG_KEY, dict(config))
             db_updated = True
 
     if not db_updated:

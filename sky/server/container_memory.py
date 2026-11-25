@@ -53,7 +53,7 @@ TYPE_ZOMBIE = 'zombie'
 TYPE_PYTHON_OTHER = 'python_other'
 TYPE_OTHER = 'other'
 # Values of sky.server.requests.requests.ScheduleType.
-WORKER_GROUPS = ('long', 'short')
+WORKER_GROUPS = ('long', 'short', 'heavy')
 TYPES = (TYPE_MAIN, TYPE_SERVER) + tuple(
     f'worker:{group}' for group in WORKER_GROUPS) + (
         TYPE_CONTROLLER, TYPE_KUBECTL_EXEC, TYPE_KUBECTL_PORT_FORWARD,

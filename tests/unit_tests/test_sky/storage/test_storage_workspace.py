@@ -595,7 +595,7 @@ class TestJobsLaunch:
     _ACCESS = 'sky.workspaces.core.get_workspace_access_sets'
     _ACTIVE = 'sky.data.storage.skypilot_config.get_active_workspace'
     _NEXT_STEP = ('sky.jobs.server.core.clouds.Kubernetes.'
-                  'check_request_keeps_server_none')
+                  'check_request_keeps_server_identity')
 
     @staticmethod
     def _launch(storage_name=None, source=None, persistent=False):
@@ -836,9 +836,9 @@ class TestServeStorage:
              mock.patch('sky.serve.server.impl.serve_utils.'
                         'validate_service_task'), \
              mock.patch('sky.serve.server.impl.clouds.Kubernetes.'
-                        'check_request_keeps_server_none'), \
+                        'check_request_keeps_server_identity'), \
              mock.patch('sky.serve.server.impl.clouds.Kubernetes.'
-                        'check_task_keeps_server_none'), \
+                        'check_task_keeps_server_identity'), \
              mock.patch('sky.serve.server.impl.controller_utils.'
                         'get_controller_for_pool'), \
              mock.patch('sky.serve.server.impl.backend_utils.'
@@ -882,8 +882,8 @@ class TestServeStorage:
 
 
 class TestServeStatusWorkspace:
-    """`status` lists every user's services; the workspace of one in a
-    workspace the caller cannot read is not shown."""
+    """`status` leaves out services in workspaces the caller cannot
+    read."""
 
     _READABLE = 'sky.workspaces.core.get_readable_workspace_names'
 
@@ -916,11 +916,11 @@ class TestServeStatusWorkspace:
         'load_balancer_port': None
     }]
 
-    def test_unreadable_workspaces_are_withheld(self):
+    def test_unreadable_workspaces_are_left_out(self):
         with self._env(self._RECORDS), \
              mock.patch(self._READABLE, return_value={'ws-a'}):
             records = serve_impl.status()
-        assert [r['workspace'] for r in records] == ['ws-a', None]
+        assert [r['workspace'] for r in records] == ['ws-a']
 
     def test_admin_sees_every_workspace(self):
         with self._env(self._RECORDS), \

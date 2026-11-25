@@ -923,10 +923,8 @@ def test_get_slurm_metrics_clusters_tolerates_enumeration_failure(monkeypatch):
 
 
 def test_get_slurm_metrics_clusters_respects_allowed_clusters(monkeypatch):
-    # A cluster with a prometheus.url that is NOT in allowed_clusters is
-    # excluded: federation is scoped to slurm.allowed_clusters (via
-    # Slurm.existing_allowed_clusters), mirroring the Kubernetes federation's
-    # use of allowed_contexts.
+    # A cluster with a prometheus.url that no workspace allows is excluded,
+    # mirroring the Kubernetes federation's use of allowed_contexts.
     def _cfg(keys, default_value=None, **_):
         if tuple(keys) in (
             ('slurm', 'cluster_configs', 'hpc', 'prometheus', 'url'),
@@ -1062,6 +1060,29 @@ def test_slurm_sibling_filter_becomes_negative_matcher(monkeypatch):
         assert utils.slurm_federate_matchers('prod') == ['cluster!="site-lab"']
         # The claimant itself keeps only its positive matcher.
         assert utils.slurm_federate_matchers('lab') == ['cluster="site-lab"']
+
+
+def test_slurm_sibling_filter_uses_the_given_federated_list(monkeypatch):
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({
+            'prod': None,
+            'lab': {
+                'cluster': 'site-lab'
+            },
+        }))
+    # The scrape passes its snapshot, so nothing is enumerated again.
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters') as listing:
+        assert utils.slurm_federate_matchers(
+            'prod', federated=['prod', 'lab']) == ['cluster!="site-lab"']
+        assert utils.slurm_federate_matchers('prod', federated=['prod']) == []
+        with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                        return_value=(0, '', '')) as run:
+            asyncio.run(
+                utils.get_metrics_for_slurm_cluster('prod',
+                                                    federated=['prod', 'lab']))
+    listing.assert_not_called()
+    assert 'cluster%21%3D%22site-lab%22' in run.call_args.args[1]
 
 
 def test_slurm_own_filter_wins_over_sibling_negation(monkeypatch):
