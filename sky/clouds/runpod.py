@@ -244,8 +244,16 @@ class RunPod(clouds.Cloud):
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
+        # Import after cloud registration to avoid a catalog/cloud import cycle.
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import runpod_catalog
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            if not runpod_catalog.is_disk_size_supported(
+                    resources.instance_type, resources.disk_size):
+                return resources_utils.FeasibleResources(
+                    [], [], 'Requested disk exceeds the RunPod CPU instance '
+                    'container disk limit.')
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources], [], None)
 
@@ -265,7 +273,7 @@ class RunPod(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # Return a default instance type
-            default_instance_type = RunPod.get_default_instance_type(
+            default_instance_type = runpod_catalog.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
@@ -273,7 +281,8 @@ class RunPod(clouds.Cloud):
                 region=resources.region,
                 zone=resources.zone,
                 use_spot=resources.use_spot,
-                max_hourly_cost=resources.max_hourly_cost)
+                max_hourly_cost=resources.max_hourly_cost,
+                disk_size=resources.disk_size)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.

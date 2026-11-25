@@ -8,6 +8,7 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -43,21 +44,39 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[str] = None,
-        local_disk: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
-        use_spot: bool = False,
-        max_hourly_cost: Optional[float] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
+                              local_disk: Optional[str] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None,
+                              use_spot: bool = False,
+                              max_hourly_cost: Optional[float] = None,
+                              disk_size: Optional[int] = None) -> Optional[str]:
     del disk_tier, local_disk  # RunPod does not support disk tiers.
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
+    df = _filter_with_disk_size(_df, disk_size)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus, memory, region,
                                                       zone, use_spot,
                                                       max_hourly_cost)
+
+
+def _filter_with_disk_size(df, disk_size: Optional[int]):
+    """Filter CPU offerings by their provider-reported container disk limit."""
+    if disk_size is None or 'MaxDiskSize' not in df.columns:
+        # Older published catalogs do not have this metadata yet.
+        return df
+    # GPU pods do not share the per-vCPU CPU pod limit. Missing CPU metadata
+    # cannot establish that the requested disk fits.
+    return df[df['AcceleratorName'].notna() | (df['MaxDiskSize'] >= disk_size)]
+
+
+def is_disk_size_supported(instance_type: str, disk_size: int) -> bool:
+    """Check explicit instances as well as optimizer-selected CPU offerings."""
+    df = _df[_df['InstanceType'] == instance_type]
+    return not _filter_with_disk_size(df, disk_size).empty
 
 
 def get_accelerators_from_instance_type(
