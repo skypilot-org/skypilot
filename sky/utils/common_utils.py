@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 
 import jsonschema
+import typing_extensions
 
 from sky import exceptions
 from sky import models
@@ -1050,27 +1051,52 @@ def fill_template(template_ref: str, variables: Dict[str, Any],
         fout.write(content)
 
 
+class SkyPilotDeprecationWarning(FutureWarning):
+    """Warning category for deprecated SkyPilot APIs.
+
+    Subclasses FutureWarning, not DeprecationWarning, so that it is shown
+    by default: Python hides DeprecationWarning outside of __main__.
+    """
+
+
+def deprecated(message: str, *, stacklevel: int = 1) -> Callable:
+    """Marks a function, method or class as deprecated (PEP 702).
+
+    Thin wrapper around typing_extensions.deprecated that uses
+    SkyPilotDeprecationWarning as the category. Type checkers flag uses of
+    the decorated object, and a warning is emitted at runtime.
+
+    Args:
+        message: Deprecation message, including what to use instead.
+        stacklevel: Passed through to warnings.warn; 1 attributes the
+            warning to the caller of the deprecated object.
+    """
+    return typing_extensions.deprecated(message,
+                                        category=SkyPilotDeprecationWarning,
+                                        stacklevel=stacklevel)
+
+
 def deprecated_function(
         func: Callable,
         name: str,
         deprecated_name: str,
         removing_version: str,
         override_argument: Optional[Dict[str, Any]] = None) -> Callable:
-    """Decorator for creating deprecated functions, for backward compatibility.
+    """Creates a deprecated alias of a function, for backward compatibility.
 
-    It will result in a warning being emitted when the function is used.
+    Kept for existing call sites; new code should use @deprecated directly.
     """
+    override_argument_str = ''
+    if override_argument:
+        override_argument_str = ', '.join(
+            f'{k}={v}' for k, v in override_argument.items())
+    message = (f'Call to deprecated function {deprecated_name}, which will be '
+               f'removed in {removing_version}. Please use '
+               f'{name}({override_argument_str}) instead.')
 
+    @deprecated(message)
     @functools.wraps(func)
     def new_func(*args, **kwargs):
-        override_argument_str = ''
-        if override_argument:
-            override_argument_str = ', '.join(
-                f'{k}={v}' for k, v in override_argument.items())
-        logger.warning(
-            f'Call to deprecated function {deprecated_name}, which will be '
-            f'removed in {removing_version}. Please use '
-            f'{name}({override_argument_str}) instead.')
         return func(*args, **kwargs)
 
     return new_func
