@@ -1062,33 +1062,6 @@ def test_slurm_sibling_filter_becomes_negative_matcher(monkeypatch):
         assert utils.slurm_federate_matchers('lab') == ['cluster="site-lab"']
 
 
-@pytest.mark.parametrize(
-    'url',
-    ['http://localhost:9090', 'http://127.0.0.1:9090', 'http://[::1]:9090'])
-def test_slurm_loopback_url_shared_only_through_same_login_node(
-        monkeypatch, url):
-    # Each cluster curls its own login node's loopback Prometheus: same URL
-    # text, different servers, so 'lab' claims nothing on 'prod'.
-    via = {}
-    base = _shared_prom_config({'prod': None, 'lab': {'cluster': 'site-lab'}})
-
-    def _cfg(keys, default_value=None, **_):
-        keys = tuple(keys)
-        if keys[-2:] == ('prometheus', 'url'):
-            return url if keys[2] in ('prod', 'lab') else default_value
-        if keys[-2:] == ('prometheus', 'via') and len(keys) == 5:
-            return via.get(keys[2], default_value)
-        return base(keys, default_value)
-
-    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
-    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
-                    return_value=['prod', 'lab']):
-        assert utils.slurm_federate_matchers('prod') == []
-        # Fetched through lab's login node, it is lab's Prometheus.
-        via['prod'] = 'lab'
-        assert utils.slurm_federate_matchers('prod') == ['cluster!="site-lab"']
-
-
 def test_slurm_sibling_filter_uses_the_given_federated_list(monkeypatch):
     monkeypatch.setattr(
         utils.skypilot_config, 'get_nested',

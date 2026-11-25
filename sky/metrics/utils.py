@@ -3,7 +3,6 @@ import asyncio
 import contextlib
 import functools
 import inspect
-import ipaddress
 import os
 import queue
 import random
@@ -2317,24 +2316,6 @@ def _slurm_prometheus_url(cluster_name: str) -> Optional[str]:
     return skypilot_config.get_nested(('slurm', 'prometheus', 'url'), None)
 
 
-def _slurm_prometheus_via(cluster_name: str) -> str:
-    """Slurm cluster whose login node runs this cluster's /federate curl."""
-    return skypilot_config.get_nested(
-        ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'via'),
-        None) or skypilot_config.get_nested(
-            ('slurm', 'prometheus', 'via'), None) or cluster_name
-
-
-def _is_loopback_url(url: str) -> bool:
-    host = urllib.parse.urlparse(url).hostname or ''
-    if host == 'localhost':
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
 def get_slurm_prometheus_filters(cluster_name: str) -> Dict[str, str]:
     """Label matchers scoping a Slurm cluster's slice of its Prometheus.
 
@@ -2385,8 +2366,7 @@ def slurm_federate_matchers(
        unfiltered cluster unable to carve out a sibling's slice, a warning
        is logged instead of silently double-counting. A label this
        cluster already constrains is left alone, since its own filter is
-       the more specific statement. A loopback URL is the same Prometheus
-       only when both curls run on the same login node.
+       the more specific statement.
 
     ``federated`` is the list of clusters being federated; when omitted it
     is enumerated with get_slurm_metrics_clusters().
@@ -2415,11 +2395,6 @@ def slurm_federate_matchers(
         name for name in configs if name != cluster_name and
         (_slurm_prometheus_url(name) or '').rstrip('/') == url
     ]
-    if candidates and _is_loopback_url(url):
-        via = _slurm_prometheus_via(cluster_name)
-        candidates = [
-            name for name in candidates if _slurm_prometheus_via(name) == via
-        ]
     if not candidates:
         return matchers
 
@@ -2544,7 +2519,10 @@ async def get_metrics_for_slurm_cluster(
     if not prometheus_url:
         raise ValueError(
             f'No prometheus.url configured for Slurm cluster {cluster_name!r}')
-    login_cluster = _slurm_prometheus_via(cluster_name)
+    login_cluster = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'via'),
+        None) or skypilot_config.get_nested(
+            ('slurm', 'prometheus', 'via'), None) or cluster_name
 
     # Scope the pull when the source Prometheus aggregates several fleets;
     # without this every fleet's series would be stamped with this cluster's
