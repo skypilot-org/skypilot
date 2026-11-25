@@ -107,11 +107,17 @@ srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 bash -c 'while IFS= re
 done < <(enroot list)
 ' || { echo "[container] ERROR: Failed to remove stale container pyxis_test-cluster." >&2; exit 1; }
 CONTAINER_PIDS=()
-srun --overlap --job-name=sky-container-keeper --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache,/tmp/test-cluster/.sky:/tmp/test-cluster/.sky" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+srun --overlap --job-name=sky-container-keeper --unbuffered --kill-on-bad-exit=1 --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache,/tmp/test-cluster/.sky:/tmp/test-cluster/.sky" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
-apt-get update
-apt-get install -y ca-certificates rsync curl git wget fuse
+missing=""
+for package in ca-certificates rsync curl git wget fuse; do
+  dpkg -s "$package" >/dev/null 2>&1 || missing="$missing $package"
+done
+if [ -n "$missing" ]; then
+  apt-get update
+  apt-get install -y $missing
+fi
 echo '"'"'alias sudo=""'"'"' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 touch /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done/$SLURM_PROCID && sleep infinity' &

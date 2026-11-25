@@ -279,6 +279,21 @@ class ResourcesMismatchError(Exception):
     pass
 
 
+class SlurmStartupError(RuntimeError):
+    """An allocation startup failure with its single diagnostic log read."""
+
+    def __init__(self, message: str, job_id: str, log_output: str) -> None:
+        super().__init__(message)
+        self.job_id = job_id
+        self.log_output = log_output
+
+    def __reduce__(
+        self
+    ) -> typing.Tuple[typing.Type['SlurmStartupError'], typing.Tuple[str, str,
+                                                                     str]]:
+        return (self.__class__, (str(self), self.job_id, self.log_output))
+
+
 class ProvisionUnsupportedError(Exception):
     """Raised when a provisioner cannot ever satisfy a request.
 
