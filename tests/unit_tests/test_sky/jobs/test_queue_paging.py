@@ -134,11 +134,11 @@ def _job_ids(request_id):
 @pytest.mark.usefixtures('sync_server')
 class TestPaging:
 
-    def test_pages_until_a_short_page(self):
+    def test_pages_until_an_empty_page(self):
         server = _Server(_TREES)
         request_id = _queue_v2(server)
         assert [(b['limit'], b['after_job_id']) for b in server.bodies
-               ] == [(2, None), (2, 7), (2, 3)]
+               ] == [(2, None), (2, 7), (2, 3), (2, 1)]
         assert 'root_job_id' in server.bodies[0]['fields']
         assert _job_ids(request_id) == ([1, 3, 5, 7, 9, 10, 11], 5)
 

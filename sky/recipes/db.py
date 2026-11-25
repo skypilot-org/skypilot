@@ -379,6 +379,8 @@ def list_recipes(
     pinned_only: bool = False,
     my_recipes_only: bool = False,
     recipe_type: Optional[Union[RecipeType, str]] = None,
+    limit: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> List[Recipe]:
     """List recipes with optional filters.
 
@@ -390,6 +392,9 @@ def list_recipes(
         pinned_only: If True, only return pinned templates.
         my_recipes_only: If True, only return recipes owned by user_id.
         recipe_type: Filter by type.
+        limit: Return at most this many recipes, by name instead of pinned
+            first.
+        after_name: Return only recipes named after this.
 
     Returns:
         List of matching YamlTemplate objects.
@@ -406,8 +411,13 @@ def list_recipes(
         query = query.where(
             recipes_table.c.recipe_type == recipe_type_to_str(recipe_type))
 
-    query = query.order_by(recipes_table.c.pinned.desc(),
-                           recipes_table.c.name.asc())
+    if after_name is not None:
+        query = query.where(recipes_table.c.name > after_name)
+    if limit is None:
+        query = query.order_by(recipes_table.c.pinned.desc(),
+                               recipes_table.c.name.asc())
+    else:
+        query = query.order_by(recipes_table.c.name.asc()).limit(limit)
 
     with orm.Session(engine) as session:
         result = session.execute(query)

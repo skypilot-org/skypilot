@@ -3184,12 +3184,15 @@ async def cluster_events(
 
 
 @app.get('/storage/ls')
-async def storage_ls(request: fastapi.Request) -> None:
-    """Gets the storages."""
+async def storage_ls(request: fastapi.Request,
+                     limit: Optional[int] = None,
+                     after_name: Optional[str] = None) -> None:
+    """Gets the storages; with `limit`, a page by name after `after_name`."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STORAGE_LS,
-        request_body=payloads.RequestBody(),
+        request_body=payloads.StorageListBody(limit=limit,
+                                              after_name=after_name),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,

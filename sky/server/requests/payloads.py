@@ -429,6 +429,11 @@ class StatusBody(RequestBody):
     summary_response: bool = False
     # Include the cluster handle in the response
     include_handle: bool = True
+    # A page of at most `limit` clusters, newest launch first. The cursor is the
+    # `launched_at` and `name` of the last cluster of the previous page.
+    limit: Optional[int] = None
+    after_launched_at: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class StartBody(RequestBody):
@@ -625,6 +630,16 @@ class VolumeListBody(RequestBody):
     # None means every volume, so a client that predates this field and never
     # sends it keeps getting the whole listing.
     volume_names: Optional[List[str]] = None
+    # A page of at most `limit` volumes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
+
+
+class StorageListBody(RequestBody):
+    """The request body for the storage list endpoint."""
+    # A page of at most `limit` storages by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class VolumeValidateBody(RequestBody):
@@ -1176,6 +1191,9 @@ class RecipeListBody(RequestBody):
     my_recipes_only: bool = False
     recipe_type: Optional[
         str] = None  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
+    # A page of at most `limit` recipes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
