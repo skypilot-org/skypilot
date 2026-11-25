@@ -247,7 +247,8 @@ class TestConfigMapSync(unittest.TestCase):
                                          'test-configmap',
                                          namespace='test-namespace',
                                          consistency=reads.FRESH,
-                                         attempts=1)
+                                         attempts=1,
+                                         timeout=reads.LONG_READ_TIMEOUT)
         # Verify ConfigMap creation was called
         mock_core_api.create_namespaced_config_map.assert_called_once()
 

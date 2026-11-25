@@ -316,7 +316,8 @@ def _find_by_name(context: Optional[str], resource: reads.Resource,
         field_selector=f'metadata.name={name}',
         consistency=reads.FRESH,
         convert=kubernetes_utils.k8s_object_converter(object_type),
-        attempts=1).items
+        attempts=1,
+        timeout=reads.LONG_READ_TIMEOUT).items
     return items[0] if items else None
 
 
@@ -678,7 +679,8 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
                                         daemonset['metadata']['name'],
                                         namespace=fuse_proxy_namespace,
                                         consistency=reads.FRESH,
-                                        attempts=1).items
+                                        attempts=1,
+                                        timeout=reads.LONG_READ_TIMEOUT).items
             if not existing:
                 raise
             ds_image = daemonset['spec']['template']['spec']['containers'][0][
@@ -732,7 +734,8 @@ def _configure_services(namespace: str, context: Optional[str],
             field_selector=f'metadata.name={name}',
             consistency=reads.FRESH,
             convert=kubernetes_utils.k8s_object_converter('V1Service'),
-            attempts=1).items
+            attempts=1,
+            timeout=reads.LONG_READ_TIMEOUT).items
         if existing_services:
             assert len(existing_services) == 1
             existing_service = existing_services[0]

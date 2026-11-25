@@ -154,6 +154,9 @@ CLUSTER_ROLE_BINDINGS = Resource(group='rbac.authorization.k8s.io',
 # A connect timeout and a read timeout, or one timeout for the whole request,
 # in seconds.
 Timeout = Union[float, Tuple[float, float]]
+# For reads whose response may be large or slow: the read timeout bounds each
+# socket read, not the whole response.
+LONG_READ_TIMEOUT: Timeout = (5, 30)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -390,7 +393,8 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
             # Every API server serves the core group.
             raise exceptions.KubeAPIUnreachableError(
                 f'Kubernetes context {context!r} answered 404 to a '
-                f'{resource.label} list.')
+                f'{resource.label} list.') from kubernetes.api_exception()(
+                    status=404, reason='Not Found')
         if name is None:
             raise exceptions.KubernetesResourceNotServedError(
                 f'Kubernetes context {context!r} does not serve '

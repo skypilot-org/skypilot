@@ -350,6 +350,15 @@ def test_list_of_an_unserved_resource_raises(api):
         reads.list_objects('ctx', queues)
 
 
+def test_core_list_404_reports_the_status(api):
+    api(_api_error(404))
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError) as raised:
+        reads.list_objects('ctx', reads.PODS, namespace='ns')
+
+    assert reads.http_status(raised.value) == 404
+
+
 def test_list_of_a_core_resource_answering_404_is_unreachable(api):
     api(_api_error(404))
 

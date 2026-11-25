@@ -304,7 +304,8 @@ def is_high_availability_cluster_by_kubectl(
             label_selector=(
                 f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}'),
             consistency=reads.FRESH,
-            attempts=1).items
+            attempts=1,
+            timeout=reads.LONG_READ_TIMEOUT).items
     except exceptions.KubernetesResourceNotServedError:
         return False
     except exceptions.KubeAPIUnreachableError as e:
@@ -522,7 +523,7 @@ def _get_pending_pvcs(
                 reads.PERSISTENT_VOLUME_CLAIMS,
                 pvc_name,
                 namespace=namespace,
-                consistency=reads.CACHED,
+                consistency=reads.FRESH,
                 convert=kubernetes_utils.k8s_object_converter(
                     'V1PersistentVolumeClaim'),
                 attempts=1).items
@@ -2102,7 +2103,8 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
                                 namespace=namespace,
                                 consistency=reads.FRESH,
                                 convert=kubernetes_utils.k8s_pod_from_dict,
-                                attempts=1).items
+                                attempts=1,
+                                timeout=reads.LONG_READ_TIMEOUT).items
     except exceptions.KubeAPIUnreachableError as e:
         if _is_transport_error(e):
             raise
@@ -2373,7 +2375,8 @@ def _wait_for_deployment_pod(context,
             namespace=namespace,
             consistency=reads.FRESH,
             convert=kubernetes_utils.k8s_object_converter('V1Deployment'),
-            attempts=1).items
+            attempts=1,
+            timeout=reads.LONG_READ_TIMEOUT).items
         if not deployments:
             raise config_lib.KubernetesError(
                 f'Deployment {deployment_name!r} no longer exists in '
@@ -2389,7 +2392,8 @@ def _wait_for_deployment_pod(context,
                 label_selector=label_selector,
                 consistency=reads.FRESH,
                 convert=kubernetes_utils.k8s_pod_from_dict,
-                attempts=1).items
+                attempts=1,
+                timeout=reads.LONG_READ_TIMEOUT).items
 
         ready_replicas = (deployment.status.ready_replicas
                           if deployment.status is not None else 0)
@@ -3322,7 +3326,8 @@ def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
         namespace=namespace,
         consistency=reads.FRESH,
         convert=kubernetes_utils.k8s_object_converter('V1ConfigMap'),
-        attempts=1).items
+        attempts=1,
+        timeout=reads.LONG_READ_TIMEOUT).items
     if not cms:
         return None
     data = cms[0].data or {}
@@ -3366,7 +3371,8 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
             namespace=namespace,
             consistency=reads.FRESH,
             convert=kubernetes_utils.k8s_object_converter('V1ConfigMap'),
-            attempts=1).items
+            attempts=1,
+            timeout=reads.LONG_READ_TIMEOUT).items
         data = (cms[0].data or {}) if cms else {}
         for key, value in data.items():
             if not key.startswith(host_network_probe.SSHD_KEY_PREFIX):

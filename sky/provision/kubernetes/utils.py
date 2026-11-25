@@ -3961,17 +3961,15 @@ def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
         namespace (str): Kubernetes namespace to look for the service in.
         context (str): Kubernetes context to use.
     """
-    services = []
-    for consistency in (reads.CACHED, reads.FRESH):
-        # A service created moments ago may not be in the cache yet.
-        services = reads.get_object(context,
-                                    reads.SERVICES,
-                                    svc_name,
-                                    namespace=namespace,
-                                    consistency=consistency,
-                                    attempts=1).items
-        if services:
-            break
+    # The port is the cluster's SSH port, so it must not come from a cache that
+    # may still hold a deleted service of the same name.
+    services = reads.get_object(context,
+                                reads.SERVICES,
+                                svc_name,
+                                namespace=namespace,
+                                consistency=reads.FRESH,
+                                attempts=1,
+                                timeout=reads.LONG_READ_TIMEOUT).items
     if not services:
         raise ValueError(f'Service {svc_name!r} not found in namespace '
                          f'{namespace!r} of context {context!r}.')
@@ -5433,8 +5431,9 @@ def merge_custom_metadata(
 def check_nvidia_runtime_class(*, context: Optional[str] = None) -> bool:
     """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
     try:
-        runtime_classes = reads.list_objects(context,
-                                             reads.RUNTIME_CLASSES).items
+        runtime_classes = reads.list_objects(
+            context, reads.RUNTIME_CLASSES,
+            timeout=reads.LONG_READ_TIMEOUT).items
     except exceptions.KubernetesResourceNotServedError:
         return False
     return any(rc['metadata']['name'] == 'nvidia' for rc in runtime_classes)
@@ -5472,7 +5471,8 @@ def create_namespace(namespace: str, context: Optional[str]) -> None:
                         reads.NAMESPACES,
                         namespace,
                         consistency=reads.FRESH,
-                        attempts=1).items:
+                        attempts=1,
+                        timeout=reads.LONG_READ_TIMEOUT).items:
         return
 
     ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
@@ -6018,7 +6018,8 @@ def filter_pods(namespace: str,
                                   field_selector=field_selector,
                                   consistency=reads.FRESH,
                                   attempts=1,
-                                  convert=k8s_pod_from_dict)
+                                  convert=k8s_pod_from_dict,
+                                  timeout=reads.LONG_READ_TIMEOUT)
 
     # Don't return pods marked for deletion,
     # i.e. pods with non-null metadata.DeletionTimestamp.
@@ -6782,7 +6783,10 @@ def get_pvc_events(context: Optional[str],
                    namespace: str,
                    pvc_name: str,
                    reverse: bool = True) -> List[Any]:
-    """Get the events for a PVC, sorted by creation_timestamp."""
+    """Get the events for a PVC, sorted by creation_timestamp.
+
+    Read from the API server: they decide whether a volume can be used.
+    """
     try:
         pvc_events = reads.list_objects(
             context,
@@ -6790,6 +6794,7 @@ def get_pvc_events(context: Optional[str],
             namespace=namespace,
             field_selector=(f'involvedObject.name={pvc_name},'
                             'involvedObject.kind=PersistentVolumeClaim'),
+            consistency=reads.FRESH,
             attempts=1,
             convert=k8s_object_converter('V1Event'))
     except exceptions.KubeAPIUnreachableError as e:

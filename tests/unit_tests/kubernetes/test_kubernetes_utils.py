@@ -7052,19 +7052,9 @@ def test_get_port_reads_the_node_port(monkeypatch):
                                        reads.SERVICES,
                                        'c-head-ssh',
                                        namespace='ns',
-                                       consistency=reads.CACHED,
-                                       attempts=1)
-
-
-def test_get_port_rereads_a_service_the_cache_lacks(monkeypatch):
-    service = {'spec': {'ports': [{'nodePort': 30022}]}}
-    get_object = mock.Mock(
-        side_effect=[_read_result([]),
-                     _read_result([service])])
-    monkeypatch.setattr(utils.reads, 'get_object', get_object)
-    assert utils.get_port('c-head-ssh', 'ns', 'ctx') == 30022
-    assert [c.kwargs['consistency'] for c in get_object.call_args_list
-           ] == [reads.CACHED, reads.FRESH]
+                                       consistency=reads.FRESH,
+                                       attempts=1,
+                                       timeout=reads.LONG_READ_TIMEOUT)
 
 
 def test_get_port_missing_service_raises(monkeypatch):
@@ -7118,7 +7108,8 @@ def test_create_namespace_creates_an_absent_namespace(monkeypatch):
                                        reads.NAMESPACES,
                                        'ns',
                                        consistency=reads.FRESH,
-                                       attempts=1)
+                                       attempts=1,
+                                       timeout=reads.LONG_READ_TIMEOUT)
     core_api.create_namespace.assert_called_once()
 
 
@@ -7141,6 +7132,7 @@ def test_get_pvc_events_sorted_newest_first(monkeypatch):
     _, kwargs = list_objects.call_args
     assert kwargs['field_selector'] == (
         'involvedObject.name=pvc,involvedObject.kind=PersistentVolumeClaim')
+    assert kwargs['consistency'] == reads.FRESH
 
 
 def test_get_pvc_events_read_failure_is_empty(monkeypatch):

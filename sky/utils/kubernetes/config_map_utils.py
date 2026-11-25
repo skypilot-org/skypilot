@@ -69,7 +69,8 @@ def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
                             configmap_name,
                             namespace=namespace,
                             consistency=reads.FRESH,
-                            attempts=1).items:
+                            attempts=1,
+                            timeout=reads.LONG_READ_TIMEOUT).items:
             # ConfigMap exists, don't overwrite it
             logger.debug(f'ConfigMap {configmap_name} already exists')
             return
