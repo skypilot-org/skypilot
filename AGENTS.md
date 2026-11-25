@@ -250,6 +250,16 @@ When updating dependencies:
 3. Test with both minimum and latest allowed versions
 4. Document version constraints with comments explaining why
 
+### Kubernetes Reads
+
+Read Kubernetes objects with `reads.list_objects()` and `reads.get_object()` in `sky/provision/kubernetes/reads.py`, not with the Kubernetes client's `list_*`/`read_*`/`get_*` methods:
+
+- `consistency=reads.CACHED` lets a registered cluster state cache serve the read. Use it for views, status and diagnostics that tolerate a few seconds of staleness.
+- `consistency=reads.FRESH` reads the API server. Use it when the result feeds a write, a control decision, a wait loop, or a permission check.
+- A missing object is an empty `items`. Other failures raise `KubeAPIUnreachableError`; `reads.http_status(e)` gives the HTTP status the API server answered.
+- `convert` turns each object into what the caller needs, e.g. `kubernetes_utils.k8s_object_converter('V1Pod')` for client objects. Do not modify unconverted items; they may be shared.
+- Writes, watches, logs and exec use the Kubernetes client directly.
+
 ## Key Modules Reference
 
 | Module | Purpose |

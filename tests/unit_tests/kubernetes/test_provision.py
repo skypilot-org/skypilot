@@ -31,6 +31,91 @@ def _remove_colorama_escape_codes(error_output):
     return [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in error_output]
 
 
+# The kubernetes client call that reads the same objects as a read.
+_CLIENT_LISTS = {
+    reads.PODS: ('core_api', 'list_namespaced_pod'),
+    reads.EVENTS: ('core_api', 'list_namespaced_event'),
+    reads.NODES: ('core_api', 'list_node'),
+    reads.DEPLOYMENTS: ('apps_api', 'list_namespaced_deployment'),
+}
+_CLIENT_GETS = {
+    reads.PODS: ('core_api', 'read_namespaced_pod'),
+    reads.NODES: ('core_api', 'read_node'),
+    reads.CONFIG_MAPS: ('core_api', 'read_namespaced_config_map'),
+    reads.PERSISTENT_VOLUME_CLAIMS:
+        ('core_api', 'read_namespaced_persistent_volume_claim'),
+    reads.DEPLOYMENTS: ('apps_api', 'read_namespaced_deployment_status'),
+}
+
+
+def _read_via_client(context, resource, name, namespace, timeout, selectors):
+    """Items of a read, from the faked kubernetes client call.
+
+    Fails the way the read layer does: a get of an absent object returns no
+    items, and every other error is a KubeAPIUnreachableError caused by the
+    client's error.
+    """
+    api, method = (_CLIENT_LISTS if name is None else _CLIENT_GETS)[resource]
+    call = getattr(getattr(kubernetes, api)(context), method)
+    args = [arg for arg in (name, namespace) if arg is not None]
+    kwargs = {key: value for key, value in selectors.items() if value}
+    kwargs['_request_timeout'] = timeout or kubernetes.API_TIMEOUT
+    try:
+        got = call(*args, **kwargs)
+    except kubernetes.api_exception() as e:
+        if e.status == 404 and name is not None:
+            return []
+        raise sky_exceptions.KubeAPIUnreachableError(str(e)) from e
+    except kubernetes.urllib3_http_error() as e:
+        raise sky_exceptions.KubeAPIUnreachableError(str(e)) from e
+    return [got] if name is not None else list(got.items)
+
+
+def _read_result(items):
+    return reads.ReadResult(items=items,
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=reads.REASON_FRESH)
+
+
+def _read_error(cause):
+    """The error a read raises when its API call failed with cause."""
+    error = sky_exceptions.KubeAPIUnreachableError('read failed')
+    error.__cause__ = cause
+    return error
+
+
+@pytest.fixture(autouse=True)
+def _reads_via_client(monkeypatch):
+    """Serves reads.list_objects() and reads.get_object() of the resources in
+    _CLIENT_LISTS and _CLIENT_GETS from the faked kubernetes client, so a test
+    fakes the client calls that read the same objects. A test that fakes the
+    reads itself replaces these."""
+    real_list_objects = reads.list_objects
+    real_get_object = reads.get_object
+
+    def list_objects(context, resource, **kwargs):
+        if resource not in _CLIENT_LISTS:
+            return real_list_objects(context, resource, **kwargs)
+        return _read_result(
+            _read_via_client(
+                context, resource, None, kwargs.get('namespace'),
+                kwargs.get('timeout'), {
+                    'label_selector': kwargs.get('label_selector'),
+                    'field_selector': kwargs.get('field_selector')
+                }))
+
+    def get_object(context, resource, name, **kwargs):
+        if resource not in _CLIENT_GETS:
+            return real_get_object(context, resource, name, **kwargs)
+        return _read_result(
+            _read_via_client(context, resource, name, kwargs.get('namespace'),
+                             kwargs.get('timeout'), {}))
+
+    monkeypatch.setattr(reads, 'list_objects', list_objects)
+    monkeypatch.setattr(reads, 'get_object', get_object)
+
+
 def _make_provision_config(count):
     """A minimal ProvisionConfig sufficient to drive _create_pods."""
     return provision_common.ProvisionConfig(
@@ -118,6 +203,56 @@ def test_create_pods_is_idempotent_when_all_pods_exist(monkeypatch):
     core_api.create_namespaced_pod.assert_not_called()
     assert record.created_instance_ids == []
     assert record.head_instance_id == head_name
+
+
+def _create_existing_pods_with_runtime_class_error(monkeypatch, error):
+    cluster_on_cloud = 'test-cluster-abc'
+    head_name = f'{cluster_on_cloud}-head'
+    _patch_create_pods_k8s_boundary(monkeypatch,
+                                    {head_name: _fake_pod(head_name)},
+                                    head_name)
+    monkeypatch.setattr(kubernetes_utils, 'check_nvidia_runtime_class',
+                        mock.MagicMock(side_effect=error))
+    monkeypatch.setattr(kubernetes, 'core_api',
+                        lambda *a, **k: mock.MagicMock())
+    monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+    return instance._create_pods('us', cluster_on_cloud, cluster_on_cloud,
+                                 _make_provision_config(count=1))
+
+
+def test_create_pods_continues_when_runtime_classes_cannot_be_read(monkeypatch):
+    """An API error answer to the RuntimeClass read (e.g. no RBAC) only
+    drops the nvidia RuntimeClass."""
+    warnings = []
+    monkeypatch.setattr(logger, 'warning',
+                        lambda msg, *a, **k: warnings.append(msg))
+    record = _create_existing_pods_with_runtime_class_error(
+        monkeypatch, _read_error(kubernetes.api_exception()(status=403)))
+    assert record.head_instance_id == 'test-cluster-abc-head'
+    assert any('nvidia RuntimeClass' in msg for msg in warnings)
+
+
+def test_create_pods_raises_when_the_api_server_is_unreachable(monkeypatch):
+    with pytest.raises(sky_exceptions.KubeAPIUnreachableError):
+        _create_existing_pods_with_runtime_class_error(
+            monkeypatch,
+            _read_error(urllib3.exceptions.ReadTimeoutError(
+                None, 'url', 'slow')))
+
+
+def test_run_instances_logs_an_unreachable_api_server(monkeypatch):
+    """A read error out of pod creation is logged like an API error."""
+    error = sky_exceptions.KubeAPIUnreachableError('filter_pods failed')
+    monkeypatch.setattr(instance, '_create_pods',
+                        mock.MagicMock(side_effect=error))
+    warnings = []
+    monkeypatch.setattr(logger, 'warning',
+                        lambda msg, *a, **k: warnings.append(msg))
+    with pytest.raises(sky_exceptions.KubeAPIUnreachableError):
+        instance.run_instances('us', 'c', 'c-on-cloud',
+                               _make_provision_config(count=1))
+    assert any('filter_pods failed' in msg for msg in warnings)
 
 
 def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
@@ -1188,6 +1323,21 @@ class TestRbac409ConflictHandling:
         existing.subjects = subjects
         return existing
 
+    @staticmethod
+    def _fake_list(monkeypatch, *results):
+        """Serves the n-th list of the resource from results[n]."""
+        calls = []
+
+        def list_objects(context, resource, **kwargs):
+            calls.append((context, resource, kwargs))
+            return reads.ReadResult(items=results[len(calls) - 1],
+                                    resource_version='',
+                                    staleness_seconds=0,
+                                    reason=reads.REASON_FRESH)
+
+        monkeypatch.setattr(reads, 'list_objects', list_objects)
+        return calls
+
     def test_service_account_409_handled(self, monkeypatch):
         """Test 409 on create_namespaced_service_account re-reads and succeeds.
         """
@@ -1197,10 +1347,7 @@ class TestRbac409ConflictHandling:
         core_api_mock = mock.MagicMock()
         # First list returns empty -> "not found", second list (after 409)
         # returns the concurrently-created resource.
-        core_api_mock.list_namespaced_service_account.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_sa]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_sa])
         core_api_mock.create_namespaced_service_account.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
@@ -1218,8 +1365,7 @@ class TestRbac409ConflictHandling:
         api_exc = _make_api_exception(500, 'Internal Server Error')
 
         core_api_mock = mock.MagicMock()
-        core_api_mock.list_namespaced_service_account.return_value = (
-            mock.MagicMock(items=[]))
+        self._fake_list(monkeypatch, [])
         core_api_mock.create_namespaced_service_account.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
@@ -1245,10 +1391,7 @@ class TestRbac409ConflictHandling:
         existing_role = self._make_existing_role(new_role.rules)
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_namespaced_role.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_role]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_role])
         auth_api_mock.create_namespaced_role.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1272,10 +1415,7 @@ class TestRbac409ConflictHandling:
             rules=[_policy_rule(['get'], ['pods'])])
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_namespaced_role.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_role]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_role])
         auth_api_mock.create_namespaced_role.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1301,10 +1441,7 @@ class TestRbac409ConflictHandling:
                                                   new_rb.subjects)
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_namespaced_role_binding.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_rb]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_rb])
         auth_api_mock.create_namespaced_role_binding.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1327,10 +1464,7 @@ class TestRbac409ConflictHandling:
                                                   subjects=['stale-subject'])
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_namespaced_role_binding.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_rb]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_rb])
         auth_api_mock.create_namespaced_role_binding.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1354,10 +1488,7 @@ class TestRbac409ConflictHandling:
         existing_cr = self._make_existing_role(new_cr.rules)
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_cluster_role.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_cr]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_cr])
         auth_api_mock.create_cluster_role.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1379,10 +1510,7 @@ class TestRbac409ConflictHandling:
             rules=[_policy_rule(['get'], ['pods'])])
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_cluster_role.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_cr]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_cr])
         auth_api_mock.create_cluster_role.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1408,10 +1536,7 @@ class TestRbac409ConflictHandling:
                                                        new_binding.subjects)
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_cluster_role_binding.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_binding]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_binding])
         auth_api_mock.create_cluster_role_binding.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1433,10 +1558,7 @@ class TestRbac409ConflictHandling:
             role_ref='stale-role-ref', subjects=['stale-subject'])
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_cluster_role_binding.side_effect = [
-            mock.MagicMock(items=[]),
-            mock.MagicMock(items=[existing_binding]),
-        ]
+        self._fake_list(monkeypatch, [], [existing_binding])
         auth_api_mock.create_cluster_role_binding.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1447,6 +1569,206 @@ class TestRbac409ConflictHandling:
         config_lib._configure_autoscaler_cluster_role_binding(
             'default', None, provider_config)
         auth_api_mock.patch_cluster_role_binding.assert_called_once()
+
+    def test_lookup_lists_fresh_by_name(self, monkeypatch):
+        """The lookup feeds a create or patch, so it reads the API server."""
+        calls = self._fake_list(monkeypatch, [mock.MagicMock()])
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *args, **kwargs: mock.MagicMock())
+
+        config_lib._configure_autoscaler_service_account(
+            'default', 'ctx', _make_provider_config_for_rbac())
+
+        context, resource, kwargs = calls[0]
+        assert (context, resource) == ('ctx', reads.SERVICE_ACCOUNTS)
+        assert kwargs['namespace'] == 'default'
+        assert kwargs['field_selector'] == (
+            'metadata.name=skypilot-service-account')
+        assert kwargs['consistency'] == reads.FRESH
+
+    def test_409_with_nothing_to_reread_raises_the_conflict(self, monkeypatch):
+        api_exc = _make_api_exception(409, 'Conflict')
+        self._fake_list(monkeypatch, [], [])
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.create_cluster_role.side_effect = api_exc
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        with pytest.raises(FakeApiException):
+            config_lib._configure_autoscaler_cluster_role(
+                'default', None, _make_provider_config_for_rbac())
+
+    def test_ingress_roles_skipped_without_ingress_namespace(self, monkeypatch):
+        """A list in a missing namespace is empty; the create answers 404."""
+        listed = []
+
+        def list_objects(context, resource, **kwargs):
+            del context
+            listed.append((resource, kwargs['namespace']))
+            return reads.ReadResult(items=[],
+                                    resource_version='',
+                                    staleness_seconds=0,
+                                    reason=reads.REASON_FRESH)
+
+        def create(namespace, body):
+            del body
+            if namespace == 'ingress-nginx':
+                raise FakeApiException(404, 'Not Found')
+
+        monkeypatch.setattr(reads, 'list_objects', list_objects)
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.create_namespaced_role.side_effect = create
+        auth_api_mock.create_namespaced_role_binding.side_effect = create
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: FakeApiException)
+        provider_config = _make_provider_config_for_rbac()
+        provider_config['port_mode'] = 'ingress'
+        provider_config['autoscaler_ingress_role'] = {
+            'metadata': {
+                'name': 'skypilot-service-account-role',
+                'namespace': 'ingress-nginx',
+            },
+            'rules': [],
+        }
+        cfg = provision_common.ProvisionConfig(
+            provider_config=provider_config,
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'spec': {
+                    'serviceAccountName': 'skypilot-service-account'
+                }
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+        others = ('_configure_services',
+                  '_configure_autoscaler_service_account',
+                  '_configure_autoscaler_cluster_role',
+                  '_configure_autoscaler_cluster_role_binding',
+                  '_configure_skypilot_system_namespace')
+        with mock.patch.multiple(config_lib,
+                                 **{name: mock.DEFAULT for name in others}), \
+             mock.patch.object(config_lib.kubernetes_utils,
+                               'get_namespace_from_config',
+                               return_value='default'), \
+             mock.patch.object(config_lib.kubernetes_utils,
+                               'get_context_from_config',
+                               return_value=None):
+            config_lib.bootstrap_instances('kubernetes', 'c', cfg)
+
+        assert (reads.ROLES, 'ingress-nginx') in listed
+
+
+class TestConfigureExistingObjects:
+    """bootstrap reads the objects it is about to create or patch fresh."""
+
+    @staticmethod
+    def _fake_reads(monkeypatch, objects):
+        calls = []
+
+        def read(context, resource, name=None, **kwargs):
+            del context
+            calls.append((resource, kwargs))
+            if name is None:
+                name = kwargs['field_selector'].split('=', 1)[1]
+            items = [obj for obj in objects if obj['metadata']['name'] == name]
+            if kwargs.get('convert') is not None:
+                items = [kwargs['convert'](obj) for obj in items]
+            return reads.ReadResult(items=items,
+                                    resource_version='',
+                                    staleness_seconds=0,
+                                    reason=reads.REASON_FRESH)
+
+        monkeypatch.setattr(reads, 'list_objects', read)
+        monkeypatch.setattr(reads, 'get_object', read)
+        return calls
+
+    @staticmethod
+    def _service(port):
+        return {
+            'apiVersion': 'v1',
+            'kind': 'Service',
+            'metadata': {
+                'name': 'svc'
+            },
+            'spec': {
+                'ports': [{
+                    'name': 'ssh',
+                    'port': port
+                }]
+            },
+        }
+
+    @pytest.mark.parametrize('existing_port,action', [(None, 'create'),
+                                                      (22, None),
+                                                      (2222, 'patch')])
+    def test_configure_services(self, monkeypatch, existing_port, action):
+        existing = ([] if existing_port is None else
+                    [self._service(existing_port)])
+        calls = self._fake_reads(monkeypatch, existing)
+        core_api_mock = mock.MagicMock()
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *args, **kwargs: core_api_mock)
+
+        config_lib._configure_services('default', 'ctx',
+                                       {'services': [self._service(22)]})
+
+        assert core_api_mock.create_namespaced_service.called == (
+            action == 'create')
+        assert core_api_mock.patch_namespaced_service.called == (
+            action == 'patch')
+        resource, kwargs = calls[0]
+        assert resource == reads.SERVICES
+        assert kwargs['consistency'] == reads.FRESH
+
+    @pytest.mark.parametrize('same_image', [True, False])
+    def test_fuse_daemonset_conflict_compares_fresh_image(
+            self, monkeypatch, same_image):
+        image = ('berkeleyskypilot/fusermount-server:0.2.2'
+                 if same_image else 'old-image')
+        calls = self._fake_reads(monkeypatch, [{
+            'metadata': {
+                'name': 'fusermount-server'
+            },
+            'spec': {
+                'template': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'server',
+                            'image': image
+                        }]
+                    }
+                }
+            },
+        }])
+        apps_api_mock = mock.MagicMock()
+        apps_api_mock.create_namespaced_daemon_set.side_effect = (
+            _make_api_exception(409, 'Conflict'))
+        monkeypatch.setattr('sky.adaptors.kubernetes.apps_api',
+                            lambda *args, **kwargs: apps_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: FakeApiException)
+        monkeypatch.setattr(kubernetes_utils, 'merge_custom_metadata',
+                            lambda *args, **kwargs: None)
+
+        config_lib._configure_fuse_mounting({
+            'skypilot_system_namespace': 'skypilot-system',
+            'context': 'ctx'
+        })
+
+        assert apps_api_mock.patch_namespaced_daemon_set.called == (
+            not same_image)
+        resource, kwargs = calls[0]
+        assert resource == reads.DAEMON_SETS
+        assert kwargs['namespace'] == 'skypilot-system'
+        assert kwargs['consistency'] == reads.FRESH
 
 
 class TestRuntimeClassOverride:
@@ -2131,10 +2453,9 @@ class TestWaitForPodsToScheduleQueueGating:
 class TestWaitForPodsToScheduleTransportErrors:
     """Transport failures of the pod poll must not wedge or kill the wait.
 
-    The production bug: the poll's list_namespaced_pod call had no request
-    timeout, so a connection silently dropped mid-response (e.g. by a NAT/LB
-    idle limit) blocked the call — and with it the whole launch — forever.
-    The poll is now bounded by _POD_POLL_REQUEST_TIMEOUT; a transport error
+    A connection silently dropped mid-response (e.g. by a NAT/LB idle limit)
+    must not block the launch forever, so the poll is bounded by
+    _POD_POLL_REQUEST_TIMEOUT; a read that got no answer from the API server
     is treated as a missed tick and retried, and only a failure streak
     lasting _POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS surfaces as an error.
     """
@@ -2158,10 +2479,8 @@ class TestWaitForPodsToScheduleTransportErrors:
         monkeypatch.setattr(instance.time, 'time', clock.time)
         monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
 
-        core_api = mock.MagicMock()
-        core_api.list_namespaced_pod.side_effect = list_side_effect
-        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                            lambda *a, **kw: core_api)
+        list_objects = mock.MagicMock(side_effect=list_side_effect)
+        monkeypatch.setattr(reads, 'list_objects', list_objects)
         monkeypatch.setattr(
             instance, '_raise_pod_scheduling_errors',
             mock.MagicMock(
@@ -2170,12 +2489,12 @@ class TestWaitForPodsToScheduleTransportErrors:
                             lambda *a, **kw: None)
         monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
                             mock.MagicMock())
-        return clock, core_api
+        return clock, list_objects
 
     @staticmethod
     def _read_timeout():
-        return urllib3.exceptions.ReadTimeoutError(None, 'url',
-                                                   'Read timed out.')
+        return _read_error(
+            urllib3.exceptions.ReadTimeoutError(None, 'url', 'Read timed out.'))
 
     def _wait(self, timeout=60):
         node = self._make_node('pod-0', 'my-cluster')
@@ -2193,59 +2512,73 @@ class TestWaitForPodsToScheduleTransportErrors:
         return pod
 
     def _flaky_list(self, failures, error_factory):
-        """A list mock failing ``failures`` times, then serving a scheduled
-        pod. Asserts every poll is bounded by _POD_POLL_REQUEST_TIMEOUT."""
+        """A reads.list_objects() failing ``failures`` times, then serving a
+        scheduled pod. Asserts every poll is one bounded fresh read."""
         scheduled = self._scheduled_pod()
         state = {'n': 0}
 
-        def list_pods(namespace, label_selector=None, **kwargs):
-            del namespace, label_selector  # unused
-            assert kwargs.get('_request_timeout') == (
-                instance._POD_POLL_REQUEST_TIMEOUT)
+        def list_pods(context, resource, **kwargs):
+            assert context == 'test-context'
+            assert resource == reads.PODS
+            assert kwargs['namespace'] == 'ns'
+            assert kwargs['consistency'] == reads.FRESH
+            assert kwargs['attempts'] == 1
+            assert kwargs['timeout'] == instance._POD_POLL_REQUEST_TIMEOUT
             state['n'] += 1
             if state['n'] <= failures:
                 raise error_factory()
-            result = mock.MagicMock()
-            result.items = [scheduled]
-            return result
+            return _read_result([scheduled])
 
         return list_pods
 
     def test_transient_transport_error_is_retried(self, monkeypatch):
         """A couple of timed-out polls are missed ticks, not a failure."""
-        _, core_api = self._setup(monkeypatch,
-                                  self._flaky_list(2, self._read_timeout))
+        _, list_objects = self._setup(monkeypatch,
+                                      self._flaky_list(2, self._read_timeout))
         self._wait()
-        assert core_api.list_namespaced_pod.call_count == 3
+        assert list_objects.call_count == 3
 
     def test_wrapped_ssl_error_is_retried(self, monkeypatch):
         """The kubernetes client wraps urllib3 SSLError into
         ApiException(status=0); it must be retried like any other transport
         error, while ApiExceptions with a real HTTP status still raise."""
-        _, core_api = self._setup(
+        _, list_objects = self._setup(
             monkeypatch,
             self._flaky_list(
-                2, lambda: kubernetes.api_exception()
-                (status=0, reason='TLS blip')))
+                2, lambda: _read_error(kubernetes.api_exception()
+                                       (status=0, reason='TLS blip'))))
         self._wait()
-        assert core_api.list_namespaced_pod.call_count == 3
+        assert list_objects.call_count == 3
+
+    def test_known_unreachable_context_is_retried(self, monkeypatch):
+        """A context known to be unreachable fails the read with no answer
+        from the API server, which is a missed tick like a timeout."""
+        _, list_objects = self._setup(
+            monkeypatch,
+            self._flaky_list(
+                1,
+                lambda: sky_exceptions.KubeAPIUnreachableError('unreachable')))
+        self._wait()
+        assert list_objects.call_count == 2
 
     def test_api_error_response_is_not_retried(self, monkeypatch):
         """An HTTP error response (e.g. 403) is not a transport failure and
-        must fail fast, unchanged."""
-        self._setup(
+        must fail fast."""
+        _, list_objects = self._setup(
             monkeypatch,
             self._flaky_list(
-                1, lambda: kubernetes.api_exception()
-                (status=403, reason='Forbidden')))
-        with pytest.raises(kubernetes.api_exception()):
+                1, lambda: _read_error(kubernetes.api_exception()
+                                       (status=403, reason='Forbidden'))))
+        with pytest.raises(sky_exceptions.KubeAPIUnreachableError) as e:
             self._wait()
+        assert reads.http_status(e.value) == 403
+        assert list_objects.call_count == 1
 
     def test_persistent_transport_errors_raise(self, monkeypatch):
         """A persistently unreachable API server surfaces as an error once
         the failure streak outlasts the grace window, instead of retrying
         silently forever."""
-        clock, core_api = self._setup(
+        clock, list_objects = self._setup(
             monkeypatch, self._flaky_list(10**9, self._read_timeout))
 
         with pytest.raises(config_lib.KubernetesError,
@@ -2257,7 +2590,7 @@ class TestWaitForPodsToScheduleTransportErrors:
         assert clock.now >= instance._POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS
         # Each missed poll costs ~1s of (fake) sleep, so the streak is
         # roughly one attempt per second of the grace window.
-        assert core_api.list_namespaced_pod.call_count > 2
+        assert list_objects.call_count > 2
 
 
 class TestWaitForPodsToScheduleBoundPod:
@@ -2822,8 +3155,8 @@ class TestWaitForPodsToScheduleDeletedPods:
 
     def test_scheduling_error_lookup_still_raises_other_api_errors(
             self, monkeypatch):
-        """Only a 404 means the pod was deleted; every other API error keeps
-        its existing behaviour (and its existing wrapper at the call site)."""
+        """Only a 404 means the pod was deleted; every other API error is
+        raised (and wrapped at the call site)."""
         core_api = mock.MagicMock()
         core_api.read_namespaced_pod.side_effect = _make_api_exception(
             500, 'Internal Server Error')
@@ -2833,10 +3166,11 @@ class TestWaitForPodsToScheduleDeletedPods:
                             lambda: FakeApiException)
 
         node = self._make_node('pod-0', 'my-cluster')
-        with pytest.raises(FakeApiException):
+        with pytest.raises(sky_exceptions.KubeAPIUnreachableError) as e:
             instance._raise_pod_scheduling_errors('ns',
                                                   'test-context', [node],
                                                   cluster_name='cn')
+        assert reads.http_status(e.value) == 500
 
     def test_a_scheduling_complaint_is_not_reported_as_the_cause(
             self, monkeypatch):
@@ -7284,3 +7618,152 @@ def test_missing_pod_reason_from_cluster_events_taint_eviction(
         kwargs: [f'[kubernetes pod p] TaintManagerEviction {message}'])
     assert instance._derive_missing_pod_reason_from_cluster_events(
         'c') == expected
+
+
+class TestIsHighAvailabilityClusterByKubectl:
+    """Whether the cluster runs as a deployment, read fresh from the API
+    server; an API error answer means it does not."""
+
+    def _is_ha(self, monkeypatch, answer):
+        list_objects = mock.MagicMock()
+        if isinstance(answer, Exception):
+            list_objects.side_effect = answer
+        else:
+            list_objects.return_value = _read_result(answer)
+        monkeypatch.setattr(reads, 'list_objects', list_objects)
+        is_ha = instance.is_high_availability_cluster_by_kubectl(
+            'c', 'ctx', 'ns')
+        assert list_objects.call_args.args == ('ctx', reads.DEPLOYMENTS)
+        assert list_objects.call_args.kwargs['namespace'] == 'ns'
+        assert list_objects.call_args.kwargs['consistency'] == reads.FRESH
+        return is_ha
+
+    def test_a_matching_deployment_means_ha(self, monkeypatch):
+        assert self._is_ha(monkeypatch, [{'metadata': {'name': 'c'}}])
+
+    def test_no_deployment_means_not_ha(self, monkeypatch):
+        assert not self._is_ha(monkeypatch, [])
+
+    def test_api_error_answer_means_not_ha(self, monkeypatch):
+        assert not self._is_ha(
+            monkeypatch, _read_error(kubernetes.api_exception()(status=403)))
+
+    def test_deployments_not_served_means_not_ha(self, monkeypatch):
+        assert not self._is_ha(
+            monkeypatch,
+            sky_exceptions.KubernetesResourceNotServedError('not served'))
+
+    def test_unreachable_api_server_is_raised(self, monkeypatch):
+        with pytest.raises(sky_exceptions.KubeAPIUnreachableError):
+            self._is_ha(
+                monkeypatch,
+                _read_error(
+                    urllib3.exceptions.ReadTimeoutError(None, 'url', 'slow')))
+
+
+class TestForceRemoveTerminatingPodRead:
+    """The read of the terminating pod before it is force-removed."""
+
+    def _remove(self, monkeypatch, answer):
+        get_object = mock.MagicMock()
+        if isinstance(answer, Exception):
+            get_object.side_effect = answer
+        else:
+            get_object.return_value = _read_result(answer)
+        monkeypatch.setattr(reads, 'get_object', get_object)
+        api = _mock_core_api(monkeypatch)
+        instance._force_remove_terminating_pod('p', 'ns', 'ctx')
+        assert get_object.call_args.args == ('ctx', reads.PODS, 'p')
+        assert get_object.call_args.kwargs['consistency'] == reads.FRESH
+        return api
+
+    def test_absent_pod_is_left_alone(self, monkeypatch):
+        api = self._remove(monkeypatch, [])
+        api.patch_namespaced_pod.assert_not_called()
+        api.delete_namespaced_pod.assert_not_called()
+
+    def test_api_error_still_force_deletes(self, monkeypatch):
+        api = self._remove(monkeypatch,
+                           _read_error(kubernetes.api_exception()(status=500)))
+        api.patch_namespaced_pod.assert_not_called()
+        assert api.delete_namespaced_pod.call_args.kwargs[
+            'grace_period_seconds'] == 0
+
+    def test_unreachable_api_server_is_raised(self, monkeypatch):
+        with pytest.raises(sky_exceptions.KubeAPIUnreachableError):
+            self._remove(
+                monkeypatch,
+                _read_error(
+                    urllib3.exceptions.ReadTimeoutError(None, 'url', 'slow')))
+
+
+def test_wait_for_deployment_pod_fails_when_the_deployment_is_gone(monkeypatch):
+    monkeypatch.setattr(reads, 'get_object',
+                        mock.MagicMock(return_value=_read_result([])))
+    deployment = mock.MagicMock()
+    deployment.metadata.name = 'c-deployment'
+    deployment.spec.selector.match_labels = {'app': 'c'}
+    with pytest.raises(config_lib.KubernetesError, match='no longer exists'):
+        instance._wait_for_deployment_pod('ctx', 'ns', deployment)
+
+
+def test_wait_for_pod_gone_reads_fresh(monkeypatch):
+    get_object = mock.MagicMock(return_value=_read_result([]))
+    monkeypatch.setattr(reads, 'get_object', get_object)
+    assert instance._wait_for_pod_gone('ns', 'ctx', 'p')
+    assert get_object.call_args.args == ('ctx', reads.PODS, 'p')
+    assert get_object.call_args.kwargs['consistency'] == reads.FRESH
+    assert get_object.call_args.kwargs['attempts'] == 1
+
+
+def test_wait_for_pod_gone_raises_when_the_api_server_is_unreachable(
+        monkeypatch):
+    monkeypatch.setattr(
+        reads, 'get_object',
+        mock.MagicMock(side_effect=_read_error(
+            urllib3.exceptions.ReadTimeoutError(None, 'url', 'slow'))))
+    with pytest.raises(sky_exceptions.KubeAPIUnreachableError):
+        instance._wait_for_pod_gone('ns', 'ctx', 'p')
+
+
+@pytest.mark.parametrize('read_name,call,consistency', [
+    ('list_objects', lambda: instance._get_pod_events('ctx', 'ns', 'p'),
+     reads.CACHED),
+    ('list_objects', lambda: instance._detect_cluster_event_reason_occurred(
+        'ns', 'ctx', datetime.datetime.now(datetime.timezone.utc),
+        'TriggeredScaleUp'), reads.FRESH),
+    ('get_object',
+     lambda: instance._get_pod_failure_reason_from_status('ctx', 'ns', 'p'),
+     reads.CACHED),
+])
+def test_read_consistency(monkeypatch, read_name, call, consistency):
+    """Diagnostics may be served from a cache; control decisions are not."""
+    read = mock.MagicMock(return_value=_read_result([]))
+    monkeypatch.setattr(reads, read_name, read)
+    call()
+    assert read.call_args.kwargs['consistency'] == consistency
+    assert read.call_args.kwargs['attempts'] == 1
+
+
+def test_read_host_network_sshd_ports_waits_for_the_configmap(monkeypatch):
+    """No ConfigMap yet is not an error: the poll goes on until it has every
+    pod's port."""
+    partial = mock.MagicMock()
+    partial.data = {'sshd_c-head': '20609', 'sshd_c-worker1': 'x'}
+    full = mock.MagicMock()
+    full.data = {'sshd_c-head': '20609', 'sshd_c-worker1': '20610'}
+    get_object = mock.MagicMock(side_effect=[
+        _read_result([]),
+        _read_result([partial]),
+        _read_result([full]),
+    ])
+    monkeypatch.setattr(reads, 'get_object', get_object)
+    monkeypatch.setattr(instance.time, 'sleep', lambda *args: None)
+
+    ports = instance._read_host_network_sshd_ports('c', 'ns', 'ctx',
+                                                   ['c-head', 'c-worker1'])
+
+    assert ports == {'c-head': 20609, 'c-worker1': 20610}
+    assert get_object.call_count == 3
+    assert get_object.call_args.args[:2] == ('ctx', reads.CONFIG_MAPS)
+    assert get_object.call_args.kwargs['consistency'] == reads.FRESH

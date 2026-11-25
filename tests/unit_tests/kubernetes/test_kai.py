@@ -17,6 +17,7 @@ from sky import global_user_state
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import kai
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 CONTEXT = 'ctx'
@@ -31,16 +32,26 @@ class FakeApiException(Exception):
         self.status = status
 
 
+def _read_result(items):
+    return reads.ReadResult(items=items,
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=reads.REASON_FRESH)
+
+
 class FakeKai:
-    """Fake PodGroups and Topologies served through the custom objects API."""
+    """Fake PodGroups and Topologies: written through the custom objects
+    API, read through the read layer."""
 
     def __init__(self):
         self.pod_groups = {}
         self.live_pods = {}
         self.calls = []
         self.pod_group_events = []
-        # Plurals SkyPilot may not read, and whether PodGroups are served.
-        self.forbidden = set()
+        # (plural, name, consistency) of each get.
+        self.gets = []
+        # Plural -> HTTP status its reads fail with (None: no answer).
+        self.failures = {}
         self.serves_pod_groups = True
         # KAI orders levels broadest first.
         self.topologies = {
@@ -80,31 +91,37 @@ class FakeKai:
         if self.pod_groups.pop(name, None) is None:
             raise FakeApiException(404)
 
-    def get_namespaced_custom_object(self, group, version, namespace, plural,
-                                     name, **kwargs):
-        del group, version, namespace, plural, kwargs
-        if name not in self.pod_groups:
-            raise FakeApiException(404)
-        return copy.deepcopy(self.pod_groups[name])
-
     def patch_namespaced_custom_object(self, group, version, namespace, plural,
                                        name, body, **kwargs):
         del group, version, namespace, plural, kwargs
         self.calls.append(('patch', name, body))
         self.pod_groups[name]['spec'].update(body['spec'])
 
-    def get_cluster_custom_object(self, group, version, plural, name, **kwargs):
-        del group, version, kwargs
-        if plural in self.forbidden:
-            raise FakeApiException(403)
-        if name not in self.topologies:
-            raise FakeApiException(404)
-        return copy.deepcopy(self.topologies[name])
+    def _fail(self, plural):
+        if plural not in self.failures:
+            return
+        status = self.failures[plural]
+        if status is None:
+            raise exceptions.KubeAPIUnreachableError('timed out')
+        raise exceptions.KubeAPIUnreachableError(
+            f'HTTP {status}') from kubernetes.api_exception()(status=status)
 
-    def list_namespaced_event(self, namespace, field_selector, **kwargs):
-        del namespace, kwargs
+    def get_object(self, context, resource, name, *, consistency, **kwargs):
+        del context, kwargs
+        self.gets.append((resource.plural, name, consistency))
+        self._fail(resource.plural)
+        objects = (self.pod_groups
+                   if resource.plural == 'podgroups' else self.topologies)
+        if name not in objects:
+            return _read_result([])
+        return _read_result([copy.deepcopy(objects[name])])
+
+    def list_objects(self, context, resource, *, field_selector, **kwargs):
+        del context, kwargs
+        assert resource == reads.EVENTS
+        self._fail(resource.plural)
         fields = dict(term.split('=') for term in field_selector.split(','))
-        return SimpleNamespace(items=[
+        return _read_result([
             event for event in self.pod_group_events
             if event.involved_object.kind == fields['involvedObject.kind'] and
             event.reason == fields['reason']
@@ -117,10 +134,15 @@ def cluster(monkeypatch):
     monkeypatch.setattr(
         kai, 'kubernetes',
         SimpleNamespace(custom_objects_api=lambda context: fake,
-                        core_api=lambda context: fake,
                         api_exception=lambda: FakeApiException,
-                        urllib3_http_error=kubernetes.urllib3_http_error,
                         API_TIMEOUT=kubernetes.API_TIMEOUT))
+    monkeypatch.setattr(
+        kai, 'reads',
+        SimpleNamespace(
+            **{
+                **vars(reads), 'get_object': fake.get_object,
+                'list_objects': fake.list_objects
+            }))
     monkeypatch.setattr(kubernetes_utils, 'filter_pods',
                         lambda *args: fake.live_pods)
     return fake
@@ -180,6 +202,7 @@ def test_ensure_pod_group_constrains_gang_to_topology(cluster):
         'requiredTopologyLevel': 'zone',
         'preferredTopologyLevel': 'topology.kubernetes.io/rack',
     }
+    assert cluster.gets == [('topologies', 'fabric', reads.FRESH)]
 
 
 @pytest.mark.parametrize(
@@ -210,7 +233,7 @@ def test_ensure_pod_group_refuses_topology_kai_would_only_log(
 
 
 def test_unreadable_topology_fails_with_the_missing_permission(cluster):
-    cluster.forbidden = {'topologies'}
+    cluster.failures = {'topologies': 403}
 
     with pytest.raises(exceptions.ProvisionUnsupportedError,
                        match='permission to get topologies.kai.scheduler'):
@@ -219,6 +242,19 @@ def test_unreadable_topology_fails_with_the_missing_permission(cluster):
                 **PROVIDER_CONFIG, 'kai_topology': 'fabric',
                 'kai_preferred_topology_level': 'zone'
             }, _node_config(), 2)
+
+
+@pytest.mark.parametrize('status', [500, None])
+def test_failed_topology_read_is_not_a_permission_error(cluster, status):
+    cluster.failures = {'topologies': status}
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError):
+        kai.ensure_pod_group(
+            CONTEXT, NAMESPACE, CLUSTER, {
+                **PROVIDER_CONFIG, 'kai_topology': 'fabric',
+                'kai_preferred_topology_level': 'zone'
+            }, _node_config(), 2)
+    assert CLUSTER not in cluster.pod_groups
 
 
 def test_ensure_pod_group_omits_unset_priority(cluster):
@@ -250,6 +286,8 @@ def test_ensure_pod_group_keeps_running_cluster_gang(cluster):
 
     assert cluster.pod_groups[CLUSTER] == _running_gang()
     assert ('delete', CLUSTER) not in cluster.calls
+    # Read back after the conflict, to compare with what is being created.
+    assert cluster.gets == [('podgroups', CLUSTER, reads.FRESH)]
 
 
 def test_ensure_pod_group_explains_a_context_without_kai(cluster):
@@ -404,6 +442,20 @@ def test_status_refresh_names_kai_eviction(cluster, monkeypatch):
     cluster.pod_group_events = [_evict_event(f'{POD}0'), _evict_event(POD)]
 
     assert RECLAIMED in _refresh_reason(monkeypatch)
+    # Only explains a deletion, so a cached PodGroup will do.
+    assert cluster.gets
+    assert all(
+        got == ('podgroups', CLUSTER, reads.CACHED) for got in cluster.gets)
+
+
+@pytest.mark.parametrize('failing', ['events', 'podgroups'])
+@pytest.mark.parametrize('status', [500, None])
+def test_eviction_reason_is_unknown_when_reads_fail(cluster, failing, status):
+    cluster.pod_groups[CLUSTER] = {'metadata': {'uid': 'pg-uid'}}
+    cluster.pod_group_events = [_evict_event(POD)]
+    cluster.failures = {failing: status}
+
+    assert kai.eviction_reason(CONTEXT, NAMESPACE, POD, since=None) is None
 
 
 def test_status_refresh_names_a_stale_gang_eviction(cluster, monkeypatch):
@@ -445,22 +497,24 @@ def test_status_refresh_ignores_other_kai_evictions(cluster, monkeypatch,
 
 
 def _patch_pod_read(monkeypatch, pod):
-    """Serves POD to kubernetes_utils, or a 404 when pod is None."""
+    """Serves POD to kubernetes_utils, absent when pod is None; no pod events."""
 
-    def read_namespaced_pod(*args, **kwargs):
-        del args, kwargs
-        if pod is None:
-            raise FakeApiException(404)
-        return pod
+    def get_object(context, resource, name, **kwargs):
+        del context, name, kwargs
+        assert resource == reads.PODS
+        return _read_result([] if pod is None else [pod])
+
+    def list_objects(context, resource, **kwargs):
+        del context, kwargs
+        assert resource == reads.EVENTS
+        return _read_result([])
 
     monkeypatch.setattr(
-        kubernetes_utils, 'kubernetes',
-        SimpleNamespace(core_api=lambda context: SimpleNamespace(
-            read_namespaced_pod=read_namespaced_pod,
-            list_namespaced_event=lambda *args, **kwargs: SimpleNamespace(items=
-                                                                          [])),
-                        api_exception=lambda: FakeApiException,
-                        API_TIMEOUT=kubernetes.API_TIMEOUT))
+        kubernetes_utils, 'reads',
+        SimpleNamespace(**{
+            **vars(reads), 'get_object': get_object,
+            'list_objects': list_objects
+        }))
 
 
 # A pod KAI is still deleting can report its container as running.

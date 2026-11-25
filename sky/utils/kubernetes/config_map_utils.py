@@ -1,10 +1,19 @@
 """Utilities for Kubernetes ConfigMap operations in SkyPilot."""
 import os
+import typing
 
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import reads
+else:
+    # skypilot_config imports this module during `import sky`, before
+    # sky.provision can be imported.
+    reads = adaptors_common.LazyImport('sky.provision.kubernetes.reads')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -55,17 +64,15 @@ def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
         namespace = _get_kubernetes_namespace()
         configmap_name = _get_configmap_name()
 
-        # Check if ConfigMap exists
-        try:
-            kubernetes.core_api().read_namespaced_config_map(
-                name=configmap_name, namespace=namespace)
+        if reads.get_object(None,
+                            reads.CONFIG_MAPS,
+                            configmap_name,
+                            namespace=namespace,
+                            consistency=reads.FRESH,
+                            attempts=1).items:
             # ConfigMap exists, don't overwrite it
             logger.debug(f'ConfigMap {configmap_name} already exists')
             return
-        except kubernetes.kubernetes.client.rest.ApiException as e:
-            if e.status != 404:
-                raise
-            # ConfigMap doesn't exist, create it
 
         current_config = skypilot_config.parse_and_validate_config_file(
             config_file_path)

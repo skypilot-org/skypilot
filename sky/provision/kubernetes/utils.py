@@ -2970,11 +2970,14 @@ def _diagnose_deleted_pod(context: Optional[str], namespace: str,
     going away -- they are the only record left of who did it.
     """
     try:
-        events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
+        events = reads.list_objects(
+            context,
+            reads.EVENTS,
+            namespace=namespace,
             field_selector=(f'involvedObject.kind=Pod,'
                             f'involvedObject.name={pod_name}'),
-            _request_timeout=kubernetes.API_TIMEOUT).items
+            attempts=1,
+            convert=k8s_object_converter('V1Event')).items
         events = sorted(events,
                         key=lambda event: event.metadata.creation_timestamp,
                         reverse=True)
@@ -3051,14 +3054,17 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
     raise.
     """
     try:
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if getattr(e, 'status', None) != 404:
-            return None
-        return _diagnose_deleted_pod(context, namespace, pod_name)
+        pods = reads.get_object(context,
+                                reads.PODS,
+                                pod_name,
+                                namespace=namespace,
+                                attempts=1,
+                                convert=k8s_pod_from_dict).items
     except Exception:  # pylint: disable=broad-except
         return None
+    if not pods:
+        return _diagnose_deleted_pod(context, namespace, pod_name)
+    pod = pods[0]
     # Checked first: a pod KAI is deleting may not show as terminated yet, and
     # once it does, the exit status KAI caused reads as the workload failing.
     eviction = _kai_eviction_reason(context, namespace, pod_name, pod)
@@ -3955,9 +3961,38 @@ def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
         namespace (str): Kubernetes namespace to look for the service in.
         context (str): Kubernetes context to use.
     """
-    head_service = kubernetes.core_api(context).read_namespaced_service(
-        svc_name, namespace)
-    return head_service.spec.ports[0].node_port
+    services = []
+    for consistency in (reads.CACHED, reads.FRESH):
+        # A service created moments ago may not be in the cache yet.
+        services = reads.get_object(context,
+                                    reads.SERVICES,
+                                    svc_name,
+                                    namespace=namespace,
+                                    consistency=consistency,
+                                    attempts=1).items
+        if services:
+            break
+    if not services:
+        raise ValueError(f'Service {svc_name!r} not found in namespace '
+                         f'{namespace!r} of context {context!r}.')
+    return services[0]['spec']['ports'][0].get('nodePort')
+
+
+def _credential_probe_failure(error: exceptions.KubeAPIUnreachableError) -> str:
+    """The check_credentials() message for a failed credential probe."""
+    cause = error.__cause__
+    if isinstance(cause, kubernetes.config_exception()):
+        return f'Invalid configuration file: {str(cause)}'
+    status = reads.http_status(error)
+    if status == 401:
+        return ('Invalid credentials - do you have permission '
+                'to access the cluster?')
+    if isinstance(cause, kubernetes.max_retry_error()):
+        return ('Failed to communicate with the cluster - timeout. '
+                'Check if your cluster is running and your network '
+                'is stable.')
+    return ('Failed to communicate with the cluster: '
+            f'{str(error if cause is None else cause)}')
 
 
 def check_credentials(context: Optional[str],
@@ -3987,8 +4022,16 @@ def check_credentials(context: Optional[str],
     """
     try:
         namespace = get_namespace(context=context, cloud=cloud)
-        kubernetes.core_api(context).list_namespaced_pod(
-            namespace, limit=1, _request_timeout=timeout)
+        try:
+            reads.list_objects(context,
+                               reads.PODS,
+                               namespace=namespace,
+                               consistency=reads.FRESH,
+                               attempts=1,
+                               timeout=timeout,
+                               limit=1)
+        except exceptions.KubeAPIUnreachableError as e:
+            return False, _credential_probe_failure(e)
         # This call is "free" because this function is a cached call,
         # and it will not be called again in this function.
         get_kubernetes_nodes(context=context)
@@ -4453,13 +4496,22 @@ _cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
 _cluster_uid_cache_lock = threading.Lock()
 
 
-def read_cluster_uid(core, timeout: float) -> Optional[str]:
-    """Reads the kube-system namespace UID through the given CoreV1Api."""
-    namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
-                                    _request_timeout=timeout)
-    if namespace is None or namespace.metadata is None:
+def read_cluster_uid(context: Optional[str], timeout: float) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given context.
+
+    Returns None if the namespace is absent or has no UID.
+
+    Raises:
+        exceptions.KubeAPIUnreachableError: The read failed.
+    """
+    namespaces = reads.get_object(context,
+                                  reads.NAMESPACES,
+                                  CLUSTER_IDENTITY_NAMESPACE,
+                                  attempts=1,
+                                  timeout=timeout).items
+    if not namespaces:
         return None
-    return namespace.metadata.uid
+    return namespaces[0].get('metadata', {}).get('uid')
 
 
 def get_cluster_uid(context: Optional[str],
@@ -4482,8 +4534,7 @@ def get_cluster_uid(context: Optional[str],
     uid: Optional[str] = None
     try:
         # The in-cluster name, unlike None, never falls back to kubeconfig.
-        uid = read_cluster_uid(kubernetes.core_api(context),
-                               _CLUSTER_UID_READ_TIMEOUT_SECONDS)
+        uid = read_cluster_uid(context, _CLUSTER_UID_READ_TIMEOUT_SECONDS)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to read the {CLUSTER_IDENTITY_NAMESPACE!r} '
                      f'namespace UID of context {context!r}: {e}')
@@ -5379,16 +5430,14 @@ def merge_custom_metadata(
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
-@_retry_on_error(resource_type='runtimeclass')
 def check_nvidia_runtime_class(*, context: Optional[str] = None) -> bool:
     """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
-    # Fetch the list of available RuntimeClasses
-    runtime_classes = kubernetes.node_api(context).list_runtime_class()
-
-    # Check if 'nvidia' RuntimeClass exists
-    nvidia_exists = any(
-        rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
-    return nvidia_exists
+    try:
+        runtime_classes = reads.list_objects(context,
+                                             reads.RUNTIME_CLASSES).items
+    except exceptions.KubernetesResourceNotServedError:
+        return False
+    return any(rc['metadata']['name'] == 'nvidia' for rc in runtime_classes)
 
 
 def check_secret_exists(secret_name: str, namespace: str,
@@ -5400,15 +5449,13 @@ def check_secret_exists(secret_name: str, namespace: str,
         namespace: Namespace to check
     """
 
-    try:
-        kubernetes.core_api(context).read_namespaced_secret(
-            secret_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            return False
-        raise
-    else:
-        return True
+    return bool(
+        reads.get_object(context,
+                         reads.SECRETS,
+                         secret_name,
+                         namespace=namespace,
+                         consistency=reads.FRESH,
+                         attempts=1).items)
 
 
 def create_namespace(namespace: str, context: Optional[str]) -> None:
@@ -5421,12 +5468,11 @@ def create_namespace(namespace: str, context: Optional[str]) -> None:
         context: Name of the context to use. Can be none to use default context.
     """
     kubernetes_client = kubernetes.kubernetes.client
-    try:
-        kubernetes.core_api(context).read_namespace(namespace)
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            raise
-    else:
+    if reads.get_object(context,
+                        reads.NAMESPACES,
+                        namespace,
+                        consistency=reads.FRESH,
+                        attempts=1).items:
         return
 
     ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
@@ -5541,6 +5587,19 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     # pylint: disable-next=protected-access
     return _deserializing_api_client()._ApiClient__deserialize(
         object_dict, object_type)
+
+
+@functools.lru_cache(maxsize=None)
+def k8s_object_converter(object_type: str) -> Callable[[Dict[str, Any]], Any]:
+    """A convert for reads that makes kubernetes client objects.
+
+    The same function is returned for the same type, so reads that convert
+    alike share their in-flight requests.
+
+    Args:
+        object_type: Kubernetes client model name, e.g. 'V1Event'.
+    """
+    return functools.partial(dict_to_k8s_object, object_type=object_type)
 
 
 def k8s_pod_from_dict(pod: Dict[str, Any]) -> Any:
@@ -5952,8 +6011,14 @@ def filter_pods(namespace: str,
             [f'status.phase!={status}' for status in non_included_pod_statuses])
 
     label_selector = to_label_selector(tag_filters)
-    pod_list = kubernetes.core_api(context).list_namespaced_pod(
-        namespace, field_selector=field_selector, label_selector=label_selector)
+    pod_list = reads.list_objects(context,
+                                  reads.PODS,
+                                  namespace=namespace,
+                                  label_selector=label_selector,
+                                  field_selector=field_selector,
+                                  consistency=reads.FRESH,
+                                  attempts=1,
+                                  convert=k8s_pod_from_dict)
 
     # Don't return pods marked for deletion,
     # i.e. pods with non-null metadata.DeletionTimestamp.
@@ -6719,13 +6784,15 @@ def get_pvc_events(context: Optional[str],
                    reverse: bool = True) -> List[Any]:
     """Get the events for a PVC, sorted by creation_timestamp."""
     try:
-        pvc_events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
+        pvc_events = reads.list_objects(
+            context,
+            reads.EVENTS,
+            namespace=namespace,
             field_selector=(f'involvedObject.name={pvc_name},'
                             'involvedObject.kind=PersistentVolumeClaim'),
-            _request_timeout=kubernetes.API_TIMEOUT)
-    except (kubernetes.max_retry_error(), kubernetes.api_exception(),
-            kubernetes.config_exception()) as e:
+            attempts=1,
+            convert=k8s_object_converter('V1Event'))
+    except exceptions.KubeAPIUnreachableError as e:
         logger.warning(f'Failed to get PVC events: {e}')
         return []
 

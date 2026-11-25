@@ -8,7 +8,9 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.metrics import utils
+from sky.provision.kubernetes import reads
 from sky.utils import annotations
 
 
@@ -25,9 +27,34 @@ class _FakeConfigException(Exception):
 
 
 def _fake_namespace(uid):
-    namespace = mock.MagicMock()
-    namespace.metadata.uid = uid
-    return namespace
+    return {'metadata': {'uid': uid}}
+
+
+class _FakeNamespaceReads:
+    """Fakes reads.get_object of the kube-system namespace.
+
+    Each answer is a namespace, or an exception that the read layer raises as
+    the cause of a KubeAPIUnreachableError; a 404 reads as an absent
+    namespace. The last answer repeats.
+    """
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.calls = []
+
+    def __call__(self, context, resource, name, **kwargs):
+        del resource, kwargs
+        self.calls.append((context, name))
+        answer = (self.answers.pop(0)
+                  if len(self.answers) > 1 else self.answers[0])
+        if isinstance(answer, _FakeApiException) and answer.status == 404:
+            answer = None
+        if isinstance(answer, Exception):
+            raise exceptions.KubeAPIUnreachableError(str(answer)) from answer
+        return reads.ReadResult(items=[] if answer is None else [answer],
+                                resource_version='',
+                                staleness_seconds=0,
+                                reason=reads.REASON_FRESH)
 
 
 def _clear_detection_state():
@@ -120,19 +147,19 @@ class _DetectionHarness:
     def __enter__(self):
         self._patches = []
 
-        def _read_namespace(name, _request_timeout=None):
+        def _get_object(context, resource, name, **kwargs):
+            del context, resource, kwargs
             self.probe_calls.append(name)
-            if self._probe_exc is not None:
-                raise self._probe_exc
-            return self._probe_result
+            reads_fake = _FakeNamespaceReads(
+                self._probe_exc if self._probe_exc is not None else self.
+                _probe_result)
+            return reads_fake(None, None, name)
 
-        core = mock.MagicMock()
-        core.read_namespace.side_effect = _read_namespace
         self._patches = [
             mock.patch.object(utils,
                               '_get_in_cluster_identity_uid',
                               return_value=self._own_uid),
-            mock.patch('sky.adaptors.kubernetes.core_api', return_value=core),
+            mock.patch.object(reads, 'get_object', side_effect=_get_object),
             mock.patch('sky.adaptors.kubernetes.api_exception',
                        return_value=_FakeApiException),
             mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
@@ -568,15 +595,11 @@ def test_split_local_remote_contexts_emits_served_and_probe_metrics():
 
 
 class _IdentityUidHarness:
-    """Patches the adaptor pieces _get_in_cluster_identity_uid depends on."""
+    """Patches the pieces _get_in_cluster_identity_uid depends on."""
 
-    def __init__(self, core=None, core_exc=None):
-        patch_core = (mock.patch('sky.adaptors.kubernetes.core_api',
-                                 side_effect=core_exc) if core_exc is not None
-                      else mock.patch('sky.adaptors.kubernetes.core_api',
-                                      return_value=core))
+    def __init__(self, namespace_reads):
         self._patches = [
-            patch_core,
+            mock.patch.object(reads, 'get_object', namespace_reads),
             mock.patch('sky.adaptors.kubernetes.config_exception',
                        return_value=_FakeConfigException),
             mock.patch('sky.adaptors.kubernetes.api_exception',
@@ -597,37 +620,47 @@ class _IdentityUidHarness:
 
 
 def test_get_in_cluster_identity_uid_caches_success_only():
-    core = mock.MagicMock()
-    core.read_namespace.side_effect = [
+    namespace_reads = _FakeNamespaceReads(
         TimeoutError('api server not ready'),
         _fake_namespace('uid-1'),
-    ]
-    with _IdentityUidHarness(core=core):
+    )
+    with _IdentityUidHarness(namespace_reads):
         # Failure is not cached; the next call retries and succeeds.
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
         assert utils._get_in_cluster_identity_uid() == 'uid-1'  # pylint: disable=protected-access
         # Success is cached: no further API calls.
         assert utils._get_in_cluster_identity_uid() == 'uid-1'  # pylint: disable=protected-access
-        assert core.read_namespace.call_count == 2
-        # The identity anchor is the kube-system namespace.
-        assert core.read_namespace.call_args[0][0] == 'kube-system'
+        # The identity anchor is kube-system, read through the in-cluster
+        # credentials.
+        assert namespace_reads.calls == [('in-cluster', 'kube-system')] * 2
 
 
 def test_get_in_cluster_identity_uid_not_in_pod():
     """Outside a pod there is no cluster identity: detection disabled."""
     with _IdentityUidHarness(
-            core_exc=_FakeConfigException('no in-cluster config')):
-        assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
+            _FakeNamespaceReads(_FakeConfigException('no in-cluster config'))):
+        with mock.patch.object(utils, '_record_anchor_read') as record:
+            assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
+    record.assert_called_once_with('no_credentials')
+
+
+@pytest.mark.parametrize('status,outcome', [(401, 'unauthorized'),
+                                            (403, 'unauthorized'),
+                                            (500, 'error')])
+def test_get_in_cluster_identity_uid_api_errors(status, outcome):
+    with _IdentityUidHarness(_FakeNamespaceReads(_FakeApiException(status))):
+        with mock.patch.object(utils, '_record_anchor_read') as record:
+            assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
+    record.assert_called_once_with(outcome)
 
 
 def test_get_in_cluster_identity_uid_permission_denied_not_cached():
     """401/403 disables detection for this attempt but is retried later."""
-    core = mock.MagicMock()
-    core.read_namespace.side_effect = [
+    namespace_reads = _FakeNamespaceReads(
         _FakeApiException(403),
         _fake_namespace('uid-1'),
-    ]
-    with _IdentityUidHarness(core=core):
+    )
+    with _IdentityUidHarness(namespace_reads):
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
         # After RBAC is fixed, the next attempt succeeds.
         assert utils._get_in_cluster_identity_uid() == 'uid-1'  # pylint: disable=protected-access
@@ -635,9 +668,7 @@ def test_get_in_cluster_identity_uid_permission_denied_not_cached():
 
 def test_get_in_cluster_identity_uid_empty_uid_is_none():
     """A namespace without a UID yields no identity anchor."""
-    core = mock.MagicMock()
-    core.read_namespace.return_value = _fake_namespace('')
-    with _IdentityUidHarness(core=core):
+    with _IdentityUidHarness(_FakeNamespaceReads(_fake_namespace(''))):
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
 
 

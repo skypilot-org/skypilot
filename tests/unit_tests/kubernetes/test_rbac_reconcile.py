@@ -40,7 +40,7 @@ def _upsert(existing_rules, new_rules):
             resource_field='autoscaler_role',
             name='skypilot-service-account-role',
             create_fn=mock.Mock(),
-            list_fn=lambda: mock.Mock(items=[existing]),
+            find_fn=lambda: existing,
             patch_fn=patch_fn,
             needs_update_fn=lambda cur: cur.rules != new_rules,
             new_rules=new_rules,

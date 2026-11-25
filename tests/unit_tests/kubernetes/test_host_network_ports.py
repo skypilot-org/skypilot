@@ -13,10 +13,12 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.provision import instance_setup
 from sky.provision.kubernetes import host_network_ports as ports
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import reads
 from sky.skylet import constants as skylet_constants
 
 # Linux default ip_local_port_range floor, measured on the dev clusters.
@@ -299,16 +301,25 @@ class TestLegacyConfigMapFallback:
         return cm
 
     def _call(self, cm_or_exc, head='c-head'):
-        from sky.provision.kubernetes import instance
-        api = mock.Mock()
+        """cm_or_exc: the ConfigMap read, None when absent, or the error."""
+        get_object = mock.Mock()
         if isinstance(cm_or_exc, Exception):
-            api.read_namespaced_config_map.side_effect = cm_or_exc
+            get_object.side_effect = cm_or_exc
         else:
-            api.read_namespaced_config_map.return_value = cm_or_exc
-        with mock.patch.object(instance.kubernetes,
-                               'core_api',
-                               return_value=api):
-            return instance._head_block_from_configmap('c', 'ns', None, head)
+            get_object.return_value = reads.ReadResult(
+                items=[] if cm_or_exc is None else [cm_or_exc],
+                resource_version='',
+                staleness_seconds=0,
+                reason=reads.REASON_FRESH)
+        with mock.patch.object(reads, 'get_object', get_object):
+            block = k8s_instance._head_block_from_configmap(
+                'c', 'ns', None, head)
+        assert get_object.call_args.args == (
+            None, reads.CONFIG_MAPS,
+            host_network_probe.ray_ports_configmap_name('c'))
+        assert get_object.call_args.kwargs['namespace'] == 'ns'
+        assert get_object.call_args.kwargs['consistency'] == reads.FRESH
+        return block
 
     # Exactly what the pre-change probe wrote. Built from today's
     # HEAD_PORT_NAMES, the fixture gained skylet with it and hid that no real
@@ -329,9 +340,11 @@ class TestLegacyConfigMapFallback:
 
     def test_absent_configmap_is_not_an_error(self):
         """A cluster created *after* this change has none, which is normal."""
-        from sky.adaptors import kubernetes as k8s_adaptor
-        exc = k8s_adaptor.api_exception()(status=404)
-        assert self._call(exc) is None
+        assert self._call(None) is None
+
+    def test_a_failed_read_is_raised(self):
+        with pytest.raises(exceptions.KubeAPIUnreachableError):
+            self._call(exceptions.KubeAPIUnreachableError('500'))
 
     def test_partial_data_allocates_rather_than_guessing(self):
         data = self._full_data()

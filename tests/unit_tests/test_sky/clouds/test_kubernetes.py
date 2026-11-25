@@ -1,6 +1,9 @@
 """Tests for Kubernetes cloud implementation."""
 
+import contextlib
 import copy
+import io
+import json
 import os
 import unittest
 from unittest import mock
@@ -14,6 +17,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import plugin_extensions
 from sky.utils import resources_utils
 
 
@@ -3095,26 +3099,13 @@ class TestCloudFlare403ErrorDetection(unittest.TestCase):
                 }
                 super().__init__('Forbidden')
 
-        # Successful response
-        mock_runtime_class = mock.Mock()
-        mock_runtime_class.metadata.name = 'nvidia'
-        successful_response = mock.Mock()
-        successful_response.items = [mock_runtime_class]
+        client = _RuntimeClassApi(CloudFlare403Exception(), [{
+            'metadata': {
+                'name': 'nvidia'
+            }
+        }])
 
-        call_count = {'count': 0}
-
-        def mock_list_runtime_class():
-            call_count['count'] += 1
-            if call_count['count'] == 1:
-                raise CloudFlare403Exception()
-            else:
-                return successful_response
-
-        mock_node_api = mock.Mock()
-        mock_node_api.list_runtime_class = mock_list_runtime_class
-
-        with patch('sky.adaptors.kubernetes.node_api',
-                   return_value=mock_node_api), \
+        with _patch_api_client(client), \
              patch('sky.adaptors.kubernetes.api_exception', return_value=CloudFlare403Exception), \
              patch('time.sleep'):
 
@@ -3122,7 +3113,7 @@ class TestCloudFlare403ErrorDetection(unittest.TestCase):
                 context='test-context')
 
             self.assertTrue(result)
-            self.assertEqual(call_count['count'], 2)
+            self.assertEqual(client.calls, 2)
 
     def test_check_nvidia_runtime_class_fails_on_real_rbac_403(self):
         """Test that real RBAC 403 errors fail immediately without retry."""
@@ -3138,26 +3129,72 @@ class TestCloudFlare403ErrorDetection(unittest.TestCase):
                 }
                 super().__init__('Forbidden: User does not have permission')
 
-        call_count = {'count': 0}
+        client = _RuntimeClassApi(RBACApiException())
 
-        def mock_list_runtime_class():
-            call_count['count'] += 1
-            raise RBACApiException()
-
-        mock_node_api = mock.Mock()
-        mock_node_api.list_runtime_class = mock_list_runtime_class
-
-        from sky import exceptions as sky_exceptions
-
-        with patch('sky.adaptors.kubernetes.node_api',
-                   return_value=mock_node_api), \
+        with _patch_api_client(client), \
              patch('sky.adaptors.kubernetes.api_exception', return_value=RBACApiException):
 
             with self.assertRaises(sky_exceptions.KubeAPIUnreachableError):
                 kubernetes_utils.check_nvidia_runtime_class(
                     context='test-context')
 
-            self.assertEqual(call_count['count'], 1)
+            self.assertEqual(client.calls, 1)
+
+    def test_check_nvidia_runtime_class_absent(self):
+        client = _RuntimeClassApi([{'metadata': {'name': 'kata'}}])
+        with _patch_api_client(client):
+            self.assertFalse(
+                kubernetes_utils.check_nvidia_runtime_class(
+                    context='test-context'))
+
+    def test_check_nvidia_runtime_class_api_not_served(self):
+        client = _RuntimeClassApi(k8s_client.ApiException(status=404))
+        with _patch_api_client(client):
+            self.assertFalse(
+                kubernetes_utils.check_nvidia_runtime_class(
+                    context='test-context'))
+            self.assertEqual(client.calls, 1)
+
+
+class _Response(io.BytesIO):
+    """A urllib3 response read with _preload_content=False."""
+
+    def release_conn(self):
+        pass
+
+
+class _RuntimeClassApi:
+    """An ApiClient whose GETs answer with the given errors, then items."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.calls = 0
+
+    def call_api(self, path, method, **kwargs):
+        del kwargs
+        assert (path, method) == ('/apis/node.k8s.io/v1/runtimeclasses', 'GET')
+        self.calls += 1
+        answer = self.answers.pop(0) if len(self.answers) > 1 else (
+            self.answers[0])
+        if isinstance(answer, Exception):
+            raise answer
+        return _Response(
+            json.dumps({
+                'metadata': {
+                    'resourceVersion': '1'
+                },
+                'items': answer
+            }).encode())
+
+
+@contextlib.contextmanager
+def _patch_api_client(client):
+    with patch('sky.adaptors.kubernetes.api_client', return_value=client), \
+         patch.object(kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS', []), \
+         patch.object(kubernetes_utils, '_CONTEXT_CALL_OBSERVERS', []), \
+         patch.object(plugin_extensions.ClusterStateSource, '_provider_func',
+                      None):
+        yield
 
 
 class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):

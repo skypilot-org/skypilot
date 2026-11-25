@@ -11,6 +11,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.backends import task_codegen
 from sky.provision import common as provision_common
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 _FMT = kubernetes_utils.GKELabelFormatter
@@ -324,6 +325,18 @@ def _pod(name, node_name, ip, topology='2x4', chips='4'):
         status=SimpleNamespace(pod_ip=ip))
 
 
+def _node_read(node_pools):
+    """A read of nodes, each in the node pool node_pools maps it to."""
+    return reads.ReadResult(items=[
+        SimpleNamespace(metadata=SimpleNamespace(
+            name=name, labels={'cloud.google.com/gke-nodepool': pool}))
+        for name, pool in node_pools.items()
+    ],
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=reads.REASON_FRESH)
+
+
 def test_tag_tpu_multi_host_workers_groups_by_node_pool():
     """Pods are grouped into slices by the node pool they run on, not by
     their index: the scheduler picks which pool each pod lands on."""
@@ -343,21 +356,18 @@ def test_tag_tpu_multi_host_workers_groups_by_node_pool():
         name: [mock.MagicMock(tags=dict(p.metadata.labels))]
         for name, p in pods.items()
     }
-    core_api = mock.MagicMock()
-    core_api.list_node.return_value = SimpleNamespace(items=[
-        SimpleNamespace(metadata=SimpleNamespace(
-            name=name, labels={'cloud.google.com/gke-nodepool': pool}))
-        for name, pool in node_pools.items()
-    ])
-    with mock.patch.object(k8s_instance.kubernetes,
-                           'core_api',
-                           return_value=core_api):
+    with mock.patch.object(reads,
+                           'list_objects',
+                           return_value=_node_read(node_pools)) as list_nodes, \
+            mock.patch.object(reads, 'get_object') as get_object:
         k8s_instance._tag_tpu_multi_host_workers('c', 'ctx', pods, infos)
     # One list call for all pods, not one read per pod.
-    core_api.list_node.assert_called_once()
-    assert core_api.list_node.call_args.kwargs['label_selector'] == (
+    list_nodes.assert_called_once()
+    assert list_nodes.call_args.args == ('ctx', reads.NODES)
+    assert list_nodes.call_args.kwargs['label_selector'] == (
         f'{_FMT.TPU_TOPOLOGY_LABEL_KEY} in (2x4)')
-    core_api.read_node.assert_not_called()
+    assert list_nodes.call_args.kwargs['consistency'] == reads.FRESH
+    get_object.assert_not_called()
 
     def env(name):
         return kubernetes_utils.tpu_worker_env_vars(infos[name][0].tags)
@@ -566,18 +576,12 @@ def test_create_pods_single_host_tpu_gets_no_slice_placement(monkeypatch):
 
 
 def _check_slices(pods, node_pools):
-    core_api = mock.MagicMock()
-    core_api.list_node.return_value = SimpleNamespace(items=[
-        SimpleNamespace(metadata=SimpleNamespace(
-            name=name, labels={'cloud.google.com/gke-nodepool': pool}))
-        for name, pool in node_pools.items()
-    ])
     with mock.patch.object(k8s_instance.kubernetes_utils,
                            'filter_pods',
                            return_value=pods), \
-            mock.patch.object(k8s_instance.kubernetes,
-                              'core_api',
-                              return_value=core_api):
+            mock.patch.object(reads,
+                              'list_objects',
+                              return_value=_node_read(node_pools)):
         k8s_instance._check_tpu_slices_in_one_node_pool('ns', 'ctx', 'c')
 
 
