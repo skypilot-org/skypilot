@@ -15,8 +15,10 @@ import pytest
 from sky import clouds
 from sky import exceptions
 from sky import models
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.resources import Resources
+from sky.utils import config_utils
 from sky.utils import status_lib
 from sky.utils import volume as volume_utils
 
@@ -47,12 +49,17 @@ class _Injected(NamedTuple):
     looked_up: List[str]
 
 
-def _volume_config(name: str, volume_type: str = 'k8s-pvc'):
+def _volume_config(name: str,
+                   volume_type: str = 'k8s-pvc',
+                   use_existing: bool = False):
     config = {'namespace': 'my-namespace'}
     if volume_type == 'k8s-pvc':
         config['access_mode'] = 'ReadWriteMany'
     else:
         config['host_path'] = '/mnt/data'
+    if use_existing:
+        # Where `sky volumes apply` records it.
+        config['use_existing'] = True
     return models.VolumeConfig(
         _version=1,
         name=name,
@@ -76,10 +83,13 @@ def _mounted(name: str, mount_paths=('/mnt/auto',), **kwargs):
                                   mount_paths=list(mount_paths))
 
 
-def _task_volume(name: str, is_ephemeral: bool = False):
+def _task_volume(name: str,
+                 is_ephemeral: bool = False,
+                 use_existing: bool = False):
     return volume_utils.VolumeMount(path='/mnt/vol',
                                     volume_name=name,
-                                    volume_config=_volume_config(name),
+                                    volume_config=_volume_config(
+                                        name, use_existing=use_existing),
                                     is_ephemeral=is_ephemeral)
 
 
@@ -104,7 +114,10 @@ def inject_fixture(monkeypatch, tmp_path):
     was asked about, and what was logged.
     """
 
-    def _inject(resolution, volume_mounts=None, volume_records=None):
+    def _inject(resolution,
+                volume_mounts=None,
+                volume_records=None,
+                cluster_config_overrides=None):
         monkeypatch.setattr(volume_utils, 'resolve_auto_mounts',
                             lambda region: resolution)
         looked_up = []
@@ -162,7 +175,9 @@ def inject_fixture(monkeypatch, tmp_path):
         backend_utils.write_cluster_config(
             to_provision=Resources(
                 cloud=clouds.Kubernetes(),
-                instance_type='2CPU--2GB').copy(region='my-context'),
+                instance_type='2CPU--2GB',
+                _cluster_config_overrides=cluster_config_overrides).copy(
+                    region='my-context'),
             num_nodes=1,
             cluster_config_template='kubernetes-ray.yml.j2',
             cluster_name='test-cluster',
@@ -294,3 +309,155 @@ class TestTaskVolumeReadiness:
 
         assert out.looked_up == []
         assert out.checked == []
+
+
+class TestImportedVolumeOwnership:
+    """SkyPilot changes ownership only on volumes it created.
+
+    A `use_existing` volume is often a filesystem shared with other workloads.
+    fsGroup is pod-level, so one such volume rules it out for the whole pod.
+    """
+
+    def test_created_volumes_get_fs_group_and_the_startup_fixup(self, inject):
+        out = inject(volume_utils.AutoMountResolution(
+            mounted=[_mounted('auto-vol')], skipped=[]),
+                     volume_mounts=[_task_volume('task-vol')],
+                     volume_records={'task-vol': _record()})
+
+        assert out.variables['set_pod_fs_group'] is True
+        assert out.variables['volume_mount_rw_paths'] == [
+            '/mnt/vol', '/mnt/auto'
+        ]
+
+    def test_an_imported_task_volume_gets_neither(self, inject):
+        out = inject(_NOTHING_AUTO_MOUNTED,
+                     volume_mounts=[_task_volume('shared', use_existing=True)],
+                     volume_records={'shared': _record()})
+
+        assert out.variables['set_pod_fs_group'] is False
+        assert out.variables['volume_mount_rw_paths'] == []
+
+    def test_an_imported_auto_mount_rules_out_fs_group_for_the_pod(
+            self, inject):
+        out = inject(volume_utils.AutoMountResolution(
+            mounted=[_mounted('shared', use_existing=True)], skipped=[]),
+                     volume_mounts=[_task_volume('task-vol')],
+                     volume_records={'task-vol': _record()})
+
+        assert out.variables['set_pod_fs_group'] is False
+        assert out.variables['volume_mount_rw_paths'] == ['/mnt/vol']
+
+    def test_no_volumes_no_fs_group(self, inject):
+        out = inject(_NOTHING_AUTO_MOUNTED)
+
+        assert out.variables['set_pod_fs_group'] is False
+
+
+def _pod_config_with_volume(source: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'spec': {
+            'containers': [{
+                'volumeMounts': [{
+                    'name': 'extra',
+                    'mountPath': '/mnt/extra'
+                }]
+            }],
+            'volumes': [{
+                'name': 'extra',
+                **source
+            }],
+        }
+    }
+
+
+_POD_CONFIG_PVC = _pod_config_with_volume(
+    {'persistentVolumeClaim': {
+        'claimName': 'team-shared-fs'
+    }})
+
+
+class TestPodConfigVolumeOwnership:
+    """A persistent volume added through pod_config also rules out fsGroup.
+
+    kubelet would apply SkyPilot's pod-level fsGroup to it as well, and it is
+    storage SkyPilot did not create. The startup fix-up still covers the
+    SkyPilot-created volume.
+    """
+
+    def _inject_with_created_volume(self, inject, **kwargs):
+        return inject(_NOTHING_AUTO_MOUNTED,
+                      volume_mounts=[_task_volume('task-vol')],
+                      volume_records={'task-vol': _record()},
+                      **kwargs)
+
+    @pytest.mark.parametrize('source,expected', [
+        ({
+            'persistentVolumeClaim': {
+                'claimName': 'team-shared-fs'
+            }
+        }, False),
+        ({
+            'csi': {
+                'driver': 'nfs.csi.k8s.io',
+                'volumeAttributes': {
+                    'server': 'nfs.example.com'
+                }
+            }
+        }, False),
+        ({
+            'emptyDir': {}
+        }, True),
+    ])
+    def test_global_pod_config_volume(self, inject, source, expected):
+        config = config_utils.Config(
+            {'kubernetes': {
+                'pod_config': _pod_config_with_volume(source)
+            }})
+        with skypilot_config.replace_skypilot_config(config):
+            out = self._inject_with_created_volume(inject)
+
+        assert out.variables['set_pod_fs_group'] is expected
+        assert out.variables['volume_mount_rw_paths'] == ['/mnt/vol']
+
+    def test_per_context_pod_config_pvc(self, inject):
+        config = config_utils.Config({
+            'kubernetes': {
+                'context_configs': {
+                    'my-context': {
+                        'pod_config': _POD_CONFIG_PVC
+                    }
+                }
+            }
+        })
+        with skypilot_config.replace_skypilot_config(config):
+            out = self._inject_with_created_volume(inject)
+
+        assert out.variables['set_pod_fs_group'] is False
+        assert out.variables['volume_mount_rw_paths'] == ['/mnt/vol']
+
+    def test_pod_config_pvc_for_another_context_is_ignored(self, inject):
+        config = config_utils.Config({
+            'kubernetes': {
+                'context_configs': {
+                    'other-context': {
+                        'pod_config': _POD_CONFIG_PVC
+                    }
+                }
+            }
+        })
+        with skypilot_config.replace_skypilot_config(config):
+            out = self._inject_with_created_volume(inject)
+
+        assert out.variables['set_pod_fs_group'] is True
+
+    def test_task_override_pod_config_pvc(self, inject):
+        out = self._inject_with_created_volume(
+            inject,
+            cluster_config_overrides={
+                'kubernetes': {
+                    'pod_config': _POD_CONFIG_PVC
+                }
+            })
+
+        assert out.variables['set_pod_fs_group'] is False
+        assert out.variables['volume_mount_rw_paths'] == ['/mnt/vol']

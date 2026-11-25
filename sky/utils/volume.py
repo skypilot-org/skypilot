@@ -355,6 +355,8 @@ class VolumeInfo:
     sub_path: Optional[str] = None
     volume_type: Optional[str] = None
     host_path: Optional[str] = None
+    # Registered with `use_existing`: adopted, not created, by SkyPilot.
+    use_existing: bool = False
 
 
 class VolumeMount:

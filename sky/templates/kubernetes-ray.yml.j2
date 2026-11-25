@@ -499,7 +499,7 @@ available_node_types:
         # won't resolve, and the worker probe gets stuck dialing the head.
         dnsPolicy: ClusterFirstWithHostNet
         {% endif %}
-        {% if volume_mounts %}
+        {% if set_pod_fs_group %}
         securityContext:
           fsGroup: 1000
           fsGroupChangePolicy: OnRootMismatch

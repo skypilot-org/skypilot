@@ -55,6 +55,7 @@ if typing.TYPE_CHECKING:
 
     from sky import backends
     from sky import resources as resources_lib
+    from sky.utils import volume as volume_utils
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     yaml = adaptors_common.LazyImport('yaml')
@@ -5160,6 +5161,34 @@ def resolve_effective_pod_config(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
     return kubernetes_config
+
+
+# pod_config volume sources that can be storage SkyPilot did not create.
+_POD_CONFIG_PERSISTENT_VOLUME_SOURCES = ('persistentVolumeClaim', 'csi')
+
+
+def should_set_pod_fs_group(volume_mounts: List['volume_utils.VolumeInfo'],
+                            pod_config: Dict[str, Any]) -> bool:
+    """Whether the pod gets SkyPilot's pod-level fsGroup.
+
+    fsGroup is pod-level: kubelet applies it to every volume in the pod whose
+    driver supports it, walking the whole tree when the volume root does not
+    already match. So it is set only when the pod mounts at least one SkyPilot
+    volume and every persistent volume in the pod is one SkyPilot created: no
+    mounted volume was registered with `use_existing`, and `pod_config` adds no
+    persistentVolumeClaim or inline csi volume.
+
+    Args:
+        volume_mounts: The SkyPilot volumes the pod mounts.
+        pod_config: The effective `kubernetes.pod_config` for the launch, as
+            returned by resolve_effective_pod_config().
+    """
+    if not volume_mounts or any(v.use_existing for v in volume_mounts):
+        return False
+    pod_config_volumes = (pod_config.get('spec') or {}).get('volumes') or []
+    return not any(source in volume
+                   for volume in pod_config_volumes
+                   for source in _POD_CONFIG_PERSISTENT_VOLUME_SOURCES)
 
 
 def pod_spec_identity_conflicts(spec: Dict[str, Any]) -> List[str]:
