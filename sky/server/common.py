@@ -421,9 +421,9 @@ def _cookie_jar_of_sync_client_request(
     `requests` does not look the cookies up in the jar it is given, but in a
     copy of it (Session.prepare_request). Copying a jar puts its cookies in
     the jar's iteration order, which is sorted on Python 3.9 and decides the
-    order of same-path cookies in the header. `requests` keeps that copy for
-    all hops of the request, and adds to it the cookies that the response of
-    a redirect hop sets (see _add_response_cookies()).
+    order of same-path cookies in the header. `requests` copies the jar again
+    for every hop of a redirect, and then adds the cookies that the response
+    of the previous hop set (see _add_response_cookies()).
     """
     return requests.cookies.merge_cookies(requests.cookies.RequestsCookieJar(),
                                           cookie_jar)
@@ -452,6 +452,10 @@ def _cookie_header_of_sync_client(
                      f'{e}')
         return None
     return requests.cookies.get_cookie_header(jar_as_sent, prepared_request)
+
+
+# The response statuses that aiohttp and `requests` follow as a redirect.
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 
 
 class _SetCookieHeaders:
@@ -508,6 +512,10 @@ def _credentials_per_hop_middleware(
       version it is sent on to the target of a redirect.
     - Adds the cookies that the response of a hop sets to the cookies of the
       following hops, as the synchronous client does.
+    - Applies the cookie policy to the URL the synchronous client would
+      apply it to. That is the URL as given for the first request, and for
+      a hop of a redirect the Location header resolved against the previous
+      one, which keeps a `user:password@` part across a relative redirect.
     - Removes the Authorization header from a hop that leaves the origin of
       the first request (another scheme, host or port). aiohttp does this
       itself when it follows a redirect, so this only matters if something
@@ -523,24 +531,46 @@ def _credentials_per_hop_middleware(
             request. Hops of a redirect get the jar's cookies.
     """
     first_hop_url: Optional['yarl.URL'] = None
-    # One copy of the jar for all hops of the request, as in `requests`.
     jar_as_sent = (None if cookie_jar is None else
                    _cookie_jar_of_sync_client_request(cookie_jar))
+    # Set once a response was a redirect: the URL `requests` would request
+    # next, which is where it applies the cookie policy.
+    redirect_url: Optional[str] = None
+
+    def is_redirect_target(request_url: 'yarl.URL') -> bool:
+        """Whether the request is the hop that redirect_url describes."""
+        if redirect_url is None:
+            return False
+        try:
+            # aiohttp requests the URL without `user:password@` and fragment.
+            # request_url is a yarl.URL; build the other one from its type,
+            # so that yarl is not imported here.
+            expected = type(request_url)(redirect_url).with_user(None)
+        except (TypeError, ValueError):
+            return False
+        return expected.with_fragment(None) == request_url.with_fragment(None)
 
     async def middleware(request: 'aiohttp.ClientRequest',
                          handler: Any) -> 'aiohttp.ClientResponse':
-        nonlocal first_hop_url
+        nonlocal first_hop_url, jar_as_sent, redirect_url
         if first_hop_url is None:
             first_hop_url = request.url
-        is_first_hop = request.url == first_hop_url
+        is_first_hop = redirect_url is None and request.url == first_hop_url
         # aiohttp removes `user:password@` from the URL it requests. The
         # synchronous client applies the cookie policy to the URL as it was
-        # given, so do the same for the first request.
-        hop_url = url if is_first_hop else str(request.url)
+        # given, and to the redirect targets it derives from it.
+        if is_first_hop:
+            policy_url = url
+        elif is_redirect_target(request.url):
+            assert redirect_url is not None
+            policy_url = redirect_url
+        else:
+            policy_url = str(request.url)
 
         if jar_as_sent is not None and not (is_first_hop and
                                             keep_first_cookie_header):
-            cookie_header = _cookie_header_of_sync_client(jar_as_sent, hop_url)
+            cookie_header = _cookie_header_of_sync_client(
+                jar_as_sent, policy_url)
             request.headers.popall('Cookie', None)
             if cookie_header is not None:
                 request.headers['Cookie'] = cookie_header
@@ -550,7 +580,13 @@ def _credentials_per_hop_middleware(
 
         response = await handler(request)
         if jar_as_sent is not None:
-            _add_response_cookies(jar_as_sent, hop_url, response.headers)
+            # As `requests` does for the next hop: a new copy of the jar,
+            # then the cookies of this response.
+            jar_as_sent = _cookie_jar_of_sync_client_request(jar_as_sent)
+            _add_response_cookies(jar_as_sent, policy_url, response.headers)
+        location = response.headers.get('Location')
+        if response.status in _REDIRECT_STATUSES and location:
+            redirect_url = urllib.parse.urljoin(policy_url, location)
         return response
 
     return middleware

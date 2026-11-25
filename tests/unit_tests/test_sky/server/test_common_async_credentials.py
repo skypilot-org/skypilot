@@ -613,6 +613,87 @@ async def test_cookie_set_by_a_redirect_does_not_reach_the_jar_of_the_caller():
     assert 'lb' not in [cookie.name for cookie in cookie_jar]
 
 
+@pytest.mark.asyncio
+async def test_relative_redirect_of_an_endpoint_with_user_and_password(
+        cookie_file):
+    """The cookie policy sees `user:password@` on both hops, as in `requests`.
+
+    The sync client keeps the credentials in the URL across a relative
+    redirect. So on the second hop it sends the cookie the redirect set, and
+    none of the jar's cookies for the bare host name.
+    """
+    cookie_file(_scoped_cookies())
+    async with _servers() as servers:
+        port = await servers.start('api')
+        servers.redirects['api', '/api/get'] = '/landing'
+        servers.set_cookies['api', '/api/get'] = 'route=one; Path=/'
+        url = f'http://user:password@api.test:{port}'
+
+        async_hops = await _async_hops(servers, url, '/api/get')
+        sync_hops = await _sync_hops(servers, url, '/api/get')
+
+    assert [(hop.path, hop.cookie) for hop in async_hops
+           ] == [(hop.path, hop.cookie) for hop in sync_hops]
+    assert [(hop.path, hop.cookie) for hop in async_hops
+           ] == [('/api/get', None), ('/landing', 'route=one')]
+
+
+@pytest.mark.asyncio
+async def test_absolute_redirect_of_an_endpoint_with_user_and_password(
+        cookie_file):
+    """A redirect that names the host again drops `user:password@`."""
+    cookie_file(_scoped_cookies())
+    async with _servers() as servers:
+        port = await servers.start('api')
+        servers.redirects['api',
+                          '/api/get'] = (f'http://api.test:{port}/landing')
+        servers.set_cookies['api', '/api/get'] = 'route=one; Path=/'
+        url = f'http://user:password@api.test:{port}'
+
+        async_hops = await _async_hops(servers, url, '/api/get')
+        sync_hops = await _sync_hops(servers, url, '/api/get')
+
+    assert [(hop.path, hop.cookie) for hop in async_hops
+           ] == [(hop.path, hop.cookie) for hop in sync_hops]
+    assert [(hop.path, hop.cookie) for hop in async_hops] == [
+        ('/api/get', None),
+        ('/landing', 'landing-cookie=for-landing; host-cookie=for-host')
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cookie_order_after_two_redirects_matches_the_sync_client():
+    """A cookie set by the first redirect, on the third hop.
+
+    `requests` copies the jar for every hop. On Python 3.9 and 3.10 a copy
+    sorts the cookies by name, so the new cookie moves to its sorted place
+    one hop after it was added.
+    """
+    cookies = [
+        _cookie('mmm', '1', 'api.test'),
+        _cookie('zzz', '2', 'api.test'),
+        _cookie('bbb', '3', 'api.test'),
+    ]
+    async with _servers() as servers:
+        port = await servers.start('api')
+        servers.redirects['api', '/a'] = '/b'
+        servers.redirects['api', '/b'] = '/c'
+        servers.set_cookies['api', '/a'] = 'aaa=first-hop; Path=/'
+        url = f'http://api.test:{port}'
+
+        hops = await _hops_of_both_clients(servers,
+                                           url,
+                                           '/a',
+                                           cookies=_jar(cookies))
+
+    assert [hop.path for hop in hops] == ['/a', '/b', '/c']
+    assert set(hops[0].cookie.split('; ')) == {'mmm=1', 'zzz=2', 'bbb=3'}
+    for hop in hops[1:]:
+        assert set(hop.cookie.split('; ')) == {
+            'mmm=1', 'zzz=2', 'bbb=3', 'aaa=first-hop'
+        }
+
+
 # Cookies the caller sets itself.
 
 
@@ -761,16 +842,29 @@ class _FakeRequest:
         self.headers = multidict.CIMultiDict(headers or {})
 
 
+class _FakeResponse:
+    """The two attributes of aiohttp.ClientResponse the middleware uses."""
+
+    def __init__(self,
+                 status: int = 200,
+                 headers: Optional[Dict[str, str]] = None):
+        self.status = status
+        self.headers = multidict.CIMultiDict(headers or {})
+
+
 async def _headers_after_middleware(
         middleware,
         url: str,
-        headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        headers: Optional[Dict[str, str]] = None,
+        response: Optional[_FakeResponse] = None) -> Dict[str, str]:
     request = _FakeRequest(url, headers)
+    response = response or _FakeResponse()
 
     async def handler(handled_request):
-        return handled_request
+        assert handled_request is request
+        return response
 
-    assert await middleware(request, handler) is request
+    assert await middleware(request, handler) is response
     return dict(request.headers)
 
 
