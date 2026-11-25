@@ -114,7 +114,8 @@ def test_bind_reuse_port_socket_allows_multiple_binds():
 
 # Prints the port of the listening socket at fd argv[1], or 'absent'.
 _CHILD_FD_PROBE = '\n'.join([
-    'import socket, sys',
+    'import socket',
+    'import sys',
     'try:',
     '    sock = socket.socket(fileno=int(sys.argv[1]))',
     'except OSError:',
