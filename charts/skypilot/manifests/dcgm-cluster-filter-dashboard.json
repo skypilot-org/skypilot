@@ -917,6 +917,318 @@
       ],
       "title": "Memory Usage",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "RDMA throughput across the nodes running this cluster's GPU pods. For each direction, the band spans the lowest to the highest node and the line is the median node. Receive (rx) is plotted up, transmit (tx) down. The per-node view is Node RDMA Network Throughput.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bps"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rx (receive) max"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.fillBelowTo",
+                "value": "rx (receive) min"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 25
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rx (receive) median"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rx (receive) min"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tx (transmit) max"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tx (transmit) median"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tx (transmit) min"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.fillBelowTo",
+                "value": "tx (transmit) max"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 25
+              },
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "min",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(\nsum by (cluster, node) (\n  irate(node_infiniband_port_data_received_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "rx (receive) max",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "quantile(0.5,\nsum by (cluster, node) (\n  irate(node_infiniband_port_data_received_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "rx (receive) median",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "min(\nsum by (cluster, node) (\n  irate(node_infiniband_port_data_received_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "rx (receive) min",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(\nsum by (cluster, node) (\n  irate(node_infiniband_port_data_transmitted_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "tx (transmit) max",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "quantile(0.5,\nsum by (cluster, node) (\n  irate(node_infiniband_port_data_transmitted_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "tx (transmit) median",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "min(\nsum by (cluster, node) (\n  irate(node_infiniband_port_data_transmitted_bytes_total{node=~\"$node\"}[3m])\n) * 8\n* on(cluster, node)\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "tx (transmit) min",
+          "range": true,
+          "refId": "F"
+        }
+      ],
+      "title": "Node RDMA Network Throughput (min / median / max)",
+      "type": "timeseries"
     }
   ],
   "preload": false,
