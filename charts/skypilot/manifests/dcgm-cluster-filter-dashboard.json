@@ -585,7 +585,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "InfiniBand / RoCE throughput of each node running this cluster's GPU pods, summed over the node's RDMA ports (node-exporter's node_infiniband_port_data_* counters). Receive (rx) is plotted up, transmit (tx) down. The counters are per node, so on a shared node they include other workloads' traffic.",
+      "description": "InfiniBand / RoCE throughput of each node running this cluster's GPU pods, summed over the node's RDMA ports (node-exporter's node_infiniband_port_data_* counters). Each point is the average rate between the two latest samples (typically 60 s apart), so short bursts aren't visible.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -923,7 +923,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "RDMA throughput across the nodes running this cluster's GPU pods. For each direction, the band spans the lowest to the highest node and the line is the median node. Receive (rx) is plotted up, transmit (tx) down. The per-node view is Node RDMA Network Throughput.",
+      "description": "RDMA throughput across the nodes running this cluster's GPU pods. For each direction, the band spans the lowest to the highest node and the line is the median node. Each point is the average rate between the two latest samples (typically 60 s apart), so short bursts aren't visible. The per-node view is Node RDMA Network Throughput.",
       "fieldConfig": {
         "defaults": {
           "color": {
