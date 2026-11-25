@@ -1453,8 +1453,7 @@ def _get_partition_infos(
         cluster_name: str,
         slurm_user: Optional[str]) -> Dict[str, slurm.SlurmPartition]:
     try:
-        slurm_config = SSHConfig.from_path(
-            os.path.expanduser(DEFAULT_SLURM_PATH))
+        slurm_config = get_slurm_ssh_config()
         slurm_config_dict = slurm_config.lookup(cluster_name)
 
         client = slurm.SlurmClient(
