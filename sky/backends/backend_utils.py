@@ -3039,6 +3039,23 @@ def _get_terminated_cluster_reason(
             cause = f'Reported failure: {reported}'
 
     launched_at = record.get('launched_at')
+    if cause is None and is_k8s and launched_at is not None:
+        # A terminating pod can report its cause before it disappears, even
+        # when Kubernetes retains no event explaining its deletion.
+        try:
+            events = global_user_state.get_cluster_events(
+                cluster_name=None,
+                cluster_hash=record['cluster_hash'],
+                event_type=global_user_state.ClusterEventType.TERMINAL,
+                include_timestamps=True,
+                limit=1)
+            since = launched_at - kubernetes_utils.POD_EVENT_CLOCK_SKEW_SECONDS
+            if events and int(events[0]['transitioned_at']) >= since:
+                cause = str(events[0]['reason']) or None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the terminal event for '
+                         f'{handle.cluster_name!r}: {e}')
+
     # Autodown is likely only if it could have fired (the cluster is older
     # than its idle limit) and nothing says it did not. A missing Kubernetes
     # breadcrumb argues against it, but the lookup can miss, so the configured
