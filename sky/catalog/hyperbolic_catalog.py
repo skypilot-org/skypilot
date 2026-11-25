@@ -11,7 +11,12 @@ from sky.utils import ux_utils
 # Initialize cloud variable at module level
 CLOUD = 'hyperbolic'
 
-_df = common.read_catalog('hyperbolic/vms.csv')
+# Keep it synced with the frequency in
+# skypilot-catalog/.github/workflows/update-hyperbolic-catalog.yml
+_PULL_FREQUENCY_HOURS = 7
+
+_df = common.read_catalog('hyperbolic/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -143,4 +148,4 @@ def get_instance_type_from_catalog() -> dict:
 
 
 def regions() -> List[cloud.Region]:
-    return [cloud.Region('default')]
+    return [cloud.Region(region) for region in _df['Region'].unique()]
