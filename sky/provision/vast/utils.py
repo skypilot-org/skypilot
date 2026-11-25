@@ -111,23 +111,9 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
-    cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
-    num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
-    query = [
-        'chunked=true',
-        'georegion=true',
-        f'geolocation="{region[-2:]}"',
-        f'disk_space>={disk_size}',
-        f'num_gpus={num_gpus}',
-        f'gpu_name="{gpu_name}"',
-        f'cpu_ram>="{cpu_ram}"',
-    ]
-    if secure_only:
-        query.append('datacenter=true')
-        query.append('hosting_type>=1')
-    query_str = ' '.join(query)
+    query_str = _create_search_offers_query(instance_type, region, disk_size,
+                                            secure_only)
 
     instance_list = vast.vast().search_offers(query=query_str)
 
@@ -242,6 +228,29 @@ def launch(name: str,
         id=new_instance_contract['new_contract'])
 
     return new_instance['id']
+
+
+def _create_search_offers_query(instance_type: str, region: str, disk_size: int,
+                                secure_only: bool) -> str:
+    # ref: https://docs.vast.ai/api-reference/search/search-offers
+
+    cpu_ram = float(instance_type.split('-')[-1]) / 1024
+    gpu_name = instance_type.split('-')[1]
+    num_gpus = int(instance_type.split('-')[0].replace('x', ''))
+
+    query = [
+        'chunked=true',
+        'georegion=true',
+        f'geolocation={region[-2:]}',
+        f'disk_space>={disk_size}',
+        f'num_gpus={num_gpus}',
+        f'gpu_name={gpu_name}',
+        f'cpu_ram>={cpu_ram}',
+    ]
+    if secure_only:
+        query.append('datacenter=true')
+
+    return ' '.join(query)
 
 
 def start(instance_id: str) -> None:
