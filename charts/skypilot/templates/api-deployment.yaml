@@ -499,7 +499,7 @@ spec:
             done
           fi
           set -x
-          cat > /etc/logrotate.conf <<EOF
+          cat > /var/lib/logrotate/logrotate.conf <<EOF
           /root/.sky/api_server/server.log {
               size {{ .Values.apiService.logs.retention.size }}
               rotate 1
@@ -516,10 +516,12 @@ spec:
           }
           EOF
           while true; do
-            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf
+            logrotate -s /var/lib/logrotate/status /var/lib/logrotate/logrotate.conf
             sleep 60;
           done
         volumeMounts:
+        - name: logrotate-state
+          mountPath: /var/lib/logrotate
         {{- if and $statePersist (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         - name: sky-ephemeral
           mountPath: /root/.sky
@@ -826,6 +828,10 @@ spec:
       {{- end }}
       {{- else }}
       - name: state-volume
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.apiService.logs.retention.enabled }}
+      - name: logrotate-state
         emptyDir: {}
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}

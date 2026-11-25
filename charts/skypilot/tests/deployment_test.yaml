@@ -1092,6 +1092,29 @@ tests:
           path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.runAsNonRoot
           value: true
 
+  - it: should provide writable logrotate state with a read-only root filesystem
+    set:
+      apiService.logs.retention.enabled: true
+      securityContext:
+        readOnlyRootFilesystem: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].volumeMounts
+          content:
+            name: logrotate-state
+            mountPath: /var/lib/logrotate
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: logrotate-state
+            emptyDir: {}
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "logrotate -s /var/lib/logrotate/status /var/lib/logrotate/logrotate.conf"
+
   - it: should rotate serve controller logs
     set:
       apiService.serveServerLog: true
@@ -1122,6 +1145,10 @@ tests:
           any: true
           content:
             name: logrotate
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: logrotate-state
 
   # Tests for the apiService.livenessProbe / apiService.readinessProbe values
   - it: should render the default probe specs that match the historical chart output
