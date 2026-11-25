@@ -87,6 +87,11 @@ available_node_types:
             {% if disk_throughput %}
             Throughput: {{disk_throughput}}
             {% endif %}
+      {% if nested_virtualization %}
+      # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html
+      CpuOptions:
+        NestedVirtualization: enabled
+      {% endif %}
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot

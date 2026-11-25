@@ -2152,6 +2152,9 @@ def get_config_schema():
                 'disk_encrypted': {
                     'type': 'boolean',
                 },
+                'nested_virtualization': {
+                    'type': 'boolean',
+                },
                 'ssh_user': {
                     'type': 'string',
                 },
