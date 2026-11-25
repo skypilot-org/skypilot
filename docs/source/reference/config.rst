@@ -3017,7 +3017,9 @@ Supported fields:
     metrics from several clusters. Without a filter, all series returned by
     ``url`` are attributed to this cluster. Clusters sharing a ``url``
     automatically exclude each other's filtered slices, so a fleet is never
-    counted twice.
+    counted twice. URLs are compared as text: give Prometheus servers that
+    run on different login nodes distinct URLs (for example the node's
+    hostname rather than ``localhost``).
   - ``via``: Name of another Slurm cluster whose login node runs the
     ``/federate`` request instead of this cluster's own, for a central
     Prometheus reachable from only some login nodes. The fetched series are

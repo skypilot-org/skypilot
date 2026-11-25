@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 71  # managed job restart (`sky jobs launch --restart`)
+API_VERSION = 72  # managed job restart (`sky jobs launch --restart`)
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -65,6 +65,10 @@ MIN_JOBS_DEPENDS_ON_API_VERSION = 64
 # Minimum server API version that accepts the task's `job:` section
 # (`job.wait_for_scheduling_timeout`).
 MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 66
+# Minimum server API version whose managed-jobs queue takes `after_job_id`
+# (a cursor: the page after this top-level job, in job id order). An older
+# server ignores the field and returns the first page again.
+MIN_JOBS_QUEUE_CURSOR_API_VERSION = 71
 
 # The HTTP header naming the user an admin service account acts as.
 IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'
@@ -122,7 +126,7 @@ MIN_WAITING_STATUS_API_VERSION = 55
 # Minimum server API version that can re-submit a finished managed job from
 # its stored spec (`sky jobs launch --restart` and the dashboard Re-run
 # button). Older servers don't have the endpoint.
-MIN_JOBS_RESTART_API_VERSION = 71
+MIN_JOBS_RESTART_API_VERSION = 72
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

@@ -95,6 +95,11 @@ def _bind_reuse_port_socket(config: uvicorn.Config) -> socket.socket:
     Mirrors ``uvicorn.Config.bind_socket`` for the TCP host/port case but also
     sets SO_REUSEPORT so that multiple workers can bind the same address and
     the kernel load-balances new connections across them.
+
+    The socket must stay non-inheritable: a child spawned with
+    ``close_fds=False`` that held it would keep it in the SO_REUSEPORT group
+    after the worker exits, and the connections routed to it would never be
+    accepted.
     """
     host = config.host or ''
     family = socket.AF_INET
@@ -109,7 +114,6 @@ def _bind_reuse_port_socket(config: uvicorn.Config) -> socket.socket:
     except OSError as exc:
         logger.error(exc)
         sys.exit(1)
-    sock.set_inheritable(True)
     return sock
 
 

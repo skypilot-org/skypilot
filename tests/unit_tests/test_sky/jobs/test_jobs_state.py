@@ -2140,8 +2140,47 @@ class TestIncludeTreeCodegenCompatibility:
 
     def test_current_version_accepts_the_kwarg(self):
         # The guard and the branch that passes the kwarg are keyed on the
-        # same version, and it is the version this tree ships.
-        assert (jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION ==
+        # same version, and this tree ships it.
+        assert (jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION <=
+                managed_job_constants.MANAGED_JOBS_VERSION)
+
+
+class TestQueueCursorCodegenCompatibility:
+    """The generated queue code against a controller that predates
+    `after_job_id`. Dropped, the cursor would return the first page again,
+    so the old controller has to refuse instead."""
+
+    def _run_branch(self, built: str, version: int):
+        return TestInfraFilterCodegenCompatibility._run_branch(
+            self, built, version)
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(page=1, limit=10)
+        one_older = jobs_utils.QUEUE_CURSOR_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'after_job_id' not in kwargs
+        assert kwargs['limit'] == 10
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(page=1,
+                                                          limit=10,
+                                                          after_job_id=7)
+        kwargs = self._run_branch(code,
+                                  jobs_utils.QUEUE_CURSOR_MANAGED_JOBS_VERSION)
+        assert kwargs['after_job_id'] == 7
+        assert kwargs['limit'] == 10
+
+    def test_old_controller_refuses_a_cursor(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(page=1,
+                                                          limit=10,
+                                                          after_job_id=7)
+        one_older = jobs_utils.QUEUE_CURSOR_MANAGED_JOBS_VERSION - 1
+        with pytest.raises(RuntimeError,
+                           match=jobs_utils.QUEUE_CURSOR_UNSUPPORTED_MARKER):
+            self._run_branch(code, one_older)
+
+    def test_current_version_accepts_the_kwarg(self):
+        assert (jobs_utils.QUEUE_CURSOR_MANAGED_JOBS_VERSION ==
                 managed_job_constants.MANAGED_JOBS_VERSION)
 
 
@@ -2316,6 +2355,117 @@ class TestPaginationByTreeRoot:
         jobs, total = state.get_managed_jobs_with_filters()
         assert total == 1
         assert sorted(j['job_id'] for j in jobs) == [root, eval1]
+
+
+class TestPaginationByCursor:
+    """`after_job_id` pages by top-level job id: a page starts after the last
+    root of the previous page, so jobs submitted or finishing in between do
+    not shift the pages."""
+
+    @staticmethod
+    def _ids(after=None, **kwargs):
+        rows, _ = state.get_managed_jobs_with_filters(page=1,
+                                                      limit=2,
+                                                      after_job_id=after,
+                                                      **kwargs)
+        return {j['job_id'] for j in rows}
+
+    def test_pages_follow_the_cursor(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        plain = new_job('plain')
+        member = new_job('member', parent_job_id=root)
+        newest = new_job('newest')
+        assert self._ids() == {newest, plain}
+        # The member rides along with its root.
+        assert self._ids(after=plain) == {root, member}
+        assert self._ids(after=root) == set()
+
+    def test_total_ignores_the_cursor(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        new_job('a')
+        b = new_job('b')
+        new_job('c')
+        _, total = state.get_managed_jobs_with_filters(page=1,
+                                                       limit=2,
+                                                       after_job_id=b)
+        assert total == 3
+
+    def test_a_job_submitted_between_pages(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        a = new_job('a')
+        b = new_job('b')
+        c = new_job('c')
+        assert self._ids() == {c, b}
+        new_job('d')
+        assert self._ids(after=b) == {a}
+        # An offset shows b again.
+        rows, _ = state.get_managed_jobs_with_filters(page=2, limit=2)
+        assert {j['job_id'] for j in rows} == {b, a}
+
+    def test_a_job_finishing_between_pages(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        a = new_job('a')
+        b = new_job('b')
+        c = new_job('c')
+        d = new_job('d')
+        pending = [state.ManagedJobStatus.PENDING.value]
+        assert self._ids(statuses=pending) == {d, c}
+        with _mock_managed_jobs_db_conn.begin() as conn:
+            conn.execute(state.spot_table.update().where(
+                state.spot_table.c.spot_job_id == c).values(
+                    status=state.ManagedJobStatus.SUCCEEDED.value))
+        assert self._ids(after=c, statuses=pending) == {b, a}
+        # An offset skips b.
+        rows, _ = state.get_managed_jobs_with_filters(page=2,
+                                                      limit=2,
+                                                      statuses=pending)
+        assert {j['job_id'] for j in rows} == {a}
+
+    def test_pages_keep_the_time_window(self, _mock_managed_jobs_db_conn):
+        # A member submitted inside the window under a root submitted before
+        # it: paged and unpaged listings return the same rows.
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        member = new_job('member', parent_job_id=root)
+        _set_created_at(_mock_managed_jobs_db_conn, root, 100.0)
+        _set_created_at(_mock_managed_jobs_db_conn, member, 300.0)
+        unpaged, _ = state.get_managed_jobs_with_filters(submitted_after=200.0)
+        assert {j['job_id'] for j in unpaged} == {member}
+        assert self._ids(submitted_after=200.0) == {member}
+
+    def test_ascending_order(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        a = new_job('a')
+        b = new_job('b')
+        c = new_job('c')
+        assert self._ids(after=a, sort_by='job_id', sort_order='asc') == {b, c}
+        # Without sort_by the order stays descending.
+        assert self._ids(after=b, sort_order='asc') == {a}
+
+
+class TestCheckQueueCursor:
+
+    @pytest.mark.parametrize('kwargs,message', [
+        ({
+            'limit': None
+        }, 'requires limit'),
+        ({
+            'page': 2
+        }, 'cannot be combined with page'),
+        ({
+            'sort_by': 'name'
+        }, 'requires sorting by job id'),
+    ])
+    def test_refusals(self, kwargs, message):
+        args = {'page': None, 'limit': 10, 'sort_by': None, **kwargs}
+        with pytest.raises(ValueError, match=message):
+            jobs_utils.check_queue_cursor(5, **args)
+
+    @pytest.mark.parametrize('sort_by', [None, 'job_id', 'id'])
+    def test_accepted(self, sort_by):
+        jobs_utils.check_queue_cursor(5, page=1, limit=10, sort_by=sort_by)
+        jobs_utils.check_queue_cursor(None, page=3, limit=None, sort_by='name')
 
 
 class TestTreeRowOrder:

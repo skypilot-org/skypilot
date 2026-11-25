@@ -729,6 +729,10 @@ class JobsQueueV2Body(RequestBody):
     infra_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
+    # Cursor: with `limit`, return the page of top-level jobs after this one
+    # in job id order. Servers older than MIN_JOBS_QUEUE_CURSOR_API_VERSION
+    # ignore this field, so the client checks the server version first.
+    after_job_id: Optional[int] = None
     statuses: Optional[List[str]] = None
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`

@@ -1,7 +1,8 @@
 """Server-side readers without a request workspace see every workspace's
-Kubernetes contexts, not only the server workspace's.
+Kubernetes contexts and Slurm clusters, not only the server workspace's.
 
-Real config file; only the kubeconfig and SSH node pool listings are faked.
+Real config file; only the kubeconfig, SSH node pool and ~/.slurm/config
+listings are faked.
 """
 from unittest import mock
 
@@ -14,6 +15,7 @@ from sky import skypilot_config
 from sky.clouds import ssh as ssh_cloud
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.server import metrics
 from sky.server import server
 from sky.skylet import constants
@@ -26,6 +28,8 @@ def configure(tmp_path, monkeypatch):
     monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
     monkeypatch.setattr(kubernetes_utils, 'get_all_kube_context_names',
                         lambda: ['ctx-a', 'ctx-b', 'ctx-c'])
+    monkeypatch.setattr(slurm_utils, 'get_all_slurm_cluster_names',
+                        lambda: ['c1', 'c2', 'c3'])
     monkeypatch.setattr(ssh_cloud, 'SSH_NODE_POOLS_PATH',
                         str(tmp_path / 'none.yaml'))
 
@@ -145,3 +149,55 @@ def test_dashboard_local_contexts_only_name_the_callers_contexts(
                         lambda user_id: {w: {} for w in readable})
     user = models.User(id='alice-id', name='alice')
     assert server._get_local_contexts(user) == expected  # pylint: disable=protected-access
+
+
+_PROM = 'http://prometheus.internal:9090'
+
+
+def _slurm_config(ws_b_slurm, filters=None):
+    filters = filters or {}
+    return {
+        'slurm': {
+            'allowed_clusters': ['c1'],
+            'cluster_configs': {
+                name: {
+                    'prometheus': {
+                        'url': _PROM,
+                        **({
+                            'filter': filters[name]
+                        } if name in filters else {}),
+                    }
+                } for name in ('c1', 'c2', 'c3')
+            },
+        },
+        'workspaces': {
+            'ws-b': {
+                'slurm': ws_b_slurm
+            }
+        },
+    }
+
+
+def test_slurm_federation_adds_clusters_only_another_workspace_allows(
+        configure):
+    configure(_slurm_config({'allowed_clusters': ['c2']}))
+    # c3 has a Prometheus but no workspace allows it.
+    assert metrics_utils.get_slurm_metrics_clusters() == ['c1', 'c2']
+
+
+def test_slurm_federation_skips_disabled_workspace(configure):
+    configure(_slurm_config({'allowed_clusters': ['c2'], 'disabled': True}))
+    assert metrics_utils.get_slurm_metrics_clusters() == ['c1']
+
+
+def test_slurm_sibling_slice_moves_to_the_cluster_that_claims_it(configure):
+    """c1 and c2 share a Prometheus and c2 claims cluster="site-b". Once c2 is
+    federated, c1 stops collecting that slice, so the series are stamped
+    slurm/c2 instead of slurm/c1, and counted once."""
+    configure(
+        _slurm_config({'allowed_clusters': ['c2']},
+                      filters={'c2': {
+                          'cluster': 'site-b'
+                      }}))
+    assert metrics_utils.slurm_federate_matchers('c1') == ['cluster!="site-b"']
+    assert metrics_utils.slurm_federate_matchers('c2') == ['cluster="site-b"']

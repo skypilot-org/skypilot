@@ -104,6 +104,11 @@ message GetJobTableRequest {
   // that predates it ignores this field and returns only the requested jobs'
   // rows, so the response reports whether the field was applied.
   optional bool include_tree = 18;
+  // Cursor: with `limit`, return the page of top-level jobs after this one in
+  // job id order. Added in ManagedJobsService v28. A server that predates it
+  // ignores this field and returns the first page, so the response reports
+  // whether the field was applied.
+  optional int64 after_job_id = 19;
 }
 
 message ManagedJobInfo {
@@ -208,6 +213,9 @@ message GetJobTableResponse {
   // server that predates the field leaves it false. The caller needs this
   // because a root-only answer and a tree answer look alike.
   bool include_tree_applied = 7;
+  // Whether `after_job_id` was applied. Added in ManagedJobsService v28. A
+  // server that predates the field leaves it false.
+  bool after_job_id_applied = 8;
 }
 
 message GetAllJobIdsByNameRequest {

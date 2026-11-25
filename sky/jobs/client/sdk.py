@@ -490,14 +490,111 @@ def queue_v2(
         # search box uses the same filter).
         name_match=name_match,
     )
-    path = '/jobs/queue/v2'
+    page_size = _queue_page_size(body)
+    if page_size is not None:
+        paged_request_id = _queue_in_pages(body, page_size)
+        if paged_request_id is not None:
+            return paged_request_id
+    return _send_queue_v2(body)
+
+
+def _send_queue_v2(
+    body: payloads.JobsQueueV2Body
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
+        str, int], int]]:
     response = server_common.make_authenticated_request(
         'POST',
-        path,
+        '/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
         sync_call=True)
     return server_common.get_request_id(response=response)
+
+
+def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
+    """The page size to fetch the queue in, or None to fetch it in one call.
+
+    The queue is paged when the server answers sync calls up to a smaller
+    `limit` than asked for and takes the job id cursor. Pages follow the
+    default order, newest top-level job first. A refresh is not answered as
+    a sync call, so it is not paged.
+    """
+    max_limit = rest.get_sync_call_max_limit()
+    if max_limit is None or (body.limit is not None and
+                             body.limit <= max_limit):
+        return None
+    if (body.refresh or body.include_tree or
+            body.sort_by not in (None, 'job_id', 'id') or
+            body.sort_order == 'asc'):
+        return None
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_JOBS_QUEUE_CURSOR_API_VERSION):
+        return None
+    return max_limit
+
+
+def _queue_in_pages(
+    body: payloads.JobsQueueV2Body, page_size: int
+) -> Optional[server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                            int, Dict[str, int], int]]]:
+    """Fetches the queue as sync calls of up to page_size top-level jobs.
+
+    Returns a request id that carries the combined result, or the request id
+    of a page that failed. Returns None when a page is not answered in its
+    response or the server does not page by job id; the caller then fetches
+    the queue in one call.
+    """
+    body = body.model_copy()
+    if body.fields and 'root_job_id' not in body.fields:
+        # Rows name their top-level job in root_job_id; the cursor needs it.
+        body.fields = [*body.fields, 'root_job_id']
+    wanted = body.limit
+    jobs: List[Dict[str, Any]] = []
+    num_trees = 0
+    while True:
+        size = page_size
+        if wanted is not None:
+            size = min(size, wanted - num_trees)
+        body.limit = size
+        request_id = _send_queue_v2(body)
+        if request_id.sync_response is None:
+            return None
+        status_code, payload = request_id.sync_response
+        if status_code != 200:
+            return None if _is_cursor_refused(payload) else request_id
+        value = json.loads(payload['return_value'])
+        if not isinstance(value, dict) or 'jobs' not in value:
+            return None
+        page_jobs = value['jobs']
+        jobs.extend(page_jobs)
+        roots = {
+            job['job_id']
+            if job.get('root_job_id') is None else job['root_job_id']
+            for job in page_jobs
+        }
+        if (body.after_job_id is not None and roots and
+                max(roots) >= body.after_job_id):
+            # Something on the way dropped the cursor and sent a page again.
+            return None
+        num_trees += len(roots)
+        if len(roots) < size or (wanted is not None and num_trees >= wanted):
+            break
+        body.after_job_id = min(roots)
+    value['jobs'] = jobs
+    request_id.sync_response = (200, {
+        **payload, 'return_value': json.dumps(value)
+    })
+    return request_id
+
+
+def _is_cursor_refused(error_body: Any) -> bool:
+    """Whether a sync call failed with QueueCursorNotSupportedError."""
+    try:
+        error = json.loads(error_body['detail']['error'])
+        return error['type'] == exceptions.QueueCursorNotSupportedError.__name__
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 # Deprecated. Please use queue_v2 instead for better performance.

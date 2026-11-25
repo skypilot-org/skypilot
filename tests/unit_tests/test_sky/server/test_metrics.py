@@ -2275,3 +2275,20 @@ def test_federation_targets_leave_out_known_unreachable_contexts(monkeypatch):
                         lambda: [])
     assert metrics._FederationTargets()._prologue() == (['up'], [])
     split.assert_called_once_with(['up'])
+
+
+def test_gpu_metrics_passes_the_snapshot_to_slurm_federation(monkeypatch):
+    """The sibling filter reuses the snapshot instead of enumerating the
+    Slurm clusters again on the event loop."""
+    targets = metrics._FEDERATION_TARGETS
+    monkeypatch.setattr(targets, 'snapshot', lambda: ([], ['c1', 'c2']))
+    monkeypatch.setattr(targets, 'start_refresh_if_idle', lambda: None)
+    fetch = AsyncMock(return_value='')
+    monkeypatch.setattr(metrics.metrics_utils, 'get_metrics_for_slurm_cluster',
+                        fetch)
+
+    asyncio.run(metrics.gpu_metrics())
+
+    assert [c.args[0] for c in fetch.call_args_list] == ['c1', 'c2']
+    assert all(
+        c.kwargs['federated'] == ['c1', 'c2'] for c in fetch.call_args_list)
