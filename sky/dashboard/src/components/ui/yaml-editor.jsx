@@ -223,11 +223,11 @@ export const yamlSearchPanelTheme = EditorView.theme({
  * YAML Editor component with syntax highlighting.
  * Drop-in replacement for Textarea when editing YAML content.
  */
-// Plugins may provide the editor through the `ui.yaml-editor` slot.
+// A component registered for the `ui.yaml-editor` slot replaces this editor.
 export function YamlEditor(props) {
-  const [pluginEditor] = usePluginComponents('ui.yaml-editor');
-  if (pluginEditor) {
-    const Editor = pluginEditor.component;
+  const [registered] = usePluginComponents('ui.yaml-editor');
+  if (registered) {
+    const Editor = registered.component;
     return <Editor {...props} />;
   }
   return <DefaultYamlEditor {...props} />;
