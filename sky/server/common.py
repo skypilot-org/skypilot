@@ -55,6 +55,7 @@ if typing.TYPE_CHECKING:
     import aiohttp
     import pydantic
     import requests
+    import yarl
 
     from sky import dag as dag_lib
     from sky import models
@@ -412,13 +413,147 @@ def _prepare_authenticated_request_params(
     return url, kwargs
 
 
-def _convert_requests_cookies_to_aiohttp(
-        cookie_jar: requests.cookies.RequestsCookieJar) -> Dict[str, str]:
-    """Convert requests cookie jar to aiohttp-compatible dict format."""
-    cookies = {}
-    for cookie in cookie_jar:
-        cookies[cookie.name] = cookie.value
-    return cookies  # type: ignore
+def _cookie_jar_of_sync_client_request(
+    cookie_jar: 'requests.cookies.RequestsCookieJar'
+) -> 'requests.cookies.RequestsCookieJar':
+    """Returns the jar the synchronous client sends one request from.
+
+    `requests` does not look the cookies up in the jar it is given, but in a
+    copy of it (Session.prepare_request). Copying a jar puts its cookies in
+    the jar's iteration order, which is sorted on Python 3.9 and decides the
+    order of same-path cookies in the header. `requests` keeps that copy for
+    all hops of the request, and adds to it the cookies that the response of
+    a redirect hop sets (see _add_response_cookies()).
+    """
+    return requests.cookies.merge_cookies(requests.cookies.RequestsCookieJar(),
+                                          cookie_jar)
+
+
+def _cookie_header_of_sync_client(
+        jar_as_sent: 'requests.cookies.RequestsCookieJar',
+        url: str) -> Optional[str]:
+    """Returns the Cookie header the synchronous client sends to the URL.
+
+    This is the lookup `requests` does when it sends a request with the jar:
+    the jar's cookie policy picks the unexpired cookies whose domain and path
+    match the URL, and Secure cookies only for HTTPS. Returns None if no
+    cookie in the jar applies to the URL.
+
+    Args:
+        jar_as_sent: The jar of the request, from
+            _cookie_jar_of_sync_client_request(). The lookup drops its
+            expired cookies.
+        url: The URL the request goes to.
+    """
+    try:
+        prepared_request = requests.Request('GET', url).prepare()
+    except requests.exceptions.RequestException as e:
+        logger.debug(f'Not sending cookies to {redact_url_password(url)}: '
+                     f'{e}')
+        return None
+    return requests.cookies.get_cookie_header(jar_as_sent, prepared_request)
+
+
+class _SetCookieHeaders:
+    """The part of a response that http.cookiejar reads: its headers."""
+
+    def __init__(self, headers: Any) -> None:
+        self._headers = headers
+
+    def info(self) -> '_SetCookieHeaders':
+        return self
+
+    def get_all(self, name: str, default: Any = None) -> Any:
+        return self._headers.getall(name, default)
+
+
+def _add_response_cookies(jar_as_sent: 'requests.cookies.RequestsCookieJar',
+                          url: str, response_headers: Any) -> None:
+    """Adds the cookies that a response sets to the jar of the request.
+
+    `requests` does this with the response of each redirect hop
+    (Session.resolve_redirects), so a cookie set by a redirect is sent on the
+    next hop if its scope allows. The jar's cookie policy decides which
+    cookies the response at `url` may set.
+    """
+    try:
+        prepared_request = requests.Request('GET', url).prepare()
+    except requests.exceptions.RequestException as e:
+        logger.debug('Not taking cookies from the response of '
+                     f'{redact_url_password(url)}: {e}')
+        return
+    # http.cookiejar is typed for urllib's own request and response. It only
+    # uses the response's info().get_all() and the request interface that
+    # `requests` adapts with MockRequest (requests.cookies).
+    jar_as_sent.extract_cookies(
+        typing.cast(Any, _SetCookieHeaders(response_headers)),
+        typing.cast(Any, requests.cookies.MockRequest(prepared_request)))
+
+
+def _credentials_per_hop_middleware(
+    url: str,
+    cookie_jar: Optional['requests.cookies.RequestsCookieJar'],
+    keep_first_cookie_header: bool = False
+) -> Callable[['aiohttp.ClientRequest', Any], Any]:
+    """Returns an aiohttp client middleware that scopes credentials per hop.
+
+    aiohttp calls a client middleware for each request it sends, which
+    includes every hop of a redirect. For each of them, this middleware:
+
+    - Sends the cookies of `cookie_jar` the way the synchronous client does.
+      The Cookie header is what the jar's cookie policy gives for the URL of
+      that hop, and nothing else. The jar is deliberately not passed to
+      aiohttp as `cookies`: that is a plain name-to-value mapping, so it has
+      no domain, path, Secure flag or expiry, and depending on the aiohttp
+      version it is sent on to the target of a redirect.
+    - Adds the cookies that the response of a hop sets to the cookies of the
+      following hops, as the synchronous client does.
+    - Removes the Authorization header from a hop that leaves the origin of
+      the first request (another scheme, host or port). aiohttp does this
+      itself when it follows a redirect, so this only matters if something
+      adds the header again.
+
+    Args:
+        url: The URL of the first request, as the synchronous client would be
+            given it.
+        cookie_jar: The cookie jar to send cookies from. If None, the Cookie
+            header is left as it is.
+        keep_first_cookie_header: The caller set a Cookie header itself. As
+            in the synchronous client, the jar then adds nothing to the first
+            request. Hops of a redirect get the jar's cookies.
+    """
+    first_hop_url: Optional['yarl.URL'] = None
+    # One copy of the jar for all hops of the request, as in `requests`.
+    jar_as_sent = (None if cookie_jar is None else
+                   _cookie_jar_of_sync_client_request(cookie_jar))
+
+    async def middleware(request: 'aiohttp.ClientRequest',
+                         handler: Any) -> 'aiohttp.ClientResponse':
+        nonlocal first_hop_url
+        if first_hop_url is None:
+            first_hop_url = request.url
+        is_first_hop = request.url == first_hop_url
+        # aiohttp removes `user:password@` from the URL it requests. The
+        # synchronous client applies the cookie policy to the URL as it was
+        # given, so do the same for the first request.
+        hop_url = url if is_first_hop else str(request.url)
+
+        if jar_as_sent is not None and not (is_first_hop and
+                                            keep_first_cookie_header):
+            cookie_header = _cookie_header_of_sync_client(jar_as_sent, hop_url)
+            request.headers.popall('Cookie', None)
+            if cookie_header is not None:
+                request.headers['Cookie'] = cookie_header
+
+        if request.url.origin() != first_hop_url.origin():
+            request.headers.popall('Authorization', None)
+
+        response = await handler(request)
+        if jar_as_sent is not None:
+            _add_response_cookies(jar_as_sent, hop_url, response.headers)
+        return response
+
+    return middleware
 
 
 def make_authenticated_request(method: str,
@@ -495,11 +630,24 @@ async def make_authenticated_request_async(
     url, kwargs = _prepare_authenticated_request_params(path, server_url,
                                                         **kwargs)
 
-    # Convert cookies to aiohttp format if needed
-    if 'cookies' in kwargs and isinstance(kwargs['cookies'],
-                                          requests.cookies.RequestsCookieJar):
-        kwargs['cookies'] = _convert_requests_cookies_to_aiohttp(
-            kwargs['cookies'])
+    # A cookie jar is not passed to aiohttp: a middleware sends its cookies
+    # per hop instead, see _credentials_per_hop_middleware(). Cookies the
+    # caller passes in another form are left to aiohttp, as before.
+    cookie_jar = None
+    if isinstance(kwargs.get('cookies'), requests.cookies.RequestsCookieJar):
+        cookie_jar = kwargs.pop('cookies')
+    caller_set_cookie_header = any(
+        name.lower() == 'cookie' for name in kwargs['headers'])
+    middlewares = kwargs.get('middlewares')
+    if middlewares is None:
+        # aiohttp uses per-request middlewares in place of the session's own,
+        # so keep the session's in front of ours.
+        middlewares = getattr(session, '_middlewares', ())
+        if not isinstance(middlewares, (tuple, list)):
+            middlewares = ()
+    kwargs['middlewares'] = (*middlewares,
+                             _credentials_per_hop_middleware(
+                                 url, cookie_jar, caller_set_cookie_header))
 
     # Convert params to strings for aiohttp compatibility
     if 'params' in kwargs and kwargs['params'] is not None:
