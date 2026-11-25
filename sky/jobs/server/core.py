@@ -2140,7 +2140,7 @@ def _resolve_job_to_restart(
         # submit (the dashboard lists every user's jobs). Workspace access is
         # still enforced by the queue. refresh=True starts a stopped jobs
         # controller, as `sky jobs launch` does.
-        records, _, _, _, _ = queue_v2_api(refresh=True,
+        records, _, _, _, _ = queue_v2_api(refresh=False,
                                            all_users=True,
                                            job_ids=[job_id],
                                            fields=fields)
@@ -2151,7 +2151,7 @@ def _resolve_job_to_restart(
     assert job_name is not None
     # By name, only the caller's own jobs: another user's job of the same
     # name must not be picked, nor make the name ambiguous.
-    records, _, _, _, _ = queue_v2_api(refresh=True,
+    records, _, _, _, _ = queue_v2_api(refresh=False,
                                        all_users=False,
                                        name_match=job_name,
                                        fields=fields)
