@@ -1075,6 +1075,22 @@ tests:
           any: true
           content:
             name: logrotate
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.capabilities.drop[0]
+          value: ALL
+
+  - it: should apply custom security context to logrotate sidecar
+    set:
+      apiService.logs.retention.enabled: true
+      securityContext:
+        runAsNonRoot: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.runAsNonRoot
+          value: true
 
   - it: should rotate serve controller logs
     set:
@@ -1085,12 +1101,12 @@ tests:
           path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
           pattern: "/root/.sky/serve/\\*/controller.log \\{\\s+size 10M\\s+rotate 1\\s+missingok\\s+notifempty\\s+copytruncate\\s+\\}"
 
-  - it: should not include logrotate sidecar when serveServerLog is false
+  - it: should include logrotate sidecar when serveServerLog is false and retention is enabled
     set:
       apiService.serveServerLog: false
       apiService.logs.retention.enabled: true
     asserts:
-      - notContains:
+      - contains:
           path: spec.template.spec.containers
           any: true
           content:

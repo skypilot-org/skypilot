@@ -481,8 +481,12 @@ spec:
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
-      {{- if and .Values.apiService.serveServerLog .Values.apiService.logs.retention.enabled }}
+      {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         # Warn if logrotate is missing in the image and keep the sidecar running

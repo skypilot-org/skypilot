@@ -920,9 +920,9 @@ Configuration for log retention settings.
 ``apiService.logs.retention.enabled``
 ''''''''''''''''''''''''''''''''''''''
 
-Whether to enable log retention for the API server. When enabled, logs will be automatically rotated and managed according to the specified size limit.
+Whether to enable log retention for API server and SkyServe controller logs. When enabled, logs will be automatically rotated and managed according to the specified size limit.
 
-Default: ``false``
+Default: ``true``
 
 .. code-block:: yaml
 
