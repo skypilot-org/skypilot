@@ -112,6 +112,17 @@ const clusterStatusMap = {
 // size, newest launch first, then by name.
 async function fetchClusterStatus(body) {
   const pageSize = await syncPageSize(MIN_LIST_CURSOR_API_VERSION);
+  const names = body.cluster_names;
+  if (
+    pageSize !== null &&
+    names?.length > 0 &&
+    names.length <= pageSize &&
+    // The server expands a glob pattern to every cluster it matches.
+    !names.some((name) => /[*?[\]]/.test(name))
+  ) {
+    // One page holds every named cluster.
+    return apiClient.fetch('/status', { ...body, limit: pageSize });
+  }
   if (pageSize !== null) {
     const launchedAt = (row) => row.launched_at || 0;
     const clusters = await fetchListInPages({

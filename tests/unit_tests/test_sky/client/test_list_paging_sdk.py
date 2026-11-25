@@ -172,6 +172,19 @@ class TestStatus:
         request_id = _call(sdk.status, server)
         assert _rows(request_id) == ['a-new', 'd-mid', 'b-old', 'e-unknown']
 
+    def test_named_clusters_are_one_sync_call(self):
+        server = _cluster_server()
+        request_id = _call(sdk.status, server, cluster_names=['a-new', 'b-old'])
+        assert [
+            (c['json']['limit'], c['json']['after_name']) for c in server.calls
+        ] == [(2, None)]
+        assert request_id.sync_response is not None
+
+    def test_a_name_pattern_is_paged(self):
+        server = _cluster_server()
+        _call(sdk.status, server, cluster_names=['*'])
+        assert len(server.calls) == 4
+
     @pytest.mark.parametrize('refresh', [
         common.StatusRefreshMode.AUTO,
         common.StatusRefreshMode.FORCE,

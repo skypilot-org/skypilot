@@ -103,4 +103,30 @@ describe('getClusters on a server that pages the cluster list', () => {
       { sync: false }
     );
   });
+
+  test('fetches named clusters in one sync call', async () => {
+    apiClient.fetch.mockResolvedValue([{ name: 'a', launched_at: 1 }]);
+
+    await getClusters({ clusterNames: ['a'] });
+
+    expect(apiClient.fetch).toHaveBeenCalledWith(
+      '/status',
+      expect.objectContaining({ cluster_names: ['a'], limit: 2 })
+    );
+    expect(apiClient.fetchImmediate).not.toHaveBeenCalled();
+  });
+
+  test('pages a cluster name pattern', async () => {
+    apiClient.fetchImmediate.mockResolvedValue(
+      response(
+        { status: 'SUCCEEDED', return_value: '[]' },
+        { headers: { 'X-SkyPilot-Sync': '1' } }
+      )
+    );
+
+    await getClusters({ clusterNames: ['a*'] });
+
+    expect(apiClient.fetchImmediate).toHaveBeenCalledTimes(1);
+    expect(apiClient.fetch).not.toHaveBeenCalled();
+  });
 });

@@ -2108,6 +2108,11 @@ def status(
     if refresh == common.StatusRefreshMode.NONE:
         page_size = client_common.sync_page_size(
             None, server_constants.MIN_LIST_CURSOR_API_VERSION)
+    if (page_size is not None and cluster_names and
+            len(cluster_names) <= page_size and
+            not any(ux_utils.is_glob_pattern(name) for name in cluster_names)):
+        # One page holds every named cluster.
+        return _send_status(body.model_copy(update={'limit': page_size}))
     if page_size is not None:
 
         def send(after: Optional[Tuple[int, str]],
