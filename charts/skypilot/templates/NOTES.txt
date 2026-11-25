@@ -4,3 +4,15 @@
 {{- include "skypilot.checkUpgradeConfig" . }}
 {{- include "skypilot.validateOAuthConfig" . }}
 {{- include "skypilot.validateExternalProxyConfig" . }}
+{{- $ingressNginx := index .Values "ingress-nginx" }}
+{{- if and $ingressNginx.enabled (kindIs "invalid" (index $ingressNginx.controller.config "use-http2")) }}
+
+WARNING: The bundled ingress-nginx controller has HTTP/2 on, which exposes it to
+CVE-2026-123007 and CVE-2026-123633 (nginx2root). Upgrades with --reuse-values keep
+the defaults of the chart version this release was first installed with, so they do
+not pick up the new default. Turn HTTP/2 off with:
+
+  helm upgrade -n {{ .Release.Namespace }} {{ .Release.Name }} skypilot/{{ .Chart.Name }} \
+    --version {{ .Chart.Version }} --reuse-values \
+    --set ingress-nginx.controller.config.use-http2=false
+{{- end }}

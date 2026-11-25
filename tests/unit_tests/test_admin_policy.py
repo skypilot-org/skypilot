@@ -1165,3 +1165,171 @@ def test_applied_hook_observes_only_its_request_names(task, monkeypatch):
     launches.assert_called_once()
     assert everything.call_count == 2
     assert deepcopy.call_count == 9
+
+
+# --- Workspace allowed_queues at submission -----------------------------------
+
+_Requests = request_names.AdminPolicyRequestName
+
+_QUEUE_CONFIG = config_utils.Config({
+    'active_workspace': 'team-a',
+    'workspaces': {
+        'team-a': {
+            'kubernetes': {
+                'quota': {
+                    'queue': 'team-a-low',
+                    'allowed_queues': ['team-a-high', 'team-a-low'],
+                },
+            },
+            'slurm': {
+                'quota': {
+                    'allowed_queues': ['team-a-qos']
+                }
+            },
+        },
+        'team-b': {},
+    },
+})
+
+
+def _queued_task(task_config: Optional[dict] = None,
+                 name: str = 'train') -> sky.Task:
+    task = sky.Task(run='echo hi', name=name)
+    task.set_resources(sky.Resources(_cluster_config_overrides=task_config))
+    return task
+
+
+def _apply_in(workspace: str,
+              entrypoint,
+              request_name,
+              config: config_utils.Config = _QUEUE_CONFIG,
+              **kwargs):
+    with skypilot_config.replace_skypilot_config_in_process(config), \
+            skypilot_config.local_active_workspace_ctx(workspace):
+        return admin_policy_utils.apply(entrypoint,
+                                        request_name=request_name,
+                                        **kwargs)
+
+
+@pytest.mark.parametrize('request_name', list(_Requests))
+def test_every_new_submission_is_checked_unless_exempt(request_name):
+    """Controller relaunches, replicas and exec keep the queue the job was
+    submitted with."""
+    task = _queued_task({'kubernetes': {'quota': {'queue': 'other'}}})
+    if request_name in admin_policy_utils._VOLUME_CHECK_EXEMPT_REQUESTS:
+        _apply_in('team-a', task, request_name)
+    else:
+        with pytest.raises(exceptions.PermissionDeniedError,
+                           match="Queue 'other' is not allowed in workspace "
+                           "'team-a'"):
+            _apply_in('team-a', task, request_name)
+
+
+@pytest.mark.parametrize('task_config, allowed', [
+    ({
+        'kubernetes': {
+            'quota': {
+                'queue': 'other'
+            }
+        }
+    }, "'team-a-high', 'team-a-low'"),
+    ({
+        'slurm': {
+            'quota': {
+                'queue': 'other'
+            }
+        }
+    }, "'team-a-qos'"),
+])
+def test_queue_outside_allowed_queues_is_rejected(task_config, allowed):
+    with pytest.raises(exceptions.PermissionDeniedError, match=allowed):
+        _apply_in('team-a', _queued_task(task_config), _Requests.JOBS_LAUNCH)
+
+
+@pytest.mark.parametrize('task_config', [
+    None,
+    {
+        'kubernetes': {
+            'quota': {
+                'queue': 'team-a-high'
+            }
+        }
+    },
+    {
+        'slurm': {
+            'quota': {
+                'queue': 'team-a-qos'
+            }
+        }
+    },
+])
+def test_allowed_queue_or_no_queue_is_accepted(task_config):
+    _apply_in('team-a', _queued_task(task_config), _Requests.CLUSTER_LAUNCH)
+
+
+def test_job_group_checks_every_task():
+    dag = sky.Dag()
+    dag.add(_queued_task(name='ok-task'))
+    dag.add(
+        _queued_task({'kubernetes': {
+            'quota': {
+                'queue': 'other'
+            }
+        }},
+                     name='bad-task'))
+    with pytest.raises(exceptions.PermissionDeniedError, match="'bad-task'"):
+        _apply_in('team-a', dag, _Requests.JOBS_LAUNCH)
+
+
+def test_workspace_without_allowed_queues_or_client_side_is_not_checked():
+    task = _queued_task({'kubernetes': {'quota': {'queue': 'other'}}})
+    _apply_in('team-b', task, _Requests.CLUSTER_LAUNCH)
+    _apply_in('team-a', task, _Requests.CLUSTER_LAUNCH, at_client_side=True)
+
+
+class _SetsQueue(sky.AdminPolicy):
+
+    @classmethod
+    def validate_and_mutate(cls, user_request):
+        user_request.task.set_resources(
+            sky.Resources(_cluster_config_overrides={
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'other'
+                    }
+                }
+            }))
+        return sky.MutatedUserRequest(user_request.task,
+                                      user_request.skypilot_config)
+
+
+def test_queue_set_by_admin_policy_is_not_checked(monkeypatch):
+    monkeypatch.setattr(admin_policy_utils, '_get_policy_impl',
+                        lambda location: _SetsQueue())
+    dag, _ = _apply_in('team-a', _queued_task(), _Requests.CLUSTER_LAUNCH)
+    resources = next(iter(dag.tasks[0].resources))
+    assert resources.cluster_config_overrides['kubernetes']['quota'][
+        'queue'] == 'other'
+
+
+def test_workspace_named_by_name_is_checked():
+    """Workspaces are keyed by id; a request may name its workspace by name."""
+    config = config_utils.Config({
+        'active_workspace': 'team-a',
+        'workspaces': {
+            'ws-1234': {
+                'name': 'team-a',
+                'kubernetes': {
+                    'quota': {
+                        'allowed_queues': ['team-a-high']
+                    }
+                },
+            },
+        },
+    })
+    task = _queued_task({'kubernetes': {'quota': {'queue': 'other'}}})
+    with pytest.raises(exceptions.PermissionDeniedError,
+                       match="workspace 'team-a'"):
+        with skypilot_config.replace_skypilot_config_in_process(config):
+            admin_policy_utils.apply(task,
+                                     request_name=_Requests.CLUSTER_LAUNCH)

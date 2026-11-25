@@ -21,6 +21,9 @@ from sky.recipes import core as recipes_core
 from sky.recipes import db as recipes_db
 from sky.recipes.utils import RecipeType
 
+# The fixtures write recipes straight into the server DB in-process.
+pytestmark = pytest.mark.no_dependency
+
 # Test recipe names - must follow the naming convention (letters, numbers, dashes)
 TEST_CLUSTER_RECIPE = 'test-smoke-cluster'
 TEST_JOB_RECIPE = 'test-smoke-job'

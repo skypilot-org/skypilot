@@ -430,12 +430,48 @@ FAQs
 
 * **Does SkyPilot support TPUs on GKE?**
 
-  SkyPilot supports single-host TPU topologies on GKE (e.g., 1x1, 2x2, 2x4). To use TPUs, add it to the accelerator field in your task YAML:
+  SkyPilot supports single-host TPU topologies on GKE (e.g., 1x1, 2x2, 2x4), and multi-host slices of TPU v6e and Ironwood (TPU7x). To use TPUs, add it to the accelerator field in your task YAML:
 
   .. code-block:: yaml
 
     resources:
       accelerators: tpu-v5-lite-podslice:1  # or tpu-v5-lite-device, tpu-v5p-slice
+
+  The count is the number of TPU chips. If you ask for more chips than one TPU VM has, SkyPilot launches a multi-host slice of that size and splits the request into one pod per VM, each taking all of its VM's chips. For example, ``tpu-v6e-16`` is a 4x4 slice of 4 VMs with 4 chips each, so it runs as 4 pods:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v6e-16  # 4 pods, one per 4-chip VM of a 4x4 slice
+
+  The pods of a slice are launched as one unit:
+
+  - They are all placed on the VMs of one slice, and the launch succeeds only when every pod is running.
+  - SkyPilot sets the TPU worker environment (``TPU_WORKER_ID``, ``TPU_WORKER_HOSTNAMES``, ``TPU_PROCESS_ADDRESSES``) for the task's ``run`` commands on each pod, so JAX and the TPU runtime see one slice. ``setup`` commands and shells opened on a pod do not get these values.
+  - ``num_nodes`` counts slices: ``num_nodes: 2`` with ``tpu-v6e-16`` runs 8 pods on two slices.
+  - A task on an existing multi-host TPU cluster must request the same slice and use every slice of the cluster.
+
+  TPU v6e with 8 chips exists both as one 8-chip VM and as a ``2x4`` slice of two 4-chip VMs. ``tpu-v6e-8`` is the single VM; add ``accelerator_args`` to get the slice:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v6e-8
+      accelerator_args:
+        multi_host: true  # a 2x4 slice: 2 pods, one per 4-chip VM
+
+  Ironwood is requested by its GKE accelerator name and chip count. Each Ironwood VM has 4 chips:
+
+  - ``tpu7x:4`` is one VM (``2x2x1``).
+  - ``tpu7x:8`` and larger are multi-host slices. For example, ``tpu7x:8`` is a ``2x2x2`` slice of 2 VMs, run as 2 pods.
+  - Google's own ``tpu7x-<N>`` names count TensorCores (two per chip), so they are not accepted.
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu7x:8  # 2 pods, one per VM of a 2x2x2 slice
+
+  A request runs only on TPU VMs of its own generation and slice shape. A single-VM request such as ``tpu7x:4`` runs on a single-host ``2x2x1`` VM, never on one VM of a ``2x2x2`` or larger slice, even though each slice VM also has 4 chips. The VMs of a slice are wired together, and the TPU runtime expects every VM of the slice to take part.
 
 * **I am using a custom image. How can I speed up the pod startup time?**
 

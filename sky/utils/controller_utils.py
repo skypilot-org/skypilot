@@ -408,7 +408,7 @@ def _get_cloud_dependencies_installation_commands(
                 '  ARCH="amd64"; '
                 'fi && '
                 '(command -v kubectl &>/dev/null || '
-                '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
+                '(curl -s -LO "https://dl.k8s.io/release/v1.35.10'
                 '/bin/linux/$ARCH/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl)) && '
@@ -626,7 +626,8 @@ def shared_controller_vars_to_fill(
         if workspace is not None:
             # This config is replayed on recovery; pin the id, which an admin
             # policy may have set as a name, so it is never re-resolved as a
-            # name another workspace may have taken since.
+            # name another workspace may have taken since. The pool check
+            # (serve_utils.get_pool_refusal) also relies on it being an id.
             local_user_config['active_workspace'] = (
                 skypilot_config.resolve_workspace_ref(workspace, workspaces))
         if controller.value.controller_type == 'jobs':

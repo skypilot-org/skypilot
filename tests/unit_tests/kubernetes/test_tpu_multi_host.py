@@ -365,12 +365,14 @@ def test_tag_tpu_multi_host_workers_groups_by_node_pool():
     assert env('c-worker1') == {
         'TPU_WORKER_ID': '0',
         'TPU_WORKER_HOSTNAMES': '10.0.0.1,10.0.0.2',
+        'TPU_PROCESS_ADDRESSES': '10.0.0.1:8471,10.0.0.2:8471',
         'TPU_NAME': 'c-pool-a',
     }
     assert env('c-worker3')['TPU_WORKER_ID'] == '1'
     assert env('c-worker2') == {
         'TPU_WORKER_ID': '0',
         'TPU_WORKER_HOSTNAMES': '10.0.0.3,10.0.0.4',
+        'TPU_PROCESS_ADDRESSES': '10.0.0.3:8471,10.0.0.4:8471',
         'TPU_NAME': 'c-pool-b',
     }
     assert env('c-head')['TPU_WORKER_ID'] == '1'
