@@ -2183,7 +2183,8 @@ class TestGetAllVolumesState:
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
     def test_volume_state_accepts_cached_reads(self, mock_get_context,
                                                fake_reads):
-        """Volume state is a view, so a cache may serve its reads."""
+        """A cache may serve the volume state's object reads; the PVC events
+        that can mark a volume unusable come from the API server."""
         mock_get_context.return_value = ('my-context', 'my-namespace')
         pvc = MockPVC('test-pvc', 'my-namespace')
         pvc.status.phase = 'Pending'
@@ -2211,7 +2212,10 @@ class TestGetAllVolumesState:
         assert (reads.PERSISTENT_VOLUME_CLAIMS, reads.CACHED) in reads_made
         assert (reads.PERSISTENT_VOLUMES, reads.CACHED) in reads_made
         assert (reads.STORAGE_CLASSES, reads.CACHED) in reads_made
-        assert all(consistency == reads.CACHED for _, consistency in reads_made)
+        assert all(consistency == reads.CACHED
+                   for resource, consistency in reads_made
+                   if resource != reads.EVENTS)
+        assert (reads.EVENTS, reads.CACHED) not in reads_made
 
     def test_hostpath_volume_reported_clean(self):
         """hostPath volumes have no PVC, but they still have to appear in the

@@ -3,7 +3,7 @@ import decimal
 import enum
 import re
 import time as time_module
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -120,7 +120,8 @@ def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
 
 _is_rbac_permission_error = api_errors.is_rbac_denial
 
-_PVC = kubernetes_utils.k8s_object_converter('V1PersistentVolumeClaim')
+_PVC: Callable[[Dict[str, Any]], Any] = (
+    kubernetes_utils.k8s_object_converter('V1PersistentVolumeClaim'))
 
 
 def _is_rbac_denied_read(e: Exception) -> bool:
