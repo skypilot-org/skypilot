@@ -839,7 +839,7 @@ def _raise_pod_scheduling_errors(
             field_selector=(f'involvedObject.name={pod_name},'
                             'involvedObject.kind=Pod'),
             consistency=reads.CACHED,
-            convert=kubernetes_utils.k8s_object_converter('V1Event'),
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
             attempts=1,
             timeout=_POD_POLL_REQUEST_TIMEOUT).items
         # Events created in the past hours are kept by
@@ -998,7 +998,7 @@ def _detect_cluster_event_reason_occurred(namespace, context, search_start,
         namespace=namespace,
         field_selector=f'reason={reason}',
         consistency=reads.FRESH,
-        convert=kubernetes_utils.k8s_object_converter('V1Event'),
+        convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
         attempts=1,
         timeout=_POD_POLL_REQUEST_TIMEOUT).items
     for event in events:
@@ -4317,7 +4317,7 @@ def _get_pod_events(context: Optional[str], namespace: str,
         namespace=namespace,
         field_selector=pod_field_selector,
         consistency=reads.CACHED,
-        convert=kubernetes_utils.k8s_object_converter('V1Event'),
+        convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
         attempts=1).items
     return sorted(
         pod_events,
@@ -4552,7 +4552,7 @@ def get_cluster_autostop_event(
             namespace=namespace,
             field_selector=f'reason={AUTOSTOP_EVENT_REASON}',
             consistency=reads.CACHED,
-            convert=kubernetes_utils.k8s_object_converter('V1Event'),
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
             attempts=1).items
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to read autodown event for '
@@ -4896,7 +4896,7 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
             namespace=namespace,
             field_selector=node_field_selector,
             consistency=reads.CACHED,
-            convert=kubernetes_utils.k8s_object_converter('V1Event'),
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
             attempts=1).items
         node_events = sorted(
             kubernetes_utils.events_since(node_events, since),

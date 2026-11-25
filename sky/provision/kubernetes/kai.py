@@ -261,7 +261,7 @@ def eviction_reason(context: Optional[str], namespace: str, pod_name: str,
             reads.EVENTS,
             namespace=namespace,
             field_selector='involvedObject.kind=PodGroup,reason=Evict',
-            convert=kubernetes_utils.k8s_object_converter('V1Event'),
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
             attempts=1).items
         for event in kubernetes_utils.events_since(events, since):
             # The first line names the pod; a reclaim adds lines describing

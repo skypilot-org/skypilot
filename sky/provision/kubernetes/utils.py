@@ -2977,7 +2977,7 @@ def _diagnose_deleted_pod(context: Optional[str], namespace: str,
             field_selector=(f'involvedObject.kind=Pod,'
                             f'involvedObject.name={pod_name}'),
             attempts=1,
-            convert=k8s_object_converter('V1Event')).items
+            convert=k8s_object_converter('CoreV1Event')).items
         events = sorted(events,
                         key=lambda event: event.metadata.creation_timestamp,
                         reverse=True)
@@ -5597,8 +5597,13 @@ def k8s_object_converter(object_type: str) -> Callable[[Dict[str, Any]], Any]:
     alike share their in-flight requests.
 
     Args:
-        object_type: Kubernetes client model name, e.g. 'V1Event'.
+        object_type: Kubernetes client model name, e.g. 'CoreV1Event'.
+
+    Raises:
+        ValueError: The Kubernetes client has no such model.
     """
+    if not hasattr(kubernetes.kubernetes.client.models, object_type):
+        raise ValueError(f'No Kubernetes client model {object_type!r}.')
     return functools.partial(dict_to_k8s_object, object_type=object_type)
 
 
@@ -6796,7 +6801,7 @@ def get_pvc_events(context: Optional[str],
                             'involvedObject.kind=PersistentVolumeClaim'),
             consistency=reads.FRESH,
             attempts=1,
-            convert=k8s_object_converter('V1Event'))
+            convert=k8s_object_converter('CoreV1Event'))
     except exceptions.KubeAPIUnreachableError as e:
         logger.warning(f'Failed to get PVC events: {e}')
         return []

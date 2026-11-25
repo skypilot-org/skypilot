@@ -3,6 +3,8 @@
 from concurrent import futures
 import io
 import json
+import pathlib
+import re
 import threading
 from unittest import mock
 
@@ -591,6 +593,23 @@ def test_http_status_of_a_known_unreachable_context(api):
         reads.list_objects('ctx', reads.PODS)
 
     assert reads.http_status(raised.value) is None
+
+
+def test_object_converter_rejects_an_unknown_model():
+    with pytest.raises(ValueError, match='V1Event'):
+        kubernetes_utils.k8s_object_converter('V1Event')
+
+
+def test_every_converted_model_exists():
+    """A wrong model name fails only once an object is read, so check them."""
+    root = pathlib.Path(kubernetes_utils.__file__).parents[2]
+    names = set()
+    for path in root.rglob('*.py'):
+        names.update(
+            re.findall(r"k8s_object_converter\(\s*'(\w+)'", path.read_text()))
+    assert names
+    for name in names:
+        kubernetes_utils.k8s_object_converter(name)
 
 
 def test_object_converter_is_shared_per_type():
