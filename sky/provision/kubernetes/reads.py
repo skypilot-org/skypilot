@@ -19,6 +19,7 @@ import json
 import os
 import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib import parse
 
@@ -26,10 +27,17 @@ import ijson
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.metrics import utils as metrics_utils
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import plugin_extensions
+
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import utils as kubernetes_utils
+else:
+    # utils imports this module.
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -98,9 +106,13 @@ class Fresh:
     """Read the API server."""
 
 
-FRESH = Fresh()
+CACHED: Cached = Cached()
+FRESH: Fresh = Fresh()
 
 Consistency = Union[Cached, Fresh]
+
+# Bytes of a LIST response parsed at a time.
+_CHUNK_SIZE = 64 * 1024
 
 
 @dataclasses.dataclass
@@ -108,10 +120,10 @@ class ReadResult:
     """Objects returned by a read.
 
     Attributes:
-        items: The objects in Kubernetes API JSON, in the API server's LIST
-            order. They may be shared with other readers, so they must not
-            be modified. Whether objects of built-in types carry apiVersion
-            and kind depends on the source.
+        items: The objects in Kubernetes API JSON, or what the read's convert
+            made of each, in the API server's LIST order. They may be shared
+            with other readers, so they must not be modified. Whether objects
+            of built-in types carry apiVersion and kind depends on the source.
         resource_version: The resourceVersion of the list or of the object;
             '' if get_object() found no object.
         staleness_seconds: How long the cache's watch had been failing; 0
@@ -119,7 +131,7 @@ class ReadResult:
         reason: Why the read went to the API server; None when the cache
             served it.
     """
-    items: List[Dict[str, Any]]
+    items: List[Any]
     resource_version: str
     staleness_seconds: float
     reason: Optional[str]
@@ -136,7 +148,9 @@ def list_objects(
     namespace: Optional[str] = None,
     label_selector: Optional[str] = None,
     field_selector: Optional[str] = None,
-    consistency: Consistency = Cached()
+    consistency: Consistency = CACHED,
+    convert: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    attempts: Optional[int] = None,
 ) -> ReadResult:
     """List the objects of a resource type.
 
@@ -151,15 +165,21 @@ def list_objects(
         label_selector: Label selector in Kubernetes syntax.
         field_selector: Field selector in Kubernetes syntax.
         consistency: Cached(max_age) or FRESH.
+        convert: Applied to each object as it is read; items then holds what
+            it returns, and a list read from the API server never holds all
+            the objects as JSON at once.
+        attempts: How many times to try the API server; None for the
+            default retries.
 
     Raises:
         exceptions.KubeAPIUnreachableError: The API server was needed and is
-            known to be unreachable, or failed after retries.
+            known to be unreachable, failed after retries, or answered 404 to
+            a list of a core resource.
         exceptions.KubernetesResourceNotServedError: The API server does not
-            serve the resource.
+            serve the resource, which is not in the core group.
     """
     return _read(context, resource, namespace, None, label_selector,
-                 field_selector, consistency)
+                 field_selector, consistency, convert, attempts)
 
 
 def get_object(
@@ -168,7 +188,9 @@ def get_object(
     name: str,
     *,
     namespace: Optional[str] = None,
-    consistency: Consistency = Cached()
+    consistency: Consistency = CACHED,
+    convert: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    attempts: Optional[int] = None,
 ) -> ReadResult:
     """Get one object; its items hold the object, or nothing if it is absent.
 
@@ -182,6 +204,9 @@ def get_object(
         namespace: The object's namespace. Required for a namespaced
             resource, and must be None for a cluster-scoped one.
         consistency: Cached(max_age) or FRESH.
+        convert: Applied to the object; items then holds what it returns.
+        attempts: How many times to try the API server; None for the
+            default retries.
 
     Raises:
         exceptions.KubeAPIUnreachableError: The API server was needed and is
@@ -189,13 +214,15 @@ def get_object(
     """
     if resource.namespaced and namespace is None:
         raise ValueError(f'Getting a {resource.label} needs a namespace.')
-    return _read(context, resource, namespace, name, None, None, consistency)
+    return _read(context, resource, namespace, name, None, None, consistency,
+                 convert, attempts)
 
 
 def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
           name: Optional[str], label_selector: Optional[str],
-          field_selector: Optional[str],
-          consistency: Consistency) -> ReadResult:
+          field_selector: Optional[str], consistency: Consistency,
+          convert: Optional[Callable[[Dict[str, Any]], Any]],
+          attempts: Optional[int]) -> ReadResult:
     if namespace is not None and not resource.namespaced:
         raise ValueError(f'{resource.label} is cluster-scoped; got namespace '
                          f'{namespace!r}.')
@@ -223,7 +250,10 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
             resource_version = served.resource_version
         else:
             resource_version = _object_version(served.items)
-        return ReadResult(items=served.items,
+        items = served.items
+        if convert is not None:
+            items = [convert(item) for item in items]
+        return ReadResult(items=items,
                           resource_version=resource_version,
                           staleness_seconds=served.staleness_seconds,
                           reason=None)
@@ -247,13 +277,21 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                   if value)
     # Each request may carry its own KUBECONFIG.
     kubeconfig = os.environ.get('KUBECONFIG')
-    got = _IN_FLIGHT.do((context, kubeconfig, path, query),
-                        lambda: _get(context=context,
+    got = _IN_FLIGHT.do((context, kubeconfig, path, query, convert),
+                        lambda: _get(attempts,
+                                     resource.plural[:-1],
+                                     context=context,
                                      resource_label=resource.label,
                                      path=path,
                                      query=query,
+                                     convert=convert,
                                      is_list=name is None))
     if got is None:
+        if name is None and not resource.group:
+            # Every API server serves the core group.
+            raise exceptions.KubeAPIUnreachableError(
+                f'Kubernetes context {context!r} answered 404 to a '
+                f'{resource.label} list.')
         if name is None:
             raise exceptions.KubernetesResourceNotServedError(
                 f'Kubernetes context {context!r} does not serve '
@@ -267,10 +305,22 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                       reason=reason)
 
 
-@kubernetes_utils._retry_on_error()  # pylint: disable=protected-access
-def _get(*, context: Optional[str], resource_label: str, path: str,
-         query: Tuple[Tuple[str, str], ...],
-         is_list: bool) -> Optional[Tuple[List[Dict[str, Any]], str]]:
+def _get(attempts: Optional[int], resource_type: str,
+         **kwargs: Any) -> Optional[Tuple[List[Any], str]]:
+    """_get_once() under the Kubernetes API retries."""
+    if attempts is None:
+        attempts = kubernetes_utils.DEFAULT_MAX_RETRIES
+    # pylint: disable-next=protected-access
+    retry = kubernetes_utils._retry_on_error(max_retries=attempts,
+                                             resource_type=resource_type)
+    return retry(_get_once)(**kwargs)
+
+
+def _get_once(*, context: Optional[str], resource_label: str, path: str,
+              query: Tuple[Tuple[str, str],
+                           ...], convert: Optional[Callable[[Dict[str, Any]],
+                                                            Any]],
+              is_list: bool) -> Optional[Tuple[List[Any], str]]:
     """One GET of path: (items, resourceVersion), or None on 404."""
     start = time.monotonic()
     outcome = 'error'
@@ -286,10 +336,11 @@ def _get(*, context: Optional[str], resource_label: str, path: str,
             _request_timeout=kubernetes.API_TIMEOUT)
         try:
             if is_list:
-                got = _parse_list(response)
+                got = _parse_list(response, convert)
             else:
                 obj = json.loads(response.data)
-                got = [obj], _object_version([obj])
+                got = ([obj if convert is None else convert(obj)],
+                       _object_version([obj]))
         except (kubernetes.urllib3.exceptions.HTTPError, ijson.JSONError,
                 json.JSONDecodeError) as e:
             # A body cut off mid-read is retried like a request that failed.
@@ -315,19 +366,38 @@ def _object_version(items: List[Dict[str, Any]]) -> str:
     return items[0].get('metadata', {}).get('resourceVersion', '')
 
 
-def _parse_list(response: Any) -> Tuple[List[Dict[str, Any]], str]:
-    items: List[Dict[str, Any]] = []
-    resource_version = ''
-    for key, value in ijson.kvitems(
-            response,
-            '',
-            use_float=True,
-            buf_size=kubernetes_utils.IJSON_BUFFER_SIZE):
-        if key == 'items':
-            items = value or []
-        elif key == 'metadata':
-            resource_version = value.get('resourceVersion', '')
-    return items, resource_version
+def _parse_list(
+    response: Any, convert: Optional[Callable[[Dict[str, Any]],
+                                              Any]]) -> Tuple[List[Any], str]:
+    """(items, resourceVersion) of a LIST response, converting as it streams."""
+    items: List[Any] = []
+    parsed = ijson.sendable_list()
+    versions = ijson.sendable_list()
+    items_parser = ijson.items_coro(parsed, 'items.item', use_float=True)
+    # Dropped once it has the resourceVersion, which the API server writes
+    # before the items.
+    version_parser: Any = ijson.items_coro(versions, 'metadata.resourceVersion')
+
+    def take_parsed() -> None:
+        items.extend(parsed if convert is None else map(convert, parsed))
+        del parsed[:]
+
+    for chunk in iter(lambda: response.read(_CHUNK_SIZE), b''):
+        items_parser.send(chunk)
+        if version_parser is not None:
+            version_parser.send(chunk)
+            if versions:
+                try:
+                    version_parser.close()
+                except ijson.IncompleteJSONError:
+                    pass  # It has not seen the rest of the response.
+                version_parser = None
+        take_parsed()
+    items_parser.close()
+    if version_parser is not None:
+        version_parser.close()
+    take_parsed()
+    return items, versions[0] if versions else ''
 
 
 class _InFlight:
