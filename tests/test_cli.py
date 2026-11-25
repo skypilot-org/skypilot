@@ -366,6 +366,47 @@ class TestWithNoCloudEnabled:
 
 class TestHelperFunctions:
 
+    @pytest.mark.parametrize('cloud,ip,user', [
+        (clouds.Slurm(), '', ''),
+        (clouds.Kubernetes(), '10.0.0.1', 'sky'),
+    ])
+    @pytest.mark.parametrize('from_status', [True, False])
+    def test_skip_ssh_unavailable_runtime(self, monkeypatch, cloud, ip, user,
+                                          from_status):
+        handle = mock.MagicMock()
+        handle.cluster_name = 'test-cluster'
+        handle.cached_external_ips = [ip]
+        handle.cached_external_ssh_ports = [22]
+        handle.ssh_user = user
+        handle.launched_resources.cloud = cloud
+        handle.provision_runtime_metadata.ssh_available = False
+        credentials = {'ssh_user': user, 'ssh_private_key': '/unused/key'}
+        records = [{
+            'name': 'test-cluster',
+            'handle': handle,
+            'credentials': credentials
+        }]
+        monkeypatch.setattr(command.sdk, 'status', mock.Mock(return_value='id'))
+        monkeypatch.setattr(command.sdk, 'stream_and_get',
+                            mock.Mock(return_value=records))
+        helper = command.cluster_utils.SSHConfigHelper
+        add = mock.Mock()
+        remove = mock.Mock()
+        key = mock.Mock()
+        monkeypatch.setattr(helper, 'add_cluster', add)
+        monkeypatch.setattr(helper, 'remove_cluster', remove)
+        monkeypatch.setattr(helper, 'generate_local_key_file', key)
+        monkeypatch.setattr(helper, 'list_cluster_names',
+                            mock.Mock(return_value=['test-cluster']))
+        if from_status:
+            assert command._get_cluster_records_and_set_ssh_config(
+                None, all_users=True) == records
+        else:
+            command._set_ssh_config_from_launch_response(handle, credentials)
+        remove.assert_called_once_with('test-cluster')
+        add.assert_not_called()
+        key.assert_not_called()
+
     def test_get_cluster_records_and_set_ssh_config(self, monkeypatch):
         """Tests _get_cluster_records_and_set_ssh_config with mocked components."""
         mock_api_server_calls(monkeypatch)
