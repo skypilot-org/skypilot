@@ -2415,6 +2415,17 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'setup_srun_options': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'minLength': 1
+                    },
+                },
+                'setup_container_mode': {
+                    'type': 'string',
+                    'enum': ['named', 'fresh'],
+                },
                 'submit_as_user': {
                     'type': 'boolean',
                 },
