@@ -517,6 +517,12 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 if request.HasField('infra_match') else None,
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
+                after_job_id=request.after_job_id
+                if request.HasField('after_job_id') else None,
+                sort_by=request.sort_by
+                if request.HasField('sort_by') else None,
+                sort_order=request.sort_order
+                if request.HasField('sort_order') else None,
                 user_hashes=user_hashes,
                 statuses=statuses,
                 fields=fields,
@@ -614,7 +620,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 infra_options=infra_options,
                 # Same for include_tree: the caller cannot otherwise tell a
                 # tree answer from a root-only one.
-                include_tree_applied=True)
+                include_tree_applied=True,
+                # Same for after_job_id: an ignored cursor returns the first
+                # page again.
+                after_job_id_applied=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))

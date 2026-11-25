@@ -3422,6 +3422,7 @@ def dump_managed_job_queue(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     include_tree: bool = False,
+    after_job_id: Optional[int] = None,
 ) -> str:
     # Passed by name: this is called from generated code that pins the
     # arguments it knows about, and the parameter list has outgrown the point
@@ -3437,6 +3438,7 @@ def dump_managed_job_queue(
                               infra_match=infra_match,
                               page=page,
                               limit=limit,
+                              after_job_id=after_job_id,
                               user_hashes=user_hashes,
                               statuses=statuses,
                               fields=fields,
@@ -3782,6 +3784,25 @@ def _reject_tree_lookup_extras(job_ids, workspace_match, name_match, pool_match,
                          f'got {", ".join(given)}.')
 
 
+def check_queue_cursor(after_job_id: Optional[int], page: Optional[int],
+                       limit: Optional[int], sort_by: Optional[str]) -> None:
+    """Raises ValueError when the queue cannot be paged by `after_job_id`.
+
+    The cursor is the last top-level job of the previous page in job id
+    order, so it needs a page size, no page number past the first, and the
+    job id order.
+    """
+    if after_job_id is None:
+        return
+    if limit is None:
+        raise ValueError('after_job_id requires limit.')
+    if page not in (None, 1):
+        raise ValueError('after_job_id cannot be combined with page.')
+    if sort_by not in (None, 'job_id', 'id'):
+        raise ValueError('after_job_id requires sorting by job id, got '
+                         f'sort_by={sort_by!r}.')
+
+
 def get_managed_job_queue(
     skip_finished: bool = False,
     accessible_workspaces: Optional[List[str]] = None,
@@ -3801,6 +3822,7 @@ def get_managed_job_queue(
     submitted_before: Optional[float] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
     include_tree: bool = False,
+    after_job_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -3828,10 +3850,15 @@ def get_managed_job_queue(
             the jobs launched under it, at any depth. The ids are resolved to
             their tree roots first, so ids from the same tree return that
             tree once. The total and the status counts cover the trees.
+        after_job_id: With limit, the page of top-level jobs after this one
+            in job id order. The total and the status counts ignore it.
 
     Returns:
         A dictionary containing the managed job queue.
     """
+    check_queue_cursor(after_job_id, page, limit, sort_by)
+    if after_job_id is not None and page is None:
+        page = 1
     tree_root_ids: Optional[List[int]] = None
     if include_tree:
         _reject_tree_lookup_extras(job_ids, workspace_match, name_match,
@@ -3903,6 +3930,7 @@ def get_managed_job_queue(
         submitted_before=submitted_before,
         page=page,
         limit=limit,
+        after_job_id=after_job_id,
         sort_by=sort_by,
         sort_order=sort_order,
         status_expr=status_expr,
@@ -4894,6 +4922,16 @@ INCLUDE_TREE_UNSUPPORTED_MESSAGE = (
 # The managed jobs version that first accepted `include_tree`.
 INCLUDE_TREE_MANAGED_JOBS_VERSION = 27
 
+# Same for `after_job_id`: a controller that predates it would return the
+# first page again.
+QUEUE_CURSOR_UNSUPPORTED_MARKER = 'SKYPILOT_QUEUE_CURSOR_UNSUPPORTED'
+QUEUE_CURSOR_UNSUPPORTED_MESSAGE = (
+    'The jobs controller does not support paging managed jobs by job id. '
+    'Launching your next managed job updates the controller automatically; '
+    'try again after that.')
+# The managed jobs version that first accepted `after_job_id`.
+QUEUE_CURSOR_MANAGED_JOBS_VERSION = 28
+
 
 class ManagedJobCodeGen:
     """Code generator for managed job utility functions.
@@ -4947,6 +4985,7 @@ class ManagedJobCodeGen:
         submitted_after: Optional[float] = None,
         submitted_before: Optional[float] = None,
         include_tree: bool = False,
+        after_job_id: Optional[int] = None,
     ) -> str:
         marker = INFRA_FILTER_UNSUPPORTED_MARKER
         message = INFRA_FILTER_UNSUPPORTED_MESSAGE
@@ -4954,6 +4993,9 @@ class ManagedJobCodeGen:
         tree_marker = INCLUDE_TREE_UNSUPPORTED_MARKER
         tree_message = INCLUDE_TREE_UNSUPPORTED_MESSAGE
         tree_version = INCLUDE_TREE_MANAGED_JOBS_VERSION
+        cursor_marker = QUEUE_CURSOR_UNSUPPORTED_MARKER
+        cursor_message = QUEUE_CURSOR_UNSUPPORTED_MESSAGE
+        cursor_version = QUEUE_CURSOR_MANAGED_JOBS_VERSION
         code = textwrap.dedent(f"""\
         # An infra filter a controller cannot apply must be an error, not a
         # silently wider answer: unlike every other filter here, dropping it
@@ -4967,6 +5009,12 @@ class ManagedJobCodeGen:
         _include_tree = {include_tree!r}
         if _include_tree and managed_job_version < {tree_version}:
             raise RuntimeError('{tree_marker}: {tree_message}')
+        # Same for after_job_id: an old controller would return the first
+        # page again.
+        _after_job_id = {after_job_id!r}
+        if (_after_job_id is not None and
+                managed_job_version < {cursor_version}):
+            raise RuntimeError('{cursor_marker}: {cursor_message}')
         # Filter out is_primary_in_job_group for older controllers (< 15)
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
@@ -5074,6 +5122,25 @@ class ManagedJobCodeGen:
                                 sort_order={sort_order!r},
                                 submitted_after={submitted_after!r},
                                 submitted_before={submitted_before!r})
+        elif managed_job_version < {cursor_version}:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                include_tree=_include_tree,
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                infra_match={infra_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields=_fields,
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r},
+                                submitted_after={submitted_after!r},
+                                submitted_before={submitted_before!r})
         else:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
@@ -5086,6 +5153,7 @@ class ManagedJobCodeGen:
                                 infra_match={infra_match!r},
                                 page={page!r},
                                 limit={limit!r},
+                                after_job_id=_after_job_id,
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r},
                                 fields=_fields,

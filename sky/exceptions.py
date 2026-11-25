@@ -397,6 +397,11 @@ class NotSupportedError(Exception):
     pass
 
 
+class QueueCursorNotSupportedError(NotSupportedError):
+    """Raised when the managed jobs queue cannot be paged by `after_job_id`."""
+    pass
+
+
 class StorageError(Exception):
     pass
 

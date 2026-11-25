@@ -269,6 +269,8 @@ class _DefaultManagedJobRunner:
         infra_match: Optional[str],
         page: Optional[int],
         limit: Optional[int],
+        # Default so a caller on the previous protocol still works.
+        after_job_id: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]],
         statuses: Optional[List[str]],
         fields: Optional[List[str]],
@@ -309,6 +311,7 @@ class _DefaultManagedJobRunner:
                 infra_match=infra_match,
                 page=page,
                 limit=limit,
+                after_job_id=after_job_id,
                 user_hashes=user_hashes,
                 statuses=statuses,
                 fields=fields,
@@ -328,19 +331,24 @@ class _DefaultManagedJobRunner:
             output = job_table_payload + stderr
             refusals = (
                 (managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER,
-                 managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE),
+                 managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE,
+                 exceptions.NotSupportedError),
                 (managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MARKER,
-                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE),
+                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE,
+                 exceptions.NotSupportedError),
+                (managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MARKER,
+                 managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE,
+                 exceptions.QueueCursorNotSupportedError),
             )
-            for marker, default_message in refusals:
+            for marker, default_message, error_class in refusals:
                 if marker not in output:
                     continue
-                # The controller refused the infra filter or the include_tree
-                # request because it predates it. Show the controller's own
-                # message instead of a traceback.
+                # The controller refused the infra filter, the include_tree
+                # request or the cursor because it predates it. Show the
+                # controller's own message instead of a traceback.
                 detail = output.partition(f'{marker}: ')[2].splitlines()
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
+                    raise error_class(
                         detail[0].strip() if detail else default_message)
             logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
@@ -1729,6 +1737,7 @@ def queue_v2_api(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     include_tree: bool = False,
+    after_job_id: Optional[int] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int,
            List[str]]:
     """Gets statuses of managed jobs and parse the
@@ -1746,6 +1755,7 @@ def queue_v2_api(
         infra_match=infra_match,
         page=page,
         limit=limit,
+        after_job_id=after_job_id,
         statuses=statuses,
         fields=fields,
         sort_by=sort_by,
@@ -1793,6 +1803,7 @@ def queue_v2(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     include_tree: bool = False,
+    after_job_id: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int, List[str]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -1837,6 +1848,7 @@ def queue_v2(
         # remote traceback. The parsed value is discarded: the controller
         # filters on the spec itself.
         infra_utils.InfraInfo.from_str(infra_match)
+    managed_job_utils.check_queue_cursor(after_job_id, page, limit, sort_by)
     if limit is not None:
         if limit < 1:
             raise ValueError(f'Limit must be at least 1, got {limit}')
@@ -1940,6 +1952,7 @@ def queue_v2(
                 infra_match=infra_match,
                 page=page,
                 limit=limit,
+                after_job_id=after_job_id,
                 # Remove None from user_hashes, as the gRPC server uses the
                 # show_jobs_without_user_hash flag instead.
                 user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
@@ -1972,6 +1985,12 @@ def queue_v2(
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+            if after_job_id is not None and not response.after_job_id_applied:
+                # Same for the cursor: an old controller returns the first
+                # page again.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.QueueCursorNotSupportedError(
+                        managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return (jobs, response.total, dict(response.status_counts),
                     response.total_no_filter, list(response.infra_options))
@@ -1989,13 +2008,20 @@ def queue_v2(
     if (fields is not None and 'depends_on' in fields and
             not managed_job_utils.is_consolidation_mode()):
         fields = [field for field in fields if field != 'depends_on']
-    tree_kwargs: Dict[str, Any] = {}
+    protocol_kwargs: Dict[str, Any] = {}
     if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
-        tree_kwargs['include_tree'] = include_tree
+        protocol_kwargs['include_tree'] = include_tree
     elif include_tree:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+    # Same for the cursor.
+    if _runner_accepts(runner.fetch_managed_job_table, 'after_job_id'):
+        protocol_kwargs['after_job_id'] = after_job_id
+    elif after_job_id is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.QueueCursorNotSupportedError(
+                managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
     fetched = runner.fetch_managed_job_table(
         handle=handle,
         backend=backend,
@@ -2015,7 +2041,7 @@ def queue_v2(
         sort_order=sort_order,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
-        **tree_kwargs,
+        **protocol_kwargs,
     )
     # A runner registered out of tree may still be on the five-value signature
     # that predates the infra options. That costs the dashboard its option list

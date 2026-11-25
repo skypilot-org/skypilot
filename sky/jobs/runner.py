@@ -48,6 +48,8 @@ class ManagedJobRunner(Protocol):
         infra_match: Optional[str],
         page: Optional[int],
         limit: Optional[int],
+        # Default so a caller on the previous protocol still works.
+        after_job_id: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]],
         statuses: Optional[List[str]],
         fields: Optional[List[str]],
