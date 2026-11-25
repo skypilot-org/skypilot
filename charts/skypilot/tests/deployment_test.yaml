@@ -1122,6 +1122,9 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "/root/.sky/api_server/server.log \\{\\s+size 10M\\s+rotate 1\\s+missingok\\s+notifempty\\s+copytruncate\\s+\\}"
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
           pattern: "/root/.sky/serve/\\*/controller.log \\{\\s+size 10M\\s+rotate 1\\s+missingok\\s+notifempty\\s+copytruncate\\s+\\}"
 
   - it: should include logrotate sidecar when serveServerLog is false and retention is enabled
