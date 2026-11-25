@@ -5,7 +5,7 @@ schedules its pods as a gang.
 """
 import datetime
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from sky import exceptions
 from sky.adaptors import kubernetes
@@ -232,43 +232,69 @@ def _get_pod_group(context: Optional[str], namespace: str,
         raise
 
 
+class Eviction(NamedTuple):
+    """An Evict event KAI recorded for a pod."""
+    # preempt, reclaim, consolidation or stalegangeviction; None if unset.
+    action: Optional[str]
+    # The event's first line, which names the pod. A reclaim adds lines
+    # describing the queues.
+    message: str
+
+
+def find_eviction(context: Optional[str], namespace: str, pod_names: List[str],
+                  since: Optional[datetime.datetime]) -> Optional[Eviction]:
+    """KAI's eviction of the first of ``pod_names`` it evicted; None if it
+    evicted none of them or the API cannot say.
+
+    KAI deletes the pods it evicts and records why only as an Evict event on
+    the PodGroup, which outlives the pod. ``since`` is where the pods' own
+    history starts; an earlier eviction was of another pod of the same name.
+    """
+    try:
+        events = kubernetes_utils.events_since(
+            kubernetes.core_api(context).list_namespaced_event(
+                namespace,
+                field_selector='involvedObject.kind=PodGroup,reason=Evict',
+                _request_timeout=kubernetes.API_TIMEOUT).items, since)
+        # PodGroup name -> its current UID, None if it is gone.
+        pod_group_uids: Dict[str, Optional[str]] = {}
+        for pod_name in pod_names:
+            # The pod name ends where the name characters end, so worker1
+            # does not match worker10.
+            pod_ref = re.compile(
+                rf'(?<![\w.-]){re.escape(f"{namespace}/{pod_name}")}'
+                r'(?![\w-]|\.[\w-])')
+            for event in events:
+                summary = (event.message or '').split('\n', 1)[0].strip()
+                if not pod_ref.search(summary):
+                    continue
+                # A PodGroup of the same name from an earlier launch has its
+                # own UID, and its evictions are not this pod's.
+                name = event.involved_object.name
+                if name not in pod_group_uids:
+                    pod_group = _get_pod_group(context, namespace, name)
+                    pod_group_uids[name] = (None if pod_group is None else
+                                            pod_group['metadata']['uid'])
+                if pod_group_uids[name] != event.involved_object.uid:
+                    continue
+                return Eviction((event.metadata.annotations or
+                                 {}).get(_EVICTOR_ACTION_ANNOTATION), summary)
+    except (kubernetes.api_exception(), kubernetes.urllib3_http_error()):
+        return None
+    return None
+
+
 def eviction_reason(context: Optional[str], namespace: str, pod_name: str,
                     since: Optional[datetime.datetime]) -> Optional[str]:
     """Why KAI evicted the pod; None if it did not or the API cannot say.
 
-    KAI deletes the pods it evicts and records why only as an Evict event on
-    the PodGroup, which outlives the pod. ``since`` is when the pod was
-    created, which an eviction of the same pod name cannot precede.
+    ``since`` is when the pod was created, which an eviction of the same pod
+    name cannot precede.
     """
-    # The pod name ends where the name characters end, so worker1 does not
-    # match worker10.
-    pod_ref = re.compile(rf'(?<![\w.-]){re.escape(f"{namespace}/{pod_name}")}'
-                         r'(?![\w-]|\.[\w-])')
-    try:
-        events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
-            field_selector='involvedObject.kind=PodGroup,reason=Evict',
-            _request_timeout=kubernetes.API_TIMEOUT).items
-        for event in kubernetes_utils.events_since(events, since):
-            # The first line names the pod; a reclaim adds lines describing
-            # the queues.
-            summary = (event.message or '').split('\n', 1)[0].strip()
-            if not pod_ref.search(summary):
-                continue
-            # A PodGroup of the same name from an earlier launch has its own
-            # UID, and its evictions are not this pod's.
-            pod_group = _get_pod_group(context, namespace,
-                                       event.involved_object.name)
-            if (pod_group is None or
-                    pod_group['metadata']['uid'] != event.involved_object.uid):
-                continue
-            # preempt, reclaim, consolidation or stalegangeviction. Lowercase
-            # so it does not read as a kubelet 'Evicted' and earn its hint.
-            action = (event.metadata.annotations or
-                      {}).get(_EVICTOR_ACTION_ANNOTATION)
-            label = (f'KAI evicted the pod ({action})'
-                     if action else 'KAI evicted the pod')
-            return f'{label}: {summary.rstrip(".")}'
-    except (kubernetes.api_exception(), kubernetes.urllib3_http_error()):
+    eviction = find_eviction(context, namespace, [pod_name], since)
+    if eviction is None:
         return None
-    return None
+    # Lowercase so it does not read as a kubelet 'Evicted' and earn its hint.
+    label = (f'KAI evicted the pod ({eviction.action})'
+             if eviction.action else 'KAI evicted the pod')
+    return f'{label}: {eviction.message.rstrip(".")}'
