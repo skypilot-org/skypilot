@@ -84,6 +84,9 @@ class _Servers:
         self.redirects: Dict[Tuple[str, str], str] = {}
         # (server name, request path) -> Set-Cookie header of the response.
         self.set_cookies: Dict[Tuple[str, str], str] = {}
+        # (server name, request path) -> statuses of the next responses, one
+        # per request, before the path answers normally.
+        self.statuses: Dict[Tuple[str, str], List[int]] = {}
         self._runners: List[web.AppRunner] = []
 
     async def start(self,
@@ -102,6 +105,11 @@ class _Servers:
             set_cookie = self.set_cookies.get((name, request.path))
             if set_cookie is not None:
                 headers['Set-Cookie'] = set_cookie
+            statuses = self.statuses.get((name, request.path))
+            if statuses:
+                return web.json_response({},
+                                         status=statuses.pop(0),
+                                         headers=headers)
             target = self.redirects.get((name, request.path))
             if target is not None:
                 headers['Location'] = target
@@ -720,6 +728,38 @@ async def test_cookie_header_of_the_caller_is_kept_on_the_first_request(
 
 
 @pytest.mark.asyncio
+async def test_cookie_header_of_the_caller_is_kept_when_the_request_is_retried(
+        cookie_file, monkeypatch):
+    """A redirect that ends in a 503 is retried from the first request."""
+    monkeypatch.setattr('sky.utils.common_utils.Backoff.current_backoff',
+                        lambda self: 0)
+    cookie_file(_scoped_cookies())
+    async with _servers() as servers:
+        port = await servers.start('api')
+        servers.redirects['api', '/api/get'] = '/landing'
+        servers.statuses['api', '/landing'] = [503]
+
+        connector = aiohttp.TCPConnector(resolver=_LoopbackResolver())
+        async with aiohttp.ClientSession(connector=connector) as session:
+            response = await common.make_authenticated_request_async(
+                session,
+                'GET',
+                '/api/get',
+                server_url=f'http://api.test:{port}',
+                retry=True,
+                headers={'Cookie': 'mine=1'})
+            await response.read()
+
+    first_attempt = [
+        _Hop('api', '/api/get', 'mine=1', None),
+        _Hop('api', '/landing',
+             'landing-cookie=for-landing; host-cookie=for-host', None),
+    ]
+    assert response.status == 200
+    assert servers.hops == first_attempt + first_attempt
+
+
+@pytest.mark.asyncio
 async def test_cookie_header_of_the_caller_is_not_sent_to_another_host(
         cookie_file):
     cookie_file(_scoped_cookies())
@@ -907,6 +947,62 @@ async def test_middleware_replaces_a_cookie_header_carried_to_a_redirect_hop():
     assert await _headers_after_middleware(
         middleware, 'http://unrelated.test/landing',
         {'Cookie': 'api-cookie=for-api; host-cookie=for-host'}) == {}
+
+
+@pytest.mark.asyncio
+async def test_middleware_starts_over_when_the_request_is_sent_again():
+    first_url = 'http://api.test/api/get'
+    middleware = common._credentials_per_hop_middleware(
+        first_url, _jar(_scoped_cookies()), keep_first_cookie_header=True)
+    redirect = _FakeResponse(307, {
+        'Location': '/landing',
+        'Set-Cookie': 'route=one; Path=/'
+    })
+
+    # First attempt: a redirect whose target is not available.
+    assert await _headers_after_middleware(middleware, first_url,
+                                           {'Cookie': 'mine=1'}, redirect) == {
+                                               'Cookie': 'mine=1'
+                                           }
+    landing = await _headers_after_middleware(middleware,
+                                              'http://api.test/landing',
+                                              {'Cookie': 'mine=1'},
+                                              _FakeResponse(503))
+    assert set(landing['Cookie'].split('; ')) == {
+        'landing-cookie=for-landing', 'host-cookie=for-host', 'route=one'
+    }
+    # The caller sends the request again through the same middleware: it is
+    # a first request again, from the jar of the caller.
+    assert await _headers_after_middleware(
+        middleware, first_url, {'Cookie': 'mine=1'},
+        _FakeResponse(307, {'Location': '/landing'})) == {
+            'Cookie': 'mine=1'
+        }
+    landing = await _headers_after_middleware(middleware,
+                                              'http://api.test/landing',
+                                              {'Cookie': 'mine=1'})
+    assert set(landing['Cookie'].split('; ')) == {
+        'landing-cookie=for-landing', 'host-cookie=for-host'
+    }
+
+
+@pytest.mark.asyncio
+async def test_middleware_returns_a_redirect_it_cannot_resolve():
+    first_url = 'http://api.test/api/get'
+    middleware = common._credentials_per_hop_middleware(first_url,
+                                                        _jar(_scoped_cookies()))
+    # Not a URL that urllib can join. The caller may have asked for the
+    # redirect response itself, so it must come back as it is.
+    assert await _headers_after_middleware(
+        middleware, first_url, None,
+        _FakeResponse(307, {'Location': 'http://[::1'})) == {
+            'Cookie': 'api-cookie=for-api; host-cookie=for-host'
+        }
+    # The next request is handled on its own URL.
+    assert await _headers_after_middleware(
+        middleware, 'http://other.test/landing') == {
+            'Cookie': 'other-cookie=for-other'
+        }
 
 
 @pytest.mark.asyncio
