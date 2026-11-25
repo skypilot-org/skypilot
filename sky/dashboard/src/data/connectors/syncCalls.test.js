@@ -109,10 +109,7 @@ describe('fetchResult', () => {
 
 describe('fetchListInPages', () => {
   const names = ['a', 'b', 'c', 'd', 'e'];
-  const byName = {
-    cursorOf: (row) => row.name,
-    follows: (row, after) => row.name > after,
-  };
+  const byName = { cursorOf: (row) => row.name };
 
   function pages({ ignoreCursor = false, queue = false } = {}) {
     return jest.fn(async (after, size) => {
@@ -143,7 +140,27 @@ describe('fetchListInPages', () => {
     ]);
   });
 
-  test('gives up when a page does not follow its cursor', async () => {
+  test('pages in the order of the server collation', async () => {
+    // A database collation that ignores case orders C after b, while byte
+    // order puts it before.
+    const { fetchListInPages } = loadWithHealth({});
+    const sorted = ['a', 'b', 'C', 'd'];
+    const sendPage = jest.fn(async (after, size) => {
+      const start = after === null ? 0 : sorted.indexOf(after) + 1;
+      return answered(
+        sorted.slice(start, start + size).map((name) => ({ name }))
+      );
+    });
+    const rows = await fetchListInPages({
+      path: '/volumes',
+      sendPage,
+      pageSize: 2,
+      ...byName,
+    });
+    expect(rows.map((r) => r.name)).toEqual(sorted);
+  });
+
+  test('gives up when a page repeats a row', async () => {
     const { fetchListInPages } = loadWithHealth({});
     await expect(
       fetchListInPages({

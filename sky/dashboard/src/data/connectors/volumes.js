@@ -30,7 +30,6 @@ async function fetchVolumes() {
         );
       },
       cursorOf: (row) => row.name,
-      follows: (row, afterName) => row.name > afterName,
     });
     if (volumes !== null) return volumes;
   }

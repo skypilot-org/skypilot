@@ -34,7 +34,6 @@ async function fetchRecipes(body) {
           { limit: size }
         ),
       cursorOf: (row) => row.name,
-      follows: (row, afterName) => row.name > afterName,
     });
     if (recipes !== null) {
       // Pages come by name; one call lists pinned recipes first, then by name.

@@ -134,10 +134,6 @@ async function fetchClusterStatus(body) {
           { limit: size }
         ),
       cursorOf: (row) => ({ launchedAt: launchedAt(row), name: row.name }),
-      follows: (row, cursor) =>
-        launchedAt(row) !== cursor.launchedAt
-          ? launchedAt(row) < cursor.launchedAt
-          : row.name > cursor.name,
     });
     if (clusters !== null) return clusters;
   }

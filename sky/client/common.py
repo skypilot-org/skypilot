@@ -14,7 +14,7 @@ import tempfile
 import time
 import typing
 from typing import (Any, Callable, Dict, Generator, Iterable, List, Optional,
-                    Tuple, TypeVar)
+                    Set, Tuple, TypeVar)
 import uuid
 import zipfile
 
@@ -588,9 +588,9 @@ def fetch_in_pages(
     read_page(value, cursor) returns the rows of the page sent with `cursor`,
     how many items they count as against the page size and `limit`, and the
     cursor of the next page. It returns None when it cannot read the value,
-    or when a row does not come after `cursor`: something on the way dropped
-    the cursor and sent an earlier page again. merge(last_value, rows) builds
-    the result from the last page's value and the rows of every page.
+    or when the page is not the one after `cursor`: something on the way
+    dropped the cursor and sent an earlier page again. merge(last_value, rows)
+    builds the result from the last page's value and the rows of every page.
 
     The list ends at the first empty page or when `limit` items are fetched.
 
@@ -632,22 +632,28 @@ def fetch_in_pages(
 
 def fetch_list_in_pages(
     send: Callable[[Any, int], server_common.RequestId], page_size: int,
-    cursor_of: Callable[[Dict[str, Any]],
-                        Any], follows: Callable[[Dict[str, Any], Any], bool]
-) -> Optional[server_common.RequestId]:
+    cursor_of: Callable[[Dict[str, Any]], Any],
+    key_of: Callable[[Dict[str, Any]],
+                     Any]) -> Optional[server_common.RequestId]:
     """fetch_in_pages for a request that returns a list of rows.
 
-    cursor_of(row) is the cursor after that row; follows(row, cursor) is
-    whether the row comes after that cursor.
+    cursor_of(row) is the cursor after that row; key_of(row) identifies the
+    row. A page that repeats a row was not sent after its cursor.
     """
+    # Rows are checked for repeats, not for their order after the cursor: the
+    # server orders names in its database collation, which the client cannot
+    # reproduce.
+    seen: Set[Any] = set()
 
     def read_page(value: Any,
                   cursor: Any) -> Optional[Tuple[List[Any], int, Any]]:
+        del cursor  # Repeats are checked against every page.
         if not isinstance(value, list):
             return None
-        if cursor is not None and not all(
-                follows(row, cursor) for row in value):
+        keys = [key_of(row) for row in value]
+        if len(set(keys)) != len(keys) or not seen.isdisjoint(keys):
             return None
+        seen.update(keys)
         return value, len(value), cursor_of(value[-1]) if value else None
 
     return fetch_in_pages(send, page_size, read_page, lambda _, rows: rows)

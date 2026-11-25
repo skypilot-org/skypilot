@@ -218,6 +218,28 @@ class TestStorageLs:
         }, None]
         assert request_id == 'req-3'
 
+    def test_pages_in_the_server_collation(self):
+        # A database collation that ignores case orders n-C after n-b, while
+        # byte order puts it before.
+        rows = [{'name': name} for name in ('n-C', 'n-a', 'n-b')]
+
+        def after(row, params):
+            return params.get('after_name') is None or (
+                row['name'].lower() > params['after_name'].lower())
+
+        server = _Server(rows, lambda row: row['name'].lower(), after)
+        request_id = _call(sdk.storage_ls, server)
+        assert [c['params'] for c in server.calls] == [{
+            'limit': 2
+        }, {
+            'limit': 2,
+            'after_name': 'n-b'
+        }, {
+            'limit': 2,
+            'after_name': 'n-C'
+        }]
+        assert _rows(request_id) == ['n-a', 'n-b', 'n-C']
+
     def test_queued_page_falls_back_to_one_call(self, monkeypatch):
         monkeypatch.setattr(rest, '_sync_call_max_limit', 3)
         server = _by_name_server()

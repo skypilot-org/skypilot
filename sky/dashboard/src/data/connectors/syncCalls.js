@@ -130,22 +130,20 @@ export async function syncPageSize(minApiVersion) {
 // Fetches a list as sync calls of up to pageSize rows each.
 //
 // sendPage(cursor, size) sends one page and returns its response; the first
-// cursor is null. cursorOf(row) is the cursor after that row, and
-// follows(row, cursor) is whether the row comes after that cursor. The list
-// ends at the first empty page: the server can drop rows after applying its
-// limit, so a short page does not end it.
+// cursor is null. cursorOf(row) is the cursor after that row. Rows are
+// identified by `name`. The list ends at the first empty page: the server can
+// drop rows after applying its limit, so a short page does not end it.
 //
 // Returns the rows, or null when a page is not answered in its response or
-// holds a row that does not come after its cursor; the caller then fetches the
-// list in one call. Throws the error of a page that failed.
-export async function fetchListInPages({
-  path,
-  sendPage,
-  pageSize,
-  cursorOf,
-  follows,
-}) {
+// repeats a row, which means something on the way dropped the cursor; the
+// caller then fetches the list in one call. Throws the error of a page that
+// failed.
+export async function fetchListInPages({ path, sendPage, pageSize, cursorOf }) {
   const rows = [];
+  // Rows are checked for repeats, not for their order after the cursor: the
+  // server orders names in its database collation, which the client cannot
+  // reproduce.
+  const seen = new Set();
   let cursor = null;
   for (;;) {
     const response = await sendPage(cursor, pageSize);
@@ -159,8 +157,9 @@ export async function fetchListInPages({
     const data = await response.json();
     const page = data.return_value ? JSON.parse(data.return_value) : [];
     if (!Array.isArray(page)) return null;
-    if (cursor !== null && !page.every((row) => follows(row, cursor))) {
-      return null;
+    for (const row of page) {
+      if (seen.has(row.name)) return null;
+      seen.add(row.name);
     }
     if (page.length === 0) return rows;
     rows.push(...page);
