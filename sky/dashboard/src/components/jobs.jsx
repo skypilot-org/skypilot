@@ -3007,25 +3007,29 @@ export function ManagedJobsTable({
                               {infraFilterUnsupported}
                             </p>
                           </div>
-                        ) : filters?.length > 0 ? (
-                          // A filter emptied the table, not the scope: the
-                          // scope hint below counts everyone's jobs with no
-                          // filter, and its button keeps the filters.
+                        ) : filters?.length > 0 ||
+                          selectedStatuses.length > 0 ? (
+                          // A filter or status pill emptied the table, not
+                          // the scope: the scope hint below counts everyone's
+                          // jobs with no filter, and its button keeps the
+                          // filters. Pills live in `view.status`, so clear
+                          // them here too or the table can stay empty.
                           <EmptyState
                             icon={<FilterX size={20} strokeWidth={1.75} />}
                             title="No jobs match your filters"
                             description="Try adjusting your filters"
                             action={
-                              onClearFilters ? (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={onClearFilters}
-                                  className="text-brand hover:text-brand-bright"
-                                >
-                                  Clear filters
-                                </Button>
-                              ) : null
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  onClearFilters?.();
+                                  setSelectedStatuses([]);
+                                }}
+                                className="text-brand hover:text-brand-bright"
+                              >
+                                Clear filters
+                              </Button>
                             }
                             minHeight={0}
                           />

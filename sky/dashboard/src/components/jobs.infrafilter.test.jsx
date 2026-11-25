@@ -289,6 +289,57 @@ describe('managed jobs Infra filter', () => {
     expect(screen.queryByText('No jobs match your filters')).toBeNull();
   });
 
+  it('treats a status pill as a filter and clears it with the chips', async () => {
+    const empty = {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      statusCounts: {},
+      controllerStopped: false,
+      hasNext: false,
+    };
+    // Status pills live in `view.status`, not in the filter chips.
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve(
+        params.statuses || params.nameMatch
+          ? empty
+          : { ...empty, total: 5, totalNoFilter: 5, jobs: PAGE }
+      )
+    );
+    await openAt('?owner=all&status=SUCCEEDED&name=zz-no-match');
+    expect(await screen.findByText('No jobs match your filters')).toBeTruthy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+
+    const emptyState = screen
+      .getByText('No jobs match your filters')
+      .closest('td');
+    fireEvent.click(
+      within(emptyState).getByRole('button', { name: 'Clear filters' })
+    );
+    await waitFor(() => {
+      const params = new URLSearchParams(window.location.search);
+      expect(params.get('name')).toBe(null);
+      expect(params.get('status')).toBe(null);
+    });
+    expect(await screen.findByText('ocmask-lm80')).toBeTruthy();
+  });
+
+  it('says no jobs match when only a status pill empties the table', async () => {
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve({
+        jobs: params.statuses ? [] : PAGE,
+        total: params.statuses ? 0 : 2,
+        totalNoFilter: 2,
+        statusCounts: {},
+        controllerStopped: false,
+        hasNext: false,
+      })
+    );
+    await openAt('?owner=all&status=SUCCEEDED');
+    expect(await screen.findByText('No jobs match your filters')).toBeTruthy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+  });
+
   it('shows loading immediately on a direct All Jobs page refresh', async () => {
     let resolveIdentity;
     let resolveJobs;
