@@ -14,6 +14,7 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import volume as k8s_volume
 from sky.utils import volume as volume_lib
+from sky.volumes.server import core as volumes_core
 
 
 class MockPVC:
@@ -54,7 +55,8 @@ class MockPod:
                  namespace: str,
                  pvc_names: List[str] = None,
                  cluster_name: str = None,
-                 terminating: bool = False):
+                 terminating: bool = False,
+                 skypilot_volumes: List[str] = None):
         self.metadata = Mock()
         self.metadata.name = name
         self.metadata.namespace = namespace
@@ -63,6 +65,13 @@ class MockPod:
         if cluster_name:
             self.metadata.labels[
                 constants.TAG_SKYPILOT_CLUSTER_NAME] = cluster_name
+        # The annotation SkyPilot writes when it mounts SkyPilot volumes on a
+        # pod; None, as the Kubernetes client reports it, when there is none.
+        self.metadata.annotations = None
+        if skypilot_volumes:
+            self.metadata.annotations = {
+                k8s_constants.VOLUMES_ANNOTATION: ','.join(skypilot_volumes)
+            }
 
         self.status = Mock()
 
@@ -588,8 +597,10 @@ class TestGetVolumeUsedBy:
 
         assert usedby_pods == ['pod-1']
         assert usedby_clusters == ['cluster-1']
-        mock_get_usedby.assert_called_once_with('my-context', 'my-namespace',
-                                                'test-pvc')
+        mock_get_usedby.assert_called_once_with('my-context',
+                                                'my-namespace',
+                                                'test-pvc',
+                                                mounted_as=None)
 
 
 class TestGetClusterNameMap:
@@ -1108,6 +1119,179 @@ class TestMapAllVolumesUsedBy:
 
         assert pods == []
         assert clusters == []
+
+
+class TestImportedVolumeUsedBy:
+    """A use_existing volume is in use only where it is mounted as itself.
+
+    Its PVC may be shared: mounted through pod_config, on pods SkyPilot
+    launched and on pods it did not. Deleting the volume leaves the PVC in
+    place, so those mounts do not count. A volume SkyPilot created counts every
+    mount, because deleting it deletes the PVC.
+    """
+
+    _CLUSTERS = {
+        'pod-config-a-2ea4': 'pod-config-a',
+        'pod-config-b-2ea4': 'pod-config-b',
+        'mounts-volume-2ea4': 'mounts-volume',
+    }
+
+    @staticmethod
+    def _config(use_existing: bool) -> models.VolumeConfig:
+        config: Dict[str, Any] = {'namespace': 'my-namespace'}
+        if use_existing:
+            config['use_existing'] = True
+        return models.VolumeConfig(
+            _version=1,
+            name='shared-fs',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='shared-fs',
+            size=None,
+            config=config,
+        )
+
+    @staticmethod
+    def _pod_config_pods() -> List[MockPod]:
+        """SkyPilot-launched pods that mount the PVC only through pod_config.
+
+        One mounts no SkyPilot volume at all, the other mounts a different
+        one.
+        """
+        return [
+            MockPod('pod-config-a-head', 'my-namespace', ['shared-fs'],
+                    'pod-config-a-2ea4'),
+            MockPod('pod-config-b-head',
+                    'my-namespace', ['shared-fs', 'other-pvc'],
+                    'pod-config-b-2ea4',
+                    skypilot_volumes=['other-volume']),
+        ]
+
+    @staticmethod
+    def _volume_pod() -> MockPod:
+        """A pod SkyPilot mounted the volume on through `volumes`."""
+        return MockPod('mounts-volume-head',
+                       'my-namespace', ['shared-fs'],
+                       'mounts-volume-2ea4',
+                       skypilot_volumes=['shared-fs'])
+
+    @pytest.fixture
+    def mock_k8s(self, monkeypatch):
+        mock_k8s = MagicMock()
+        monkeypatch.setattr(k8s_volume, 'kubernetes', mock_k8s)
+        monkeypatch.setattr(k8s_volume,
+                            '_get_cluster_name_on_cloud_to_cluster_name_map',
+                            lambda: dict(self._CLUSTERS))
+        return mock_k8s
+
+    @staticmethod
+    def _list_pods(mock_k8s, pods: List[MockPod]) -> None:
+        mock_k8s.core_api.return_value.list_namespaced_pod.return_value = Mock(
+            items=pods)
+
+    def _usedby(self, use_existing: bool):
+        """The volume's usedby info as delete and as list/refresh see it."""
+        config = self._config(use_existing)
+        on_delete = k8s_volume.get_volume_usedby(config)
+        used_by_pods, used_by_clusters, failed = (
+            k8s_volume.get_all_volumes_usedby([config]))
+        assert failed == set()
+        on_list = k8s_volume.map_all_volumes_usedby(used_by_pods,
+                                                    used_by_clusters, config)
+        return on_delete, on_list
+
+    def test_pod_config_mounts_do_not_count(self, mock_k8s):
+        self._list_pods(mock_k8s, self._pod_config_pods())
+
+        on_delete, on_list = self._usedby(use_existing=True)
+
+        assert on_delete == ([], [])
+        assert on_list == ([], [])
+
+    def test_a_pod_skypilot_did_not_create_does_not_count(self, mock_k8s):
+        # Only the delete check sees it: the list/refresh path lists only the
+        # pods SkyPilot created.
+        self._list_pods(
+            mock_k8s, [MockPod('external-pod', 'my-namespace', ['shared-fs'])])
+
+        usedby = k8s_volume.get_volume_usedby(self._config(use_existing=True))
+
+        assert usedby == ([], [])
+
+    def test_a_mount_as_the_volume_counts(self, mock_k8s):
+        self._list_pods(mock_k8s, [self._volume_pod()])
+
+        on_delete, on_list = self._usedby(use_existing=True)
+
+        assert on_delete == (['mounts-volume-head'], ['mounts-volume'])
+        assert on_list == (['mounts-volume-head'], ['mounts-volume'])
+
+    def test_only_the_mount_as_the_volume_counts(self, mock_k8s):
+        self._list_pods(mock_k8s,
+                        self._pod_config_pods() + [self._volume_pod()])
+
+        on_delete, on_list = self._usedby(use_existing=True)
+
+        assert on_delete == (['mounts-volume-head'], ['mounts-volume'])
+        assert on_list == (['mounts-volume-head'], ['mounts-volume'])
+
+    def test_a_created_volume_counts_every_mount(self, mock_k8s):
+        self._list_pods(mock_k8s,
+                        self._pod_config_pods() + [self._volume_pod()])
+
+        on_delete, on_list = self._usedby(use_existing=False)
+
+        expected = (
+            ['pod-config-a-head', 'pod-config-b-head', 'mounts-volume-head'],
+            ['pod-config-a', 'pod-config-b', 'mounts-volume'],
+        )
+        assert on_delete == expected
+        assert on_list == expected
+
+    @pytest.fixture
+    def delete_volume_record(self, monkeypatch):
+        """Serves the imported volume's record; returns what deletes it."""
+        record = {
+            'name': 'shared-fs',
+            'status': None,
+            'handle': self._config(use_existing=True),
+        }
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            {'shared-fs': record}.get)
+        delete_volume_record = MagicMock()
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            delete_volume_record)
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            MagicMock())
+        return delete_volume_record
+
+    def test_delete_succeeds_with_only_pod_config_mounts(
+            self, mock_k8s, delete_volume_record):
+        self._list_pods(
+            mock_k8s,
+            self._pod_config_pods() +
+            [MockPod('external-pod', 'my-namespace', ['shared-fs'])])
+
+        volumes_core.volume_delete(['shared-fs'])
+
+        delete_volume_record.assert_called_once_with('shared-fs')
+        # The PVC stays: it belongs to whoever created it.
+        (mock_k8s.core_api.return_value.
+         delete_namespaced_persistent_volume_claim.assert_not_called())
+
+    def test_delete_is_refused_while_mounted_as_the_volume(
+            self, mock_k8s, delete_volume_record):
+        self._list_pods(mock_k8s,
+                        self._pod_config_pods() + [self._volume_pod()])
+
+        with pytest.raises(
+                ValueError,
+                match='^Volume shared-fs is used by cluster mounts-volume.$'):
+            volumes_core.volume_delete(['shared-fs'])
+
+        delete_volume_record.assert_not_called()
 
 
 class TestPopulateConfigFromPVC:

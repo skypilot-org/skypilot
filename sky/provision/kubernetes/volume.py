@@ -503,25 +503,53 @@ def _wait_for_daemonset_ready(context: Optional[str],
                    f'Some nodes may not have been cleaned up.')
 
 
+def _imported_volume_name(config: models.VolumeConfig) -> Optional[str]:
+    """The volume's name if it was registered with use_existing, else None.
+
+    Deleting such a volume leaves its PVC in place (see `_delete_pvc_volume`),
+    so it is in use only where SkyPilot mounts it as this volume. The PVC
+    itself may be shared: mounted through pod_config, or by pods SkyPilot did
+    not create, none of which deleting the volume affects.
+    """
+    if config.config.get('use_existing'):
+        return config.name
+    return None
+
+
+def _mounted_skypilot_volumes(pod: Any) -> Set[str]:
+    """The SkyPilot volumes SkyPilot mounted on the pod when it created it."""
+    annotations = pod.metadata.annotations
+    if annotations is None:
+        # The pod has no annotations at all.
+        return set()
+    value = annotations.get(k8s_constants.VOLUMES_ANNOTATION)
+    if not value:
+        return set()
+    return set(value.split(','))
+
+
 def _get_volume_usedby(
     context: Optional[str],
     namespace: str,
     pvc_name: str,
+    mounted_as: Optional[str] = None,
 ) -> Tuple[List[str], List[str]]:
     """Gets the usedby resources of a volume.
 
     This function returns the pods and clusters that are using the volume.
-    The usedby_pods is accurate, which also includes the Pods that are not
-    managed by SkyPilot.
+    By default every pod that mounts the PVC counts, including the Pods that
+    are not managed by SkyPilot.
 
     Args:
         context: Kubernetes context
         namespace: Kubernetes namespace
         pvc_name: PVC name
+        mounted_as: If set, only the pods SkyPilot mounted the PVC on as the
+            SkyPilot volume of this name count (see `_imported_volume_name`).
 
     Returns:
-        usedby_pods: List of pods using the volume. These may include pods
-                     not created by SkyPilot.
+        usedby_pods: List of pods using the volume. Unless mounted_as is set,
+                     these may include pods not created by SkyPilot.
         usedby_clusters: List of clusters using the volume.
     """
     usedby_pods = []
@@ -545,6 +573,9 @@ def _get_volume_usedby(
         # reference it: the pvc-protection finalizer will keep the PVC
         # alive until all pods fully terminate.
         if pod.metadata.deletion_timestamp is not None:
+            continue
+        if (mounted_as is not None and
+                mounted_as not in _mounted_skypilot_volumes(pod)):
             continue
         for volume in pod.spec.volumes:
             if volume.persistent_volume_claim is None:
@@ -585,7 +616,10 @@ def get_volume_usedby(
         return [], []
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
-    return _get_volume_usedby(context, namespace, pvc_name)
+    return _get_volume_usedby(context,
+                              namespace,
+                              pvc_name,
+                              mounted_as=_imported_volume_name(config))
 
 
 def refresh_volume_config(
@@ -623,7 +657,9 @@ def get_all_volumes_usedby(
     Returns:
         usedby_pods: Dictionary of context to namespace to volume name to pods
                      using the volume. These may include pods not created by
-                     SkyPilot.
+                     SkyPilot. For a volume registered with use_existing,
+                     only pods that mount it as that volume count (see
+                     `_imported_volume_name`).
         usedby_clusters: Dictionary of context to namespace to volume name to
                          clusters using the volume.
         failed_volume_names: Set of volume names whose usedby info failed to
@@ -637,6 +673,9 @@ def get_all_volumes_usedby(
     context_to_namespaces: Dict[Optional[str], Set[str]] = {}
     pvc_names = set()
     original_volume_names: Dict[Optional[str], Dict[str, List[str]]] = {}
+    # (context, namespace, PVC name) -> name of the use_existing volume
+    # registered for that PVC.
+    imported_volume_names: Dict[Tuple[Optional[str], str, str], str] = {}
     for config in configs:
         # Skip hostPath volumes — they have no PVC to track
         if config.type == volume_lib.VolumeType.HOSTPATH.value:
@@ -647,6 +686,10 @@ def get_all_volumes_usedby(
                                          {}).setdefault(namespace,
                                                         []).append(config.name)
         pvc_names.add(config.name_on_cloud)
+        imported_name = _imported_volume_name(config)
+        if imported_name is not None:
+            imported_volume_names[(context, namespace,
+                                   config.name_on_cloud)] = imported_name
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
     used_by_pods: Dict[Optional[str], Dict[str, Dict[str, List[str]]]] = {}
@@ -682,6 +725,11 @@ def get_all_volumes_usedby(
                         continue
                     volume_name = volume.persistent_volume_claim.claim_name
                     if volume_name not in pvc_names:
+                        continue
+                    imported_name = imported_volume_names.get(
+                        (context, namespace, volume_name))
+                    if (imported_name is not None and imported_name
+                            not in _mounted_skypilot_volumes(pod)):
                         continue
                     if volume_name not in used_by_pods[context][namespace]:
                         used_by_pods[context][namespace][volume_name] = []

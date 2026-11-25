@@ -3026,6 +3026,81 @@ def test_volume_size_resync_on_kubernetes():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- An imported volume also mounted through pod_config ----------
+@pytest.mark.kubernetes
+# Creates the PVC with the agent's own kubectl, which a remote server's agent
+# does not have.
+@pytest.mark.no_remote_server
+def test_volume_delete_imported_with_pod_config_mount_on_kubernetes():
+    """A cluster mounting the PVC through pod_config does not block deletion.
+
+    Deleting a use_existing volume leaves its PVC in place, so only a mount of
+    it as this volume counts as using it, not a mount of the same PVC that
+    goes through pod_config.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # `--use-existing` finds the PVC by the volume's own name.
+    pvc = name
+    # The pod volume entry is named after the PVC, as a pod_config mount
+    # usually is. That is also the entry SkyPilot writes when it mounts the
+    # volume itself, so the two mounts look the same in the pod spec.
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        config:
+          kubernetes:
+            pod_config:
+              spec:
+                volumes:
+                - name: {pvc}
+                  persistentVolumeClaim:
+                    claimName: {pvc}
+                containers:
+                - volumeMounts:
+                  - name: {pvc}
+                    mountPath: /mnt/imported
+        run: grep " /mnt/imported " /proc/mounts
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'volume_delete_imported_with_pod_config_mount_on_kubernetes',
+            [
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: {pvc}\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteOnce\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: 1Gi\n'
+                f'EOF',
+                f'sky volumes apply -y -n {name} --type k8s-pvc '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} --use-existing',
+                f'sky launch -y -c {name} {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{task_f.name}',
+                # The job only succeeds if the PVC is mounted.
+                f'sky logs {name} 1 --status',
+                # The CLI exits 0 when it refuses a delete, so the refusal is
+                # read from its output, and the removal from `sky volumes ls`.
+                f's=$(sky volumes delete {name} -y 2>&1); echo "$s"; '
+                f'! echo "$s" | grep -q "is used by"',
+                smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(name),
+                f'kubectl get pvc {pvc}',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}', f'sky volumes delete {name} -y || true',
+                f'kubectl delete pvc {pvc} --ignore-not-found'),
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 
 _POD_COLUMNS = ('--no-headers -o custom-columns="NS:.metadata.namespace,'
