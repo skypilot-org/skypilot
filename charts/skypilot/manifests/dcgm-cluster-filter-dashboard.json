@@ -585,7 +585,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "InfiniBand / RoCE throughput of each node running this cluster's GPU pods, summed over the node's RDMA ports (node-exporter's node_infiniband_port_data_* counters). Each point is the average rate between the two latest samples (typically 60 s apart), so short bursts aren't visible.",
+      "description": "InfiniBand / RoCE throughput of each node running this cluster's GPU pods, summed over the node's RDMA ports. Each point is the average rate between the two latest samples (typically 60 s apart), so short bursts aren't visible.",
       "fieldConfig": {
         "defaults": {
           "color": {
