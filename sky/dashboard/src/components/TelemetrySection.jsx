@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useRouter } from 'next/router';
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -27,7 +28,8 @@ const TIME_RANGE_PRESETS = [
 // Telemetry panels — all live in the same skypilot-dcgm-gpu dashboard,
 // pre-scoped to a single SkyPilot cluster via var-cluster. The `family`
 // field lets consumers hide GPU panels when the underlying cluster/job
-// is CPU-only.
+// is CPU-only. A panel with `previewParam` shows only when the page URL
+// carries that query parameter.
 const TELEMETRY_PANELS = [
   { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util', family: 'gpu' },
   {
@@ -45,6 +47,15 @@ const TELEMETRY_PANELS = [
     family: 'host',
   },
   { id: '7', title: 'Memory Usage', keyPrefix: 'mem-usage', family: 'host' },
+  // Finds the cluster's nodes through DCGM, so it is a GPU panel. In
+  // preview: shown with ?node_rdma.
+  {
+    id: '8',
+    title: 'Node RDMA Network Throughput',
+    keyPrefix: 'node-rdma',
+    family: 'gpu',
+    previewParam: 'node_rdma',
+  },
 ];
 
 /**
@@ -94,9 +105,12 @@ export function TelemetrySection({
   hasGpu = true,
 }) {
   const { resolvedTheme } = useTheme();
-  const visiblePanels = hasGpu
-    ? TELEMETRY_PANELS
-    : TELEMETRY_PANELS.filter((p) => p.family !== 'gpu');
+  const router = useRouter();
+  const visiblePanels = TELEMETRY_PANELS.filter(
+    (p) =>
+      (hasGpu || p.family !== 'gpu') &&
+      (!p.previewParam || router.query[p.previewParam] !== undefined)
+  );
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [isExpanded, setIsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
