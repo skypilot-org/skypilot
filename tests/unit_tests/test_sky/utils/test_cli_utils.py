@@ -192,7 +192,7 @@ def test_get_command():
 
     # Test normal command
     cmd_str = status_utils._get_command(mock_record)
-    assert cmd_str == 'sky launch test.yaml --env...'
+    assert cmd_str == 'sky launch test.yaml --en...'
 
     # Test command without truncation
     cmd_str = status_utils._get_command(mock_record, truncate=False)
