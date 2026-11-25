@@ -32,10 +32,11 @@ router = fastapi.APIRouter()
 
 @router.get('')
 async def volume_list(
-        request: fastapi.Request,
-        refresh: bool = fastapi.Depends(
-            role_filter.force_viewer_volume_refresh),
-        names: Optional[List[str]] = fastapi.Query(None),
+    request: fastapi.Request,
+    refresh: bool = fastapi.Depends(role_filter.force_viewer_volume_refresh),
+    names: Optional[List[str]] = fastapi.Query(None),
+    limit: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> None:
     """Gets the volumes.
 
@@ -47,8 +48,13 @@ async def volume_list(
         names: If given, return only these volumes, and narrow a `refresh` to
             them. Optional so that a client older than this parameter, which
             never sends it, keeps getting every volume.
+        limit: If given, return at most this many volumes, by name.
+        after_name: If given, return only volumes named after this.
     """
-    request_body = payloads.VolumeListBody(refresh=refresh, volume_names=names)
+    request_body = payloads.VolumeListBody(refresh=refresh,
+                                           volume_names=names,
+                                           limit=limit,
+                                           after_name=after_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_LIST,

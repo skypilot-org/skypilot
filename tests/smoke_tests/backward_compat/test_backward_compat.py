@@ -555,7 +555,10 @@ class TestBackwardCompatibility:
             f'sky jobs launch -y -d --restart {managed_job_name}-old-1 '
             f'-n {restart_name}',
             wait_for_status(restart_name, [sky.ManagedJobStatus.SUCCEEDED]),
-            f'result="$(sky jobs logs --no-follow -n {restart_name})"; '
+            # By ID: `sky jobs logs -n` only finds running jobs.
+            f'id=$(sky jobs queue | awk \'$3 == "{restart_name}" '
+            f'{{print $1}}\'); echo "id=$id"; [ -n "$id" ] && '
+            f'result="$(sky jobs logs --no-follow $id)"; '
             f'echo "$result"; echo "$result" | grep hi',
         ]
 

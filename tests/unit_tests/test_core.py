@@ -83,6 +83,8 @@ def test_status_best_effort(mock_get_clusters) -> None:
         include_credentials=False,
         summary_response=False,
         include_handle=True,
+        limit=None,
+        after=None,
     )
     assert len(core.status()) == 1
     # Verify logging shows 0 cleaned requests
