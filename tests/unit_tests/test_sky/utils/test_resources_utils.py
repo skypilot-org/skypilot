@@ -59,6 +59,37 @@ class TestParseTimeMinutes(unittest.TestCase):
                     ValueError, msg=f'Should fail for input: {invalid_input}'):
                 resources_utils.parse_time_minutes(invalid_input)
 
+    def test_non_finite_rejected(self):
+        """Non-finite durations raise ValueError, not OverflowError.
+
+        float() accepts 'inf'/'infinity'/'nan', so without an explicit
+        guard math.ceil(inf) would leak an OverflowError past the parser's
+        'except ValueError' handler (crashing callers such as the
+        ``sky jobs queue --since`` CLI flag that catch only ValueError).
+        """
+        non_finite_inputs = [
+            'infm',
+            'infh',
+            'infinityh',
+            'infd',
+            '-infm',
+            'infw',
+            # Finite values whose product with the unit multiplier
+            # overflows to infinity must be rejected the same way.
+            '1e307d',
+            '1e308h',
+        ]
+        for invalid_input in non_finite_inputs:
+            with self.assertRaises(
+                    ValueError, msg=f'Should fail for input: {invalid_input}'):
+                resources_utils.parse_time_minutes(invalid_input)
+            with self.assertRaises(
+                    ValueError, msg=f'Should fail for input: {invalid_input}'):
+                resources_utils.parse_time_seconds(invalid_input)
+        # 'infs' only maps to a unit for the seconds parser.
+        with self.assertRaises(ValueError):
+            resources_utils.parse_time_seconds('infs')
+
     def test_case_insensitive(self):
         """Test that unit parsing is case-insensitive."""
         self.assertEqual(resources_utils.parse_time_minutes('30m'), 30)
@@ -335,6 +366,54 @@ class TestNormalizeLocalDisk:
     def test_empty_size(self):
         with pytest.raises(ValueError, match='Invalid local_disk'):
             resources_utils.normalize_local_disk('nvme:')
+
+    # Invalid inputs - non-finite sizes. float() parses 'nan'/'inf' and
+    # overflowing literals (e.g. '1e400' -> inf), and the 'size <= 0' guard
+    # does not catch them (nan comparisons are always False), so they would
+    # otherwise become a silently unsatisfiable disk requirement.
+    @pytest.mark.parametrize('disk', [
+        'nan',
+        'inf',
+        'Infinity',
+        '1e400',
+        'nvme:nan',
+        'ssd:inf',
+        'nvme:NaN',
+        'nvme:inf+',
+        'nvme:1e400',
+    ])
+    def test_non_finite_size(self, disk):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk(disk)
+
+    # A size may carry at most one trailing '+'. 'size++' previously passed
+    # validation (rstrip stripped every '+') yet then crashed
+    # parse_local_disk_str(), which drops only one '+'.
+    @pytest.mark.parametrize('disk', [
+        'nvme:1000++',
+        '1000++',
+        'ssd:500+++',
+        'nvme:1000.5++',
+    ])
+    def test_multiple_plus_rejected(self, disk):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk(disk)
+
+    # Whatever normalize_local_disk() accepts must round-trip through
+    # parse_local_disk_str() without raising.
+    @pytest.mark.parametrize('disk', [
+        'nvme:1000+',
+        'ssd:500',
+        'nvme',
+        'ssd',
+        '1000+',
+        '500',
+        '1000.5',
+        'nvme:1000.5+',
+    ])
+    def test_normalized_output_parses(self, disk):
+        resources_utils.parse_local_disk_str(
+            resources_utils.normalize_local_disk(disk))
 
     # Invalid inputs - bad format
     def test_too_many_colons(self):
