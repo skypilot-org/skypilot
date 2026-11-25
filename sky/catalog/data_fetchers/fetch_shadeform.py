@@ -87,21 +87,26 @@ def create_catalog(api_key: str, output_path: str) -> None:
             # Price is in cents per hour, convert to dollars
             price = float(instance['hourly_price']) / 100
 
-            # Create GPU info
+            # CPU SKUs (num_gpus == 0) must leave accelerator fields empty.
+            # Writing gpu_type "CPU" makes Resources infer {'CPU': 0}.
+            accelerator_name = None
+            accelerator_count = None
             gpuinfo = None
             if gpu_count > 0:
+                accelerator_name = gpu_type
+                accelerator_count = gpu_count
                 gpuinfo_dict = parse_gpu_info(gpu_type, int(gpu_count),
                                               int(config['vram_per_gpu_in_gb']))
                 gpuinfo = json.dumps(gpuinfo_dict).replace('"', '\'')
 
-            # Write entry for each available region
+            # Write entry for each available region, including CPU-only SKUs.
             for availability in instance.get('availability', []):
-                if availability['available'] and gpu_count > 0:
+                if availability['available']:
                     region = availability['region']
                     writer.writerow([
                         instance_type,
-                        gpu_type,
-                        gpu_count,
+                        accelerator_name,
+                        accelerator_count,
                         vcpus,
                         memory_gb,
                         price,

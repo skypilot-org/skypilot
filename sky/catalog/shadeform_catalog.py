@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import common as adaptors_common
 from sky.catalog import common
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -39,10 +40,15 @@ def _get_df():
             ])
         else:
             df = df[df['InstanceType'].notna()]
+            # Keep CPU rows (empty AcceleratorName). Still strip GPU names.
+            # astype(str) on the whole column stringifies NaN to 'nan'
+            # (Resources infers {'nan': 0}). .str.strip() on a float
+            # all-NA column raises. Keep NA cells as NA, strip the rest.
             if 'AcceleratorName' in df.columns:
-                df = df[df['AcceleratorName'].notna()]
-                df = df.assign(AcceleratorName=df['AcceleratorName'].astype(
-                    str).str.strip())
+                acc = df['AcceleratorName']
+                df = df.assign(
+                    AcceleratorName=acc.where(acc.isna(),
+                                              acc.astype(str).str.strip()))
             _df = df.reset_index(drop=True)
     return _df
 
@@ -61,6 +67,12 @@ def _call_or_default(func, default):
         raise
 
 
+def _ensure_no_zone(zone: Optional[str]) -> None:
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Shadeform does not support zones.')
+
+
 def instance_type_exists(instance_type: str) -> bool:
     """Check if an instance type exists."""
     return common.instance_type_exists_impl(_get_df(), instance_type)
@@ -70,6 +82,7 @@ def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validate region and zone for Shadeform."""
+    _ensure_no_zone(zone)
     return common.validate_region_zone_impl('shadeform', _get_df(), region,
                                             zone)
 
@@ -82,6 +95,7 @@ def get_hourly_cost(instance_type: str,
     # Shadeform doesn't support spot instances currently
     if use_spot:
         raise ValueError('Spot instances are not supported on Shadeform')
+    _ensure_no_zone(zone)
 
     return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
                                        region, zone)
@@ -106,6 +120,7 @@ def get_default_instance_type(
         max_hourly_cost: Optional[float] = None) -> Optional[str]:
     """Get default instance type based on requirements."""
     del disk_tier, local_disk  # Shadeform doesn't support custom disk tiers yet
+    _ensure_no_zone(zone)
     return _call_or_default(
         lambda: common.get_instance_type_for_cpus_mem_impl(
             _get_df(), cpus, memory, region, zone, use_spot, max_hourly_cost),
@@ -133,6 +148,7 @@ def get_instance_type_for_accelerator(
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Returns a list of instance types that have the given accelerator."""
     del local_disk  # unused
+    _ensure_no_zone(zone)
     if use_spot:
         # Return empty lists since spot is not supported
         return None, ['Spot instances are not supported on Shadeform']

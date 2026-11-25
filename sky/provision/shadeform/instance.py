@@ -312,9 +312,11 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query the status of instances."""
-    del cluster_name, provider_config  # unused
+    # Common query_instances interface; retry_if_missing is Kubernetes-only.
+    del cluster_name, provider_config, retry_if_missing  # unused
     instances = _get_cluster_instances(cluster_name_on_cloud)
 
     if not instances:
