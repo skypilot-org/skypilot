@@ -11,7 +11,7 @@ export function Tooltip({ children, text }) {
     >
       {children}
       {isHovered && (
-        <div className="absolute top-0 right-0 transform -translate-y-full -translate-x-2 mb-2 px-2 py-1 bg-gray-700 text-white text-xs rounded-md shadow-lg whitespace-nowrap z-50">
+        <div className="absolute top-0 right-0 transform -translate-y-full -translate-x-2 mb-2 px-2 py-1 bg-tooltip text-tooltip-foreground text-xs rounded-md whitespace-nowrap z-50">
           {text}
         </div>
       )}

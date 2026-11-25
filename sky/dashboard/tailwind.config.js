@@ -73,6 +73,10 @@ module.exports = {
           code: token('surface-code'),
           nav: token('surface-nav'),
         },
+        tooltip: {
+          DEFAULT: token('tooltip'),
+          foreground: token('tooltip-foreground'),
+        },
         content: {
           DEFAULT: token('content'),
           strong: token('content-strong'),

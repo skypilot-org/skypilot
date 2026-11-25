@@ -197,8 +197,9 @@ const CleanUtilizationBar = ({
     value > 0 ? (
       <Tooltip
         placement="top"
+        disableAnimation
         content={
-          <span className="px-2 py-1 text-xs text-white bg-gray-800 dark:bg-gray-700 rounded whitespace-nowrap">
+          <span className="px-2 py-1 text-xs bg-tooltip text-tooltip-foreground rounded whitespace-nowrap">
             {value.toLocaleString()} {label}
           </span>
         }
