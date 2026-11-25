@@ -115,6 +115,7 @@ all_clouds_in_smoke_tests = [
     'mithril',
     'modal',
     'verda',
+    'ionet',
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -150,6 +151,7 @@ cloud_to_pytest_keyword = {
     'mithril': 'mithril',
     'modal': 'modal',
     'verda': 'verda',
+    'ionet': 'ionet',
 }
 
 

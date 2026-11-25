@@ -1706,6 +1706,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.Paperspace,
             clouds.Azure,
             clouds.DO,
+            clouds.IONet,
             clouds.Nebius,
             clouds.Modal,
             clouds.Yotta,
