@@ -182,18 +182,21 @@ class Slurm(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
+        resources: Optional['resources_lib.Resources'] = None,
     ) -> Iterator[Optional[List[clouds.Zone]]]:
         """Iterate over partitions (zones) for provisioning with failover.
 
-        Yields one partition at a time for failover retry logic.
+        Yields one partition or joint partition selection at a time.
         """
         del num_nodes  # unused
 
-        regions = cls.regions_with_offering(instance_type,
-                                            accelerators,
-                                            use_spot,
-                                            region=region,
-                                            zone=None)
+        regions = cls.regions_with_offering(
+            instance_type,
+            accelerators,
+            use_spot,
+            region=region,
+            zone=(resources.zone if resources is not None else None),
+            resources=resources)
 
         for r in regions:
             if r.zones:
@@ -292,8 +295,11 @@ class Slurm(clouds.Cloud):
             try:
                 partitions = slurm_utils.get_partitions(cluster)
                 if zone is not None:
-                    # Filter by zone (partition) if specified
-                    partitions = [p for p in partitions if p == zone]
+                    # A comma-separated zone is one joint sbatch selection.
+                    selected = zone.split(',')
+                    if not set(selected).issubset(partitions):
+                        continue
+                    partitions = selected
                 zones = [clouds.Zone(p) for p in partitions]
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'Failed to get partitions for {cluster}: {e}')
@@ -332,6 +338,7 @@ class Slurm(clouds.Cloud):
             # Check each partition (zone) in the cluster
             partitions_to_check = [z.name for z in r.zones] if r.zones else []
             valid_zones = []
+            joint_selection = zone is not None and ',' in zone
 
             # Narrow partition list based on config:
             # - gpu_partition_map for GPU tasks
@@ -387,10 +394,13 @@ class Slurm(clouds.Cloud):
                         cpu_part = slurm_utils.lookup_cpu_partition(cluster)
                     if cpu_part is not None:
                         available = set(partitions_to_check)
-                        if cpu_part in available:
-                            partitions_to_check = [cpu_part]
-                        else:
-                            partitions_to_check = []
+                        selected = cpu_part.split(',')
+                        partitions_to_check = [
+                            p for p in (zone.split(',') if zone else selected)
+                            if p in available and p in selected
+                        ]
+                        joint_selection = joint_selection or ',' in cpu_part
+                        if not partitions_to_check:
                             logger.warning(
                                 f'{colorama.Fore.YELLOW}'
                                 f'cpu_partition is set to '
@@ -412,6 +422,10 @@ class Slurm(clouds.Cloud):
                         f'{cluster}/{partition}: {reason}')
 
             if valid_zones:
+                if joint_selection:
+                    valid_zones = [
+                        clouds.Zone(','.join(z.name for z in valid_zones))
+                    ]
                 r.set_zones(valid_zones)
                 regions_to_return.append(r)
 
@@ -422,6 +436,12 @@ class Slurm(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
+        if zone is not None and ',' in zone:
+            # Before allocation, do not understate the cost of any candidate.
+            return max(
+                self.instance_type_to_hourly_cost(instance_type, use_spot,
+                                                  region, partition)
+                for partition in zone.split(','))
         # pylint: disable=import-outside-toplevel
         from sky.catalog import slurm_catalog
         return slurm_catalog.get_hourly_cost(instance_type, use_spot, region,
@@ -492,6 +512,35 @@ class Slurm(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
+        if zones and ',' in zones[0].name:
+            assert resources.instance_type is not None, resources
+            if self.get_accelerators_from_instance_type(
+                    resources.instance_type):
+                raise ValueError(
+                    'Joint partition submission is supported only for CPU jobs')
+            partitions = zones[0].name.split(',')
+            variants = []
+            for partition in partitions:
+                variables = self.make_deploy_resources_variables(
+                    resources, cluster_name, region, [clouds.Zone(partition)],
+                    num_nodes, dryrun, volume_mounts)
+                variables.pop('slurm_partition')
+                variants.append(variables)
+            differences = sorted({
+                key for variables in variants[1:]
+                for key in variables.keys() | variants[0].keys()
+                # A snapshot ID is generated per render, not per partition.
+                if key != 'snapshot_id' and
+                variables.get(key) != variants[0].get(key)
+            })
+            if differences:
+                raise ValueError(
+                    f'Partitions {partitions} have incompatible deployment '
+                    f'settings: {differences}. Select one partition or align '
+                    'their configuration.')
+            variables = variants[0]
+            variables['slurm_partition'] = ','.join(partitions)
+            return variables
         del cluster_name, dryrun  # Unused.
         if region is not None:
             cluster = region.name
@@ -592,6 +641,7 @@ class Slurm(clouds.Cloud):
         # global < cluster < partition.
         sbatch_options: Dict[str, Any] = {}
         slurm_config = skypilot_config.get_workspace_cloud('slurm')
+        sbatch_levels = []
         for config_keys in [
             ('sbatch_options',),
             ('cluster_configs', cluster, 'sbatch_options'),
@@ -600,16 +650,27 @@ class Slurm(clouds.Cloud):
         ]:
             level_config = slurm_config.get_nested(config_keys,
                                                    default_value=None)
-            if level_config is not None:
-                sbatch_options.update(level_config)
+            sbatch_levels.append(level_config)
         # Merge task-level config overrides (from `config:` in task YAML).
         task_sbatch = config_utils.get_cloud_config_value_from_dict(
             dict_config=resources.cluster_config_overrides,
             cloud='slurm',
             region=cluster,
             keys=('sbatch_options',))
-        if task_sbatch is not None:
-            sbatch_options.update(task_sbatch)
+        sbatch_levels.append(task_sbatch)
+        for level_config in sbatch_levels:
+            if level_config is None:
+                continue
+            level_config = dict(level_config)
+            if 'time' in level_config or 't' in level_config:
+                # Normalize aliases before merging, so a task's -t can
+                # replace a site's --time (and vice versa).
+                time = level_config.pop('time', None)
+                short_time = level_config.pop('t', time)
+                if time is None or time is False:
+                    time = short_time
+                level_config['time'] = time
+            sbatch_options.update(level_config)
         # `quota.queue` / `quota.account` name the QOS and account with
         # workspace > global and partition > cluster > cloud precedence
         # (task `config:` overrides apply at every scope). Set at any scope,
@@ -1064,13 +1125,18 @@ class Slurm(clouds.Cloud):
                 raise ValueError(
                     'Cannot specify partition (zone) without specifying '
                     'cluster (region) for Slurm.')
+            selected = zone.split(',')
+            if (any(not name or name != name.strip() for name in selected) or
+                    len(set(selected)) != len(selected)):
+                raise ValueError(f'Invalid Slurm partition selection {zone!r}: '
+                                 'expected distinct, non-empty partition names')
 
             # Skip a cluster outside the caller's allowed set: probing it
             # would reveal its partitions, and the optimizer never places a
             # new launch there anyway.
             if region in self.existing_allowed_clusters(silent=True):
                 partitions = slurm_utils.get_partitions(region)
-                if zone not in partitions:
+                if not set(selected).issubset(partitions):
                     raise ValueError(
                         f'Partition {zone!r} not found in cluster {region!r}. '
                         f'Available partitions: {partitions}')
