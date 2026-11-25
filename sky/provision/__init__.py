@@ -189,6 +189,17 @@ def _route_to_cloud_impl(func):
 # pylint: disable=unused-argument
 
 
+@_route_to_cloud_impl
+def sync_workdir(provider_name: str,
+                 runners: List[command_runner.CommandRunner], source: str,
+                 target: str, log_path: str) -> bool:
+    """Optionally sync a path workdir; False requests the standard rsync path.
+
+    Implementations must not return False after starting remote uploads.
+    """
+    return False
+
+
 @timeline.event
 @_route_to_cloud_impl
 def query_instances(
