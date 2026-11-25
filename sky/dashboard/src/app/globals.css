@@ -44,6 +44,9 @@
     --surface-stronger: 216 12.2% 83.92%;
     /* Top bar fill. */
     --surface-nav: 0 0% 100%;
+    /* Tooltips use the inverse of the page: dark in light mode. */
+    --tooltip: 0 0% 9%;
+    --tooltip-foreground: 0 0% 98%;
     --content-strong: 220.91 39.29% 10.98%;
     --content-heavy: 215 27.91% 16.86%;
     --content: 216.92 19.12% 26.67%;
@@ -193,6 +196,8 @@
     --surface-stronger: 0 0% 32%;
     /* A half step above the page (#1c1c1c) so the top bar stands apart. */
     --surface-nav: 0 0% 10.98%;
+    --tooltip: 0 0% 98%;
+    --tooltip-foreground: 0 0% 9%;
     --content-strong: 0 0% 98%;
     --content-heavy: 0 0% 98%;
     --content: 0 0% 98%;
