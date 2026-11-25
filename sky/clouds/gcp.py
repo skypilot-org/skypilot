@@ -14,6 +14,7 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
@@ -1422,7 +1423,10 @@ class GCP(clouds.Cloud):
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
             return True
 
-        command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
+        command = (
+            f'gcloud compute regions describe {region} '
+            f'--project {cls.get_project_id()} '
+            f'|grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\'')
         try:
             proc = subprocess_utils.run(cmd=command,
                                         stdout=subprocess.PIPE,
@@ -1454,6 +1458,7 @@ class GCP(clouds.Cloud):
         region: str,
         zone: Optional[str],
         specific_reservations: Set[str],
+        project_id: Optional[str] = None,
     ) -> Dict[str, int]:
         del region  # Unused
         if zone is None:
@@ -1461,8 +1466,10 @@ class GCP(clouds.Cloud):
             # before #2352 may not have zone information. In this case, we
             # return 0 for all reservations.
             return {reservation: 0 for reservation in specific_reservations}
+        if project_id is None:
+            project_id = self.get_project_id()
         reservations = gcp_utils.list_reservations_for_instance_type_in_zone(
-            instance_type, zone)
+            instance_type, zone, project_id)
 
         return {
             r.name: r.available_resources
@@ -1491,7 +1498,23 @@ class GCP(clouds.Cloud):
         # we should be able to get rid of this assumption.
         tag_filters = {'ray-cluster-name': cluster_name.name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
+        # The source cluster may belong to a different project than the
+        # current workspace. Use its saved launch configuration if available.
+        project_id = None
+        try:
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name.display_name)
+            cluster_yaml = getattr(handle, 'cluster_yaml', None)
+            if cluster_yaml is not None:
+                provider_config = global_user_state.get_cluster_yaml_dict(
+                    cluster_yaml).get('provider', {})
+                project_id = provider_config.get('project_id')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the source cluster project: {e}')
+        if not project_id:
+            project_id = cls.get_project_id()
         instance_name_cmd = ('gcloud compute instances list '
+                             f'--project {project_id} '
                              f'--filter="({label_filter_str})" '
                              '--format="json(name)"')
         returncode, stdout, stderr = subprocess_utils.run_with_retries(
@@ -1515,6 +1538,7 @@ class GCP(clouds.Cloud):
 
         image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
         create_image_cmd = (f'gcloud compute images create {image_name} '
+                            f'--project {project_id} '
                             f'--source-disk  {instance_name} '
                             f'--source-disk-zone {zone}')
         logger.debug(create_image_cmd)
@@ -1531,6 +1555,7 @@ class GCP(clouds.Cloud):
             stream_logs=True)
 
         image_uri_cmd = (f'gcloud compute images describe {image_name} '
+                         f'--project {project_id} '
                          '--format="get(selfLink)"')
         returncode, stdout, stderr = subprocess_utils.run_with_retries(
             image_uri_cmd,
@@ -1561,8 +1586,11 @@ class GCP(clouds.Cloud):
     @classmethod
     def delete_image(cls, image_id: str, region: Optional[str]) -> None:
         del region  # Unused.
+        # Use the image's project even if the active workspace has changed.
+        project_id = image_id.split('/')[1]
         image_name = image_id.rpartition('/')[2]
-        delete_image_cmd = f'gcloud compute images delete {image_name} --quiet'
+        delete_image_cmd = (f'gcloud compute images delete {image_name} '
+                            f'--project {project_id} --quiet')
         returncode, _, stderr = subprocess_utils.run_with_retries(
             delete_image_cmd,
             retry_returncode=[255],

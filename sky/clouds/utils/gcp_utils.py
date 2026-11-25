@@ -125,8 +125,10 @@ class GCPReservation:
 def list_reservations_for_instance_type_in_zone(
     instance_type: str,
     zone: str,
+    project_id: str,
 ) -> List[GCPReservation]:
-    reservations = _list_reservations_for_instance_type(instance_type)
+    reservations = _list_reservations_for_instance_type(instance_type,
+                                                        project_id)
     return [r for r in reservations if r.zone.endswith(f'/{zone}')]
 
 
@@ -134,7 +136,7 @@ def list_reservations_for_instance_type_in_zone(
                                              ttl=300,
                                              timer=time.time))
 def _list_reservations_for_instance_type(
-    instance_type: str,) -> List[GCPReservation]:
+        instance_type: str, project_id: str) -> List[GCPReservation]:
     """List all reservations for the given instance type.
 
     TODO: We need to incorporate accelerators because the reserved instance
@@ -158,6 +160,7 @@ def _list_reservations_for_instance_type(
     logger.debug(f'Querying GCP reservations for instance {instance_type!r}')
     list_reservations_cmd = (
         'gcloud compute reservations list '
+        f'--project {project_id} '
         '--filter="specificReservation.instanceProperties.machineType='
         f'{instance_type} AND status=READY" --format="json('
         'specificReservation.count, specificReservation.inUseCount, '

@@ -93,7 +93,8 @@ def test_gcp_get_reservations_available_resources(mock_return, expected):
     gcp = GCP()
     with patch.object(gcp_utils,
                       'list_reservations_for_instance_type_in_zone',
-                      return_value=mock_return):
+                      return_value=mock_return), patch.object(
+                          GCP, 'get_project_id', return_value='test-project'):
         reservations = gcp.get_reservations_available_resources(
             'instance_type', 'region', 'zone',
             {'projects/<project>/reservations/<reservation>'})
