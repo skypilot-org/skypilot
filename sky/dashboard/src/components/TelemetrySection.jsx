@@ -47,12 +47,19 @@ const TELEMETRY_PANELS = [
     family: 'host',
   },
   { id: '7', title: 'Memory Usage', keyPrefix: 'mem-usage', family: 'host' },
-  // Finds the cluster's nodes through DCGM, so it is a GPU panel. In
-  // preview: shown with ?node_rdma.
+  // The RDMA panels find the cluster's nodes through DCGM, so they are GPU
+  // panels. In preview: shown with ?node_rdma.
   {
     id: '8',
     title: 'Node RDMA Network Throughput',
     keyPrefix: 'node-rdma',
+    family: 'gpu',
+    previewParam: 'node_rdma',
+  },
+  {
+    id: '10',
+    title: 'RDMA Link Drops',
+    keyPrefix: 'rdma-link-drops',
     family: 'gpu',
     previewParam: 'node_rdma',
   },
