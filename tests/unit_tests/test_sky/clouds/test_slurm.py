@@ -94,8 +94,9 @@ class TestGetSubmitUser:
                                             name='alice@example.com')):
             assert slurm_utils.get_submit_user('my-cluster') == 'alice+lab'
 
-    def test_config_is_server_managed(self):
-        key = ('slurm', 'submit_as_user')
+    @pytest.mark.parametrize('key', [('slurm', 'submit_as_user'),
+                                     ('slurm', 'username_from_email')])
+    def test_config_is_server_managed(self, key):
         assert key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS
 
     @pytest.mark.parametrize('user_name,expected', [
@@ -108,14 +109,23 @@ class TestGetSubmitUser:
     @patch('sky.provision.slurm.utils.skypilot_config.'
            'get_effective_region_config')
     def test_enabled(self, mock_get_config, mock_get_user, user_name, expected):
-        mock_get_config.return_value = True
+        mock_get_config.side_effect = lambda **kwargs: {
+            ('submit_as_user',): True,
+            ('username_from_email',): 'local_part',
+        }[kwargs['keys']]
         mock_get_user.return_value = models.User(id='human', name=user_name)
 
         assert slurm_utils.get_submit_user('my-cluster') == expected
-        mock_get_config.assert_called_once_with(cloud='slurm',
-                                                region='my-cluster',
-                                                keys=('submit_as_user',),
-                                                default_value=False)
+        assert mock_get_config.call_args_list == [
+            call(cloud='slurm',
+                 region='my-cluster',
+                 keys=('submit_as_user',),
+                 default_value=False),
+            call(cloud='slurm',
+                 region='my-cluster',
+                 keys=('username_from_email',),
+                 default_value='local_part'),
+        ]
 
     @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
