@@ -25,6 +25,7 @@ import contextvars
 import json
 import logging
 import os
+import shlex
 import signal
 import sys
 import textwrap
@@ -465,11 +466,9 @@ class BatchCoordinator:
         sky_runtime = skylet_constants.SKY_REMOTE_PYTHON_ENV
 
         # Serialize typed format dicts as JSON env vars for workers.
-        input_format_json = json.dumps(self._input_format.to_dict()).replace(
-            '\'', '\'\\\'\'')
+        input_format_json = json.dumps(self._input_format.to_dict())
         # Pass output formats as a JSON array for multi-output support.
-        output_formats_json = json.dumps(self._output_formats_dict or
-                                         []).replace('\'', '\'\\\'\'')
+        output_formats_json = json.dumps(self._output_formats_dict or [])
 
         port = constants.WORKER_SERVICE_PORT
         # Python snippet that frees port {port} if a stale worker
@@ -484,11 +483,11 @@ class BatchCoordinator:
             port_cleanup_py.encode('utf-8')).decode('ascii')
         return textwrap.dedent(f"""\
             set -e
-            export SKY_BATCH_SERIALIZED_FN='{self.serialized_fn}'
-            export SKY_BATCH_OUTPUT_PATH='{self.output_path}'
-            export SKY_BATCH_JOB_ID='{job_id}'
-            export SKY_BATCH_INPUT_FORMAT='{input_format_json}'
-            export SKY_BATCH_OUTPUT_FORMATS='{output_formats_json}'
+            export SKY_BATCH_SERIALIZED_FN={shlex.quote(self.serialized_fn)}
+            export SKY_BATCH_OUTPUT_PATH={shlex.quote(self.output_path)}
+            export SKY_BATCH_JOB_ID={shlex.quote(job_id)}
+            export SKY_BATCH_INPUT_FORMAT={shlex.quote(input_format_json)}
+            export SKY_BATCH_OUTPUT_FORMATS={shlex.quote(output_formats_json)}
 
             # On HA resume the previous worker service may still be
             # holding port {port} even after sdk.cancel has returned.
