@@ -4308,7 +4308,11 @@ def _condensed_pod_reason(pod: 'V1Pod') -> str:
 
 def _get_pod_events(context: Optional[str], namespace: str,
                     pod_name: str) -> List[Any]:
-    """Get the events for a pod, sorted by timestamp, most recent first."""
+    """Get the events for a pod, sorted by timestamp, most recent first.
+
+    Read from the API server: the pod wait loops classify a pending pod by
+    them.
+    """
     pod_field_selector = (
         f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
     pod_events = reads.list_objects(
@@ -4316,7 +4320,7 @@ def _get_pod_events(context: Optional[str], namespace: str,
         reads.EVENTS,
         namespace=namespace,
         field_selector=pod_field_selector,
-        consistency=reads.CACHED,
+        consistency=reads.FRESH,
         convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
         attempts=1).items
     return sorted(

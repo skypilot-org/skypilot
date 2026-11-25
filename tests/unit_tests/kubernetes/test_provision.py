@@ -7728,7 +7728,7 @@ def test_wait_for_pod_gone_raises_when_the_api_server_is_unreachable(
 
 @pytest.mark.parametrize('read_name,call,consistency', [
     ('list_objects', lambda: instance._get_pod_events('ctx', 'ns', 'p'),
-     reads.CACHED),
+     reads.FRESH),
     ('list_objects', lambda: instance._detect_cluster_event_reason_occurred(
         'ns', 'ctx', datetime.datetime.now(datetime.timezone.utc),
         'TriggeredScaleUp'), reads.FRESH),
