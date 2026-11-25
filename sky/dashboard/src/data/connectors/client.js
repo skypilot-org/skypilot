@@ -8,6 +8,7 @@ import {
   ENDPOINT,
   VERSION_HEADER,
 } from './constants';
+import { isSyncAnswer, sendRequest } from './syncCalls';
 
 // The server's APIVersionMiddleware uses these headers to (a) negotiate
 // protocol compatibility and (b) populate the `_remote_api_version`
@@ -160,8 +161,10 @@ export const apiClient = {
       signal: options.signal,
     });
   },
-  fetch: async (path, body, method = 'POST') => {
-    // Call the server API and get the result of the request it schedules
+  // Calls the server API and returns the result of the request. The request
+  // is sent as a sync call (see syncCalls.js) unless options.sync is false; a
+  // body with a `limit` is answered as one only within the server's maximum.
+  fetch: async (path, body, method = 'POST', options = {}) => {
     try {
       await waitForPlugins();
       // A plugin may take over how the result is obtained; it gets the same
@@ -173,8 +176,17 @@ export const apiClient = {
           readRequestResult,
         });
       }
-      const response = await apiClient.fetchImmediate(path, body, method);
-      return await getRequestResult(path, response);
+      const limit =
+        body && typeof body === 'object' && 'limit' in body
+          ? body.limit
+          : undefined;
+      const response = await sendRequest(
+        (headers) => apiClient.fetchImmediate(path, body, method, { headers }),
+        { sync: options.sync ?? true, limit }
+      );
+      return isSyncAnswer(response)
+        ? await readRequestResult(path, response)
+        : await getRequestResult(path, response);
     } catch (error) {
       const msg = `Error in apiClient.fetch for ${path}: ${error}`;
       console.error(msg);
@@ -227,7 +239,7 @@ export const apiClient = {
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
     return await fetch(fullUrl, {
-      headers: withVersionHeader({}),
+      headers: withVersionHeader(options.headers || {}),
       signal: options.signal,
     });
   },

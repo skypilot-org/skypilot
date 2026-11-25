@@ -1,68 +1,15 @@
 import { apiClient } from '@/data/connectors/client';
+import { fetchResult } from '@/data/connectors/syncCalls';
 
 export async function getWorkspaces() {
   try {
-    // Step 1: Call the /workspaces endpoint to schedule the task
-    const scheduleResponse = await apiClient.get(`/workspaces`);
-    if (!scheduleResponse.ok) {
-      throw new Error(
-        `Error scheduling getWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
-      );
-    }
-
-    // Step 2: Get the request_id from the response headers or body
-    let requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
-
-    if (!requestId) {
-      console.warn(
-        'X-Skypilot-Request-ID header not found in /workspaces response. Attempting to find request_id in response body as a fallback.'
-      );
-      try {
-        // .json() consumes the response body. If this fails or doesn't find requestId,
-        // we can't try reading the body again for other purposes.
-        const scheduleData = await scheduleResponse.json();
-        if (scheduleData && scheduleData.request_id) {
-          requestId = scheduleData.request_id; // Correctly assign to requestId
-          console.log(
-            'Found request_id in /workspaces response body (fallback):',
-            requestId
-          );
-        } else {
-          // If not in header AND not in body after attempting fallback.
-          throw new Error(
-            'X-Skypilot-Request-ID header not found AND request_id not found in parsed response body from /workspaces.'
-          );
-        }
-      } catch (e) {
-        // This catch handles errors from scheduleResponse.json() or the explicit throw above.
-        const errorMessage =
-          e.message ||
-          'Error processing fallback for request_id from /workspaces response body.';
-        console.error(
-          'Error in /workspaces request_id fallback logic:',
-          errorMessage
-        );
-        throw new Error(
-          `X-Skypilot-Request-ID header not found, and fallback to read request_id from body failed: ${errorMessage}`
-        );
-      }
-    }
-
-    // Step 2.5: Validate that we have a requestId before proceeding
-    if (!requestId) {
-      // This error indicates a critical failure in obtaining the request_id.
-      throw new Error(
-        'Failed to obtain X-Skypilot-Request-ID from /workspaces response (checked header and attempted body fallback, but ID is still missing).'
-      );
-    }
-
-    // Step 3: Poll the /api/get endpoint with the request_id.
-    console.log(`Fetching workspace data with request_id: ${requestId}`);
-    const resultResponse = await apiClient.get(
-      `/api/get?request_id=${requestId}`
+    const resultResponse = await fetchResult(
+      '/workspaces',
+      (headers) => apiClient.get('/workspaces', { headers }),
+      apiClient.get
     );
     if (!resultResponse.ok) {
-      let errorDetail = `Error fetching workspace data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
+      let errorDetail = `Error fetching workspace data: ${resultResponse.statusText} (status ${resultResponse.status})`;
       try {
         const errorData = await resultResponse.json();
         if (errorData && errorData.detail) {
@@ -81,7 +28,7 @@ export async function getWorkspaces() {
           } catch (parseErr) {
             /* Inner detail is not JSON, use as is */
           }
-          errorDetail = `Error fetching workspace data for request ID ${requestId}: ${innerDetail}`;
+          errorDetail = `Error fetching workspace data: ${innerDetail}`;
         }
       } catch (e) {
         /* ignore error parsing errorData */
@@ -163,7 +110,7 @@ export async function getWorkspaces() {
           resultData.return_value
         );
         throw new Error(
-          `Failed to parse workspace data for request ID ${requestId}: ${parseError.message}`
+          `Failed to parse workspace data: ${parseError.message}`
         );
       }
     } else if (resultData.result) {
@@ -205,61 +152,13 @@ export async function getEnabledClouds(workspaceId = null, expand = false) {
       url += `?${params.toString()}`;
     }
 
-    const scheduleResponse = await apiClient.get(url);
-
-    if (!scheduleResponse.ok) {
-      throw new Error(
-        `Error scheduling getEnabledClouds: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
-      );
-    }
-
-    // Step 2: Get the request_id from the response headers or body
-    let requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
-
-    if (!requestId) {
-      console.warn(
-        'X-Skypilot-Request-ID header not found in /enabled_clouds response. Attempting to find request_id in response body as a fallback.'
-      );
-      try {
-        const scheduleData = await scheduleResponse.json();
-        if (scheduleData && scheduleData.request_id) {
-          requestId = scheduleData.request_id;
-          console.log(
-            'Found request_id in /enabled_clouds response body (fallback):',
-            requestId
-          );
-        } else {
-          throw new Error(
-            'X-Skypilot-Request-ID header not found AND request_id not found in parsed response body from /enabled_clouds.'
-          );
-        }
-      } catch (e) {
-        const errorMessage =
-          e.message ||
-          'Error processing fallback for request_id from /enabled_clouds response body.';
-        console.error(
-          'Error in /enabled_clouds request_id fallback logic:',
-          errorMessage
-        );
-        throw new Error(
-          `X-Skypilot-Request-ID header not found, and fallback to read request_id from body failed: ${errorMessage}`
-        );
-      }
-    }
-
-    if (!requestId) {
-      throw new Error(
-        'Failed to obtain X-Skypilot-Request-ID from /enabled_clouds response (checked header and attempted body fallback, but ID is still missing).'
-      );
-    }
-
-    // Step 3: Poll the /api/get endpoint with the request_id.
-    console.log(`Fetching enabled_clouds data with request_id: ${requestId}`);
-    const resultResponse = await apiClient.get(
-      `/api/get?request_id=${requestId}`
+    const resultResponse = await fetchResult(
+      url,
+      (headers) => apiClient.get(url, { headers }),
+      apiClient.get
     );
     if (!resultResponse.ok) {
-      let errorDetail = `Error fetching enabled_clouds data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
+      let errorDetail = `Error fetching enabled_clouds data: ${resultResponse.statusText} (status ${resultResponse.status})`;
       try {
         const errorData = await resultResponse.json();
         // Similar error detail extraction as in getWorkspaces
@@ -280,7 +179,7 @@ export async function getEnabledClouds(workspaceId = null, expand = false) {
           } catch (parseErr) {
             /* Inner detail is not JSON, use as is */
           }
-          errorDetail = `Error fetching enabled_clouds data for request ID ${requestId}: ${innerDetail}`;
+          errorDetail = `Error fetching enabled_clouds data: ${innerDetail}`;
         }
       } catch (e) {
         /* ignore error parsing errorData */
@@ -299,9 +198,7 @@ export async function getEnabledClouds(workspaceId = null, expand = false) {
         resultData.error ||
         (resultData.result && resultData.result.error) ||
         'Unknown error during task execution for enabled_clouds';
-      throw new Error(
-        `Fetching enabled_clouds data failed for request ID ${requestId}: ${errorMessage}`
-      );
+      throw new Error(`Fetching enabled_clouds data failed: ${errorMessage}`);
     }
 
     let enabledCloudsData = []; // Default to empty array
@@ -322,7 +219,7 @@ export async function getEnabledClouds(workspaceId = null, expand = false) {
           resultData.return_value
         );
         throw new Error(
-          `Failed to parse enabled_clouds data for request ID ${requestId}: ${parseError.message}`
+          `Failed to parse enabled_clouds data: ${parseError.message}`
         );
       }
     } else if (resultData.result) {
@@ -354,9 +251,13 @@ async function pollForTaskCompletion(requestId, taskName) {
   const resultResponse = await apiClient.get(
     `/api/get?request_id=${requestId}`
   );
+  return readTaskResult(resultResponse, taskName);
+}
 
+// Returns the result an /api/get-shaped response carries for taskName.
+async function readTaskResult(resultResponse, taskName) {
   if (!resultResponse.ok) {
-    let errorDetail = `Error fetching ${taskName} data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
+    let errorDetail = `Error fetching ${taskName} data: ${resultResponse.statusText} (status ${resultResponse.status})`;
     // The server-side exception class, when the response carries one, so
     // callers can tell specific failures apart.
     let errorType;
@@ -534,7 +435,7 @@ async function pollForTaskCompletion(requestId, taskName) {
         resultData.return_value
       );
       throw new Error(
-        `Failed to parse ${taskName} data for request ID ${requestId}: ${parseError.message}`
+        `Failed to parse ${taskName} data: ${parseError.message}`
       );
     }
   } else if (resultData.result) {
@@ -708,19 +609,12 @@ export async function getConfig() {
   try {
     console.log('Getting entire SkyPilot configuration');
 
-    const scheduleResponse = await apiClient.get(`/workspaces/config`);
-    if (!scheduleResponse.ok) {
-      throw new Error(
-        `Error scheduling getConfig: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
-      );
-    }
-
-    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
-    if (!requestId) {
-      throw new Error('Failed to obtain request ID for getConfig');
-    }
-
-    return await pollForTaskCompletion(requestId, 'getConfig');
+    const resultResponse = await fetchResult(
+      '/workspaces/config',
+      (headers) => apiClient.get('/workspaces/config', { headers }),
+      apiClient.get
+    );
+    return await readTaskResult(resultResponse, 'getConfig');
   } catch (error) {
     console.error('Failed to get config:', error);
     throw error;

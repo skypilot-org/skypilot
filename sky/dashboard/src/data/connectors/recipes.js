@@ -6,6 +6,44 @@
  */
 
 import { apiClient } from './client';
+import {
+  fetchListInPages,
+  MIN_LIST_CURSOR_API_VERSION,
+  sendRequest,
+  syncPageSize,
+} from './syncCalls';
+
+// The recipes /recipes/list returns for `body`. When the server answers sync
+// calls and takes the recipe cursor, they are fetched as sync calls of its
+// maximum size, by name.
+async function fetchRecipes(body) {
+  const pageSize = await syncPageSize(MIN_LIST_CURSOR_API_VERSION);
+  if (pageSize !== null) {
+    const recipes = await fetchListInPages({
+      path: '/recipes/list',
+      pageSize,
+      sendPage: (afterName, size) =>
+        sendRequest(
+          (headers) =>
+            apiClient.fetchImmediate(
+              '/recipes/list',
+              { ...body, limit: size, after_name: afterName },
+              'POST',
+              { headers }
+            ),
+          { limit: size }
+        ),
+      cursorOf: (row) => row.name,
+      follows: (row, afterName) => row.name > afterName,
+    });
+    if (recipes !== null) {
+      // Pages come by name; one call lists pinned recipes first, then by name.
+      return recipes.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
+    }
+  }
+  // A list call without `limit` is not answered as a sync call.
+  return apiClient.fetch('/recipes/list', body, 'POST', { sync: false });
+}
 
 /**
  * List YAML templates with optional filters.
@@ -25,7 +63,7 @@ export async function getRecipes(options = {}) {
       recipe_type: options.recipeType || null,
     };
 
-    const result = await apiClient.fetch('/recipes/list', body, 'POST');
+    const result = await fetchRecipes(body);
     return result || [];
   } catch (error) {
     console.error('Error fetching YAML templates:', error);

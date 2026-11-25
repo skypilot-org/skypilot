@@ -13,6 +13,7 @@ import {
 import dashboardCache from '@/lib/cache';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
+import { fetchResult } from './syncCalls';
 import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
@@ -187,18 +188,13 @@ export async function getManagedJobs(options = {}) {
       }
     }
 
-    const response = await apiClient.post(`/jobs/queue/v2`, body);
-    if (!response.ok) {
-      const msg = `Failed to get managed jobs with status ${response.status}`;
-      throw new Error(msg);
-    }
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    // Handle empty request ID
-    if (!id) {
-      const msg = 'No request ID received from server for managed jobs';
-      throw new Error(msg);
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    // Answered as a sync call only with a limit within the server's maximum.
+    const fetchedData = await fetchResult(
+      '/jobs/queue/v2',
+      (headers) => apiClient.post(`/jobs/queue/v2`, body, { headers }),
+      apiClient.get,
+      { limit: body.limit ?? null }
+    );
     let errorMessage = fetchedData.statusText;
     // Recorded rather than thrown from inside the parse below: a throw there
     // lands in that block's own catch and is reported as a parse failure.
