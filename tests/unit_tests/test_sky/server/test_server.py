@@ -18,6 +18,7 @@ import prometheus_client as prom
 import pytest
 import uvicorn
 
+from sky import core
 from sky import models
 from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
@@ -329,6 +330,37 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
             "is available")
     else:
         pytest.skip("uvloop not available, skipping uvloop policy check")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('auth_user,func', [
+    (models.User(id='alice-id', name='alice'), core.get_workspace_contexts),
+    (None, core.get_all_contexts),
+])
+async def test_all_contexts_scopes_authenticated_users(auth_user, func):
+    # get_all_contexts lists every SSH node pool, allowed or not.
+    request = mock.MagicMock()
+    request.state.auth_user = auth_user
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.all_contexts(request)
+
+    _, kwargs = mock_schedule.call_args
+    assert kwargs['func'] is func
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('auth_user',
+                         [models.User(id='alice-id', name='alice'), None])
+async def test_dashboard_config_scopes_local_contexts_to_caller(
+        monkeypatch, auth_user):
+    seen = []
+    monkeypatch.setattr(server, '_get_local_contexts',
+                        lambda user: seen.append(user) or [])
+    request = mock.MagicMock()
+    request.state.auth_user = auth_user
+    await server.dashboard_config(request)
+    assert seen == [auth_user]
 
 
 @pytest.mark.asyncio
@@ -1161,6 +1193,47 @@ def test_api_get_interrupted_request_without_error_synthesizes_error(
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
 
 
+@pytest.mark.parametrize('outcome', ['success', 'error', 'should_retry'])
+def test_api_get_never_returns_request_body(monkeypatch, outcome):
+    """A body built on the server holds the server's env; /api/get must not
+    return it in any branch, and the client must still decode the reply."""
+    from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    request = _make_interrupted_request(with_error=outcome == 'error')
+    request.request_body = payloads.RequestBody()
+    assert 'server-canary' in request.request_body.model_dump_json()
+    if outcome == 'success':
+        request.status = requests_lib.RequestStatus.SUCCEEDED
+        request.should_retry = False
+        request.set_return_value('result')
+    _mount_api_get_request(monkeypatch, request)
+
+    response = TestClient(server.app).get(
+        '/api/get', params={'request_id': 'interrupted-req'})
+
+    if outcome == 'success':
+        assert response.status_code == 200
+        payload = payloads.RequestPayload(**response.json())
+    else:
+        assert response.status_code == 500
+        payload = payloads.RequestPayload(**response.json()['detail'])
+    assert payload.request_body == server_constants.EMPTY_PICKLED_VALUE
+    decoded = requests_lib.Request.decode(payload)
+    assert decoded.request_body is None
+    if outcome == 'success':
+        assert decoded.get_return_value() == 'result'
+    else:
+        assert isinstance(decoded.get_error()['object'],
+                          exceptions.RequestInterruptedError)
+    # Response only: the stored request keeps its body.
+    assert 'server-canary' in request.request_body.model_dump_json()
+
+
 def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
     """/dashboard_config returns JSON-serialized dashboard settings.
 
@@ -1183,7 +1256,7 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
             'label': 'Malformed entry without regex or url',
         }])
     monkeypatch.setattr(server, '_get_local_contexts',
-                        lambda: ['kind-local-named'])
+                        lambda user: ['kind-local-named'])
 
     client = TestClient(server.app)
     response = client.get('/dashboard_config')
@@ -1231,7 +1304,7 @@ def test_dashboard_config_endpoint_sanitizes_scope(monkeypatch):
             'url': 'https://wiki.internal.example.com',
             'scope': 'cluster',
         }])
-    monkeypatch.setattr(server, '_get_local_contexts', lambda: [])
+    monkeypatch.setattr(server, '_get_local_contexts', lambda user: [])
 
     client = TestClient(server.app)
     response = client.get('/dashboard_config')
@@ -1269,7 +1342,7 @@ def test_dashboard_config_endpoint_omits_local_contexts_on_failure(monkeypatch):
     monkeypatch.setattr(skypilot_config, 'get_nested',
                         lambda keys, default: default)
 
-    def _boom():
+    def _boom(user):
         raise RuntimeError('kubeconfig exploded')
 
     monkeypatch.setattr(server, '_get_local_contexts', _boom)
@@ -1806,6 +1879,27 @@ def test_api_status_listing_matches_model_encoding(_request_authz_env,
         assert listed.headers['content-type'] == 'application/json'
         assert fetched, params
         assert listed.json() == reference_client.get('/list').json(), params
+
+
+@pytest.mark.parametrize('scope', ['carol', None])
+def test_api_status_never_returns_request_body(_request_authz_env, monkeypatch,
+                                               scope):
+    """Not even to the owner: a body built on the server holds its env."""
+    monkeypatch.setenv('SKYPILOT_UT_ENV_CANARY', 'server-canary')
+    row = _seed_request('carol-req-1', 'carol')
+    assert 'server-canary' in row.request_body.model_dump_json()
+    asyncio.new_event_loop().run_until_complete(
+        server.requests_lib.create_if_not_exists_async(row))
+    _scope_as(monkeypatch, scope)
+
+    client = testclient.TestClient(server.app)
+    for params in ({'all_status': True}, {'request_ids': ['carol-req-1']}):
+        listed = client.get('/api/status', params=params)
+        assert listed.status_code == 200, params
+        assert 'server-canary' not in listed.text, params
+        carol = [r for r in listed.json() if r['request_id'] == 'carol-req-1']
+        assert len(carol) == 1, params
+        assert carol[0]['request_body'] == 'null', params
 
 
 def test_api_status_lists_off_event_loop(_request_authz_env, monkeypatch):

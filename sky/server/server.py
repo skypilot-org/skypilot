@@ -65,6 +65,7 @@ from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
@@ -124,6 +125,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.utils.kubernetes import exec_auth_cache
 from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
@@ -780,6 +782,7 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
                     f'{user.name!r} ({user.id}): {request.method} '
                     f'{request.url.path} (request ID: {request_id})')
         request.state.impersonator = caller
+        caller_usage.set_impersonator(caller)
         request.state.auth_user = models.User(id=user.id, name=user.name)
         return None
 
@@ -1171,6 +1174,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
+    permission.permission_service.start_policy_watcher()
     # Attribute event loop stalls to the code that caused them. Not gated on
     # METRICS_ENABLED: its primary output is a log line, which is the only
     # thing available when debugging a deployment after the fact.
@@ -1590,7 +1594,8 @@ async def poll_auth_token(
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_verifier is required')
 
-    auth_token = auth_sessions.auth_session_store.poll_session(code_verifier)
+    auth_token = await asyncio.to_thread(
+        auth_sessions.auth_session_store.poll_session, code_verifier)
 
     if auth_token is None:
         raise fastapi.HTTPException(status_code=404, detail='Session not found')
@@ -1631,7 +1636,8 @@ async def authorize_auth_session(
     auth_token = _generate_auth_token(request)
 
     # Create the session with the token
-    auth_sessions.auth_session_store.create_session(code_challenge, auth_token)
+    await asyncio.to_thread(auth_sessions.auth_session_store.create_session,
+                            code_challenge, auth_token)
 
     return fastapi.responses.JSONResponse(content={'status': 'authorized'},
                                           headers={'Cache-Control': 'no-store'})
@@ -1711,11 +1717,12 @@ async def enabled_clouds_batch(request: fastapi.Request,
         # read, so a read-only-visible workspace must survive this filter (the
         # dashboard asks for every workspace it can see at once, and dropping
         # one would fail the whole batch).
-        workspace_list = list(
-            permission.permission_service.get_accessible_workspace_names(
-                auth_user.id,
-                set(workspace_list),
-                action=workspace_constants.WORKSPACE_ACTION_READ))
+        workspace_list = list(await context_utils.to_thread_with_executor(
+            None,
+            permission.permission_service.get_accessible_workspace_names,
+            auth_user.id,
+            set(workspace_list),
+            action=workspace_constants.WORKSPACE_ACTION_READ))
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
@@ -2629,8 +2636,7 @@ async def _reject_cluster_write_for_unauthorized(
 
     This helper only covers the HTTP endpoints. SSH/VSCode go over a websocket,
     which does not pass through here; that path calls the same
-    ``check_cluster_write_permission`` inline in
-    ``_validate_cluster_for_ssh_proxy_ws``.
+    ``check_cluster_write_permission`` in ``_check_ssh_proxy_ws_permission``.
 
     Runs at the API boundary (before a worker is scheduled) so external
     requests are gated while internal ``core.*`` callers (controllers,
@@ -3301,8 +3307,9 @@ async def api_get(request: fastapi.Request,
     # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
     if request_task.should_retry:
         # Interrupted by a server version that recorded no error object —
         # including the very rolling update that ships this code, whose
@@ -3314,9 +3321,12 @@ async def api_get(request: fastapi.Request,
                 f'Request {request_id!r} was interrupted by an API server '
                 'restart and will not be resumed. Please re-submit the '
                 'original request.'))
-        raise fastapi.HTTPException(status_code=500,
-                                    detail=request_task.encode().model_dump())
-    return request_task.encode()
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=request_task.encode_for_client().model_dump())
+    if request_task.has_stored_result:
+        return await asyncio.to_thread(request_task.encode_for_client)
+    return request_task.encode_for_client()
 
 
 @app.get('/api/stream')
@@ -3573,10 +3583,6 @@ async def api_status(
         None, description='Filter requests by cluster name.'),
 ) -> Union[List[payloads.RequestPayload], fastapi.Response]:
     """Gets the list of requests."""
-    # Scope the request body to the caller: the owner sees it, others get null
-    # (see _request_body_for_display).
-    auth_user = request.state.auth_user
-    caller_user_id = auth_user.id if auth_user is not None else None
     # `fields` is caller-supplied and ends up in the SQL column list. Reject an
     # unknown column here so the client gets a 400 instead of a 500 from the
     # query layer.
@@ -3604,10 +3610,10 @@ async def api_status(
             sort=True,
         )
         content = await asyncio.to_thread(requests_lib.list_requests_json,
-                                          req_filter, caller_user_id)
+                                          req_filter)
         return fastapi.Response(content=content, media_type='application/json')
     else:
-        encoded_request_tasks = []
+        matched_request_tasks = []
         for request_id in request_ids:
             request_tasks = await requests_lib.get_requests_async_with_prefix(
                 request_id, requests_lib.DISPLAY_COLUMNS)
@@ -3618,23 +3624,34 @@ async def api_status(
                 if (scope_user_id is not None and
                         request_task.user_id != scope_user_id):
                     continue
-                encoded_request_tasks.append(
-                    request_task.readable_encode(caller_user_id=caller_user_id))
-        return encoded_request_tasks
+                matched_request_tasks.append(request_task)
+        # Encoding looks up each task's user in the DB.
+        return await asyncio.to_thread(
+            lambda: [task.readable_encode() for task in matched_request_tasks])
 
 
-def _get_local_contexts() -> List[str]:
+def _get_local_contexts(user: Optional[models.User]) -> List[str]:
     """Kubeconfig contexts that point at the API server's own cluster.
 
     Uses the same detection as the metrics federation routes, so the
     dashboard and the federation always agree on which contexts are
     local (their series are queried with cluster="" instead of a
-    context name). Non-blocking: verdicts come from the detection cache,
-    so this never stalls the event loop on a slow context.
+    context name). Verdicts come from the detection cache, so a slow context
+    never stalls it, but listing every workspace's contexts parses the
+    kubeconfig: call it off the event loop. For a non-admin ``user``, only the
+    contexts of the workspaces that user reads are returned.
     """
+    # This worker does not get the executor's per-request config reload; the
+    # federation reloads on every refresh, so match it.
+    common.refresh_workspace_state_for_sync_handler()
     local_contexts, _ = metrics_utils.split_local_remote_contexts(
-        core.get_all_contexts())
-    return local_contexts
+        core.get_every_workspace_contexts())
+    if user is None or permission.is_admin(user.id):
+        return local_contexts
+    workspaces = list(workspaces_core.workspaces_for_user(user.id))
+    readable = (visibility.visible_for_workspaces(workspaces, 'kubernetes') |
+                visibility.visible_for_workspaces(workspaces, 'ssh'))
+    return [c for c in local_contexts if c in readable]
 
 
 @app.get('/kubernetes/allowed_nodes')
@@ -3663,7 +3680,7 @@ async def kubernetes_allowed_nodes(k8s_context: str) -> Dict[str, Any]:
 
 
 @app.get('/dashboard_config')
-async def dashboard_config() -> Dict[str, Any]:
+async def dashboard_config(request: fastapi.Request) -> Dict[str, Any]:
     """Returns admin-configured dashboard settings consumed by the UI.
 
     Exposes the optional `external_links` entries: `regex` entries that
@@ -3675,8 +3692,8 @@ async def dashboard_config() -> Dict[str, Any]:
     render the link; entries without a scope appear on all pages. Also
     exposes `local_contexts` (contexts pointing at the API server's own
     cluster); the field is omitted when detection raises, so the
-    dashboard falls back to its ['in-cluster'] default instead of
-    treating an error as "no local contexts".
+    dashboard keeps its last known list (or its ['in-cluster'] default
+    on first load) instead of treating an error as "no local contexts".
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
@@ -3714,7 +3731,7 @@ async def dashboard_config() -> Dict[str, Any]:
         # keep it off the event loop. Failures must not break the rest of
         # the dashboard config.
         dashboard_settings['local_contexts'] = await asyncio.to_thread(
-            _get_local_contexts)
+            _get_local_contexts, request.state.auth_user)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning('Failed to determine local Kubernetes contexts for '
                        f'the dashboard: {common_utils.format_exception(e)}')
@@ -3823,6 +3840,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         # Whether GET /workspaces/config is restricted to admins (so the
         # dashboard can hide the config UI for non-admins when enabled)
         restrict_config_to_admins=rbac.restrict_config_to_admins(),
+        sync_call_max_limit=executor.get_sync_call_max_limit(),
     )
 
 
@@ -3842,7 +3860,7 @@ def _get_cluster_records_for_ssh(
     # simple cluster validation. This keeps per-call overhead low enough to
     # handle 20+ concurrent WebSocket SSH connections without timeout.
     # core.status runs as the server user, which can read every workspace;
-    # _validate_cluster_for_ssh_proxy_ws checks the caller's access first.
+    # _check_ssh_proxy_ws_permission checks the caller's access first.
     records = core.status(cluster_name, all_users=True, summary_response=True)
     if records:
         return records
@@ -3883,14 +3901,11 @@ async def _get_cluster_and_validate(
     return handle
 
 
-async def _validate_cluster_for_ssh_proxy_ws(
-    websocket: fastapi.WebSocket,
-    cluster_name: str,
-    cloud_type: Type[clouds.Cloud],
-) -> Optional['backends.CloudVmRayResourceHandle']:
-    """Validate the cluster for an already-accepted SSH proxy websocket.
+async def _close_ssh_proxy_ws(websocket: fastapi.WebSocket, cluster_name: str,
+                              detail: str) -> None:
+    """Closes an already-accepted SSH proxy websocket with the error detail.
 
-    The websocket is accepted before this call, so a raised HTTPException
+    The websocket is accepted before the checks run, so a raised HTTPException
     cannot be turned into an HTTP response: Starlette would emit
     ``websocket.http.response.start``, which uvicorn rejects with a
     ``RuntimeError``. On a websocket connection that error is unhandled and
@@ -3898,36 +3913,56 @@ async def _validate_cluster_for_ssh_proxy_ws(
     logs, and the connection is dropped abnormally rather than closed
     cleanly. This is easy to trigger, e.g. a client repeatedly reconnecting
     to a deleted cluster spams the logs with tracebacks. Instead, close the
-    websocket with the error detail as the close reason and return None so
-    the caller can bail out cleanly.
+    websocket with the error detail as the close reason.
+    """
+    logger.info(f'Closing SSH proxy websocket for cluster '
+                f'{cluster_name}: {detail}')
+    # 1008 (policy violation) signals the client that the connection
+    # cannot proceed; the reason carries the human-readable detail. A
+    # websocket close frame payload is capped at 125 bytes (RFC 6455) and
+    # 2 bytes go to the status code, so truncate the reason to 123 bytes
+    # to avoid a serialization error on long details (e.g. long cluster
+    # names) that would itself surface as the same unhandled RuntimeError.
+    reason = detail.encode('utf-8')[:123].decode('utf-8', 'ignore')
+    await websocket.close(code=1008, reason=reason)
+
+
+async def _check_ssh_proxy_ws_permission(websocket: fastapi.WebSocket,
+                                         cluster_name: str) -> bool:
+    """Checks write access to the cluster's own workspace; closes if denied.
+
+    Must run before anything else acts on the cluster, including the SSH
+    redirect hook. A missing auth_user (loopback / local CLI) is trusted.
+    Returns False if the websocket was closed.
+    """
+    auth_user = getattr(websocket.state, 'auth_user', None)
+    if auth_user is None:
+        return True
+    try:
+        await context_utils.to_thread_with_executor(
+            None, workspaces_core.check_cluster_write_permission, auth_user,
+            cluster_name)
+    except exceptions.PermissionDeniedError as e:
+        await _close_ssh_proxy_ws(websocket, cluster_name, str(e))
+        return False
+    return True
+
+
+async def _validate_cluster_for_ssh_proxy_ws(
+    websocket: fastapi.WebSocket,
+    cluster_name: str,
+    cloud_type: Type[clouds.Cloud],
+) -> Optional['backends.CloudVmRayResourceHandle']:
+    """Validate the cluster for an already-accepted SSH proxy websocket.
+
+    Callers must run ``_check_ssh_proxy_ws_permission`` first. On a lookup
+    or validation error, closes the websocket (see ``_close_ssh_proxy_ws``)
+    and returns None so the caller can bail out cleanly.
     """
     try:
-        # SSH into an existing cluster is a write (it grants an interactive
-        # shell / arbitrary code execution), so gate it by the cluster's own
-        # workspace, not the caller's active workspace. auth_user is set on
-        # the connection scope by the websocket-aware auth middleware; a
-        # missing one (loopback / local CLI) is trusted.
-        auth_user = getattr(websocket.state, 'auth_user', None)
-        if auth_user is not None:
-            try:
-                await context_utils.to_thread_with_executor(
-                    None, workspaces_core.check_cluster_write_permission,
-                    auth_user, cluster_name)
-            except exceptions.PermissionDeniedError as e:
-                raise fastapi.HTTPException(status_code=403,
-                                            detail=str(e)) from e
         return await _get_cluster_and_validate(cluster_name, cloud_type)
     except fastapi.HTTPException as e:
-        logger.info(f'Closing SSH proxy websocket for cluster '
-                    f'{cluster_name}: {e.detail}')
-        # 1008 (policy violation) signals the client that the connection
-        # cannot proceed; the reason carries the human-readable detail. A
-        # websocket close frame payload is capped at 125 bytes (RFC 6455) and
-        # 2 bytes go to the status code, so truncate the reason to 123 bytes
-        # to avoid a serialization error on long details (e.g. long cluster
-        # names) that would itself surface as the same unhandled RuntimeError.
-        reason = str(e.detail).encode('utf-8')[:123].decode('utf-8', 'ignore')
-        await websocket.close(code=1008, reason=reason)
+        await _close_ssh_proxy_ws(websocket, cluster_name, str(e.detail))
         return None
 
 
@@ -3943,6 +3978,9 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     timestamps_supported = client_version is not None and client_version > 21
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
+
+    if not await _check_ssh_proxy_ws_permission(websocket, cluster_name):
+        return
 
     # Check if there is a hook wants to redirect this connection.
     if (no_redirect != 1 and websocket_utils.ssh_redirect_hook is not None and
@@ -4145,6 +4183,8 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
 
+    if not await _check_ssh_proxy_ws_permission(websocket, cluster_name):
+        return
     handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
                                                       clouds.Slurm)
     if handle is None:
@@ -4407,13 +4447,15 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
 
 @app.get('/all_contexts')
 async def all_contexts(request: fastapi.Request) -> None:
-    """Gets all Kubernetes and SSH node pool contexts."""
+    """Gets the Kubernetes and SSH node pool contexts the caller can read."""
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
         request_body=payloads.RequestBody(),
-        func=core.get_all_contexts,
+        # Without an authenticated user nothing is scoped.
+        func=(core.get_all_contexts if request.state.auth_user is None else
+              core.get_workspace_contexts),
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -4468,10 +4510,38 @@ async def download_debug_dump(
 
 
 # === Internal APIs ===
+def _completion_workspaces_filter(
+        auth_user: Optional[models.User]) -> Optional[Set[str]]:
+    """Workspaces whose names `sky status` / `sky volumes ls` would show.
+
+    None (no authenticated user) means every workspace.
+    """
+    if auth_user is None:
+        return None
+    # Read-only visibility comes from the workspace config, which this
+    # process does not reload per request.
+    common.refresh_workspace_state_for_sync_handler()
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}))
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return permission.permission_service.get_accessible_workspace_names(
+        auth_user.id,
+        workspaces,
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def _readable_cluster_names_start_with(auth_user: Optional[models.User],
+                                       incomplete: str) -> List[str]:
+    """Cluster names to complete: only those `sky status -u` would show."""
+    return global_user_state.get_cluster_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
+
+
 @app.get('/api/completion/cluster_name')
-async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_cluster_names_start_with, incomplete)
+async def complete_cluster_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_cluster_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/storage_name')
@@ -4497,10 +4567,18 @@ async def complete_storage_name(request: fastapi.Request,
     return await asyncio.to_thread(_complete)
 
 
+def _readable_volume_names_start_with(auth_user: Optional[models.User],
+                                      incomplete: str) -> List[str]:
+    """Volume names to complete: only those `sky volumes ls` would show."""
+    return global_user_state.get_volume_names_start_with(
+        incomplete, workspaces_filter=_completion_workspaces_filter(auth_user))
+
+
 @app.get('/api/completion/volume_name')
-async def complete_volume_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_volume_names_start_with, incomplete)
+async def complete_volume_name(request: fastapi.Request,
+                               incomplete: str) -> List[str]:
+    return await asyncio.to_thread(_readable_volume_names_start_with,
+                                   request.state.auth_user, incomplete)
 
 
 @app.get('/api/completion/api_request')
@@ -4793,6 +4871,8 @@ if __name__ == '__main__':
 
     # Initialize global user state db
     db_utils.set_max_connections(1)
+    # Fail with install hint before ORM init (not TypeError on missing SA).
+    sqlalchemy_deps.require_server_dependencies()
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')
@@ -4918,6 +4998,9 @@ if __name__ == '__main__':
         clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
+        # Before uvicorn spawns its workers: they find the poller's output
+        # through the environment.
+        permission.permission_service.start_policy_version_poller()
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request

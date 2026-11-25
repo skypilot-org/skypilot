@@ -79,7 +79,8 @@ def _names_str(service_records: List[Dict[str, Any]]) -> str:
 
 
 def _check_service_ownership(service_records: List[Dict[str, Any]],
-                             pool: bool) -> None:
+                             pool: bool,
+                             terminated: Optional[List[str]] = None) -> None:
     """Refuses to act on a service the current user did not create.
 
     The services table records the creator of each service. The check
@@ -89,6 +90,11 @@ def _check_service_ownership(service_records: List[Dict[str, Any]],
     did not record one, or came from a controller that does not report
     it, so only an admin can act on it; the error says so, since to its
     creator it would otherwise read as someone else's.
+
+    Args:
+        terminated: Names already handed to the controller in the same
+            request, named in the error so a caller can tell a partial
+            refusal from a total one.
 
     Raises:
         exceptions.PermissionDeniedError: If the caller is not an admin and
@@ -114,8 +120,14 @@ def _check_service_ownership(service_records: List[Dict[str, Any]],
             f'{_names_str(unrecorded)} with no recorded creator (created by '
             'an older version, or reported by a controller that predates '
             'creator records)')
+    # The controller may still skip one (e.g. failed without --purge); its
+    # output, logged before this, says so.
+    done = (f'Asked the controller to terminate '
+            f'{", ".join(repr(n) for n in terminated)} (see its output '
+            'above); ' if terminated else '')
     raise exceptions.PermissionDeniedError(
-        f'User {user.name} ({user.id}) cannot manage {" and ".join(reasons)}. '
+        f'{done}User {user.name} ({user.id}) cannot manage '
+        f'{" and ".join(reasons)}. '
         f'Only the creator of a {noun} or an admin can manage it; a {noun} '
         'with no recorded creator needs an admin.')
 
@@ -430,6 +442,37 @@ def _own_service_records(
     ]
 
 
+def _own_or_skip(service_records: List[Dict[str, Any]],
+                 noun: str) -> List[Dict[str, Any]]:
+    """The caller's own records, as `--all` and patterns take them; logs how
+    many others it left out."""
+    targets = _own_service_records(service_records)
+    skipped = len(service_records) - len(targets)
+    if skipped:
+        # Only a non-admin skips, and then every record without a creator.
+        unrecorded = sum(
+            record.get('user_hash') is None for record in service_records)
+        extra = (f' ({unrecorded} with no recorded creator; an admin can tear '
+                 f'{"them" if unrecorded > 1 else "it"} down)'
+                 if unrecorded else '')
+        logger.info(f'Skipped {skipped} {noun}{"s" if skipped > 1 else ""} '
+                    f'not owned by you{extra}.')
+    return targets
+
+
+def _in_workspace(record: Dict[str, Any], workspace_id: str) -> bool:
+    """Whether the record is in the given workspace. A record whose workspace
+    is unknown is in none."""
+    record_workspace = record.get('workspace')
+    if record_workspace is None or record_workspace == workspace_id:
+        return record_workspace is not None
+    try:
+        return (skypilot_config.resolve_workspace_ref(record_workspace) ==
+                workspace_id)
+    except ValueError:  # Two workspaces share this name.
+        return False
+
+
 def check_service_owned_by_caller(
         service_name: str, pool: bool,
         handle: backends.CloudVmRayResourceHandle) -> None:
@@ -585,8 +628,8 @@ def up(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
-    clouds.Kubernetes.check_request_keeps_server_none()
-    clouds.Kubernetes.check_task_keeps_server_none(dag.tasks[0])
+    clouds.Kubernetes.check_request_keeps_server_identity()
+    clouds.Kubernetes.check_task_keeps_server_identity(dag.tasks[0])
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
@@ -1023,8 +1066,8 @@ def update(
     dag, _ = admin_policy_utils.apply(
         task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
-    clouds.Kubernetes.check_request_keeps_server_none()
-    clouds.Kubernetes.check_task_keeps_server_none(task)
+    clouds.Kubernetes.check_request_keeps_server_identity()
+    clouds.Kubernetes.check_task_keeps_server_identity(task)
     if pool:
         _maybe_display_run_warning(task)
         # Use dummy run script for pool.
@@ -1256,6 +1299,8 @@ def down(
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
 
+    # Exact names the caller may not manage: refused after their own go down.
+    denied: List[Dict[str, Any]] = []
     try:
         # Resolve the request to concrete records first, so each can be
         # checked against its creator. Every record is fetched: an older
@@ -1277,21 +1322,62 @@ def down(
                 f'{common_utils.format_exception(e)}')
             service_records = None
         if service_records is not None:
+            # `--all` and globs only reach the active workspace; an exact
+            # name reaches its service wherever it is. A controller older
+            # than the records' `workspace` field cannot be scoped.
+            active_workspace = skypilot_config.get_active_workspace()
+            scoped = not any(
+                'workspace' not in record for record in service_records)
+            unknown = [
+                record['name']
+                for record in service_records
+                if scoped and record['workspace'] is None
+            ]
+
+            def _reached(record: Dict[str, Any]) -> bool:
+                return not scoped or _in_workspace(record, active_workspace)
+
             if all:
                 # `down --all` from a non-admin means all of the caller's own.
-                targets = _own_service_records(service_records)
-                skipped = len(service_records) - len(targets)
-                if skipped:
-                    logger.info(
-                        f'Skipped {skipped} {noun}{"s" if skipped > 1 else ""} '
-                        'not owned by you.')
+                targets = _own_or_skip(
+                    [record for record in service_records if _reached(record)],
+                    noun)
             else:
+                # A pattern, like `--all`, takes only the caller's own; an
+                # exact name is refused if it is someone else's, even when a
+                # pattern matches it too.
+                exact = [
+                    record for record in service_records
+                    if record['name'] in service_names
+                ]
+                own_names = {
+                    record['name'] for record in _own_service_records(exact)
+                }
+                denied = [
+                    record for record in exact
+                    if record['name'] not in own_names
+                ]
                 targets = [
-                    record for record in service_records if any(
-                        _matches_service_pattern(record['name'], pattern)
+                    record for record in exact if record['name'] in own_names
+                ] + _own_or_skip([
+                    record for record in service_records
+                    if record['name'] not in service_names and _reached(record)
+                    and any('*' in pattern and
+                            _matches_service_pattern(record['name'], pattern)
+                            for pattern in service_names)
+                ], noun)
+                if denied and not targets:
+                    _check_service_ownership(denied, pool)
+                unknown = [
+                    name for name in unknown
+                    if name not in service_names and any(
+                        '*' in pattern and
+                        _matches_service_pattern(name, pattern)
                         for pattern in service_names)
                 ]
-                _check_service_ownership(targets, pool)
+            if unknown:
+                logger.info(f'Skipped {noun}s whose workspace is unknown '
+                            f'(tear them down by name): {unknown}')
             service_names = [record['name'] for record in targets]
             if not service_names:
                 # Decided here rather than by handing the controller an empty
@@ -1339,6 +1425,8 @@ def down(
         raise RuntimeError('gRPC timed out') from e
 
     logger.info(stdout)
+    if denied:
+        _check_service_ownership(denied, pool, terminated=service_names)
 
 
 class _DefaultServiceStatusRunner:
@@ -1444,6 +1532,7 @@ def status(
 
     service_records = serve_runner.current().get_service_status(
         handle=handle, service_names=service_names, pool=pool)
+    service_records = _readable_only(service_records)
 
     # Get the endpoint for each service
     for service_record in service_records:
@@ -1470,23 +1559,32 @@ def status(
                                                 '').replace('http://', '')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
 
-    _withhold_workspaces_of_unreadable(service_records)
     _resolve_user_names(service_records)
     _withhold_details_of_others(service_records)
 
     return service_records
 
 
-def _withhold_workspaces_of_unreadable(
-        service_records: List[Dict[str, Any]]) -> None:
-    """Drops the workspace from records in workspaces the caller cannot
-    read; status lists every user's services."""
+def _readable_only(
+        service_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drops records in workspaces the caller cannot read. A record whose
+    workspace is unknown is kept."""
     readable = workspaces_core.get_readable_workspace_names()
     if readable is None:
-        return
-    for record in service_records:
-        if record.get('workspace') not in readable:
-            record['workspace'] = None
+        return service_records
+
+    def _readable(workspace: Optional[str]) -> bool:
+        if workspace is None or workspace in readable:
+            return True
+        try:  # Older records may hold a name.
+            return skypilot_config.resolve_workspace_ref(workspace) in readable
+        except ValueError:  # Two workspaces share this name.
+            return False
+
+    return [
+        record for record in service_records
+        if _readable(record.get('workspace'))
+    ]
 
 
 ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]

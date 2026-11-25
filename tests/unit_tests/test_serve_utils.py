@@ -1,12 +1,16 @@
+import os
 import pathlib
+import pickle
 import tempfile
 from unittest import mock
 
 import pytest
 import requests.exceptions as requests_exceptions
+import sqlalchemy
 
 from sky import clouds
 from sky.resources import Resources
+from sky.serve import serve_state
 from sky.serve import serve_utils
 
 # String path for mock.patch — can't use the constant directly because
@@ -1012,3 +1016,79 @@ class TestHaRecoveryDefensiveOnAliveCheckException:
             # recovery script lookup or run must NOT happen — we skipped early
             mock_script.assert_not_called()
             mock_runner_cls.return_value.run.assert_not_called()
+
+
+class TestPoolWorkspace:
+    """The workspace a pool belongs to, read where the serve DB lives."""
+
+    @pytest.fixture(autouse=True)
+    def _db(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('HOME', str(tmp_path))
+        engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path / "serve.db"}')
+        serve_state._db_manager._engine = engine
+        serve_state.create_table(engine)
+        with engine.begin() as conn:
+            conn.execute(serve_state.services_table.insert(), [
+                {
+                    'name': 'p',
+                    'status': 'READY',
+                    'controller_port': 1,
+                    'pool': True,
+                    'workspace': 'ws-col',
+                },
+                {
+                    'name': 'svc',
+                    'status': 'READY',
+                    'controller_port': 2,
+                    'pool': False,
+                    'workspace': 'ws-a',
+                },
+            ])
+            conn.execute(serve_state.version_specs_table.insert(), [{
+                'service_name': name,
+                'version': 1,
+                'spec': pickle.dumps(None),
+                'yaml_content': 'run: echo\n',
+            } for name in ('p', 'svc')])
+        yield
+        serve_state._db_manager._engine = None
+
+    @staticmethod
+    def _config(text):
+        path = pathlib.Path(
+            os.path.expanduser(
+                serve_utils.generate_remote_config_yaml_file_name('p')))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def test_missing_pool(self):
+        assert serve_utils.get_pool_workspace('nosuch') == (False, None)
+
+    def test_service_is_not_a_pool(self):
+        assert serve_utils.get_pool_workspace('svc') == (False, None)
+
+    def test_config_wins_over_the_column(self):
+        self._config('active_workspace: ws-a\n')
+        assert serve_utils.get_pool_workspace('p') == (True, 'ws-a')
+
+    def test_column_when_the_config_is_gone(self):
+        assert serve_utils.get_pool_workspace('p') == (True, 'ws-col')
+
+    def test_config_without_the_key_is_unknown(self):
+        # Listings still say default; only the pool check treats it as unknown.
+        self._config('workspaces: {}\n')
+        assert serve_utils.get_pool_workspace('p') == (True, None)
+        assert serve_utils.get_service_workspace('p') == 'default'
+
+    @pytest.mark.parametrize(('config', 'workspace', 'refusal'), [
+        ('active_workspace: ws-a\n', 'ws-a', None),
+        ('workspaces: {}\n', 'ws-b', None),
+        ('active_workspace: ws-a\n', 'ws-b', (True, 'ws-a')),
+    ])
+    def test_refusal(self, config, workspace, refusal):
+        # Ids only: a renamed workspace keeps its id, so it still passes.
+        self._config(config)
+        assert serve_utils.get_pool_refusal('p', workspace) == refusal
+
+    def test_missing_pool_is_refused(self):
+        assert serve_utils.get_pool_refusal('nosuch', 'ws-a') == (False, None)

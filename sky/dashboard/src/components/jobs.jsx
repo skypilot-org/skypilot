@@ -558,12 +558,9 @@ export function ManagedJobs() {
       {/* Jobs section */}
       <div className="flex flex-wrap items-center gap-2 mb-1">
         <div className="flex items-center">
-          <Link
-            href="/jobs"
-            className="text-brand hover:underline leading-none text-base"
-          >
+          <span className="text-content leading-none text-base">
             Managed Jobs
-          </Link>
+          </span>
         </div>
         {/* Extension point for a small summary badge next to the page
             title. Renders nothing when no plugin fills it. */}
@@ -613,6 +610,7 @@ export function ManagedJobs() {
 
       {/* Pools table - always visible */}
       <div className="mb-4">
+        <h3 className="text-base leading-none mb-3">Pools</h3>
         <PoolsTable
           refreshInterval={REFRESH_INTERVAL}
           setLoading={setLoading}

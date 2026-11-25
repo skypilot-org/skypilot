@@ -19,6 +19,8 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_REQUEST_RESULTS_DIR_NAME = '.request_results'
+
 
 class LocalFilesystemBlobStorage(bs.BlobStorage):
     """Local-filesystem blob storage"""
@@ -39,6 +41,12 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
             'api_server_clients': str(
                 server_common.API_SERVER_CLIENT_DIR.expanduser())
         }
+
+    def request_results_dir(self) -> pathlib.Path:
+        # The clients dir is persisted and shared wherever file-mount blobs
+        # are; a dot name is never a user id.
+        return (server_common.API_SERVER_CLIENT_DIR.expanduser() /
+                _REQUEST_RESULTS_DIR_NAME)
 
     def blobs_dir(self, user_id: str) -> pathlib.Path:
         # Defense in depth: user_id is joined as a directory component, so a
@@ -166,7 +174,9 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
                     pass
 
         for user_dir in clients_dir.iterdir():
-            if not user_dir.is_dir():
+            # Stored request results live as long as their request rows.
+            if (not user_dir.is_dir() or
+                    user_dir.name == _REQUEST_RESULTS_DIR_NAME):
                 continue
             for entry in user_dir.iterdir():
                 if entry.name == 'file_mounts' and entry.is_dir():

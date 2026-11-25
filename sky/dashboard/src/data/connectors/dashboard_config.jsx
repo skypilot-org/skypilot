@@ -9,11 +9,22 @@ export const LINK_SCOPE_CLUSTER = 'cluster';
 export const LINK_SCOPE_JOBS = 'jobs';
 export const EXTERNAL_LINK_SCOPES = [LINK_SCOPE_CLUSTER, LINK_SCOPE_JOBS];
 
-// Module-level cache for the dashboard config response. The endpoint returns
-// admin-configured settings that do not change while the page is open, so a
-// single fetch per session is sufficient.
+// Module-level cache for the dashboard config response, fetched once per
+// session. `localContexts` depends on the caller's workspace grants and on
+// the server's context detection, so the infra page's Refresh clears it.
 let dashboardConfigCache = null;
 let dashboardConfigPromise = null;
+// Bumped on invalidation so a fetch sent earlier cannot cache its older
+// response.
+let dashboardConfigGeneration = 0;
+// A failed refetch keeps the last good response instead of EMPTY_CONFIG.
+let lastGoodDashboardConfig = null;
+
+export const invalidateDashboardConfig = () => {
+  dashboardConfigGeneration += 1;
+  dashboardConfigCache = null;
+  dashboardConfigPromise = null;
+};
 
 // `localContexts` falls back to ['in-cluster'] (the context name that is
 // local by construction) so the infra page keeps matching the local
@@ -43,12 +54,13 @@ export const getDashboardConfig = async () => {
     return dashboardConfigPromise;
   }
 
-  dashboardConfigPromise = (async () => {
+  const generation = dashboardConfigGeneration;
+  const promise = (async () => {
+    let config = lastGoodDashboardConfig || EMPTY_CONFIG;
     try {
       const response = await apiClient.get('/dashboard_config');
       if (!response.ok) {
-        dashboardConfigCache = EMPTY_CONFIG;
-        return dashboardConfigCache;
+        return config;
       }
       const data = await response.json();
       const rawCustomUrls = Array.isArray(data?.external_links)
@@ -81,24 +93,33 @@ export const getDashboardConfig = async () => {
           }
           return normalized;
         });
+      // The server omits local_contexts when detection fails; keep the
+      // last known list rather than falling back to the default.
       const localContexts = Array.isArray(data?.local_contexts)
         ? data.local_contexts.filter((entry) => typeof entry === 'string')
-        : EMPTY_CONFIG.localContexts;
-      dashboardConfigCache = { externalLinks, localContexts };
-      return dashboardConfigCache;
+        : config.localContexts;
+      config = { externalLinks, localContexts };
+      if (generation === dashboardConfigGeneration) {
+        lastGoodDashboardConfig = config;
+      }
+      return config;
     } catch (error) {
       console.debug('Dashboard config fetch failed:', error);
-      dashboardConfigCache = EMPTY_CONFIG;
-      return dashboardConfigCache;
+      return config;
     } finally {
-      dashboardConfigPromise = null;
+      if (generation === dashboardConfigGeneration) {
+        dashboardConfigCache = config;
+        dashboardConfigPromise = null;
+      }
     }
   })();
-
-  return dashboardConfigPromise;
+  dashboardConfigPromise = promise;
+  return promise;
 };
 
 export const resetDashboardConfigCache = () => {
+  dashboardConfigGeneration += 1;
   dashboardConfigCache = null;
   dashboardConfigPromise = null;
+  lastGoodDashboardConfig = null;
 };

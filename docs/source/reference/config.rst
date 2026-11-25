@@ -1898,6 +1898,12 @@ One of:
   identity: no token is mounted and no roles are granted. Autodown is not
   available. See :ref:`kubernetes-remote-identity-none`.
 
+With a remote API server, a user who is not an admin cannot make the API
+server's kubeconfig reach clusters that the server's own config does not send
+it to, such as with ``LOCAL_CREDENTIALS`` or by overriding the server's
+``NO_UPLOAD``. Such a value in their client config, task or admin policy
+output is refused; set it in the API server's config instead.
+
 .. _config-yaml-kubernetes-allowed-contexts:
 
 ``kubernetes.allowed_contexts``
@@ -2474,7 +2480,10 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
 Override the APT mirrors tried when installing packages on a pod (optional).
 Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
 fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
-(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``). The image's own sources are
+tried first. A mirror replaces only the image's Ubuntu sources
+(``*.ubuntu.com/ubuntu``), so it must serve Ubuntu packages over HTTP at
+``/ubuntu``.
 
 Example:
 
@@ -3113,6 +3122,7 @@ Advanced OCI configuration (optional).
 
 ``oci_config_profile``
     The profile name in ``~/.oci/config`` to use for launching instances.
+    A region-specific section can name a different profile for that region; ``sky check`` probes every profile named this way, and the key and token files of all of them are copied to clusters.
     Default: ``DEFAULT``
 
 ``compartment_ocid``

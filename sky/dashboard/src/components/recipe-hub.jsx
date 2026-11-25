@@ -1316,7 +1316,7 @@ export function RecipeHub() {
       {/* Header */}
       <div className="flex flex-wrap items-center gap-2 mb-4 min-h-[20px]">
         <div className="text-base flex items-center">
-          <span className="text-brand leading-none text-base">Recipes</span>
+          <span className="text-content leading-none text-base">Recipes</span>
         </div>
 
         <div className="flex items-center gap-2 ml-auto">

@@ -553,12 +553,9 @@ export function Clusters() {
     <>
       <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
         <div className="flex items-center gap-2">
-          <Link
-            href="/clusters"
-            className="text-brand hover:underline leading-none text-base"
-          >
+          <span className="text-content leading-none text-base">
             Sky Clusters
-          </Link>
+          </span>
         </div>
         <div className="w-full sm:w-auto max-w-xl">
           <PluginSlot

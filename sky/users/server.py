@@ -794,6 +794,7 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
     success_count = 0
     error_count = 0
     creation_errors = []
+    created_user_ids = []
 
     for user_data in users_to_create:
         try:
@@ -832,10 +833,23 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
                 permission.permission_service.update_role(user_hash, role)
 
             success_count += 1
+            created_user_ids.append(user_hash)
 
         except Exception as e:  # pylint: disable=broad-except
             error_count += 1
             creation_errors.append(f'{user_data["username"]}: {str(e)}')
+
+    if created_user_ids:
+        # Grant the private-workspace access `allowed_users` owes the new
+        # accounts, as `/users/create` does, once for the whole batch. The
+        # users already exist, so a failure is logged rather than raised: the
+        # grant is retried when a user next requests that workspace.
+        try:
+            (permission.permission_service.
+             resync_workspace_policies_for_new_users(created_user_ids))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Failed to grant private-workspace access for '
+                         f'imported users: {common_utils.format_exception(e)}')
 
     return {
         'success_count': success_count,
@@ -855,6 +869,8 @@ def user_export() -> Dict[str, Any]:
         skypilot_config.safe_reload_config()
         # Get all users
         user_list = global_user_state.get_all_users()
+        # One reload for the whole export, then read roles from memory.
+        permission.permission_service.refresh_policy()
 
         # Create CSV content
         csv_lines = ['username,password,role']  # Header
@@ -866,7 +882,7 @@ def user_export() -> Dict[str, Any]:
                 continue
 
             # Get user role
-            user_roles = permission.permission_service.get_user_roles(user.id)
+            user_roles = permission.permission_service.roles_in_memory(user.id)
             role = user_roles[0] if user_roles else rbac.get_default_role()
             # Avoid exporting `None` values
             line = ''
@@ -933,6 +949,16 @@ def get_service_account_tokens(
             if token['creator_user_hash'] == auth_user.id
         ]
 
+    users_by_id: Dict[str, models.User] = {}
+    if tokens:
+        # One reload and one user query for the whole list, not per token.
+        permission.permission_service.refresh_policy()
+        # Both columns are nullable, and get_users sorts its input.
+        users_by_id = global_user_state.get_users({
+            i for t in tokens
+            for i in (t['creator_user_hash'], t['service_account_user_id']) if i
+        })
+
     result = []
     for token in tokens:
         token_info = {
@@ -946,17 +972,17 @@ def get_service_account_tokens(
         }
 
         # Add creator display name
-        creator_user = global_user_state.get_user(token['creator_user_hash'])
+        creator_user = users_by_id.get(token['creator_user_hash'])
         token_info[
             'creator_name'] = creator_user.name if creator_user else 'Unknown'
 
         # Add service account name
-        sa_user = global_user_state.get_user(token['service_account_user_id'])
+        sa_user = users_by_id.get(token['service_account_user_id'])
         token_info['service_account_name'] = (sa_user.name if sa_user else
                                               token['token_name'])
 
         # Add service account roles
-        roles = permission.permission_service.get_user_roles(
+        roles = permission.permission_service.roles_in_memory(
             token['service_account_user_id'])
         token_info['service_account_roles'] = roles
 

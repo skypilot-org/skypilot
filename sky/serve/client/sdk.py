@@ -8,6 +8,7 @@ from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.usage import usage_lib
+from sky.utils import annotations
 from sky.utils import context
 
 if typing.TYPE_CHECKING:
@@ -20,6 +21,7 @@ if typing.TYPE_CHECKING:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def up(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
@@ -54,6 +56,7 @@ def up(
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def update(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
@@ -90,6 +93,7 @@ def update(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def down(
     service_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
@@ -115,12 +119,17 @@ def down(
         sky.exceptions.ClusterNotUpError: if the sky serve controller is not up.
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
+        sky.exceptions.PermissionDeniedError: if a named service was created
+          by another user; the caller's own named services are handed to the
+          controller first. A pattern from a non-admin skips other users'
+          services instead.
     """
     return impl.down(service_names, all, purge, pool=False)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def terminate_replica(service_name: str, replica_id: int,
                       purge: bool) -> server_common.RequestId[None]:
     """Tears down a specific replica for the given service.
@@ -155,6 +164,7 @@ def terminate_replica(service_name: str, replica_id: int,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def status(
     service_names: Optional[Union[str, List[str]]]
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
@@ -222,6 +232,7 @@ def status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
+@annotations.client_api
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
@@ -300,6 +311,7 @@ def tail_logs(service_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def sync_down_logs(service_name: str,
                    local_dir: str,
                    *,

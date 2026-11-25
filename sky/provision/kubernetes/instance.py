@@ -3317,12 +3317,6 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
         time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
 
 
-# Tags get_cluster_info() puts on the pods of a multi-host TPU slice; the
-# task runner exports them as TPU_WORKER_ID, TPU_WORKER_HOSTNAMES and
-# TPU_NAME (see kubernetes_utils.tpu_worker_env_vars()).
-_GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
-
-
 def _multi_host_tpu_vms_per_slice(node_selector: Any) -> int:
     """VMs per slice for a pod with ``node_selector``, or 0.
 
@@ -3363,7 +3357,7 @@ def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str) -> None:
                     kubernetes_utils.TPU_SLICE_LABEL: slice_name
                 }
             },
-            'topologyKey': _GKE_NODEPOOL_LABEL,
+            'topologyKey': kubernetes_utils.GKE_NODEPOOL_LABEL_KEY,
         })
     affinity.setdefault('podAntiAffinity', {}).setdefault(
         'requiredDuringSchedulingIgnoredDuringExecution', []
@@ -3382,7 +3376,7 @@ def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str) -> None:
                 'values': [slice_name],
             }]
         },
-        'topologyKey': _GKE_NODEPOOL_LABEL,
+        'topologyKey': kubernetes_utils.GKE_NODEPOOL_LABEL_KEY,
     })
 
 
@@ -3423,8 +3417,8 @@ def _tpu_slice_pods_by_node_pool(
         _request_timeout=kubernetes.API_TIMEOUT).items
     node_pool_by_name = {
         node.metadata.name: (node.metadata.labels or
-                             {}).get(_GKE_NODEPOOL_LABEL, node.metadata.name)
-        for node in nodes
+                             {}).get(kubernetes_utils.GKE_NODEPOOL_LABEL_KEY,
+                                     node.metadata.name) for node in nodes
     }
     slice_pods: Dict[str, List[str]] = {}
     for pod_name, node_name in slice_members:

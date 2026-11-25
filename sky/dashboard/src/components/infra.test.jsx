@@ -12,7 +12,7 @@ jest.mock('@/plugins/PluginSlot', () => ({
   ),
 }));
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import {
   InfrastructureSection,
   slurmRequestableCounts,
@@ -347,6 +347,59 @@ describe('InfrastructureSection Kubernetes GPU-type rows', () => {
     expect(container.querySelector('table').textContent).not.toContain(
       'Partition'
     );
+  });
+});
+
+describe('InfrastructureSection context workspaces', () => {
+  const renderWithWorkspaces = (workspaces) =>
+    renderSection({
+      title: 'Kubernetes',
+      contexts: ['ctx'],
+      groupedPerNodeGPUs: { ctx: [] },
+      contextWorkspaceMap: { ctx: workspaces },
+    });
+
+  // The name cell of the desktop table (the mobile card repeats it).
+  const nameCell = (container) =>
+    container.querySelector('table tbody tr').querySelectorAll('td')[1];
+
+  // jsdom has no layout, so fake the text being taller than its box.
+  const fakeOverflow = () => {
+    jest
+      .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+      .mockReturnValue(500);
+    jest
+      .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+      .mockReturnValue(100);
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  it('lists the workspaces with no button when they fit', () => {
+    const { container } = renderWithWorkspaces(['a', 'b']);
+    expect(normalize(nameCell(container))).toContain('(workspaces: a, b)');
+    expect(within(nameCell(container)).queryByRole('button')).toBeNull();
+  });
+
+  it('expands and collapses a list that does not fit', () => {
+    fakeOverflow();
+    const workspaces = Array.from({ length: 40 }, (_, i) => `ws-${i}`);
+    const { container } = renderWithWorkspaces(workspaces);
+    const cell = nameCell(container);
+    expect(normalize(cell)).toContain(`(workspaces: ${workspaces.join(', ')})`);
+
+    const button = within(cell).getByRole('button', { name: 'Show more' });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(cell.querySelector('.line-clamp-2')).not.toBeNull();
+
+    fireEvent.click(button);
+    const less = within(cell).getByRole('button', { name: 'Show less' });
+    expect(less).toHaveAttribute('aria-expanded', 'true');
+    expect(cell.querySelector('.line-clamp-2')).toBeNull();
+
+    fireEvent.click(less);
+    expect(
+      within(cell).getByRole('button', { name: 'Show more' })
+    ).toBeInTheDocument();
   });
 });
 

@@ -25,6 +25,7 @@ import {
   persistPageSize,
 } from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
+import { getCurrentUserInfo } from '@/data/connectors/client';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
@@ -60,6 +61,10 @@ import {
   filterData,
 } from '@/components/shared/FilterSystem';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
@@ -78,6 +83,7 @@ const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 // on each volume.
 const VOLUME_FILTER_SCHEMA = [
   { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'status', label: 'Status', kind: 'enum', multi: true },
   { key: 'infra', label: 'Infra', kind: 'text' },
   { key: 'type', label: 'Type', kind: 'enum', multi: true },
@@ -116,6 +122,8 @@ export function Volumes() {
   const [showPurgeUI, setShowPurgeUI] = useState(false);
   const [purgeConfirmed, setPurgeConfirmed] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
+  // A k8s-hostpath volume with cleanup wipes its host path on every node.
+  const [cleanupHostPath, setCleanupHostPath] = useState(true);
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
   const [activeTab, setActiveTab] = useState('volumes');
@@ -172,7 +180,13 @@ export function Volumes() {
     setDeleteError(null);
     setShowPurgeUI(false);
     setPurgeConfirmed(false);
+    setCleanupHostPath(true);
   };
+
+  const wipesHostPath =
+    volumeToDelete?.type === 'k8s-hostpath' &&
+    !!volumeToDelete?.config?.cleanup_on_deletion;
+  const noCleanup = wipesHostPath && !cleanupHostPath;
 
   const handleDeleteVolumeConfirm = async () => {
     if (!volumeToDelete) return;
@@ -181,9 +195,11 @@ export function Volumes() {
     setDeleteError(null);
 
     try {
-      const result = await deleteVolume(volumeToDelete.name);
+      const result = await deleteVolume(volumeToDelete.name, { noCleanup });
       if (!result.success) {
-        throw new Error(result.msg);
+        throw Object.assign(new Error(result.msg), {
+          forbidden: result.forbidden,
+        });
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
@@ -204,9 +220,14 @@ export function Volumes() {
     setDeleteError(null);
 
     try {
-      const result = await deleteVolume(volumeToDelete.name, { purge: true });
+      const result = await deleteVolume(volumeToDelete.name, {
+        purge: true,
+        noCleanup,
+      });
       if (!result.success) {
-        throw new Error(result.msg);
+        throw Object.assign(new Error(result.msg), {
+          forbidden: result.forbidden,
+        });
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
@@ -274,12 +295,7 @@ export function Volumes() {
               />
             </>
           ) : (
-            <Link
-              href="/volumes"
-              className="text-brand hover:underline leading-none"
-            >
-              Volumes
-            </Link>
+            <span className="text-content leading-none">Volumes</span>
           )}
         </div>
         {activeTab === 'volumes' && (
@@ -344,7 +360,7 @@ export function Volumes() {
                     <>
                       Remove &quot;
                       {volumeToDelete?.name || 'this volume'}&quot; from
-                      SkyPilot records. The underlying volume will not be
+                      SkyPilot records. The underlying volume may not be
                       deleted.
                     </>
                   ) : (
@@ -387,6 +403,28 @@ export function Volumes() {
                       <>; the underlying resource will be left intact.</>
                     )}
                   </div>
+                </div>
+              )}
+
+              {wipesHostPath && (
+                <div className="bg-amber-tint border border-amber-line rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-fg mt-0.5 flex-shrink-0" />
+                  <label className="text-sm text-amber-fg-stronger flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cleanupHostPath}
+                      onChange={(e) => setCleanupHostPath(e.target.checked)}
+                      disabled={deleteLoading}
+                      className="h-4 w-4 cursor-pointer mt-0.5 flex-shrink-0"
+                    />
+                    <span>
+                      Also delete everything under{' '}
+                      <code className="bg-amber-tint-strong px-1 rounded">
+                        {volumeToDelete?.config?.host_path}
+                      </code>{' '}
+                      on every node
+                    </span>
+                  </label>
                 </div>
               )}
 
@@ -442,13 +480,13 @@ export function Volumes() {
                         </>
                       )}
                     </p>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-start gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={purgeConfirmed}
                         onChange={(e) => setPurgeConfirmed(e.target.checked)}
                         disabled={purgeLoading}
-                        className="cursor-pointer"
+                        className="h-4 w-4 cursor-pointer mt-0.5 flex-shrink-0"
                       />
                       <span>
                         I understand force removal may not delete the underlying
@@ -480,7 +518,8 @@ export function Volumes() {
                           ? 'Retry Delete'
                           : 'Delete'}
                     </Button>
-                    {deleteError && (
+                    {/* Force removal is refused just the same. */}
+                    {deleteError && !deleteError.forbidden && (
                       <Button
                         variant="outline"
                         onClick={() => setShowPurgeUI(true)}
@@ -533,6 +572,35 @@ export function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
+  // Names for the Workspace column, and which workspaces the user may delete
+  // volumes from.
+  const { isWorkspaceWritable, workspacesConfig, loaded } =
+    useWorkspacesConfig();
+  // Only an admin may delete a k8s-hostpath volume. Unknown (null) leaves
+  // delete enabled; the server still enforces it. The cached lookup keeps
+  // this page from adding a /users/role call.
+  const [isAdmin, setIsAdmin] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUserInfo().then((info) => {
+      if (!cancelled && info?.role) setIsAdmin(info.role === 'admin');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Rows carry the workspace name, which filters and sorting go by; older
+  // servers send only the id.
+  const rows = useMemo(
+    () =>
+      data.map((volume) => ({
+        ...volume,
+        workspace_name:
+          volume.workspace_name ||
+          getWorkspaceName(workspacesConfig, volume.workspace),
+      })),
+    [data, workspacesConfig]
+  );
   // Filters live in the URL, keyed by name, so a filtered view is shareable.
   const { filters, setFilters } = useUrlFilterState(VOLUME_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
@@ -597,29 +665,30 @@ export function VolumesTable({
   // Suggestions shown in the filter dropdown, keyed by PROPERTY_OPTIONS value.
   const valueList = useMemo(() => {
     const uniq = (getValue) => [
-      ...new Set(data.map(getValue).filter((value) => value && value !== '-')),
+      ...new Set(rows.map(getValue).filter((value) => value && value !== '-')),
     ];
     return {
       name: uniq((volume) => volume.name),
+      workspace: uniq((volume) => volume.workspace_name),
       status: uniq((volume) => volume.status),
       infra: uniq((volume) => volume.infra),
       type: uniq((volume) => volume.type),
       user: uniq((volume) => volume.user_name),
     };
-  }, [data]);
+  }, [rows]);
 
   const filteredData = useMemo(() => {
     if (filters.length === 0) {
-      return data;
+      return rows;
     }
     // `User` filters against `user_name`; alias it so the shared filter can
     // resolve the property name to a field.
     return filterData(
-      data.map((volume) => ({ ...volume, user: volume.user_name })),
+      rows.map((volume) => ({ ...volume, user: volume.user_name })),
       filters,
       { orProperties: OR_PROPERTIES }
     );
-  }, [data, filters]);
+  }, [rows, filters]);
 
   const pluginColumns = useTableColumns('volumes');
 
@@ -809,6 +878,21 @@ export function VolumesTable({
       ),
     },
     {
+      id: 'workspace',
+      order: 5,
+      renderHeader: () => sortableHeader('Workspace', 'workspace_name'),
+      renderCell: (volume) => (
+        <TableCell>
+          <Link
+            href="/workspaces"
+            className="text-content hover:text-blue-fg hover:underline"
+          >
+            {volume.workspace_name}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
       id: 'infra',
       order: 10,
       renderHeader: () => sortableHeader('Infra', 'infra'),
@@ -899,19 +983,42 @@ export function VolumesTable({
       id: 'actions',
       order: 1000,
       renderHeader: () => <TableHead>Actions</TableHead>,
-      renderCell: (volume) => (
-        <TableCell>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDeleteVolume(volume)}
-            className="text-red-fg hover:text-red-fg-strong hover:bg-red-tint"
-            title="Delete volume"
-          >
-            <Trash2Icon className="w-4 h-4" />
-          </Button>
-        </TableCell>
-      ),
+      renderCell: (volume) => {
+        // The server refuses to delete a volume in a workspace the user can
+        // only read.
+        const writable = isWorkspaceWritable(volume.workspace);
+        // Until the workspaces load, delete is disabled without a reason.
+        const readOnly = loaded && !writable;
+        const adminOnly = volume.type === 'k8s-hostpath' && isAdmin === false;
+        return (
+          <TableCell>
+            {/* Also on a wrapper: a disabled button shows no tooltip. The
+                wrapper is inline-block so it covers the whole button. */}
+            <span
+              className="inline-block"
+              title={
+                readOnly
+                  ? 'Read-only: you are not a member of this volume’s workspace'
+                  : adminOnly
+                    ? 'Only an admin can delete k8s-hostpath volumes'
+                    : undefined
+              }
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDeleteVolume(volume)}
+                disabled={!writable || adminOnly}
+                className="text-red-fg hover:text-red-fg-strong hover:bg-red-tint"
+                title="Delete volume"
+                aria-label="Delete volume"
+              >
+                <Trash2Icon className="w-4 h-4" />
+              </Button>
+            </span>
+          </TableCell>
+        );
+      },
     },
   ];
 

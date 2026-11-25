@@ -40,7 +40,7 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/clusters',
         'title': 'Clusters | SkyPilot Dashboard',
         'aria': """
-- link "Sky Clusters"
+- text: /Sky Clusters/
 - textbox "Filter clusters"
 - tablist "Filter clusters by owner":
   - tab "My Clusters"
@@ -56,7 +56,7 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/jobs',
         'title': 'Managed Jobs | SkyPilot Dashboard',
         'aria': """
-- link "Managed Jobs"
+- text: /Managed Jobs/
 - textbox "Filter jobs"
 - tablist "Filter jobs by owner":
   - tab "My Jobs"
@@ -72,12 +72,12 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/volumes',
         'title': 'Volumes | SkyPilot Dashboard',
         'aria': """
-- link "Volumes"
+- text: /Volumes/
 - button "Refresh"
 - textbox "Filter volumes"
 - table:
   - rowgroup:
-    - row /Name Infra Status Size User/
+    - row /Name Workspace Infra Status Size User/
 """,
     },
     {
@@ -100,7 +100,7 @@ PAGES: List[Dict[str, str]] = [
         'url': '/dashboard/infra',
         'title': 'Infra | SkyPilot Dashboard',
         'aria': """
-- link "Infrastructure"
+- text: /Infrastructure/
 - combobox
 - button "Refresh"
 """,
@@ -454,7 +454,7 @@ def test_tour_runs_once_then_stays_away(make_user, open_as, twist):
     # A returning visitor: the suite's browser has seen the tour already.
     page = open_as(user, '/dashboard/clusters')
     tour = page.locator('.shepherd-element')
-    expect(page.get_by_role('link', name='Sky Clusters'),
+    expect(page.get_by_text('Sky Clusters', exact=True),
            'the clusters page must load').to_be_visible()
     # Absence check: the tour starts on mount and the welcome prompt after
     # 2 s, so give both that long to (wrongly) appear.
@@ -477,7 +477,7 @@ def test_tour_runs_once_then_stays_away(make_user, open_as, twist):
     expect(tour, 'Skip Tour must close the tour').to_have_count(0)
 
     page.reload()
-    expect(page.get_by_role('link', name='Sky Clusters'),
+    expect(page.get_by_text('Sky Clusters', exact=True),
            'the clusters page must load again').to_be_visible()
     page.wait_for_timeout(3000)
     expect(tour,

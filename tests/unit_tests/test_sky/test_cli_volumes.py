@@ -6,10 +6,33 @@ from unittest import mock
 from click import testing as cli_testing
 import pytest
 
+from sky import exceptions
 from sky.client.cli import command
 from sky.client.cli import table_utils
 from sky.schemas.api import responses
 from sky.utils import volume as volume_utils
+
+
+@pytest.fixture(autouse=True)
+def _server_without_workspace_api(monkeypatch):
+    """A server too old to name the active workspace: -a and patterns are
+    not narrowed (covered in test_cli_bulk_selectors.py)."""
+    monkeypatch.setattr(
+        'sky.client.sdk.get_user_workspace',
+        mock.MagicMock(side_effect=exceptions.APINotSupportedError('old')))
+    monkeypatch.setattr('sky.client.sdk.api_info',
+                        mock.MagicMock(return_value=mock.Mock(user=None)))
+
+
+def _mock_ls_and_workspaces(monkeypatch, volumes, workspaces):
+    """Answers `sdk.get` for the volume listing and the workspaces."""
+    monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                        mock.MagicMock(return_value='ls-request-id'))
+    monkeypatch.setattr('sky.client.sdk.workspaces',
+                        mock.MagicMock(return_value='ws-request-id'))
+    replies = {'ls-request-id': volumes, 'ws-request-id': workspaces}
+    monkeypatch.setattr('sky.client.sdk.get',
+                        mock.MagicMock(side_effect=replies.__getitem__))
 
 
 class TestVolumeCommands:
@@ -31,6 +54,8 @@ class TestVolumeCommands:
         # Mock the volumes SDK
         mock_apply = mock.MagicMock(return_value='request-id')
         monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+        # The server's own checks (e.g. enabled clouds) are not under test.
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock.MagicMock())
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -69,6 +94,8 @@ class TestVolumeCommands:
         # Mock the volumes SDK
         mock_apply = mock.MagicMock(return_value='request-id')
         monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+        # The server's own checks (e.g. enabled clouds) are not under test.
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock.MagicMock())
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -283,9 +310,7 @@ class TestVolumeCommands:
         monkeypatch.setattr('sky.volumes.client.sdk.ls', mock_ls)
         monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
 
-        # Mock the SDK get
-        mock_get = mock.MagicMock(return_value=mock_volumes)
-        monkeypatch.setattr('sky.client.sdk.get', mock_get)
+        _mock_ls_and_workspaces(monkeypatch, mock_volumes, {})
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -298,9 +323,125 @@ class TestVolumeCommands:
         # Test deleting all volumes
         result = cli_runner.invoke(command.volumes_delete, ['--all'])
         assert not result.exit_code
-        mock_delete.assert_called_once_with(['volume1', 'volume2'], purge=False)
+        mock_delete.assert_called_once_with(['volume1', 'volume2'],
+                                            purge=False,
+                                            no_cleanup=False)
         mock_async_call.assert_called_once_with('delete-request-id', False,
                                                 'sky.volumes.delete')
+
+    @pytest.mark.parametrize(
+        'args, deleted',
+        [
+            (['--all'], {'mine'}),
+            (['*'], {'mine'}),
+            # A name given exactly is left to the server to refuse.
+            (['theirs'], {'theirs'}),
+        ])
+    def test_volumes_delete_skips_unwritable_workspaces(self, monkeypatch, args,
+                                                        deleted):
+        _mock_ls_and_workspaces(monkeypatch, [{
+            'name': 'mine',
+            'workspace': 'ws-a'
+        }, {
+            'name': 'theirs',
+            'workspace': 'ws-b'
+        }], {
+            'ws-a': {
+                'writable': True
+            },
+            'ws-b': {
+                'writable': False
+            }
+        })
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                args + ['-y'])
+        assert not result.exit_code, result.output
+        assert set(mock_delete.call_args[0][0]) == deleted
+        assert ('Skipping 1 volume(s)'
+                in result.output) == (deleted == {'mine'})
+
+    _HOSTPATH_VOLUMES = [{
+        'name': 'hp',
+        'type': 'k8s-hostpath',
+        'region': 'ctx1',
+        'config': {
+            'host_path': '/mnt/data',
+            'cleanup_on_deletion': True
+        },
+    }, {
+        'name': 'pvc',
+        'type': 'k8s-pvc',
+        'config': {}
+    }]
+
+    @pytest.mark.parametrize('role, deleted', [('admin', {'hp', 'pvc'}),
+                                               ('user', {'pvc'})])
+    def test_volumes_delete_all_skips_hostpath_for_a_non_admin(
+            self, monkeypatch, role, deleted):
+        _mock_ls_and_workspaces(monkeypatch, self._HOSTPATH_VOLUMES, {})
+        monkeypatch.setattr(
+            'sky.server.common.make_authenticated_request',
+            lambda *a, **kw: mock.MagicMock(json=lambda: {'role': role}))
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                ['--all', '-y'])
+        assert not result.exit_code, result.output
+        assert set(mock_delete.call_args[0][0]) == deleted
+
+    @pytest.mark.parametrize('args, cleanup, warned',
+                             [([], True, True), (['--no-cleanup'], True, False),
+                              ([], False, False)])
+    def test_volumes_delete_warns_before_wiping_a_host_path(
+            self, monkeypatch, args, cleanup, warned):
+        hp = dict(self._HOSTPATH_VOLUMES[0],
+                  config={
+                      'host_path': '/mnt/data',
+                      'cleanup_on_deletion': cleanup
+                  })
+        _mock_ls_and_workspaces(monkeypatch, [hp], {})
+        confirm = mock.MagicMock(return_value=True)
+        monkeypatch.setattr('click.confirm', confirm)
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                ['hp'] + args)
+        assert not result.exit_code, result.output
+        prompt = confirm.call_args[0][0]
+        assert ('/mnt/data on every node of ctx1' in prompt) == warned
+        assert ('use --no-cleanup to keep the files' in prompt) == warned
+        # Defaults to no only when files would be wiped.
+        assert confirm.call_args[1]['default'] is (not warned)
+        assert mock_delete.call_args[1]['no_cleanup'] is bool(args)
+
+    def test_volumes_delete_all_without_writable_flag(self, monkeypatch):
+        """A server too old to report `writable` is not filtered against."""
+        _mock_ls_and_workspaces(monkeypatch, [{
+            'name': 'mine',
+            'workspace': 'ws-a'
+        }, {
+            'name': 'theirs',
+            'workspace': 'ws-b'
+        }], {
+            'ws-a': {},
+            'ws-b': {}
+        })
+        mock_delete = mock.MagicMock(return_value='delete-request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock.MagicMock())
+        result = cli_testing.CliRunner().invoke(command.volumes_delete,
+                                                ['--all', '-y'])
+        assert not result.exit_code, result.output
+        assert set(mock_delete.call_args[0][0]) == {'mine', 'theirs'}
 
     def test_volumes_delete_no_volumes(self, monkeypatch):
         """Test `sky volumes delete` when no volumes exist."""
@@ -376,9 +517,7 @@ class TestVolumeCommands:
         monkeypatch.setattr('sky.volumes.client.sdk.ls', mock_ls)
         monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
 
-        # Mock the SDK get
-        mock_get = mock.MagicMock(return_value=mock_volumes)
-        monkeypatch.setattr('sky.client.sdk.get', mock_get)
+        _mock_ls_and_workspaces(monkeypatch, mock_volumes, {})
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -1241,6 +1380,49 @@ class TestRunPodVolumeTable:
         assert 'Kubernetes PVCs:' in out
         assert 'RunPod Network Volumes:' in out
         assert '\n\n' in out
+
+    def test_format_volume_table_renders_every_volume_type(self):
+        # A type without a table branch is grouped but never printed, so
+        # `sky volumes ls` claims there are no volumes.
+        from sky.client.cli.table_utils import format_volume_table
+        from sky.utils import volume as volume_utils
+        for volume_type in volume_utils.VolumeType:
+            out = format_volume_table([{
+                'name': 'v1',
+                'type': volume_type.value,
+                'cloud': 'c',
+                'region': None,
+                'zone': None,
+                'size': None,
+            }],
+                                      show_all=False)
+            assert 'v1' in out, volume_type
+
+
+class TestModalVolumeTable:
+
+    def test_modal_volume_table(self):
+        from sky.client.cli import table_utils as tutils
+        volumes = [{
+            'name': 'cache',
+            'type': 'modal-volume',
+            'cloud': 'modal',
+            'region': None,
+            'zone': None,
+            'size': None,
+            'user_name': 'u',
+            'workspace': 'w',
+            'launched_at': 0,
+            'last_attached_at': None,
+            'status': 'READY',
+            'usedby_clusters': ['c1'],
+            'name_on_cloud': 'cache-abc'
+        }]
+        out = tutils.format_volume_table(volumes, show_all=True)
+        assert out.startswith('Modal Volumes:')
+        assert 'cache' in out
+        assert 'cache-abc' in out
+        assert 'c1' in out
 
 
 class TestVolumesLsByName:

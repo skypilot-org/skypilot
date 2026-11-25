@@ -1,4 +1,5 @@
 """Verify sky.check.check persists cloud2ctx2text into check_results."""
+import contextvars
 import time
 
 import pytest
@@ -16,6 +17,7 @@ import sky.check as sky_check
 from sky.clouds.cloud import CloudCapability
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import context
 from sky.utils.db import db_utils
 
 
@@ -653,6 +655,53 @@ def test_reader_recheck_is_kept_per_config(tmp_path, monkeypatch):
         assert enabled() == {'AWS', 'GCP'}
         config = {'kubernetes': {'allowed_contexts': ['b']}}
         assert enabled() == {'AWS'}
+
+
+def test_reader_recheck_is_kept_per_request(tmp_path, monkeypatch):
+    """Requests that run concurrently in one process keep their own re-checks.
+
+    A request starting in the process clears the request-level caches, which
+    must not drop what an earlier, still running request re-checked.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'aws', 'gcp'})
+    _probes(monkeypatch, {repr(sky_clouds.AWS()), repr(sky_clouds.GCP())})
+    monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                        lambda *args, **kwargs: [sky_clouds.AWS()])
+    monkeypatch.setattr(
+        'sky.global_user_state.get_allowed_clouds',
+        # pylint: disable-next=protected-access
+        sky_check._get_workspace_allowed_clouds)
+
+    def new_request():
+        request = contextvars.Context()
+        request.run(context.initialize)
+        return request
+
+    def in_request(request, func):
+
+        def run():
+            with skypilot_config.local_active_workspace_ctx('ws-ro'):
+                return func()
+
+        return request.run(run)
+
+    def enabled():
+        return {
+            repr(c) for c in sky_check.get_cached_enabled_clouds_or_refresh(
+                CloudCapability.COMPUTE)
+        }
+
+    rechecking = new_request()
+    other = new_request()
+    in_request(
+        rechecking,
+        lambda: sky_check.recheck_clouds(CloudCapability.COMPUTE, ['GCP']))
+    assert in_request(other, enabled) == {'AWS'}
+    in_request(other,
+               lambda: annotations.clear_request_level_cache(sync_refresh=True))
+    assert in_request(rechecking, enabled) == {'AWS', 'GCP'}
 
 
 def test_writer_reads_add_no_reader_recheck_entries(tmp_path, monkeypatch):
