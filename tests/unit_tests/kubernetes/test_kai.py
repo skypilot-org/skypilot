@@ -374,7 +374,8 @@ def _refresh_reason(monkeypatch):
                                       creation_timestamp=POD_CREATED,
                                       deletion_timestamp=POD_CREATED),
                 status=V1PodStatus(phase='Running'))
-    monkeypatch.setattr(instance, 'list_namespaced_pod', lambda *args: [pod])
+    monkeypatch.setattr(instance, 'list_namespaced_pod',
+                        lambda *args, **kwargs: [pod])
     monkeypatch.setattr(instance, '_get_pod_failure_reason_from_events',
                         lambda *args, **kwargs: None)
     monkeypatch.setattr(global_user_state, 'add_cluster_event',

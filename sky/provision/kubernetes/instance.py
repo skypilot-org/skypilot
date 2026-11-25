@@ -23,6 +23,7 @@ from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import kai
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -3930,8 +3931,16 @@ def _inspect_nodes(
     def _inspect_node(name: str) -> _NodeState:
         # One unreadable node must not lose the others: all of it in the try.
         try:
-            node = kubernetes.core_api(context).read_node(
-                name, _request_timeout=kubernetes.API_TIMEOUT)
+            result = reads.get_object(
+                context,
+                reads.NODES,
+                name,
+                consistency=reads.CACHED,
+                convert=kubernetes_utils.k8s_node_from_dict,
+                attempts=1)
+            if not result.items:
+                return _NodeState(True, _NODE_GONE, [])
+            node = result.items[0]
             taints = (_evicting_taints(node, tolerations, since)
                       if tolerations is not None else [])
             node_status = getattr(node, 'status', None)
@@ -3941,11 +3950,6 @@ def _inspect_nodes(
             if getattr(getattr(node, 'spec', None), 'unschedulable', False):
                 return _NodeState(True, _NODE_CORDONED, taints)
             return _NodeState(True, None, taints)
-        except kubernetes.api_exception() as e:
-            if e.status == 404:
-                return _NodeState(True, _NODE_GONE, [])
-            logger.debug(f'Failed to read node {name}: {e}')
-            return _NodeState(False, None, [])
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read node {name}: {e}')
             return _NodeState(False, None, [])
@@ -5155,10 +5159,32 @@ def _deleted_pods_error(
     return config_lib.KubernetesError(message)
 
 
-def list_namespaced_pod(context: Optional[str], namespace: str,
-                        cluster_name_on_cloud: str, is_ssh: bool, identity: str,
-                        label_selector: str) -> List[Any]:
-    # Get all the pods with the label skypilot-cluster-name: <cluster_name>
+def list_namespaced_pod(
+    context: Optional[str],
+    namespace: str,
+    cluster_name_on_cloud: str,
+    is_ssh: bool,
+    identity: str,
+    label_selector: str,
+    cache_accepts: Optional[Callable[[List[Any]], bool]] = None,
+) -> List[Any]:
+    """Lists the pods matching label_selector.
+
+    Args:
+        cache_accepts: None reads the API server. Otherwise a cached answer is
+            returned when cache_accepts(pods) is true, and any other answer is
+            read again from the API server.
+    """
+
+    def read(consistency: reads.Consistency) -> reads.ReadResult:
+        return reads.list_objects(context,
+                                  reads.PODS,
+                                  namespace=namespace,
+                                  label_selector=label_selector,
+                                  consistency=consistency,
+                                  convert=kubernetes_utils.k8s_pod_from_dict,
+                                  attempts=1)
+
     try:
         # log the query parameters we pass to the k8s api
         logger.debug(f'Querying k8s api for pods:\n'
@@ -5166,19 +5192,19 @@ def list_namespaced_pod(context: Optional[str], namespace: str,
                      f'namespace: {namespace}\n'
                      f'label selector:`{label_selector}`.')
 
-        response = kubernetes.core_api(context).list_namespaced_pod(
-            namespace,
-            label_selector=label_selector,
-            _request_timeout=kubernetes.API_TIMEOUT)
+        result = read(reads.FRESH if cache_accepts is None else reads.CACHED)
+        if (cache_accepts is not None and
+                result.source == reads.SOURCE_CACHE and
+                not cache_accepts(result.items)):
+            result = read(reads.FRESH)
 
         # log PodList response info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'k8s api response for `{label_selector}`:\n'
-                         f'apiVersion={response.api_version}, '
-                         f'kind={response.kind},\n'
-                         f'metadata={response.metadata}')
+                         f'source={result.source}, reason={result.reason}, '
+                         f'resourceVersion={result.resource_version}')
 
-        pods = response.items
+        pods = result.items
 
         # log detailed Pod info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
@@ -5199,23 +5225,20 @@ def list_namespaced_pod(context: Optional[str], namespace: str,
                              f'pod.status={pod.status}')
         return pods
 
-    except kubernetes.max_retry_error():
+    except exceptions.KubeAPIUnreachableError as e:
+        if is_ssh:
+            node_pool = common_utils.removeprefix(context,
+                                                  'ssh-') if context else ''
+            hint = (f'Please check if the SSH Node Pool {node_pool} is up and '
+                    'accessible. To debug, run `sky check ssh` to check the '
+                    'status of the SSH Node Pool.')
+        else:
+            hint = (f'Check if the {identity} in context {context} is up and '
+                    'accessible.')
         with ux_utils.print_exception_no_traceback():
-            if is_ssh:
-                node_pool = common_utils.removeprefix(context,
-                                                      'ssh-') if context else ''
-                msg = (
-                    f'Cannot connect to SSH Node Pool {node_pool}. '
-                    'Please check if the SSH Node Pool is up and accessible. '
-                    'To debug, run `sky check ssh` to check the status of '
-                    'the SSH Node Pool.')
-            else:
-                ctx = kubernetes_utils.get_current_kube_config_context_name()
-                msg = (f'Network error - check if the {identity} in '
-                       f'context {ctx} is up and accessible.')
             raise exceptions.ClusterStatusFetchingError(
-                f'Failed to query cluster {cluster_name_on_cloud!r} status. ' +
-                msg) from None
+                f'Failed to query cluster {cluster_name_on_cloud!r} status: '
+                f'{common_utils.format_exception(e)} {hint}') from None
     except Exception as e:  # pylint: disable=broad-except
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
@@ -5254,10 +5277,25 @@ def query_instances(
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
                       f'{cluster_name_on_cloud}')
+    # Find the list of pod names that should be there
+    # from k8s services. Filter duplicates as -ssh service
+    # creates a duplicate entry.
+    target_pod_names = {
+        service['spec']['selector']['component']
+        for service in provider_config.get('services', [])
+    }
 
     attempts = 0
-    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
-                               is_ssh, identity, label_selector)
+    pods = list_namespaced_pod(
+        context,
+        namespace,
+        cluster_name_on_cloud,
+        is_ssh,
+        identity,
+        label_selector,
+        # Verifying a teardown must not see pods a stale cache still holds.
+        cache_accepts=((lambda pods: _all_pods_up(pods, target_pod_names))
+                       if non_terminated_only else None))
     # When we see no pods returned from the k8s api, we assume the pods have
     # been terminated by the user directly and mark the cluster as terminated
     # in the global user state.
@@ -5319,15 +5357,6 @@ def query_instances(
         pod_name = pod.metadata.name
         cluster_status[pod_name] = (pod_status, reason)
 
-    # Find the list of pod names that should be there
-    # from k8s services. Filter duplicates as -ssh service
-    # creates a duplicate entry.
-    target_pod_names = list(
-        set([
-            service['spec']['selector']['component']
-            for service in provider_config.get('services', [])
-        ]))
-
     first_pod = True
     for target_pod_name in target_pod_names:
         if target_pod_name not in cluster_status:
@@ -5341,6 +5370,20 @@ def query_instances(
                 cluster_status[target_pod_name] = (None, reason)
 
     return cluster_status
+
+
+def _all_pods_up(pods: List[Any], target_pod_names: Set[str]) -> bool:
+    """Whether every expected pod is present, Running and healthy."""
+    if not pods:
+        return False
+    # Services select pods by component label; a Deployment's pod has a
+    # generated name.
+    present = ({pod.metadata.name for pod in pods} |
+               {(pod.metadata.labels or {}).get('component') for pod in pods})
+    if not target_pod_names <= present:
+        return False
+    return all(pod.status.phase == 'Running' and pod.metadata.deletion_timestamp
+               is None and _get_pod_health_issues(pod) is None for pod in pods)
 
 
 def get_command_runners(

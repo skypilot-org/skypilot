@@ -26,6 +26,7 @@ from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import oci_nccl
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
@@ -2271,7 +2272,8 @@ class Kubernetes(clouds.Cloud):
         # Deliberately not swallowing a failure to list nodes: the caller
         # reports None as "no node advertises this resource", which would be a
         # misleading diagnosis for an API or permission error.
-        nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context,
+                                                      consistency=reads.CACHED)
         for node in nodes:
             allocatable = node.status.allocatable or {}
             labels = node.metadata.labels or {}
@@ -2365,7 +2367,8 @@ class Kubernetes(clouds.Cloud):
         saw_aws_efa_node = False
 
         try:
-            nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+            nodes = kubernetes_utils.get_kubernetes_nodes(
+                context=context, consistency=reads.CACHED)
             for node in nodes:
                 if node.metadata.labels:
                     # Check for Nebius clusters
