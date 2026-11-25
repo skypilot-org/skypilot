@@ -83,6 +83,26 @@ describe('sendRequest', () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(got.status).toBe(200);
   });
+
+  test('waits a second for a busy server without Retry-After', async () => {
+    const { sendRequest } = loadWithHealth({ sync_call_max_limit: 100 });
+    const busy = response(null, { status: 429, headers: SYNC });
+    const send = jest
+      .fn()
+      .mockResolvedValueOnce(busy)
+      .mockResolvedValueOnce(answered([1]));
+    jest.useFakeTimers();
+    try {
+      const pending = sendRequest(send);
+      await jest.advanceTimersByTimeAsync(999);
+      expect(send).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toMatchObject({ status: 200 });
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe('fetchResult', () => {

@@ -1,5 +1,6 @@
 """Unit tests for the SDK fetching the cluster, storage and volume lists in
 pages."""
+import fnmatch
 import json
 from typing import Any, Callable, Dict, List, Optional
 from unittest import mock
@@ -67,9 +68,12 @@ class _Server:
         limit = args.get('limit')
         if limit is None or int(limit) > 2:
             return _response({'X-Skypilot-Request-ID': request_id})
+        names = args.get('cluster_names')
         rows = [
             row for row in self.rows
-            if self.ignores_cursor or self.after(row, args)
+            if (self.ignores_cursor or self.after(row, args)) and
+            (names is None or any(
+                fnmatch.fnmatchcase(row['name'], name) for name in names))
         ]
         page = [
             row for row in rows[:int(limit)] if row['name'] not in self.dropped
@@ -178,7 +182,8 @@ class TestStatus:
         assert [
             (c['json']['limit'], c['json']['after_name']) for c in server.calls
         ] == [(2, None)]
-        assert request_id.sync_response is not None
+        assert server.calls[0]['json']['cluster_names'] == ['a-new', 'b-old']
+        assert _rows(request_id) == ['a-new', 'b-old']
 
     def test_a_name_pattern_is_paged(self):
         server = _cluster_server()

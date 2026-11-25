@@ -96,7 +96,7 @@ async function waitForPlugins() {
 }
 
 // Returns the result carried by an /api/get response.
-export async function readRequestResult(path, fetchedData) {
+async function readRequestResult(path, fetchedData) {
   if (!fetchedData.ok) {
     const errorMessage = await getErrorMessageFromResponse(fetchedData);
     const msg = `API request to get ${path} result failed with status ${fetchedData.status}, error: ${errorMessage}`;
@@ -108,7 +108,7 @@ export async function readRequestResult(path, fetchedData) {
 
 // Returns the result of the request that `response` scheduled, read from
 // /api/get by the request ID in the response headers.
-export async function getRequestResult(path, response) {
+async function getRequestResult(path, response) {
   if (!response.ok) {
     const msg = `Initial API request ${path} failed with status ${response.status}`;
     throw new Error(msg);
@@ -167,15 +167,6 @@ export const apiClient = {
   fetch: async (path, body, method = 'POST', options = {}) => {
     try {
       await waitForPlugins();
-      // A plugin may take over how the result is obtained; it gets the same
-      // building blocks this function uses.
-      if (typeof window.__skyApiFetch === 'function') {
-        return await window.__skyApiFetch(path, body, method, {
-          fetchImmediate: apiClient.fetchImmediate,
-          getRequestResult,
-          readRequestResult,
-        });
-      }
       const limit =
         body && typeof body === 'object' && 'limit' in body
           ? body.limit

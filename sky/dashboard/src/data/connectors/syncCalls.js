@@ -67,8 +67,10 @@ export function isSyncAnswer(response) {
   );
 }
 
+// Retry-After in ms: 1 s when it is missing or invalid, as in the Python SDK.
 function retryAfterMs(response) {
-  const seconds = Number(response.headers.get('Retry-After'));
+  const header = response.headers.get('Retry-After');
+  const seconds = header === null ? NaN : Number(header);
   const ms = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 1000;
   return Math.min(ms, MAX_RETRY_AFTER_MS);
 }

@@ -1,8 +1,4 @@
-import {
-  apiClient,
-  getRequestResult,
-  readRequestResult,
-} from '@/data/connectors/client';
+import { apiClient } from '@/data/connectors/client';
 
 function jsonResponse(data, { status = 200, headers = {} } = {}) {
   return {
@@ -16,11 +12,6 @@ function jsonResponse(data, { status = 200, headers = {} } = {}) {
 describe('apiClient.fetch', () => {
   beforeEach(() => {
     global.fetch.mockReset();
-    delete window.__skyApiFetch;
-  });
-
-  afterEach(() => {
-    delete window.__skyApiFetch;
   });
 
   test('reads the result from /api/get by the request ID', async () => {
@@ -44,25 +35,6 @@ describe('apiClient.fetch', () => {
     expect(urls.some((url) => url.includes('/api/get?request_id=req-1'))).toBe(
       true
     );
-  });
-
-  test('hands the call to a plugin that sets window.__skyApiFetch', async () => {
-    window.__skyApiFetch = jest.fn(async () => 'from-plugin');
-
-    await expect(apiClient.fetch('/status', { a: 1 }, 'POST')).resolves.toBe(
-      'from-plugin'
-    );
-    expect(window.__skyApiFetch).toHaveBeenCalledWith(
-      '/status',
-      { a: 1 },
-      'POST',
-      {
-        fetchImmediate: apiClient.fetchImmediate,
-        getRequestResult,
-        readRequestResult,
-      }
-    );
-    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 
