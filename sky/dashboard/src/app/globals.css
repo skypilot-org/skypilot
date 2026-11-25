@@ -45,7 +45,7 @@
     /* Top bar fill. */
     --surface-nav: 0 0% 100%;
     /* Tooltips use the inverse of the page: dark in light mode. */
-    --tooltip: 0 0% 9%;
+    --tooltip: 0 0% 15%;
     --tooltip-foreground: 0 0% 98%;
     --content-strong: 220.91 39.29% 10.98%;
     --content-heavy: 215 27.91% 16.86%;
