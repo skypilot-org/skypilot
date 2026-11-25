@@ -61,7 +61,8 @@ class _ProcessingArgs:
                  skip_lines: Optional[List[str]] = None,
                  replace_crlf: bool = False,
                  line_processor: Optional[log_utils.LineProcessor] = None,
-                 streaming_prefix: Optional[str] = None) -> None:
+                 streaming_prefix: Optional[str] = None,
+                 collect_output: bool = True) -> None:
         self.log_path = log_path
         self.stream_logs = stream_logs
         self.start_streaming_at = start_streaming_at
@@ -70,6 +71,7 @@ class _ProcessingArgs:
         self.replace_crlf = replace_crlf
         self.line_processor = line_processor
         self.streaming_prefix = streaming_prefix
+        self.collect_output = collect_output
 
 
 def _get_context():
@@ -133,7 +135,8 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                     fout.write(line)
                     fout.flush()
                 line_processor.process_line(line)
-                out.append(line)
+                if args.collect_output:
+                    out.append(line)
     return ''.join(out)
 
 
@@ -276,6 +279,7 @@ def run_with_log(
                     # Replace CRLF when the output is logged to driver by ray.
                     replace_crlf=with_ray,
                     streaming_prefix=formatted_streaming_prefix,
+                    collect_output=require_outputs,
                 )
                 stdout_stream_handler = functools.partial(
                     _handle_io_stream,

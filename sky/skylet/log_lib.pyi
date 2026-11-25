@@ -29,6 +29,7 @@ class _ProcessingArgs:
     replace_crlf: bool = ...
     line_processor: Optional[log_utils.LineProcessor] = ...
     streaming_prefix: Optional[str] = ...
+    collect_output: bool = ...
 
     def __init__(self,
                  log_path: str,
@@ -38,7 +39,8 @@ class _ProcessingArgs:
                  skip_lines: Optional[List[str]] = ...,
                  replace_crlf: bool = ...,
                  line_processor: Optional[log_utils.LineProcessor] = ...,
-                 streaming_prefix: Optional[str] = ...) -> None:
+                 streaming_prefix: Optional[str] = ...,
+                 collect_output: bool = ...) -> None:
         ...
 
 
