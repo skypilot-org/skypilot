@@ -184,6 +184,14 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class KubernetesResourceNotServedError(Exception):
+    """The Kubernetes API server does not serve a resource type.
+
+    For example, the CRD that defines it is not installed.
+    """
+    pass
+
+
 class KubeAPIUnreachableError(ResourcesUnavailableError):
     """Raised when the Kubernetes API is currently unreachable.
 
@@ -838,6 +846,11 @@ class StorageReadOnlyError(StorageSpecError, PermissionDeniedError):
     pass
 
 
+class QueueNotAllowedError(PermissionDeniedError):
+    """Raised when a job's queue is not in its workspace's allowed queues."""
+    pass
+
+
 class InfraTargetNotFoundError(ValueError):
     """Raised when a named Kubernetes context or Slurm cluster is not found.
 
@@ -915,6 +928,20 @@ class SkyletMethodNotImplementedError(Exception):
 class SkyletUnavailableError(Exception):
     """Raised when the Skylet gRPC server is unreachable."""
     pass
+
+
+class PoolRefusedError(Exception):
+    """The jobs controller refused a pool for the job's workspace.
+
+    Raised and handled on the API server, which words the error the user sees.
+    """
+
+    def __init__(self, exists: bool, workspace: Optional[str]) -> None:
+        # The workspace stays out of the message: it may be one the caller
+        # cannot read, and a chained exception's message reaches the client.
+        super().__init__('Pool refused by the jobs controller.')
+        self.exists = exists
+        self.workspace = workspace
 
 
 # Exception types that indicate gRPC failed and the caller should fall

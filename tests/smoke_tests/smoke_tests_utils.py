@@ -1677,9 +1677,11 @@ def server_side_is_consolidation_mode() -> bool:
             text=True,
             check=False,
         )
-        # If we see a jobs controller cluster, consolidation is off.
+        # If we see a jobs controller cluster, consolidation is off. Match the
+        # table row: with SKYPILOT_DEBUG=1, the config dump can print
+        # 'sky-jobs-controller-' on stdout before the table.
         for line in result.stdout.splitlines():
-            if 'sky-jobs-controller-' in line:
+            if line.startswith('sky-jobs-controller-'):
                 return False
         # No controller cluster found. Check if managed jobs work (i.e.
         # consolidation mode is active) by checking if jobs queue succeeds.

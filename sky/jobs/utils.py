@@ -1877,7 +1877,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       cancel_launched_from: bool = True) -> str:
     """Cancel jobs by id.
 
-    If job_ids is None, cancel all jobs.
+    If job_ids is None, cancel all of the user's jobs, or with all_users,
+    every job in the current workspace.
 
     Args:
         cancel_request_info: who requested the cancellation, recorded in each
@@ -1889,14 +1890,19 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             tree). False when the caller already holds the full list, e.g.
             the controller sweep.
     """
+    if current_workspace is None:
+        current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
     if job_ids is None:
+        # All users' jobs: only the active workspace's, so the reply never
+        # lists ids from other workspaces. Own jobs keep the skipped hint.
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
-            None, user_hash, all_users)
+            None,
+            user_hash,
+            all_users,
+            workspaces={current_workspace} if all_users else None)
     job_ids = list(set(job_ids))
     if not job_ids:
         return 'No job to cancel.'
-    if current_workspace is None:
-        current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
 
     # Cancelling a job takes every job launched under it, at any depth: a
     # job launched from inside a managed job records that job as its parent
@@ -2084,8 +2090,11 @@ def cancel_job_by_name(
         graceful: bool = False,
         graceful_timeout: Optional[int] = None,
         cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
-    """Cancel a job by name."""
-    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
+    """Cancel a job by name, looked up in the active workspace only."""
+    if current_workspace is None:
+        current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
+        job_name, workspaces={current_workspace})
     if not job_ids:
         return f'No running job found with name {job_name!r}.'
     if len(job_ids) > 1:
@@ -2104,8 +2113,11 @@ def cancel_jobs_by_pool(
         pool_name: str,
         current_workspace: Optional[str] = None,
         cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
-    """Cancel all jobs in a pool."""
-    job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(pool_name)
+    """Cancel all jobs in a pool in the active workspace."""
+    if current_workspace is None:
+        current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
+        pool_name, workspaces={current_workspace})
     if not job_ids:
         return f'No running job found in pool {pool_name!r}.'
     return cancel_jobs_by_id(job_ids,

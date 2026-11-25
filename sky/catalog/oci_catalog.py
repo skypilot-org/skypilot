@@ -53,6 +53,9 @@ _image_df = common.read_catalog('oci/images.csv',
 _df: Optional[Union['pd.DataFrame', common.LazyDataFrame]] = None
 _df_catalog_mtime: Optional[float] = None
 _subscribed_regions: Optional[List[str]] = None
+# Set once a failed subscribed-region lookup has been reported; the lookup is
+# retried on every call until it succeeds (see _get_df), so warn only once.
+_subscription_lookup_warned = False
 
 _lock = threading.RLock()
 
@@ -64,12 +67,15 @@ def _catalog_mtime() -> Optional[float]:
         return None
 
 
-def _fetch_subscribed_regions() -> List[str]:
+def _fetch_subscribed_regions() -> Optional[List[str]]:
     """Returns the regions the configured tenancy is subscribed to.
 
     Returns an empty list when the OCI SDK or credentials are missing, or the
-    call fails, in which case the catalog is served unfiltered.
+    call fails, in which case the catalog is served unfiltered. Returns None
+    when the session token is missing or expired: the answer is not known
+    yet, and the caller should retry once the user has a new token.
     """
+    global _subscription_lookup_warned
     try:
         oci_adaptor.oci.load_module()
     except ImportError:
@@ -92,6 +98,15 @@ def _fetch_subscribed_regions() -> List[str]:
         # enter here (meaning OCI disabled).
         logger.debug(f'It is OK goes here when testing: {str(e)}')
         return []
+
+    except oci_adaptor.OCISessionTokenError as e:
+        # `sky check` tells the user how to fix this; warn only once here.
+        if _subscription_lookup_warned:
+            logger.debug(str(e))
+        else:
+            logger.warning(str(e))
+            _subscription_lookup_warned = True
+        return None
 
     except oci_adaptor.oci.exceptions.ServiceError as e:
         # Should never expect going here. However, we still catch
@@ -116,7 +131,13 @@ def _get_df() -> Union['pd.DataFrame', common.LazyDataFrame]:
         # filtered view. The subscribed-region lookup is an OCI API call, so
         # it is only repeated when the catalog actually changed, i.e. at most
         # once per pull.
-        _subscribed_regions = _fetch_subscribed_regions()
+        subscribed_regions = _fetch_subscribed_regions()
+        if subscribed_regions is None:
+            # Expired session token: serve the full catalog for now, but do
+            # not cache it, so filtering resumes on the next call once the
+            # user has re-authenticated, without a restart.
+            return _vms_df
+        _subscribed_regions = subscribed_regions
         if _subscribed_regions:
             _df = _vms_df[regions.isin(_subscribed_regions)]
         else:

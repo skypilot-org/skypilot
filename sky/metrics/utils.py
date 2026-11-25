@@ -677,6 +677,31 @@ SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
              120.0, 300.0, 600.0, float('inf')),
 )
 
+# Reads made through sky.provision.kubernetes.reads. reason is '' for a read
+# served from the cluster state source.
+SKY_APISERVER_KUBE_READS_TOTAL = prom.Counter(
+    'sky_apiserver_kube_reads_total',
+    'Kubernetes object reads by context, resource, the source that served '
+    'them, and why a read went to the API server',
+    ['context', 'resource', 'source', 'reason'],
+)
+
+# One sample per GET call to an API server, retries included.
+SKY_APISERVER_KUBE_READ_API_CALL_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_api_call_seconds',
+    'Duration of the Kubernetes API calls made by object reads, by resource '
+    'and outcome',
+    ['resource', 'outcome'],
+    buckets=_LATENCY_BUCKETS,
+)
+
+SKY_APISERVER_KUBE_READ_STALENESS_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_staleness_seconds',
+    'How long the watch behind a cached object read had been failing',
+    ['resource'],
+    buckets=(0, 1, 5, 15, 30, 60, 120, 300, 600, float('inf')),
+)
+
 # --- ~/sky_logs retention ---
 #
 # Written once per hourly sweep by _prune_sky_logs() in the main API server
@@ -812,6 +837,44 @@ def observe_launch_phase(phase: str, attempt: str, workspace: str,
                                                      max(0.0, duration_seconds))
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to observe launch phase metric: {e}')
+
+
+def count_kube_read(context: str, resource: str, source: str,
+                    reason: str) -> None:
+    """Record one Kubernetes object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READS_TOTAL.labels(context=context,
+                                              resource=resource,
+                                              source=source,
+                                              reason=reason).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count Kubernetes read: {e}')
+
+
+def observe_kube_read_api_call(resource: str, outcome: str,
+                               duration_seconds: float) -> None:
+    """Record one Kubernetes API call made by an object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_API_CALL_SECONDS.labels(
+            resource=resource, outcome=outcome).observe(duration_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes API call: {e}')
+
+
+def observe_kube_read_staleness(resource: str,
+                                staleness_seconds: float) -> None:
+    """Record the staleness of one cached object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_STALENESS_SECONDS.labels(
+            resource=resource).observe(staleness_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes read staleness: {e}')
 
 
 def count_launch_phase_dropped(phase: str, reason: str) -> None:
@@ -2111,19 +2174,47 @@ async def add_cluster_name_label(metrics_text: str,
                                    replace_existing)
 
 
+# node-exporter's InfiniBand / RoCE series, one per RDMA device port. Per node
+# (no pod label): the GPU dashboard's node network panel joins them to DCGM's
+# series on (cluster, node).
+_NODE_RDMA_METRICS = (
+    # tx/rx bytes: the GPU dashboard's node network panel.
+    'node_infiniband_port_data_transmitted_bytes_total',
+    'node_infiniband_port_data_received_bytes_total',
+    # Work-completion errors. A NIC can fail every multi-node job while its
+    # link stays up at full rate with no link errors; these are what rise then.
+    'node_infiniband_req_cqes_errors_total',
+    'node_infiniband_req_cqes_flush_errors_total',
+    'node_infiniband_resp_cqes_errors_total',
+    'node_infiniband_resp_cqes_flush_errors_total',
+    'node_infiniband_req_remote_invalid_request_errors_total',
+    # Link drops, recoveries and physical-layer errors.
+    'node_infiniband_link_downed_total',
+    'node_infiniband_link_error_recovery_total',
+    'node_infiniband_symbol_error_total',
+    'node_infiniband_port_errors_received_total',
+    'node_infiniband_local_link_integrity_errors_total',
+    # RoCE transport retransmits and ack timeouts.
+    'node_infiniband_roce_adp_retransmits_total',
+    'node_infiniband_local_ack_timeout_errors_total',
+    # Negotiated link rate: a port that trained below its rated speed.
+    'node_infiniband_rate_bytes_per_second',
+)
+
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
-# CPU/memory, node RDMA throughput, kube_pod_labels, and cAdvisor container
-# metrics (per-pod CPU/Memory in the Telemetry section joins on (pod,
-# namespace) with kube_pod_labels — same join shape the GPU panels use to
-# filter by SkyPilot cluster name).
+# CPU/memory, node RDMA throughput, errors and link changes, kube_pod_labels,
+# and cAdvisor container metrics (per-pod CPU/Memory in the Telemetry section
+# joins on (pod, namespace) with kube_pod_labels — same join shape the GPU
+# panels use to filter by SkyPilot cluster name).
 GPU_METRICS_MATCH_PATTERNS = [
     '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
     'kube_pod_labels',
     'node_cpu_seconds_total{mode="idle"}',
-    # node-exporter's InfiniBand / RoCE byte counters, one series per RDMA
-    # device port. Per node (no pod label): the GPU dashboard's node network
-    # panel joins them to DCGM's series on (cluster, node).
-    '{__name__=~"node_infiniband_port_data_(transmitted|received)_bytes_total"}',  # pylint: disable=line-too-long
+    '{__name__=~"' + '|'.join(_NODE_RDMA_METRICS) + '"}',
+    # Link drops of the RDMA network interfaces (rdma* for RoCE, ib* for
+    # InfiniBand), one per drop. A flapping RoCE port leaves
+    # node_infiniband_link_downed_total at 0; this is what rises.
+    'node_network_carrier_down_changes_total{device=~"rdma.*|ib.*"}',
     'container_cpu_usage_seconds_total{container!="",container!="POD"}',
     'container_memory_working_set_bytes{container!="",container!="POD"}',
     # GPU allocation metrics — pod requests + node capacity for nvidia/amd

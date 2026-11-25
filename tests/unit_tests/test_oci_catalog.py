@@ -7,6 +7,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 
+from sky.adaptors import oci as oci_adaptor
 from sky.catalog import common as catalog_common
 from sky.catalog import oci_catalog
 from sky.clouds.utils import oci_utils
@@ -167,6 +168,50 @@ def test_fresh_catalog_does_not_repeat_subscription_lookup(isolated_catalog):
         assert set(first['Region']) == {'eu-frankfurt-1'}
         assert get.call_count == 1
         assert subscribed.call_count == 1
+
+
+def test_expired_token_serves_full_catalog_until_a_new_session(
+        isolated_catalog, monkeypatch):
+    """An expired session token must not pin the unfiltered view."""
+    del isolated_catalog
+    pytest.importorskip('oci')
+    # The token is expired for the first two catalog queries; the user then
+    # runs `oci session authenticate` and the third one succeeds.
+    subscription = mock.MagicMock()
+    subscription.region_name = 'us-ashburn-1'
+    client = mock.MagicMock()
+    client.list_region_subscriptions.return_value.data = [subscription]
+    expired = oci_adaptor.OCISessionTokenError('token expired')
+    get_identity_client = mock.MagicMock(side_effect=[expired, expired, client])
+    monkeypatch.setattr(oci_adaptor, 'get_identity_client', get_identity_client)
+    monkeypatch.setattr(
+        oci_adaptor,
+        'get_oci_config',
+        lambda region=None, profile='DEFAULT': {'tenancy': 'ocid1.tenancy.x'})
+    monkeypatch.setattr(oci_utils.oci_config,
+                        'get_profile',
+                        lambda region=None: 'TOKEN')
+    monkeypatch.setattr(oci_catalog, '_subscription_lookup_warned', False)
+    monkeypatch.setattr(oci_catalog, 'logger', mock.MagicMock())
+    with mock.patch.object(catalog_common.requests,
+                           'get',
+                           return_value=_Response(CATALOG_V1)):
+        both = {'us-ashburn-1', 'eu-frankfurt-1'}
+        assert set(oci_catalog._get_df()['Region']) == both
+        # Not cached: the next query retries the lookup instead of serving
+        # the unfiltered catalog until the process restarts.
+        assert oci_catalog._df is None
+        assert set(oci_catalog._get_df()['Region']) == both
+        # Reported once, not on every query.
+        oci_catalog.logger.warning.assert_called_once_with('token expired')
+        oci_catalog.logger.debug.assert_called_once_with('token expired')
+
+        filtered = oci_catalog._get_df()
+        assert set(filtered['Region']) == {'us-ashburn-1'}
+        assert oci_catalog._df is filtered
+        # Once resolved, the lookup is not repeated.
+        assert oci_catalog._get_df() is filtered
+        assert get_identity_client.call_count == 3
 
 
 # ---------------------------------------------------------------------------

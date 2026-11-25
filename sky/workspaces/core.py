@@ -272,7 +272,23 @@ def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
     # `allowed_users`: they add or remove no infra.
     access_fields = set(_ACCESS_AND_NAME_FIELDS)
     access_fields |= schemas.access_only_workspace_properties()
-    return {k: v for k, v in config.items() if k not in access_fields}
+    stripped = {k: v for k, v in config.items() if k not in access_fields}
+    # Allowed queues are left out. An empty cloud or quota block counts as
+    # no block.
+    for cloud in ('kubernetes', 'slurm'):
+        if cloud not in stripped:
+            continue
+        cloud_config = dict(stripped.pop(cloud) or {})
+        quota = {
+            k: v
+            for k, v in (cloud_config.pop('quota', None) or {}).items()
+            if k != 'allowed_queues'
+        }
+        if quota:
+            cloud_config['quota'] = quota
+        if cloud_config:
+            stripped[cloud] = cloud_config
+    return stripped
 
 
 def _check_workspace_names_unique(old_workspaces: Dict[str, Any],
@@ -400,6 +416,20 @@ def _is_additive_contexts(current_allowed_contexts: Any,
     return False
 
 
+def _narrows_allowed_queues(current_config: Dict[str, Any],
+                            new_config: Dict[str, Any]) -> bool:
+    """Whether the change drops a queue from the allowed queues, or starts
+    limiting queues."""
+    for cloud in ('kubernetes', 'slurm'):
+        old = ((current_config.get(cloud) or {}).get('quota') or
+               {}).get('allowed_queues')
+        new = ((new_config.get(cloud) or {}).get('quota') or
+               {}).get('allowed_queues')
+        if new is not None and (old is None or not set(old) <= set(new)):
+            return True
+    return False
+
+
 def _compare_workspace_configs(
     current_config: Dict[str, Any],
     new_config: Dict[str, Any],
@@ -467,6 +497,13 @@ def _compare_workspace_configs(
     additive_allowed_contexts = (
         current_without_contexts == new_without_contexts and
         _is_additive_contexts(current_allowed_contexts, new_allowed_contexts))
+
+    # Dropping a queue needs the workspace to have no active resources.
+    # TODO(amithadke): Only refuse when active work is in a removed queue, not
+    # when the workspace has any active work.
+    if _narrows_allowed_queues(current_config, new_config):
+        only_user_access_changes = False
+        additive_allowed_contexts = False
 
     return WorkspaceConfigComparison(
         only_user_access_changes=only_user_access_changes,

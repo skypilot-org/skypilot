@@ -28,6 +28,7 @@ from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
@@ -165,6 +166,7 @@ def _uses_wait_for_scheduling_timeout(dag: 'sky.Dag') -> bool:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
@@ -339,6 +341,7 @@ def launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(18)
+@annotations.client_api
 def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
@@ -574,6 +577,7 @@ def _queue_in_pages(
 # TODO(lloyd): Remove version=1 support before 0.13.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def queue(
     refresh: bool,
     skip_finished: bool = False,
@@ -657,6 +661,7 @@ def queue(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def cancel(
     name: Optional[str] = None,
     job_ids: Optional[Sequence[int]] = None,
@@ -764,6 +769,7 @@ def tail_logs(name: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
+@annotations.client_api
 def tail_logs(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
@@ -858,6 +864,7 @@ def tail_logs(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(45)
+@annotations.client_api
 def wait(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
@@ -913,6 +920,7 @@ def wait(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs_streaming(
     name: Optional[str],
     job_id: Optional[int],
@@ -1038,6 +1046,7 @@ def download_logs_streaming(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs(
         name: Optional[str],
         job_id: Optional[int],
@@ -1109,6 +1118,7 @@ spot_tail_logs = common_utils.deprecated_function(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def dashboard() -> None:
     """Starts a dashboard for managed jobs."""
     user_hash = common_utils.get_user_hash()
@@ -1123,6 +1133,7 @@ def dashboard() -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_apply(
     task: Optional[Union['sky.Task', 'sky.Dag']],
     pool_name: str,
@@ -1151,18 +1162,27 @@ def pool_apply(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
 ) -> server_common.RequestId[None]:
-    """Delete a pool."""
+    """Delete a pool.
+
+    Request Raises:
+        sky.exceptions.PermissionDeniedError: if a named pool was created by
+          another user; the caller's own named pools are handed to the
+          controller first. A pattern from a non-admin skips other users'
+          pools instead.
+    """
     return impl.down(pool_names, all, purge, pool=True)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
@@ -1174,6 +1194,7 @@ def pool_status(
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
 @versions.minimal_api_version(16)
+@annotations.client_api
 def pool_tail_logs(pool_name: str,
                    target: Union[str, 'serve_utils.ServiceComponent'],
                    worker_id: Optional[int] = None,
@@ -1194,6 +1215,7 @@ def pool_tail_logs(pool_name: str,
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
 @versions.minimal_api_version(16)
+@annotations.client_api
 def pool_sync_down_logs(pool_name: str,
                         local_dir: str,
                         *,
