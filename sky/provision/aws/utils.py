@@ -1,4 +1,8 @@
-"""Utils for AWS provisioner."""
+"""Utils for AWS provisioner.
+
+Adapted from Ray (ray-2.0.1, python/ray/autoscaler/_private/aws/utils.py),
+Apache-2.0; see sky/skylet/LICENSE. Modified by the SkyPilot authors.
+"""
 import colorama
 
 from sky import exceptions

@@ -1,5 +1,8 @@
 """Azure configuration bootstrapping.
 
+Adapted from Ray (ray-2.4.0, python/ray/autoscaler/_private/_azure/config.py),
+Apache-2.0; see sky/skylet/LICENSE. Modified by the SkyPilot authors.
+
 Creates the resource group and deploys the configuration template to Azure for
 a cluster to be launched.
 """

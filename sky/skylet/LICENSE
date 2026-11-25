@@ -202,14 +202,22 @@
 
 --------------------------------------------------------------------------------
 
-Code in providers/azure from
-https://github.com/ray-project/ray/tree/ray-2.4.0/python/ray/autoscaler/_private/_azure
-Git commit of the release 2.4.0: a777a028b8dbd7bbae9a7393c98f6cd65f98a5f5
+Code adapted from Ray (https://github.com/ray-project/ray), Apache-2.0:
 
-Code in providers/gcp from
-https://github.com/ray-project/ray/tree/ray-2.4.0/python/ray/autoscaler/_private/gcp
-Git commit of the release 2.4.0: 45ffe6eb99d96488fdec187bb47a4a78d9b5ee92
+  sky/provision/aws/config.py, sky/provision/aws/utils.py and parts of
+  sky/provision/aws/instance.py from
+  https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws
 
+  sky/provision/azure/config.py and
+  sky/provision/azure/azure-config-template.json from
+  https://github.com/ray-project/ray/tree/ray-2.4.0/python/ray/autoscaler/_private/_azure
+  Git commit of the release 2.4.0: a777a028b8dbd7bbae9a7393c98f6cd65f98a5f5
+
+  sky/provision/gcp/config.py and sky/provision/gcp/instance_utils.py from
+  https://github.com/ray-project/ray/tree/ray-2.4.0/python/ray/autoscaler/_private/gcp
+  Git commit of the release 2.4.0: 45ffe6eb99d96488fdec187bb47a4a78d9b5ee92
+
+All of these files were modified by the SkyPilot authors.
 
 Copyright 2016-2023 Ray developers
 
@@ -224,3 +232,74 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+--------------------------------------------------------------------------------
+
+Code in sky/provision/runpod/api/commands.py, sky/provision/runpod/api/pods.py
+and parts of sky/provision/runpod/utils.py adapted from runpod-python
+(https://github.com/runpod/runpod-python), modified by the SkyPilot authors.
+
+MIT License
+
+Copyright (c) 2023 RunPod
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+The React components in sky/dashboard/src/components/ui/ are generated from
+and adapted from shadcn/ui (https://ui.shadcn.com,
+https://github.com/shadcn-ui/ui), modified by the SkyPilot authors.
+
+MIT License
+
+Copyright (c) 2023 shadcn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+charts/skypilot/manifests/vllm-serving-dashboard.json is adapted from the
+Grafana dashboard shipped with vLLM (https://github.com/vllm-project/vllm,
+examples/online_serving/prometheus_grafana/grafana.json), Apache-2.0,
+Copyright the vLLM team. Modified by the SkyPilot authors.
+
+--------------------------------------------------------------------------------
+
+goofys (https://github.com/kahing/goofys), Apache-2.0, Copyright 2015-2019
+Ka-Hing Cheung. SkyPilot does not bundle goofys; sky/data/mounting_utils.py
+downloads an unmodified binary built from the fork at
+https://github.com/aylei/goofys onto the cluster at mount time. The license
+text is available in that repository.

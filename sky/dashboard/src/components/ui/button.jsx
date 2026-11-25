@@ -1,3 +1,6 @@
+// Adapted from shadcn/ui (https://ui.shadcn.com), MIT License; see
+// sky/skylet/LICENSE. Modified by the SkyPilot authors.
+
 import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';

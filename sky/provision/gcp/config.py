@@ -1,4 +1,8 @@
-"""GCP configuration bootstrapping."""
+"""GCP configuration bootstrapping.
+
+Adapted from Ray (ray-2.4.0, python/ray/autoscaler/_private/gcp/config.py),
+Apache-2.0; see sky/skylet/LICENSE. Modified by the SkyPilot authors.
+"""
 import copy
 import logging
 import time
