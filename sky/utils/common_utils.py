@@ -538,6 +538,8 @@ def get_pretty_entrypoint_cmd() -> str:
 
     # Redact sensitive values from secrets arguments
     argv = _redact_secrets_values(argv)
+    # Redact the token and the endpoint password of `sky api login`
+    argv = _redact_api_login_credentials(argv)
 
     return shlex.join(argv)
 
@@ -682,6 +684,93 @@ def redact_flag_values(argv: List[str], flags: Tuple[str, ...]) -> List[str]:
         result.append(arg)
         i += 1
     return result
+
+
+# The options of `sky api login` whose value is or can hold a credential.
+_API_LOGIN_TOKEN_OPTIONS = ('--service-account-token', '--token', '-t')
+_API_LOGIN_ENDPOINT_OPTIONS = ('--endpoint', '-e')
+
+
+def _redact_endpoint_password(endpoint: str) -> str:
+    """``[scheme://]user:password@host`` with the password redacted.
+
+    Replaces everything from the first ``:`` after the scheme to the last
+    ``@``. This covers a user name that is an email address and a password
+    with unescaped special characters, and can hide more than the password
+    when the path contains an ``@``. An endpoint without a password is
+    returned unchanged.
+    """
+    scheme, sep, rest = endpoint.partition('://')
+    if not sep:
+        scheme, rest = '', endpoint
+    colon = rest.find(':')
+    at = rest.rfind('@')
+    if colon < 0 or at < colon:
+        return endpoint
+    return f'{scheme}{sep}{rest[:colon]}:<redacted>{rest[at:]}'
+
+
+def _redact_api_login_credentials(argv: List[str]) -> List[str]:
+    """Redact the token and the endpoint password of ``sky api login``.
+
+    Covers ``OPTION VALUE``, ``--option=VALUE`` and ``-oVALUE``. Any other
+    command is returned unchanged: ``-t`` and ``-e`` mean other things there.
+
+    Args:
+        argv: Command line arguments
+
+    Returns:
+        A new argv with the values redacted. If anything goes wrong, the
+        program name followed by ``<redacted>``, so that a failure cannot
+        leave a credential in the result.
+
+    Examples:
+        ['sky', 'api', 'login', '--token', 'sky_abc'] ->
+        ['sky', 'api', 'login', '--token', '<redacted>']
+
+        ['sky', 'api', 'login', '-e', 'https://user:pw@host'] ->
+        ['sky', 'api', 'login', '-e', 'https://user:<redacted>@host']
+
+        ['sky', 'launch', '-t', 'm5.large'] ->
+        ['sky', 'launch', '-t', 'm5.large'] (no change)
+    """
+    if not argv:
+        return argv or []
+    try:
+        subcommand = [arg for arg in argv[1:] if not arg.startswith('-')][:2]
+        if subcommand != ['api', 'login']:
+            return argv
+
+        def redact(option: str, value: str) -> str:
+            if option in _API_LOGIN_TOKEN_OPTIONS:
+                return '<redacted>'
+            return _redact_endpoint_password(value)
+
+        options = _API_LOGIN_TOKEN_OPTIONS + _API_LOGIN_ENDPOINT_OPTIONS
+        result: List[str] = []
+        # The option whose value is the next argument, if any.
+        value_of: Optional[str] = None
+        for arg in argv:
+            if value_of is not None:
+                result.append(redact(value_of, arg))
+                value_of = None
+                continue
+            if arg in options:
+                result.append(arg)
+                value_of = arg
+                continue
+            for option in options:
+                # --option=VALUE, or -oVALUE for a short option.
+                prefix = option + '=' if option.startswith('--') else option
+                if arg.startswith(prefix):
+                    arg = prefix + redact(option, arg[len(prefix):])
+                    break
+            result.append(arg)
+        return result
+    except Exception:  # pylint: disable=broad-except
+        # Redaction must not fail the command, and must not return the
+        # arguments unredacted either.
+        return argv[:1] + ['<redacted>']
 
 
 def user_and_hostname_hash() -> str:
