@@ -1134,6 +1134,40 @@ tests:
           any: true
           content:
             name: logrotate
+      - notMatchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "/root/.sky/api_server/server.log \\{"
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "/root/.sky/serve/\\*/controller.log \\{"
+
+  - it: should rotate only controller logs in dev mode with a non-root context
+    set:
+      apiService.devMode.enabled: true
+      apiService.logs.retention.enabled: true
+      securityContext:
+        runAsNonRoot: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.runAsNonRoot
+          value: false
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.runAsUser
+          value: 0
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.capabilities.drop[0]
+          value: ALL
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].securityContext.privileged
+      - notMatchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "/root/.sky/api_server/server.log \\{"
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "/root/.sky/serve/\\*/controller.log \\{"
 
   - it: should not include logrotate sidecar when retention is disabled even if serveServerLog is true
     set:

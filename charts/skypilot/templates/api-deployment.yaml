@@ -483,9 +483,19 @@ spec:
         {{- end }}
       {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
+        {{- if .Values.apiService.devMode.enabled }}
+        securityContext:
+          runAsNonRoot: false
+          runAsUser: 0
+          capabilities:
+            drop:
+            - ALL
+          allowPrivilegeEscalation: false
+        {{- else }}
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- end }}
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
@@ -500,6 +510,7 @@ spec:
           fi
           set -x
           cat > /var/lib/logrotate/logrotate.conf <<EOF
+          {{- if and .Values.apiService.serveServerLog (not .Values.apiService.devMode.enabled) }}
           /root/.sky/api_server/server.log {
               size {{ .Values.apiService.logs.retention.size }}
               rotate 1
@@ -507,6 +518,7 @@ spec:
               notifempty
               copytruncate
           }
+          {{- end }}
           /root/.sky/serve/*/controller.log {
               size {{ .Values.apiService.logs.retention.size }}
               rotate 1
