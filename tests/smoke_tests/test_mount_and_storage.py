@@ -40,6 +40,7 @@ import sky
 from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
+from sky.adaptors import akave
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
@@ -978,6 +979,40 @@ def test_vastdata_storage_mounts(generic_cloud: str):
 
         test = smoke_tests_utils.Test(
             'vastdata_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.akave
+def test_akave_storage_mounts(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_akave_storage_mounting.yaml').read_text(
+            encoding='utf-8')
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     encoding='utf-8') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',
+            (f'AWS_SHARED_CREDENTIALS_FILE='
+             f'{akave.AKAVE_CREDENTIALS_PATH} '
+             f'AWS_CONFIG_FILE={akave.AKAVE_CONFIG_PATH} '
+             f'aws s3 ls s3://{storage_name}/hello.txt '
+             f'--profile={akave.AKAVE_PROFILE_NAME}'),
+        ]
+
+        test = smoke_tests_utils.Test(
+            'akave_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,

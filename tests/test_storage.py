@@ -1,9 +1,11 @@
 import tempfile
 import time
+from unittest import mock
 
 import pytest
 
 from sky import exceptions
+from sky.adaptors import akave
 from sky.data import mounting_utils
 from sky.data import storage as storage_lib
 
@@ -775,6 +777,124 @@ class TestVastDataStorage:
     def test_vastdata_in_store_enabled_clouds(self):
         """Verify VastData is in STORE_ENABLED_CLOUDS."""
         assert 'VastData' in storage_lib.STORE_ENABLED_CLOUDS
+
+
+class TestAkaveStorage:
+    """Tests for Akave storage integration."""
+
+    def test_store_type_akave_exists(self):
+        """Verify AKAVE is a valid StoreType."""
+        assert storage_lib.StoreType.AKAVE.value == 'AKAVE'
+
+    def test_store_prefix(self):
+        """Verify Akave store prefix is akave://."""
+        assert storage_lib.StoreType.AKAVE.store_prefix() == 'akave://'
+
+    def test_split_akave_path(self):
+        """Test splitting Akave URIs."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_akave_path(
+            'akave://my-bucket/path/to/data')
+        assert bucket == 'my-bucket'
+        assert key == 'path/to/data'
+
+    def test_split_akave_path_no_key(self):
+        """Test splitting Akave URIs with no key."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_akave_path('akave://my-bucket/')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_split_akave_path_bucket_only(self):
+        """Test splitting Akave URIs with bucket only."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_akave_path('akave://my-bucket')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_from_yaml_config_akave_source(self):
+        """Test Storage.from_yaml_config with Akave source."""
+        yaml_config = {
+            'source': 'akave://my-bucket',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.source == 'akave://my-bucket'
+
+    def test_from_yaml_config_akave_store_type(self):
+        """Test Storage.from_yaml_config with store set to akave."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 'akave',
+            'mode': 'COPY',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.name == 'test-bucket'
+
+    def test_akave_mount_cmd(self):
+        """Test Akave mount command generation."""
+        cmd = mounting_utils.get_akave_mount_cmd(
+            akave_credentials_path='~/.akave/akave.credentials',
+            akave_profile_name='akave',
+            bucket_name='test-bucket',
+            endpoint_url='https://s3.example.com',
+            mount_path='/mnt/data')
+        assert 'test-bucket' in cmd
+        assert 'https://s3.example.com' in cmd
+        assert '/mnt/data' in cmd
+        assert 'AWS_SHARED_CREDENTIALS_FILE=' in cmd
+
+    def test_akave_mount_cmd_rclone_uses_env_auth(self):
+        """rclone (ARM64) must read the Akave profile from the environment."""
+        cmd = mounting_utils.get_akave_mount_cmd(
+            akave_credentials_path='~/.akave/akave.credentials',
+            akave_profile_name='akave',
+            bucket_name='test-bucket',
+            endpoint_url='https://s3.example.com',
+            mount_path='/mnt/data')
+        rclone_cmd, goofys_cmd = cmd.rsplit('; else ', 1)
+        assert 'rclone mount :s3:test-bucket' in rclone_cmd
+        assert '--s3-env-auth=true' in rclone_cmd
+        assert '--s3-env-auth' not in goofys_cmd
+
+    def test_akave_mount_cmd_goofys_disables_trailing_checksums(self):
+        """goofys (x86_64) must send multipart parts as plain PUTs."""
+        cmd = mounting_utils.get_akave_mount_cmd(
+            akave_credentials_path='~/.akave/akave.credentials',
+            akave_profile_name='akave',
+            bucket_name='test-bucket',
+            endpoint_url='https://s3.example.com',
+            mount_path='/mnt/data')
+        wrapper = mounting_utils._GOOFYS_WRAPPER  # pylint: disable=protected-access
+        goofys_env = cmd[:cmd.index(wrapper)]
+        goofys_env = goofys_env[goofys_env.rindex('else'):]
+        assert 'AWS_REQUEST_CHECKSUM_CALCULATION=when_required' in goofys_env
+        assert 'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required' in goofys_env
+
+    def test_akave_in_store_enabled_clouds(self):
+        """Verify Akave is in STORE_ENABLED_CLOUDS."""
+        assert 'Akave' in storage_lib.STORE_ENABLED_CLOUDS
+
+    def test_akave_upload_commands_disable_trailing_checksums(self, tmp_path):
+        """Local-to-bucket `aws s3 sync` uploads must send plain requests."""
+        with mock.patch.object(akave,
+                               'get_endpoint',
+                               return_value='https://s3.example.com'):
+            store = object.__new__(storage_lib.AkaveStore)
+            store.config = storage_lib.AkaveStore.get_config()
+            store.name = 'test-bucket'
+            store._bucket_sub_path = None  # pylint: disable=protected-access
+            with mock.patch.object(storage_lib.data_utils,
+                                   'parallel_upload') as upload:
+                store.batch_aws_rsync([str(tmp_path)])
+                file_cmd_fn, dir_cmd_fn = upload.call_args[0][1:3]
+                file_cmd = file_cmd_fn(str(tmp_path), ['a.bin'])
+                dir_cmd = dir_cmd_fn(str(tmp_path), 'data')
+        for cmd in (file_cmd, dir_cmd):
+            assert 'aws s3 sync' in cmd
+            assert 'AWS_REQUEST_CHECKSUM_CALCULATION=when_required' in cmd
+            assert 'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required' in cmd
+            assert cmd.index('AWS_REQUEST_CHECKSUM_CALCULATION') < cmd.index(
+                'aws s3 sync')
 
 
 class TestMountConfig:

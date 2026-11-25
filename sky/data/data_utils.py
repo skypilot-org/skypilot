@@ -16,6 +16,7 @@ from filelock import FileLock
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import akave
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
@@ -746,6 +747,7 @@ class Rclone:
         NEBIUS = 'NEBIUS'
         COREWEAVE = 'COREWEAVE'
         VASTDATA = 'VASTDATA'
+        AKAVE = 'AKAVE'
         OCI = 'OCI'
 
         def get_profile_name(self, bucket_name: str) -> str:
@@ -767,6 +769,7 @@ class Rclone:
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
                 Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
                 Rclone.RcloneStores.VASTDATA: 'sky-vastdata',
+                Rclone.RcloneStores.AKAVE: 'sky-akave',
                 Rclone.RcloneStores.OCI: 'sky-oci',
             }
             return f'{profile_prefix[self]}-{bucket_name}'
@@ -933,6 +936,22 @@ class Rclone:
                 endpoint_url = vastdata.get_endpoint()
                 access_key_id = vastdata_credentials.access_key
                 secret_access_key = vastdata_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    region = auto
+                    acl = private
+                    """)
+            elif self is Rclone.RcloneStores.AKAVE:
+                akave_session = akave.session()
+                akave_credentials = akave.get_akave_credentials(akave_session)
+                endpoint_url = akave.get_endpoint()
+                access_key_id = akave_credentials.access_key
+                secret_access_key = akave_credentials.secret_key
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
                     type = s3
@@ -1231,4 +1250,41 @@ def verify_vastdata_bucket(name: str) -> bool:
         return False
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Unexpected error checking VastData bucket {name}: {e}')
+        return False
+
+
+def create_akave_client() -> Client:
+    """Create Akave S3 client."""
+    return akave.client('s3')
+
+
+def split_akave_path(akave_path: str) -> Tuple[str, str]:
+    """Splits Akave Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      akave_path: str; Akave Path, e.g. akave://imagenet/train/
+    """
+    path_parts = akave_path.replace('akave://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def verify_akave_bucket(name: str) -> bool:
+    """Verify Akave bucket exists and is accessible."""
+    akave_client = create_akave_client()
+    try:
+        akave_client.head_bucket(Bucket=name)
+        return True
+    except akave.botocore_exceptions().ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '403':
+            logger.error(f'Access denied to bucket {name}')
+        elif error_code == '404':
+            logger.debug(f'Bucket {name} does not exist')
+        else:
+            logger.debug(f'Unexpected error checking Akave bucket {name}: {e}')
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Unexpected error checking Akave bucket {name}: {e}')
         return False
