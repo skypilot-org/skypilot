@@ -3,7 +3,7 @@ import decimal
 import enum
 import re
 import time as time_module
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -120,8 +120,9 @@ def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
 
 _is_rbac_permission_error = api_errors.is_rbac_denial
 
-_PVC: Callable[[Dict[str, Any]], Any] = (
-    kubernetes_utils.k8s_object_converter('V1PersistentVolumeClaim'))
+
+def _pvc_from_dict(pvc: Dict[str, Any]) -> Any:
+    return kubernetes_utils.dict_to_k8s_object(pvc, 'V1PersistentVolumeClaim')
 
 
 def _is_rbac_denied_read(e: Exception) -> bool:
@@ -230,7 +231,7 @@ def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
                                   pvc_name,
                                   namespace=namespace,
                                   consistency=reads.FRESH,
-                                  convert=_PVC,
+                                  convert=_pvc_from_dict,
                                   attempts=1)
         if not result.items:
             raise config_lib.KubernetesError(
@@ -892,7 +893,7 @@ def get_all_volumes_state(
                                       namespace=namespace,
                                       label_selector='parent=skypilot',
                                       consistency=reads.CACHED,
-                                      convert=_PVC,
+                                      convert=_pvc_from_dict,
                                       attempts=1)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get PVCs in namespace {namespace} '
@@ -925,7 +926,7 @@ def get_all_volumes_state(
                                           pvc_name,
                                           namespace=namespace,
                                           consistency=reads.CACHED,
-                                          convert=_PVC,
+                                          convert=_pvc_from_dict,
                                           attempts=1)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to read PVC {pvc_name} in namespace '
@@ -1244,7 +1245,7 @@ def _find_pvc_by_name_or_label(context: Optional[str], namespace: str,
                               volume_name,
                               namespace=namespace,
                               consistency=reads.FRESH,
-                              convert=_PVC,
+                              convert=_pvc_from_dict,
                               attempts=1)
     if result.items:
         return result.items[0]
@@ -1256,7 +1257,7 @@ def _find_pvc_by_name_or_label(context: Optional[str], namespace: str,
                                   namespace=namespace,
                                   label_selector=f'skypilot-name={volume_name}',
                                   consistency=reads.FRESH,
-                                  convert=_PVC,
+                                  convert=_pvc_from_dict,
                                   attempts=1)
         if pvcs.items:
             if len(pvcs.items) > 1:
@@ -1319,7 +1320,7 @@ def create_persistent_volume_claim(
                               pvc_name,
                               namespace=namespace,
                               consistency=reads.FRESH,
-                              convert=_PVC,
+                              convert=_pvc_from_dict,
                               attempts=1)
     if result.items:
         if config is not None:
