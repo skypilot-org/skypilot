@@ -2046,7 +2046,10 @@ async def gpu_metrics() -> fastapi.Response:
         asyncio.create_task(
             asyncio.wait_for(
                 metrics_utils.get_metrics_for_slurm_cluster(
-                    name, stats=stats, timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
+                    name,
+                    stats=stats,
+                    timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+                    federated=slurm_clusters),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
             )) for name, stats in zip(slurm_clusters, slurm_stats)
     ]
