@@ -922,6 +922,10 @@ Configuration for log retention settings.
 
 Whether to enable log retention for API server and SkyServe controller logs. When enabled, logs will be automatically rotated and managed according to the specified size limit.
 
+Rotation copies the active log before truncating it, so the first rotation needs
+free space for that copy; enabling retention cannot recover an already-full volume.
+``sky serve logs --controller`` reads the active log only, not retained archives.
+
 Default: ``true``
 
 .. code-block:: yaml
