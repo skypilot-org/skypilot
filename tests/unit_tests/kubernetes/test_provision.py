@@ -45,6 +45,7 @@ _CLIENT_GETS = {
     reads.PERSISTENT_VOLUME_CLAIMS:
         ('core_api', 'read_namespaced_persistent_volume_claim'),
     reads.DEPLOYMENTS: ('apps_api', 'read_namespaced_deployment_status'),
+    reads.NAMESPACES: ('core_api', 'read_namespace'),
 }
 
 
