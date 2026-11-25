@@ -23,14 +23,25 @@ from sky.utils import resources_utils
 
 
 def test_gcp_rtxpro6000_instance_type_mapping():
-    # RTXPRO6000 (GCP G4) maps to g4-standard-{48,96,192,384} for 1/2/4/8 GPUs.
+    # RTXPRO6000 (GCP G4) maps to every g4-standard-* shape GCP bundles the GPU
+    # with. All four of g4-standard-{6,12,24,48} carry exactly one GPU, so a
+    # 1-GPU request must not be forced onto the 48-vCPU host (8x the price of
+    # g4-standard-6 for the same accelerator). Mirrors the L4/G2 entry.
     assert gcp_catalog._ACC_INSTANCE_TYPE_DICTS['RTXPRO6000'] == {
-        1: ['g4-standard-48'],
+        1: [
+            'g4-standard-6',
+            'g4-standard-12',
+            'g4-standard-24',
+            'g4-standard-48',
+        ],
         2: ['g4-standard-96'],
         4: ['g4-standard-192'],
         8: ['g4-standard-384'],
     }
     expected = {
+        'g4-standard-6': 1,
+        'g4-standard-12': 1,
+        'g4-standard-24': 1,
         'g4-standard-48': 1,
         'g4-standard-96': 2,
         'g4-standard-192': 4,
@@ -42,9 +53,10 @@ def test_gcp_rtxpro6000_instance_type_mapping():
         }
 
 
-@pytest.mark.parametrize(
-    'instance_type',
-    ['g4-standard-48', 'g4-standard-96', 'g4-standard-192', 'g4-standard-384'])
+@pytest.mark.parametrize('instance_type', [
+    'g4-standard-6', 'g4-standard-12', 'g4-standard-24', 'g4-standard-48',
+    'g4-standard-96', 'g4-standard-192', 'g4-standard-384'
+])
 def test_gcp_g4_uses_hyperdisk_balanced(instance_type):
     # G4 only supports hyperdisk-balanced (no pd-* support), like n4/a4.
     tier2name = gcp_volume_utils.get_data_disk_tier_mapping(instance_type)
