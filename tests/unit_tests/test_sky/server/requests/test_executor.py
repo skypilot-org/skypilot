@@ -3320,30 +3320,34 @@ def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
 
     monkeypatch.setattr('sky.workspaces.core.resolve_workspace_for_user',
                         fake_resolve)
-    monkeypatch.setattr(
-        'sky.global_user_state.get_user',
-        mock.Mock(return_value=models.User(
-            id='user-1', name='alice', preferred_workspace='ws-2')))
+    get_user = mock.Mock(return_value=models.User(
+        id='user-1', name='alice', preferred_workspace='ws-2'))
+    monkeypatch.setattr('sky.global_user_state.get_user', get_user)
 
     _run_override_as_user(authenticated=True)
 
     assert resolved_for == ['ws-2']
+    get_user.assert_called_once_with('user-1')
     assert not counted_user_upsert
 
 
+@pytest.mark.parametrize('user_type', [
+    models.UserType.SSO.value,
+    models.UserType.SA.value,
+    models.UserType.BASIC.value,
+])
 def test_authenticated_request_user_carries_user_type(counted_user_upsert,
-                                                      monkeypatch):
+                                                      monkeypatch, user_type):
     """Admin policies read user_type to tell authenticated users apart."""
     monkeypatch.setattr(
         'sky.global_user_state.get_user',
         mock.Mock(return_value=models.User(
-            id='user-1', name='alice', user_type=models.UserType.SSO.value)))
+            id='user-1', name='alice', user_type=user_type)))
     reload = mock.Mock()
     monkeypatch.setattr(executor.server_common, 'reload_for_new_request',
                         reload)
     _run_override_as_user(authenticated=True)
-    assert reload.call_args.kwargs['user'].user_type == (
-        models.UserType.SSO.value)
+    assert reload.call_args.kwargs['user'].user_type == user_type
     assert not counted_user_upsert
 
 
