@@ -365,6 +365,34 @@ class RequestQueue:
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
+@functools.lru_cache(maxsize=1)
+def eager_workers_enabled() -> bool:
+    """Whether executor pools start all their workers at boot (warm start).
+
+    True when SKYPILOT_EAGER_EXECUTOR_WORKERS is set, unless the state DB is
+    Postgres without a connection pooler: then every started worker keeps its
+    own DB connections, which could exhaust the database. Cached per process.
+    """
+    if not env_options.Options.EAGER_EXECUTOR_WORKERS.get():
+        return False
+    if (os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) and
+            not db_utils.pooler_configured()):
+        logger.warning(
+            f'{env_options.Options.EAGER_EXECUTOR_WORKERS.env_key} is set, '
+            'but the Postgres state DB is not behind a connection pooler '
+            f'({constants.ENV_VAR_DB_POOL_HOSTPORT} or '
+            f'{constants.ENV_VAR_DB_POOL_CONNECTION_URI}); executor workers '
+            'will start on demand.')
+        return False
+    if not env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        logger.warning(
+            f'{env_options.Options.EAGER_EXECUTOR_WORKERS.env_key} starts '
+            'every executor worker, but '
+            f'{env_options.Options.MEMORY_AWARE_WORKER_SIZING.env_key} is off, '
+            'so the pools may not fit in memory once all workers are up.')
+    return True
+
+
 def executor_initializer(proc_group: str,
                          clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
@@ -806,6 +834,8 @@ class RequestWorker:
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
+                warm_start=eager_workers_enabled(),
+                name=proc_group,
                 initializer=executor_initializer,
                 initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
@@ -1443,7 +1473,7 @@ def _request_execution_wrapper(request_id: str,
         try:
             # Capture the peak RSS while the request's result is still
             # referenced.
-            peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            peak_rss = max(proc.memory_info().rss, metrics_lib.latest_rss_bytes)
             # Unreference the request's payload and result before
             # release_memory() so that their memory can be returned too.
             return_value = request_task = None

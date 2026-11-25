@@ -577,6 +577,28 @@ SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
     multiprocess_mode='livesum',
 )
 
+# Guaranteed executor pools replaced because a worker died.
+#   phase="warm_start": a worker failed to start during boot-time warm start.
+#   phase="serving": any other break, e.g. a worker crashed or ran out of
+#   memory while serving requests.
+SKY_APISERVER_EXECUTOR_POOL_BROKEN_TOTAL = prom.Counter(
+    'sky_apiserver_executor_pool_broken_total',
+    'Guaranteed executor pools found broken and replaced, by pool and phase',
+    ['pool', 'phase'],
+)
+
+# Executor workers that failed to start (import SkyPilot and run the
+# initializer); failures while serving a request are not counted.
+#   reason="error": start-up raised an exception.
+#   reason="died": the process exited before it was ready (killed, crashed).
+# In guaranteed pools, "died" is only counted during warm start; other deaths
+# show up as pool_broken{phase="serving"}.
+SKY_APISERVER_EXECUTOR_WORKER_START_FAILURES_TOTAL = prom.Counter(
+    'sky_apiserver_executor_worker_start_failures_total',
+    'Executor workers that failed to start, by pool and reason',
+    ['pool', 'reason'],
+)
+
 # Active threads in on-demand thread executors. Each process has its own
 # executor with a per-process max_workers limit, so per-pid series are kept:
 # exhaustion is a per-process condition and a sum across processes can exceed

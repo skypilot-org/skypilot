@@ -1832,6 +1832,35 @@ async def test_wrapper_releases_result_before_release_memory(
     ]
 
 
+@pytest.mark.asyncio
+async def test_wrapper_request_peak_rss_ignores_window_peak(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """A request's recorded peak uses the latest RSS sample, not the worker's
+    30 s window peak, which can hold an earlier request's spike."""
+    req = requests_lib.Request(request_id='peak-isolated',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    # An earlier request left a 64 GB spike in this worker's window peak.
+    spike = 64 * 1024 * 1024 * 1024
+    monkeypatch.setattr(executor.metrics_lib, 'peak_rss_bytes', spike)
+    monkeypatch.setattr(executor.metrics_lib, 'latest_rss_bytes', 0)
+    recorded = []
+    monkeypatch.setattr(
+        executor, '_record_memory_metrics',
+        lambda *args, **_: recorded.append(args[3]))  # args[3] is peak_rss.
+
+    executor._request_execution_wrapper('peak-isolated',
+                                        ignore_return_value=False)
+
+    assert len(recorded) == 1
+    assert recorded[0] < spike
+
+
 _MB = 1024 * 1024
 
 
@@ -3440,3 +3469,98 @@ async def test_caller_usage_of_an_inline_request(in_process_env,
                           kind='sync') == 1
     assert _caller_sample(
         metrics_utils.SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL) == 0
+
+
+@pytest.mark.parametrize(
+    'flag,db_uri,pool_hostport,expected',
+    [
+        (None, None, None, False),
+        ('0', None, None, False),
+        # SQLite: no database connections to run out of.
+        ('1', None, None, True),
+        ('true', None, None, True),
+        # Postgres without a pooler: workers start on demand.
+        ('1', 'postgresql://u:p@db:5432/sky', None, False),
+        # Postgres behind a pooler.
+        ('1', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', True),
+        ('1', 'postgresql://u:p@db:5432/sky', 'uri', True),
+        ('0', 'postgresql://u:p@db:5432/sky', '127.0.0.1:6432', False),
+    ])
+def test_eager_workers_enabled(monkeypatch, flag, db_uri, pool_hostport,
+                               expected):
+    """Warm start needs the flag, and on Postgres also a connection pooler."""
+    env = {
+        'SKYPILOT_EAGER_EXECUTOR_WORKERS': flag,
+        constants.ENV_VAR_DB_CONNECTION_URI: db_uri,
+        # 'uri' sets the pooler connection URI instead of the host:port.
+        constants.ENV_VAR_DB_POOL_HOSTPORT:
+            (None if pool_hostport == 'uri' else pool_hostport),
+        constants.ENV_VAR_DB_POOL_CONNECTION_URI:
+            ('postgresql://u:p@pooler:6432/sky'
+             if pool_hostport == 'uri' else None),
+    }
+    for name, value in env.items():
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    executor.eager_workers_enabled.cache_clear()
+    try:
+        assert executor.eager_workers_enabled() is expected
+    finally:
+        executor.eager_workers_enabled.cache_clear()
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_request_worker_passes_eager_workers_flag(monkeypatch, enabled):
+    """RequestWorker passes eager_workers_enabled() to its pool."""
+    monkeypatch.setattr(executor, 'eager_workers_enabled', lambda: enabled)
+    captured = {}
+
+    class FakeExecutor:
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(executor.process, 'BurstableExecutor', FakeExecutor)
+    monkeypatch.setattr(executor, '_get_queue',
+                        lambda schedule_type: mock.Mock())
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        config=server_config.WorkerConfig(garanteed_parallelism=2,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+    worker._cancel_event.set()
+    # Run off the main thread so run() leaves signal handlers and the
+    # process title alone.
+    thread = threading.Thread(target=worker.run)
+    thread.start()
+    thread.join(timeout=30)
+    assert not thread.is_alive()
+    assert captured['warm_start'] is enabled
+    assert captured['name'] == requests_lib.ScheduleType.SHORT.value
+
+
+@pytest.mark.parametrize('sizing,warns', [(None, True), ('1', False)])
+def test_eager_workers_warns_without_memory_aware_sizing(
+        monkeypatch, sizing, warns):
+    """Warm start stays on, but warns when memory-aware sizing is off, and
+    only then."""
+    monkeypatch.setenv('SKYPILOT_EAGER_EXECUTOR_WORKERS', '1')
+    if sizing is None:
+        monkeypatch.delenv('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', raising=False)
+    else:
+        monkeypatch.setenv('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', sizing)
+    monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI, raising=False)
+    warnings = []
+    monkeypatch.setattr(executor.logger, 'warning', warnings.append)
+    executor.eager_workers_enabled.cache_clear()
+    try:
+        assert executor.eager_workers_enabled() is True
+        assert any('SKYPILOT_MEMORY_AWARE_WORKER_SIZING' in w
+                   for w in warnings) is warns
+    finally:
+        executor.eager_workers_enabled.cache_clear()

@@ -2544,6 +2544,9 @@ def _record_caller_usage(request: fastapi.Request,
 
 
 peak_rss_bytes = 0
+# The latest RSS sample. A request's peak uses this, not peak_rss_bytes, so it
+# does not include a spike from an earlier request in the same 30 s window.
+latest_rss_bytes = 0
 
 
 def process_monitor(process_type: str, stop: threading.Event):
@@ -2551,13 +2554,17 @@ def process_monitor(process_type: str, stop: threading.Event):
     proc = psutil.Process(pid)
     last_bucket_end = time.time()
     bucket_peak = 0
-    global peak_rss_bytes
+    global peak_rss_bytes, latest_rss_bytes
     while not stop.is_set():
         if time.time() - last_bucket_end >= 30:
             # Reset peak RSS for the next time bucket.
             last_bucket_end = time.time()
             bucket_peak = 0
-        peak_rss_bytes = max(bucket_peak, proc.memory_info().rss)
+        # Keep the highest RSS seen in the current 30 s window, so a scrape
+        # reports the window's peak rather than the latest 1 s sample.
+        latest_rss_bytes = proc.memory_info().rss
+        bucket_peak = max(bucket_peak, latest_rss_bytes)
+        peak_rss_bytes = bucket_peak
         metrics_utils.SKY_APISERVER_PROCESS_PEAK_RSS.labels(
             pid=pid, type=process_type).set(peak_rss_bytes)
         ctimes = proc.cpu_times()
