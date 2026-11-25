@@ -1147,6 +1147,7 @@ tests:
             name: logrotate
       - notContains:
           path: spec.template.spec.volumes
+          any: true
           content:
             name: logrotate-state
 
