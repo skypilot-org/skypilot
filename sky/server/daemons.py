@@ -1,4 +1,5 @@
 """Internal server daemons that run in the background."""
+import asyncio
 import atexit
 import dataclasses
 import os
@@ -14,6 +15,7 @@ from sky.metrics import utils as metrics_lib
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -25,12 +27,15 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def _rotate_daemon_log(log_path: str) -> None:
-    """Rotate the daemon log if it exceeds the size threshold.
+def rotate_log_fd(fd: int, log_path: str) -> None:
+    """Rotate the log open on fd if it exceeds the size threshold.
 
     Uses the copytruncate pattern: copy current log to a backup file,
     then truncate the original. This keeps one backup for external log
-    collectors and debugging.
+    collectors and debugging. If the copy fails, for example on a full disk,
+    the log is truncated without a backup. The writers must have opened the
+    log with O_APPEND, or they keep writing at their old offset after the
+    truncate.
 
     The threshold is configurable via api_server.daemon_log_max_bytes in
     ~/.sky/config.yaml, defaulting to DAEMON_LOG_MAX_BYTES.
@@ -41,19 +46,77 @@ def _rotate_daemon_log(log_path: str) -> None:
             server_constants.DEFAULT_DAEMON_LOG_MAX_BYTES)
         if max_bytes <= 0:
             return
-        sys.stdout.flush()
-        sys.stderr.flush()
-        fd = sys.stdout.fileno()
         if os.fstat(fd).st_size < max_bytes:
             return
         # Copy current log to backup before truncating.
         backup_path = log_path + '.1'
-        shutil.copy2(log_path, backup_path)
+        try:
+            shutil.copy2(log_path, backup_path)
+        except OSError as e:
+            # A full disk is the case the cap exists for: lose the backup,
+            # not the truncate. The log is empty after this, so the warning
+            # repeats at most once per max_bytes of new log.
+            logger.warning(f'Could not back up {log_path} to {backup_path}: '
+                           f'{e}. Truncating it without a backup.')
         os.ftruncate(fd, 0)
         os.lseek(fd, 0, os.SEEK_SET)
     except Exception:  # pylint: disable=broad-except
-        # Never crash the daemon on rotation failure.
+        # Never crash the caller on rotation failure.
         pass
+
+
+def _rotate_daemon_log(log_path: str) -> None:
+    """Rotate the daemon log, which is this process's stdout."""
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        fd = sys.stdout.fileno()
+    except Exception:  # pylint: disable=broad-except
+        # Never crash the daemon on rotation failure.
+        return
+    rotate_log_fd(fd, log_path)
+
+
+# True while the config reload for the server log rotation keeps failing.
+_server_log_reload_failed = False
+
+
+def _rotate_server_log_once() -> None:
+    """Rotates server.log if this process's stdout is that file."""
+    log_path = runtime_utils.expanduser(constants.API_SERVER_LOGS)
+    try:
+        # With --foreground, stdout is not server.log (it may be a stale file
+        # from an earlier run), so there is nothing to rotate.
+        if not os.path.samestat(os.fstat(sys.stdout.fileno()),
+                                os.stat(log_path)):
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        fd = sys.stdout.fileno()
+    except (OSError, ValueError):
+        return
+    global _server_log_reload_failed
+    try:
+        # Like the other daemons, read the cap fresh, so that a changed or
+        # disabled cap takes effect on the next check.
+        skypilot_config.reload_config()
+        _server_log_reload_failed = False
+    except Exception as e:  # pylint: disable=broad-except
+        # A config source that fails must not stop the cap. Keep the last
+        # loaded config. Warn once: this log is the one we cap, and the
+        # check runs every few seconds.
+        if not _server_log_reload_failed:
+            logger.warning('Could not reload the config for the server log '
+                           f'rotation: {common_utils.format_exception(e)}')
+        _server_log_reload_failed = True
+    rotate_log_fd(fd, log_path)
+
+
+async def rotate_server_log():
+    """Caps server.log, the stdout of the API server and its child processes."""
+    while True:
+        await asyncio.to_thread(_rotate_server_log_once)
+        await asyncio.sleep(server_constants.SERVER_LOG_ROTATE_INTERVAL_SECONDS)
 
 
 # Populated lazily on the first run_event() call per process.
