@@ -1,0 +1,284 @@
+# Train the pilot as a SkyPilot Job Group: training, rollout inference and evaluation run side
+# by side, each on its own hardware.
+#
+#   trainer       (1x H100)  warm start, then GRPO; rollouts come from the inference task. After
+#                            every step the new LoRA weights reach it through a shared volume.
+#                            A checkpoint every CKPT_EVERY steps lands in the bucket.
+#   inference     (1x H100)  SkyRL's vLLM server + router generating the RL rollouts; stops once
+#                            training is done
+#   eval-watcher  (CPU)      for each new checkpoint, `sky jobs launch eval.yaml` from inside the
+#                            group: a dynamic task on its own GPU flying the validation seeds, in
+#                            parallel, never blocking training. After training it picks the best
+#                            checkpoint and flies the held-out test set once with it.
+#
+# Needs a Kubernetes cluster with two free H100s (plus one per running eval), a ReadWriteMany
+# volume, and an S3 bucket:
+#
+#   sky volumes apply policy_volume.yaml      # once
+#   sky jobs launch train_eval.yaml --secret WANDB_API_KEY \
+#     --env OUTPUT_BUCKET=my-roadster-bucket --env RUN=pilot-run1
+---
+name: roadster-rl
+execution: parallel
+primary_tasks: [trainer, eval-watcher]   # the group ends when both are done
+---
+name: trainer
+resources:
+  infra: k8s               # the group's tasks share one Kubernetes cluster
+  accelerators: H100:1
+  cpus: 16+
+  memory: 120+
+  image_id: docker:nvidia/cuda:13.0.2-devel-ubuntu22.04   # SkyRL main needs CUDA 13
+workdir: .
+volumes:
+  /policy: roadster-policy   # shared with the inference task: LoRA weights every step, server URLs
+file_mounts:
+  /outputs:
+    name: ${OUTPUT_BUCKET}
+    store: s3
+    mode: MOUNT_CACHED
+envs:
+  OUTPUT_BUCKET: my-roadster-bucket   # S3 bucket for checkpoints + eval results
+  MODEL: Qwen/Qwen3-4B-Instruct-2507
+  RUN: pilot-run1
+  # Warm start: SFT on successful flights before RL. 64 scripted-pilot flights per stunt in
+  # light wind, plus a teacher's recorded flights for SFT_TEACHER_KINDS (here: DeepSeek V4.1
+  # Flash's landed gale and storm Cybertruck flights on training seeds, flown with the sim
+  # waiting). 0 = RL from the base model, which never discovers the Cybertruck takeoff.
+  SFT_FLIGHTS: 64
+  SFT_EPOCHS: 1
+  SFT_LR: "2.0e-5"
+  SFT_ROUND: -1            # decimals in the warm-start commands; -1 = full precision (the reported run)
+  SFT_TEACHER: distill_data/pilot_teacher_deepseek_v2_galestorm_cyb.jsonl   # relative to this directory; "" = script only
+  SFT_TEACHER_KINDS: hop_kickflip
+  SFT_TEACHER_ADDS: 1      # 1: teacher flights are added to the scripted ones; 0: they replace them
+  SFT_WEATHERS: normal     # scripted warm-start flights cycle through these weathers
+  SFT_CPU_OFFLOAD: "true"  # false: keep the warm start's optimizer on the GPU (faster if it fits)
+  SFT_MICRO: 1             # sequences per warm-start pass
+  # RL (GRPO + LoRA)
+  STEPS: 60
+  LR: "1.0e-5"
+  BATCH: 16                # flights per step (x N_SAMPLES rollouts)
+  N_SAMPLES: 8
+  TEMP: "1.0"
+  LORA_RANK: 64
+  MAX_TURNS: 40            # decisions per flight; a Cybertruck kickflip takes ~26
+  TURN_TOKENS: 128         # per-decision reply budget: one JSON action is ~25 tokens
+  TRAIN_WEATHERS: normal,gale,storm,storm   # training rows split across these: storm counts double
+  HARD_FRAC: 0.5           # fraction of Cybertruck training flights with a slow car and a far truck
+  KIND_WEIGHTS: ""         # e.g. "hop_kickflip=4,ramp_flip=1": training mix across stunts
+  # Reverse curriculum: this fraction of training flights start after the scripted pilot has
+  # flown 1..N decisions ("" = every flight starts at t=0). Eval always starts at t=0.
+  HANDOVER: "0.5:hop_kickflip=20"
+  RL_SEED: 42              # RL sampling + data order; change it to repeat a run independently
+  CKPT_EVERY: 5
+  RESUME: "null"
+  EPOCHS: 3
+  MICRO_TRAIN: 8           # sequences per training forward/backward pass
+  MICRO_FWD: 16            # sequences per log-prob pass
+  # In-training eval is off: pick the checkpoint with eval.yaml on the validation seeds
+  # (2001, 2002, 2003), so the held-out seeds are flown once, by that checkpoint only.
+  EVAL_EVERY: 1000
+  EVAL_BEFORE_TRAIN: "false"
+  VAL_SEEDS: "2001,2002,2003"
+  # Continue from an earlier run: merge this LoRA (e.g. /outputs/<RUN>/export/global_step_30/policy)
+  # into MODEL and train a fresh LoRA on top. MODEL is then usually /outputs/<RUN>/sft_model.
+  INIT_LORA: ""
+  SKYRL_COMMIT: c2a5ce0d68e3c21ce4aa4b098174f88a55e5a638
+  HF_HUB_ENABLE_HF_TRANSFER: "1"
+  LOGGER: wandb            # or console
+  WANDB_PROJECT: flying-roadster-rl
+secrets:
+  WANDB_API_KEY: ""
+setup: |
+  bash ~/sky_workdir/skyrl_roadster/prep_image.sh   # git/python + CUDA compat
+  nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+run: |
+  set -ex
+  bash ~/sky_workdir/skyrl_roadster/install_skyrl.sh
+  OUT=/outputs/$RUN
+  DATA=$HOME/data/pilot
+  mkdir -p $OUT
+
+  cd ~/SkyRL
+  GIVEN_MODEL=$MODEL   # as passed in (a Hub id or a bucket path), before any local copy
+  if [ "$SFT_FLIGHTS" -gt 0 ]; then
+    uv run -q --isolated --extra fsdp python ~/sky_workdir/skyrl_roadster/make_pilot_sft_data.py \
+      --out $HOME/data/pilot_sft.parquet --per-kind $SFT_FLIGHTS --model $MODEL --round $SFT_ROUND --weathers $SFT_WEATHERS \
+      ${SFT_TEACHER:+--teacher $HOME/sky_workdir/$SFT_TEACHER --teacher-kinds $SFT_TEACHER_KINDS} $([ "$SFT_TEACHER_ADDS" = 1 ] && echo --teacher-adds)
+    uv run --isolated --extra fsdp python -m skyrl.train.main_sft \
+      strategy=fsdp model.path=$MODEL \
+      pretokenized_dataset_paths="['$HOME/data/pilot_sft.parquet']" \
+      max_length=10240 num_epochs=$SFT_EPOCHS batch_size=8 micro_train_batch_size_per_gpu=$SFT_MICRO \
+      optimizer_config.lr=$SFT_LR optimizer_config.weight_decay=0.0 optimizer_config.max_grad_norm=1.0 \
+      optimizer_config.num_warmup_steps=0 optimizer_config.scheduler=constant_with_warmup \
+      placement.num_nodes=1 placement.num_gpus_per_node=1 \
+      fsdp_config.cpu_offload=$SFT_CPU_OFFLOAD fsdp_config.reshard_after_forward=true \
+      remove_microbatch_padding=true seed=42 \
+      logger=$LOGGER project_name=$WANDB_PROJECT run_name=$RUN-sft \
+      ckpt_path="" ckpt_interval=0 resume_from="" \
+      hf_save_interval=100000 export_path=$HOME/sft_export
+    MODEL=$(ls -d $HOME/sft_export/global_step_*/policy | sort -V | tail -1)
+    mkdir -p $OUT/sft_model && cp -r $MODEL/. $OUT/sft_model/   # the inference task and the evals serve this
+    mkdir -p $HOME/models/base && cp -r $MODEL/. $HOME/models/base/ && MODEL=$HOME/models/base   # same path as on the inference task
+    echo "RL starts from the warm-started model: $MODEL"
+  fi
+  if [ "$SFT_FLIGHTS" -eq 0 ] && [ -d "$MODEL" ] && [ -z "$INIT_LORA" ]; then
+    # Reusing an earlier run's warm start: copy it off the bucket mount first (reading through it is slow).
+    mkdir -p $HOME/models/base && cp -r $MODEL/. $HOME/models/base/ && MODEL=$HOME/models/base
+  fi
+  if [ -n "$INIT_LORA" ]; then
+    BASE=$HOME/models/init_base; mkdir -p $BASE
+    if [ -d "$MODEL" ]; then cp -r $MODEL/. $BASE/; else BASE=$MODEL; fi
+    uv run --isolated --extra fsdp python ~/sky_workdir/tools/merge_lora.py \
+      --base $BASE --lora $INIT_LORA --out $HOME/models/init_merged
+    MODEL=$HOME/models/init_merged
+    mkdir -p $OUT/sft_model && cp -r $MODEL/. $OUT/sft_model/   # the eval serves this as the base
+  fi
+  # Tell the inference task and the eval watcher which model RL starts from, so all tasks use the same base.
+  if [ "$SFT_FLIGHTS" -gt 0 ] || [ -n "$INIT_LORA" ]; then RL_BASE=$OUT/sft_model; else RL_BASE=$GIVEN_MODEL; fi
+  echo "$RL_BASE" > $OUT/RL_BASE
+  uv run -q --isolated --with datasets python ~/sky_workdir/skyrl_roadster/make_dataset.py \
+    --out $DATA ${HANDOVER:+--handover $HANDOVER} --val-seeds $VAL_SEEDS --train-weathers $TRAIN_WEATHERS \
+    ${KIND_WEIGHTS:+--kind-weights $KIND_WEIGHTS} --hard-frac $HARD_FRAC
+
+  # The inference task publishes its server URLs on the shared volume once it serves the base model.
+  for i in $(seq 1 240); do [ -s /policy/$RUN/endpoints.json ] && break; echo "waiting for inference"; sleep 15; done
+  PROXY=$(python3 -c "import json;print(json.load(open('/policy/$RUN/endpoints.json'))['proxy_url'])")
+  SERVERS=$(python3 -c "import json;print(json.load(open('/policy/$RUN/endpoints.json'))['server_urls'])")
+  echo "rollouts from the inference task: proxy=$PROXY servers=$SERVERS"
+  uv run --isolated --extra fsdp -m examples.train.roadster.main_roadster \
+    data.train_data="['$DATA/train.parquet']" \
+    data.val_data="['$DATA/validation.parquet']" \
+    environment.env_class=roadster_pilot \
+    trainer.policy.model.path=$MODEL \
+    trainer.strategy=fsdp \
+    trainer.placement.colocate_all=false \
+    trainer.placement.policy_num_gpus_per_node=1 \
+    trainer.placement.ref_num_gpus_per_node=1 \
+    generator.inference_engine.tensor_parallel_size=1 \
+    generator.inference_engine.backend=vllm \
+    generator.inference_engine.run_engines_locally=false \
+    generator.inference_engine.external_proxy_url="$PROXY" \
+    generator.inference_engine.external_server_urls="$SERVERS" \
+    trainer.policy.model.lora.rank=$LORA_RANK \
+    trainer.policy.model.lora.alpha=$((2 * LORA_RANK)) \
+    trainer.policy.model.lora.lora_sync_path=/policy/$RUN/lora \
+    trainer.algorithm.advantage_estimator=grpo \
+    trainer.seed=$RL_SEED \
+    trainer.algorithm.use_kl_loss=false \
+    trainer.policy.optimizer_config.lr=$LR \
+    generator.n_samples_per_prompt=$N_SAMPLES \
+    generator.sampling_params.temperature=$TEMP \
+    generator.max_turns=$MAX_TURNS \
+    generator.batched=false \
+    generator.sampling_params.max_generate_length=$TURN_TOKENS \
+    generator.eval_n_samples_per_prompt=1 \
+    trainer.max_prompt_length=2048 \
+    generator.max_input_length=$((2048 + MAX_TURNS * 192)) \
+    trainer.train_batch_size=$BATCH \
+    trainer.policy_mini_batch_size=$BATCH \
+    trainer.micro_forward_batch_size_per_gpu=$MICRO_FWD \
+    trainer.micro_train_batch_size_per_gpu=$MICRO_TRAIN \
+    trainer.max_training_steps=$STEPS \
+    trainer.epochs=$EPOCHS \
+    trainer.eval_before_train=$EVAL_BEFORE_TRAIN \
+    trainer.eval_interval=$EVAL_EVERY \
+    trainer.eval_batch_size=144 \
+    trainer.ckpt_interval=$CKPT_EVERY \
+    trainer.hf_save_interval=$CKPT_EVERY \
+    trainer.ckpt_path=$OUT/ckpt \
+    trainer.export_path=$OUT/export \
+    trainer.resume_mode=$RESUME \
+    trainer.logger=$LOGGER \
+    trainer.project_name=$WANDB_PROJECT \
+    trainer.run_name=$RUN
+  touch $OUT/TRAIN_DONE      # tells the eval-watcher (and the inference task) that training is done
+---
+name: inference
+resources:
+  infra: k8s
+  accelerators: H100:1
+  cpus: 8+
+  memory: 64+
+  image_id: docker:nvidia/cuda:13.0.2-devel-ubuntu22.04
+workdir: .
+volumes:
+  /policy: roadster-policy   # LoRA weights from the trainer every step; our server URLs for it
+file_mounts:
+  /outputs:
+    name: ${OUTPUT_BUCKET}
+    store: s3
+    mode: MOUNT_CACHED
+envs:
+  OUTPUT_BUCKET: my-roadster-bucket
+  RUN: pilot-run1
+  BASE_MODEL: ""               # the model RL starts from; "" = whatever the trainer publishes in /outputs/$RUN/RL_BASE
+  LORA_RANK: 64
+  SKYRL_COMMIT: c2a5ce0d68e3c21ce4aa4b098174f88a55e5a638
+  HF_HUB_ENABLE_HF_TRANSFER: "1"
+setup: |
+  bash ~/sky_workdir/skyrl_roadster/prep_image.sh
+run: |
+  set -ex
+  bash ~/sky_workdir/skyrl_roadster/install_skyrl.sh   # in run, not setup: group networking waits for every task's setup
+  BASE=$BASE_MODEL
+  if [ -z "$BASE" ]; then   # the trainer writes RL_BASE once the warm start (if any) is done
+    until [ -s /outputs/$RUN/RL_BASE ]; do sleep 60; done
+    BASE=$(cat /outputs/$RUN/RL_BASE)
+  fi
+  if [[ "$BASE" == /* ]]; then   # a path in the bucket: wait for it to show up on the mount, then copy it off
+    for i in $(seq 1 60); do [ -f $BASE/config.json ] && break; sleep 10; done
+    [ -f $BASE/config.json ] || { ls -la $(dirname $BASE) | head; echo "no model at $BASE"; exit 1; }
+    mkdir -p ~/models/base && cp -r $BASE/. ~/models/base/ && BASE=$HOME/models/base   # same path as on the trainer
+  fi
+  mkdir -p /policy/$RUN
+  cd ~/SkyRL
+  bash ~/sky_workdir/skyrl_roadster/serve_and_publish.sh /policy/$RUN/endpoints.json \
+    trainer.policy.model.path=$BASE \
+    trainer.policy.model.lora.rank=$LORA_RANK \
+    trainer.policy.model.lora.alpha=$((2 * LORA_RANK)) \
+    trainer.policy.model.lora.lora_sync_path=/policy/$RUN/lora \
+    trainer.placement.colocate_all=false \
+    generator.inference_engine.num_engines=1 \
+    generator.inference_engine.tensor_parallel_size=1 \
+    generator.inference_engine.gpu_memory_utilization=0.9 &
+  SERVE=$!
+  # Serve until training is done, then free the GPU: the evals don't need this server.
+  until [ -f /outputs/$RUN/TRAIN_DONE ] || ! kill -0 $SERVE 2>/dev/null; do sleep 30; done
+  if ! kill -0 $SERVE 2>/dev/null; then wait $SERVE; exit $?; fi   # the server died first: report its status
+  kill $SERVE; pkill -f skyrl.train.entrypoints.serve || true
+  echo "training is done; inference server stopped"
+---
+name: eval-watcher
+resources:
+  infra: k8s
+  cpus: 2+
+  memory: 4+
+workdir: .
+file_mounts:
+  /outputs:
+    name: ${OUTPUT_BUCKET}
+    store: s3
+    mode: MOUNT                # not cached: the watcher must see new checkpoints promptly
+envs:
+  OUTPUT_BUCKET: my-roadster-bucket
+  RUN: pilot-run1
+  BASE_MODEL: ""
+  VAL_PER_KIND: 96
+  TEST_PER_KIND: 96
+  WEATHERS: "normal gale storm"
+setup: |
+  # SkyPilot client matching the API server (its credentials are injected into the task), to launch the evals.
+  V=$(curl -fsS $SKYPILOT_API_SERVER_ENDPOINT/api/health | python3 -c \
+    "import sys, json; print(json.load(sys.stdin).get('pinned_client_version', ''))") || V=""
+  curl -fsSL https://skypilot-cli.s3.us-west-2.amazonaws.com/install.sh \
+    | bash -s -- ${V:+--version $V} --python "$(command -v python3)"
+  python3 -m pip install -q requests
+run: |
+  cd ~/sky_workdir
+  BASE=$BASE_MODEL
+  if [ -z "$BASE" ]; then until [ -s /outputs/$RUN/RL_BASE ]; do sleep 60; done; BASE=$(cat /outputs/$RUN/RL_BASE); fi
+  python3 tools/eval_watcher.py --run $RUN --bucket $OUTPUT_BUCKET \
+    --base $BASE --eval-yaml eval.yaml \
+    --weathers "$WEATHERS" --val-per-kind $VAL_PER_KIND --test-per-kind $TEST_PER_KIND

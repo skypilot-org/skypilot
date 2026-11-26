@@ -1,6 +1,7 @@
 """Managed jobs."""
 import pathlib
 
+from sky.jobs.client.sdk import AUTO_JOB_GROUP
 from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs
@@ -13,6 +14,7 @@ from sky.jobs.client.sdk import pool_sync_down_logs
 from sky.jobs.client.sdk import pool_tail_logs
 from sky.jobs.client.sdk import queue
 from sky.jobs.client.sdk import queue_v2
+from sky.jobs.client.sdk import restart
 from sky.jobs.client.sdk import tail_logs
 from sky.jobs.client.sdk import wait
 from sky.jobs.constants import JOBS_CLUSTER_NAME_PREFIX_LENGTH
@@ -40,6 +42,8 @@ __all__ = [
     # Core
     'cancel',
     'launch',
+    'AUTO_JOB_GROUP',
+    'restart',
     'queue',
     'queue_v2',
     'tail_logs',

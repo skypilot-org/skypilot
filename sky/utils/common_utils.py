@@ -4,6 +4,7 @@ import base64
 import ctypes
 import difflib
 import enum
+import errno
 import functools
 import gc
 import getpass
@@ -21,7 +22,7 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 
 import jsonschema
@@ -84,8 +85,24 @@ def is_valid_user_hash(user_hash: Optional[str]) -> bool:
         return False
     # Must start with a letter, followed by alphanumeric characters and hyphens
     # This covers both old hex format (e.g., "abc123") and new service account
-    # format (e.g., "sa-abc123-token-xyz")
-    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
+    # format (e.g., "sa-abc123-token-xyz").
+    #
+    # fullmatch, not match with a trailing '$': '$' also matches just before a
+    # final newline, so a value ending in one was accepted and then used as an
+    # identity distinct from the same value without it.
+    return bool(re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]*', user_hash))
+
+
+def is_single_path_component(name: Optional[str]) -> bool:
+    """Whether `name` is safe to join as a single path component.
+
+    Rejects a name that is empty, '.', '..', or contains a path separator or
+    NUL byte, i.e. anything that would not stay directly inside the directory
+    it is joined under. Used to validate a client-supplied user id before it
+    becomes a directory under the API server's clients dir.
+    """
+    return (name is not None and name not in ('', '.', '..') and
+            not any(c in name for c in ('/', '\\', '\x00')))
 
 
 def generate_user_hash() -> str:
@@ -521,6 +538,8 @@ def get_pretty_entrypoint_cmd() -> str:
 
     # Redact sensitive values from secrets arguments
     argv = _redact_secrets_values(argv)
+    # Redact the token and the endpoint password of `sky api login`
+    argv = _redact_api_login_credentials(argv)
 
     return shlex.join(argv)
 
@@ -625,45 +644,133 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
     try:
         if not argv:
             return argv or []
-
-        result = []
-        i = 0
-
-        while i < len(argv):
-            arg = argv[i]
-
-            # Ensure arg is a string
-            if not isinstance(arg, str):
-                result.append(arg)
-                i += 1
-                continue
-
-            if arg == '--secret' and i + 1 < len(argv):
-                result.append(arg)
-                next_arg = argv[i + 1]
-                # Ensure next_arg is a string and handle redaction safely
-                if isinstance(next_arg, str):
-                    redacted = re.sub(r'^([^=]+)=.*', r'\1=<redacted>',
-                                      next_arg)
-                    result.append(redacted)
-                else:
-                    result.append(next_arg)
-                i += 2
-            elif arg.startswith('--secret='):
-                # Redact only if there's a value after the key
-                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
-                                  arg)
-                result.append(redacted)
-                i += 1
-            else:
-                result.append(arg)
-                i += 1
-
-        return result
+        return redact_flag_values(argv, ('--secret',))
     except Exception:  # pylint: disable=broad-except
         # If anything goes wrong with redaction, return original argv
         # This ensures the command can still execute
         return argv or []
+
+
+def redact_flag_values(argv: List[str], flags: Tuple[str, ...]) -> List[str]:
+    """``argv`` with the value of every ``FLAG K=V`` or ``FLAG=K=V`` replaced
+    by ``<redacted>``, for each flag in ``flags``. The key is kept, and so is
+    a bare ``FLAG K`` (the value comes from the caller's environment).
+
+    Works per token, so a value with spaces or quotes is redacted whole.
+    """
+    result: List[Any] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if not isinstance(arg, str):
+            result.append(arg)
+            i += 1
+            continue
+        if arg in flags and i + 1 < len(argv):
+            result.append(arg)
+            value = argv[i + 1]
+            if isinstance(value, str):
+                value = re.sub(r'^([^=]+)=.*',
+                               r'\1=<redacted>',
+                               value,
+                               flags=re.DOTALL)
+            result.append(value)
+            i += 2
+            continue
+        flag, sep, value = arg.partition('=')
+        if sep and flag in flags:
+            arg = flag + '=' + re.sub(
+                r'^([^=]+)=.*', r'\1=<redacted>', value, flags=re.DOTALL)
+        result.append(arg)
+        i += 1
+    return result
+
+
+# The options of `sky api login` whose value is or can hold a credential.
+_API_LOGIN_TOKEN_OPTIONS = ('--service-account-token', '--token', '-t')
+_API_LOGIN_ENDPOINT_OPTIONS = ('--endpoint', '-e')
+
+
+def _redact_endpoint_password(endpoint: str) -> str:
+    """``[scheme://]user:password@host`` with the password redacted.
+
+    Replaces everything from the first ``:`` after the scheme to the last
+    ``@``. This covers a user name that is an email address and a password
+    with unescaped special characters, and can hide more than the password
+    when the path contains an ``@``. An endpoint without a password is
+    returned unchanged.
+    """
+    scheme, sep, rest = endpoint.partition('://')
+    if not sep:
+        scheme, rest = '', endpoint
+    colon = rest.find(':')
+    at = rest.rfind('@')
+    if colon < 0 or at < colon:
+        return endpoint
+    return f'{scheme}{sep}{rest[:colon]}:<redacted>{rest[at:]}'
+
+
+def _redact_api_login_credentials(argv: List[str]) -> List[str]:
+    """Redact the token and the endpoint password of ``sky api login``.
+
+    Covers ``OPTION VALUE``, ``--option=VALUE`` and ``-oVALUE``. Any other
+    command is returned unchanged: ``-t`` and ``-e`` mean other things there.
+
+    Args:
+        argv: Command line arguments
+
+    Returns:
+        A new argv with the values redacted. If anything goes wrong, the
+        program name followed by ``<redacted>``, so that a failure cannot
+        leave a credential in the result.
+
+    Examples:
+        ['sky', 'api', 'login', '--token', 'sky_abc'] ->
+        ['sky', 'api', 'login', '--token', '<redacted>']
+
+        ['sky', 'api', 'login', '-e', 'https://user:pw@host'] ->
+        ['sky', 'api', 'login', '-e', 'https://user:<redacted>@host']
+
+        ['sky', 'launch', '-t', 'm5.large'] ->
+        ['sky', 'launch', '-t', 'm5.large'] (no change)
+    """
+    if not argv:
+        return argv or []
+    try:
+        subcommand = [arg for arg in argv[1:] if not arg.startswith('-')][:2]
+        if subcommand != ['api', 'login']:
+            return argv
+
+        def redact(option: str, value: str) -> str:
+            if option in _API_LOGIN_TOKEN_OPTIONS:
+                return '<redacted>'
+            return _redact_endpoint_password(value)
+
+        options = _API_LOGIN_TOKEN_OPTIONS + _API_LOGIN_ENDPOINT_OPTIONS
+        result: List[str] = []
+        # The option whose value is the next argument, if any.
+        value_of: Optional[str] = None
+        for arg in argv:
+            if value_of is not None:
+                result.append(redact(value_of, arg))
+                value_of = None
+                continue
+            if arg in options:
+                result.append(arg)
+                value_of = arg
+                continue
+            for option in options:
+                # --option=VALUE, or -oVALUE for a short option.
+                prefix = option + '=' if option.startswith('--') else option
+                if arg.startswith(prefix):
+                    arg = prefix + redact(option, arg[len(prefix):])
+                    break
+            result.append(arg)
+        return result
+    except Exception:  # pylint: disable=broad-except
+        # Redaction must not fail the command, and must not return the
+        # arguments unredacted either.
+        return argv[:1] + ['<redacted>']
 
 
 def user_and_hostname_hash() -> str:
@@ -1286,22 +1393,48 @@ def removeprefix(string: str, prefix: str) -> str:
     return string
 
 
-def release_memory():
+# jemalloc's MALLCTL_ARENAS_ALL: the arena index that addresses all arenas.
+_JEMALLOC_PURGE_ALL_ARENAS = b'arena.4096.purge'
+
+
+@functools.lru_cache(maxsize=1)
+def _get_free_memory_returner() -> Optional[Callable[[], int]]:
+    """Returns a function that returns freed heap memory to the OS.
+
+    Uses jemalloc's purge when jemalloc is the process allocator (e.g.
+    preloaded via LD_PRELOAD), where glibc's malloc_trim is a no-op, and
+    glibc's malloc_trim otherwise.
+    """
+    if not sys.platform.startswith('linux'):
+        return None
+    process = ctypes.CDLL(None)
+    mallctl = getattr(process, 'mallctl', None)
+    if mallctl is not None:
+        mallctl.argtypes = [
+            ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_size_t
+        ]
+        mallctl.restype = ctypes.c_int
+        return lambda: mallctl(_JEMALLOC_PURGE_ALL_ARENAS, None, None, None, 0)
+    malloc_trim = getattr(process, 'malloc_trim', None)
+    if malloc_trim is None:
+        # Not glibc, e.g. musl (alpine).
+        return None
+    return lambda: malloc_trim(0)
+
+
+def release_memory() -> None:
     """Release the process memory"""
-    # Do the best effort to release the python heap and let malloc_trim
-    # be more efficient.
+    # Do the best effort to release the python heap first, so that the
+    # allocator has more free memory to return.
     try:
         gc.collect()
-        if sys.platform.startswith('linux'):
-            # Will fail on musl (alpine), but at least it works on our
-            # official docker images.
-            libc = ctypes.CDLL('libc.so.6')
-            return libc.malloc_trim(0)
-        return 0
+        returner = _get_free_memory_returner()
+        if returner is not None:
+            returner()
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
-        return 0
 
 
 def base64_url_encode(data: bytes) -> str:
@@ -1448,3 +1581,69 @@ def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
                 os.remove(tmp_path)
             except FileNotFoundError:
                 pass
+
+
+# errno values link() raises on a filesystem without hard links.
+_LINK_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK})
+
+
+def atomic_create_text(path: str, content: str, mode: int = 0o644) -> bool:
+    """Create ``path`` with ``content`` unless it already exists.
+
+    Like ``atomic_write_text``, the content is staged to a sibling tmp file,
+    so a reader never sees a torn file. But the tmp file is linked into
+    place rather than renamed over the destination: ``link()`` fails with
+    EEXIST when the destination exists, so an existing file is never
+    replaced, even when several processes race to create the same path.
+    That matters on a shared filesystem (NFS / EFS): replacing a file, even
+    by rename, fails a reader on another host that holds a handle to the old
+    file (ESTALE) or whose lookup of the path races the replacement.
+
+    On a filesystem without hard links (``link()`` raises EPERM, ENOTSUP,
+    EXDEV, ...) the tmp file is renamed into place if the destination is
+    still absent, which can replace a file created in between.
+
+    Args:
+        path: The destination file path. The parent directory must already
+            exist.
+        content: The text content to write. Encoded as UTF-8.
+        mode: The Unix file permission bits to apply to the destination
+            file. Defaults to 0o644.
+
+    Returns:
+        True if this call created the file, False if it already existed.
+    """
+    parent_dir = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # mkstemp creates with mode 0o600; chmod to the requested mode.
+        os.chmod(tmp_path, mode)
+        try:
+            os.link(tmp_path, path)
+        except FileExistsError:
+            return False
+        except OSError as e:
+            if e.errno not in _LINK_UNSUPPORTED_ERRNOS:
+                raise
+            if os.path.exists(path):
+                return False
+            os.rename(tmp_path, path)
+        return True
+    finally:
+        # After a link the tmp name is a second name for the file; after a
+        # rename or a failure it is gone or a fragment. Remove it either way.
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass
+
+
+def check_page(limit: Optional[int], has_cursor: bool) -> None:
+    """Raises ValueError for a page size below 1 or a cursor without one."""
+    if limit is not None and limit < 1:
+        raise ValueError(f'Limit must be at least 1, got {limit}')
+    if has_cursor and limit is None:
+        raise ValueError('A cursor requires limit.')

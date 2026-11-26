@@ -115,19 +115,35 @@ class JobsCacheManager {
   }
 
   /**
-   * Group tasks by job_id and return unique job IDs in order
+   * Group rows by job tree and return the tree keys in order.
+   *
+   * Same rule as groupJobRowsByTree in components/jobs.jsx, so the pages
+   * this rebuilds in the background match the root-aware pages the server
+   * returns: a job launched from inside another job (root_job_id set) rides
+   * with its root when the root is listed and takes no slot of its own;
+   * otherwise it stands as its own job. Roots and their declared tasks are
+   * placed first, so a group starts with the job it is named after and the
+   * order is the roots' order.
    */
   _groupTasksByJob(tasks) {
     const jobMap = new Map();
     const jobOrder = [];
-
-    for (const task of tasks) {
-      const jobId = task.id;
-      if (!jobMap.has(jobId)) {
-        jobMap.set(jobId, []);
-        jobOrder.push(jobId);
+    const isMember = (task) =>
+      task.root_job_id != null && task.root_job_id !== task.id;
+    const add = (key, task) => {
+      if (!jobMap.has(key)) {
+        jobMap.set(key, []);
+        jobOrder.push(key);
       }
-      jobMap.get(jobId).push(task);
+      jobMap.get(key).push(task);
+    };
+    for (const task of tasks) {
+      if (!isMember(task)) add(task.id, task);
+    }
+    for (const task of tasks) {
+      if (isMember(task)) {
+        add(jobMap.has(task.root_job_id) ? task.root_job_id : task.id, task);
+      }
     }
 
     return { jobMap, jobOrder };

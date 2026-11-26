@@ -125,6 +125,35 @@ class SSH(kubernetes.Kubernetes):
                 'Run `sky ssh up` to set up.')
 
     @classmethod
+    def _filter_allowed_node_pools(cls, contexts: List[str]) -> List[str]:
+        """Keeps the contexts the active workspace's allowed_node_pools allows.
+        """
+        # Workspace-level allowed_node_pools should take precedence over
+        # the global allowed_node_pools.
+        allowed_node_pools = skypilot_config.get_workspace_cloud('ssh').get(
+            'allowed_node_pools', None)
+        if allowed_node_pools is None:
+            allowed_node_pools = skypilot_config.get_effective_region_config(
+                cloud='ssh',
+                region=None,
+                keys=('allowed_node_pools',),
+                default_value=None)
+        if allowed_node_pools is None:
+            return contexts
+        return [
+            ctx for ctx in contexts
+            if common_utils.removeprefix(ctx, 'ssh-') in allowed_node_pools
+        ]
+
+    @classmethod
+    def allowed_node_pool_contexts(cls) -> List[str]:
+        """The node pools file's contexts that the active workspace allows.
+
+        Unlike ``existing_allowed_contexts``, includes pools not yet set up.
+        """
+        return cls._filter_allowed_node_pools(cls.get_ssh_node_pool_contexts())
+
+    @classmethod
     def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts that start with 'ssh-'.
 
@@ -140,17 +169,6 @@ class SSH(kubernetes.Kubernetes):
 
         all_contexts = set(all_contexts)
 
-        # Workspace-level allowed_node_pools should take precedence over
-        # the global allowed_node_pools.
-        allowed_node_pools = skypilot_config.get_workspace_cloud('ssh').get(
-            'allowed_node_pools', None)
-        if allowed_node_pools is None:
-            allowed_node_pools = skypilot_config.get_effective_region_config(
-                cloud='ssh',
-                region=None,
-                keys=('allowed_node_pools',),
-                default_value=None)
-
         # Filter for SSH contexts (those starting with 'ssh-')
         ssh_contexts = [
             context for context in all_contexts if context.startswith('ssh-')
@@ -158,14 +176,6 @@ class SSH(kubernetes.Kubernetes):
 
         # Get contexts from SSH node pools file
         all_node_pool_contexts = cls.get_ssh_node_pool_contexts()
-
-        def filter_by_allowed_node_pools(ctxs):
-            if allowed_node_pools is None:
-                return ctxs
-            return [
-                ctx for ctx in ctxs
-                if common_utils.removeprefix(ctx, 'ssh-') in allowed_node_pools
-            ]
 
         if all_node_pool_contexts:
             # Only include allowed contexts that exist
@@ -177,11 +187,13 @@ class SSH(kubernetes.Kubernetes):
                 else:
                     skipped_contexts.append(context)
             if not silent:
-                cls._ssh_log_skipped_contexts_once(tuple(skipped_contexts))
-            return filter_by_allowed_node_pools(existing_contexts)
+                # Only name pools the caller's workspace may see.
+                cls._ssh_log_skipped_contexts_once(
+                    tuple(cls._filter_allowed_node_pools(skipped_contexts)))
+            return cls._filter_allowed_node_pools(existing_contexts)
 
         # If no all_node_pool_contexts found, return all SSH contexts
-        return filter_by_allowed_node_pools(ssh_contexts)
+        return cls._filter_allowed_node_pools(ssh_contexts)
 
     @classmethod
     def _check_compute_credentials(

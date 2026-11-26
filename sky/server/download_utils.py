@@ -1,16 +1,23 @@
-"""Shared authorization for log download staging and retrieval."""
+"""Shared authorization for the per-user directory a request may touch."""
+
+from typing import Optional
 
 import fastapi
 
-from sky.server.requests import payloads
+from sky.utils import common_utils
 
 
-def download_user_id(request: fastapi.Request,
-                     body: payloads.RequestBody) -> str:
-    """Choose a download owner whose ID is a single path component."""
+def owner_user_id(request: fastapi.Request, user_hash: Optional[str]) -> str:
+    """The user dir this request may touch: the auth id if set, else user_hash.
+
+    The result is joined as a directory component under API_SERVER_CLIENT_DIR by
+    the upload and download handlers, so it must be a single safe path
+    component. Rejecting a bad value here stops a request from writing into
+    another user's tree or escaping the clients dir.
+    """
     user_id = (request.state.auth_user.id
-               if request.state.auth_user is not None else body.user_hash)
-    if (not user_id or user_id in ('.', '..') or '/' in user_id or
-            '\\' in user_id):
+               if request.state.auth_user is not None else user_hash)
+    if not common_utils.is_single_path_component(user_id):
         raise fastapi.HTTPException(status_code=400, detail='Invalid user ID')
+    assert user_id is not None  # narrowed by the check above
     return user_id

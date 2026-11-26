@@ -57,12 +57,23 @@ def check_host_in_ssh_config(hostname: str) -> bool:
     return bool(pattern.search(proc.stdout))
 
 
+_NON_STR_SCALAR_TAGS = ('tag:yaml.org,2002:int', 'tag:yaml.org,2002:float',
+                        'tag:yaml.org,2002:bool')
+
+
 class UniqueKeySafeLoader(yaml.SafeLoader):
     """Custom YAML loader that raises an error if there are duplicate keys."""
 
     def construct_mapping(self, node, deep=False):
         mapping = set()
-        for key_node, _ in node.value:
+        for key_node, value_node in node.value:
+            # Keep a password as typed: YAML would read `012345` as the octal
+            # int 5349 and `yes` as True.
+            if (isinstance(key_node, yaml.ScalarNode) and
+                    key_node.value == 'password' and
+                    isinstance(value_node, yaml.ScalarNode) and
+                    value_node.tag in _NON_STR_SCALAR_TAGS):
+                value_node.tag = 'tag:yaml.org,2002:str'
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
                 raise yaml.constructor.ConstructorError(
@@ -112,11 +123,16 @@ def get_cluster_config(
     return targets
 
 
+def _password_str(value: Any) -> str:
+    # YAML reads `password: 123456` as an int; sudo needs the text.
+    return '' if value is None else str(value)
+
+
 def prepare_hosts_info(
     cluster_name: str,
     cluster_config: Dict[str, Any],
     upload_ssh_key_func: Optional[Callable[[str, str], str]] = None
-) -> List[Dict[str, str]]:
+) -> List[Dict[str, Any]]:
     """Prepare list of hosts with resolved user, identity_file, and password.
 
     Args:
@@ -142,7 +158,7 @@ def prepare_hosts_info(
     cluster_user = cluster_config.get('user', '')
     cluster_identity_file = os.path.expanduser(
         cluster_config.get('identity_file', ''))
-    cluster_password = cluster_config.get('password', '')
+    cluster_password = _password_str(cluster_config.get('password'))
 
     # Check if cluster identity file exists
     if cluster_identity_file and not os.path.isfile(cluster_identity_file):
@@ -188,16 +204,19 @@ def prepare_hosts_info(
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                logger.warning(f'{colorama.Fore.RED}Warning: Host missing'
-                               f'\'ip\' field, skipping: {host}'
-                               f'{colorama.Style.RESET_ALL}')
+                # Not the dict itself: it may hold a sudo password.
+                logger.warning(
+                    f'{colorama.Fore.RED}Warning: Host {i} of '
+                    f'{cluster_name!r} has no \'ip\' field, skipping.'
+                    f'{colorama.Style.RESET_ALL}')
                 continue
 
             # Check if this is an SSH config hostname
             is_ssh_config_host = check_host_in_ssh_config(host['ip'])
             if upload_ssh_key_func is not None and is_ssh_config_host:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(use_cluster_config_msg.format(host=host))
+                    raise ValueError(
+                        use_cluster_config_msg.format(host=host['ip']))
 
             # Use host-specific values or fall back to cluster defaults
             host_user = '' if is_ssh_config_host else host.get(
@@ -206,7 +225,8 @@ def prepare_hosts_info(
                 _maybe_hardcode_identity_file(
                     i, host.get('identity_file', cluster_identity_file)))
             host_identity_file = os.path.expanduser(host_identity_file)
-            host_password = host.get('password', cluster_password)
+            host_password = (_password_str(host['password'])
+                             if 'password' in host else cluster_password)
 
             if host_identity_file and not os.path.isfile(host_identity_file):
                 with ux_utils.print_exception_no_traceback():

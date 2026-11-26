@@ -31,9 +31,15 @@ jest.mock('@/lib/cache-preloader', () => ({
     backgroundPreload: jest.fn(),
   },
 }));
+jest.mock('@/data/connectors/client', () => ({
+  ...jest.requireActual('@/data/connectors/client'),
+  getCurrentUserInfo: jest.fn(async () => ({ id: 'local', name: 'local' })),
+}));
 jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
-  PluginSlot: () => null,
+  // Honour `fallback` so the built-in rendering a slot wraps (e.g. the
+  // Infra cell) stays under test when no plugin is registered.
+  PluginSlot: ({ fallback = null }) => fallback,
 }));
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
@@ -92,7 +98,16 @@ jest.mock('@/lib/jobs-cache-manager', () => ({
   },
 }));
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import { getCurrentUserInfo } from '@/data/connectors/client';
+import cachePreloader from '@/lib/cache-preloader';
 import {
   ManagedJobs,
   ManagedJobsTable,
@@ -170,12 +185,279 @@ const lastParams = () =>
 describe('managed jobs Infra filter', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    getCurrentUserInfo.mockResolvedValue({ id: 'local', name: 'local' });
+    cachePreloader.preloadForPage.mockResolvedValue(undefined);
     respondWith(PAGE);
     window.history.replaceState({}, '', '/jobs');
   });
 
   it('offers Infra as a filter property', () => {
     expect(JOB_FILTER_SCHEMA.map((f) => f.key)).toContain('infra');
+  });
+
+  it('shows loading from the first paint through identity, Mine, and count lookup', async () => {
+    const deferred = () => {
+      let resolve;
+      const promise = new Promise((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    };
+    const identity = deferred();
+    const mine = deferred();
+    const everyone = deferred();
+    getCurrentUserInfo.mockReturnValue(identity.promise);
+    getPaginatedJobs.mockImplementation((params) =>
+      params.userMatch ? mine.promise : everyone.promise
+    );
+    const expectLoading = () => {
+      expect(screen.queryByText('No active jobs')).toBeNull();
+      expect(
+        screen.queryByText("You haven't submitted any managed jobs yet.")
+      ).toBeNull();
+      expect(screen.getAllByText('Loading...').length).toBeGreaterThan(0);
+    };
+    render(<ManagedJobs />);
+    // The initial paint must not mistake an unresolved identity for no jobs.
+    expectLoading();
+    expect(getPaginatedJobs).not.toHaveBeenCalled();
+    await act(async () =>
+      identity.resolve({ id: 'alice', name: 'alice@example.com' })
+    );
+    await waitFor(() => expect(getPaginatedJobs).toHaveBeenCalled());
+    expectLoading();
+    const empty = {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      statusCounts: {},
+      controllerStopped: false,
+      hasNext: false,
+    };
+    await act(async () => mine.resolve(empty));
+    await waitFor(() => expect(lastParams().limit).toBe(1));
+    expectLoading();
+    await act(async () =>
+      everyone.resolve({ ...empty, total: 1, totalNoFilter: 1 })
+    );
+    expect(
+      await screen.findByText("You haven't submitted any managed jobs yet.")
+    ).toBeTruthy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+    expect(screen.queryAllByText('Loading...')).toHaveLength(0);
+  });
+
+  it('says the filters match nothing, not that you have no jobs', async () => {
+    getCurrentUserInfo.mockResolvedValue({
+      id: 'alice',
+      name: 'alice@example.com',
+    });
+    const empty = {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      statusCounts: {},
+      controllerStopped: false,
+      hasNext: false,
+    };
+    // Alice has jobs, and so does everyone else: only the filter empties it.
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve(
+        params.nameMatch
+          ? empty
+          : { ...empty, total: 5, totalNoFilter: 5, jobs: PAGE }
+      )
+    );
+    await openAt('?name=zz-no-match');
+    expect(await screen.findByText('No jobs match your filters')).toBeTruthy();
+    expect(
+      screen.queryByText("You haven't submitted any managed jobs yet.")
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'View all jobs' })).toBeNull();
+
+    // The empty state's own button, not the chips row's.
+    const emptyState = screen
+      .getByText('No jobs match your filters')
+      .closest('td');
+    fireEvent.click(
+      within(emptyState).getByRole('button', { name: 'Clear filters' })
+    );
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('name')).toBe(null)
+    );
+    expect(await screen.findByText('ocmask-lm80')).toBeTruthy();
+    expect(screen.queryByText('No jobs match your filters')).toBeNull();
+  });
+
+  it('treats a status pill as a filter and clears it with the chips', async () => {
+    const empty = {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      statusCounts: {},
+      controllerStopped: false,
+      hasNext: false,
+    };
+    // Status pills live in `view.status`, not in the filter chips.
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve(
+        params.statuses || params.nameMatch
+          ? empty
+          : { ...empty, total: 5, totalNoFilter: 5, jobs: PAGE }
+      )
+    );
+    await openAt('?owner=all&status=SUCCEEDED&name=zz-no-match');
+    expect(await screen.findByText('No jobs match your filters')).toBeTruthy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+
+    const emptyState = screen
+      .getByText('No jobs match your filters')
+      .closest('td');
+    fireEvent.click(
+      within(emptyState).getByRole('button', { name: 'Clear filters' })
+    );
+    await waitFor(() => {
+      const params = new URLSearchParams(window.location.search);
+      expect(params.get('name')).toBe(null);
+      expect(params.get('status')).toBe(null);
+    });
+    expect(await screen.findByText('ocmask-lm80')).toBeTruthy();
+  });
+
+  it('keeps the Active toggle when Clear filters removes the chips', async () => {
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve({
+        jobs: params.nameMatch ? [] : PAGE,
+        total: params.nameMatch ? 0 : 2,
+        totalNoFilter: 2,
+        statusCounts: {},
+        controllerStopped: false,
+        hasNext: false,
+      })
+    );
+    await openAt('?owner=all&status=active&name=zz-no-match');
+    const emptyState = (
+      await screen.findByText('No jobs match your filters')
+    ).closest('td');
+    fireEvent.click(
+      within(emptyState).getByRole('button', { name: 'Clear filters' })
+    );
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('name')).toBe(null)
+    );
+    expect(new URLSearchParams(window.location.search).get('status')).toBe(
+      'active'
+    );
+  });
+
+  it('says no jobs match when only a status pill empties the table', async () => {
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve({
+        jobs: params.statuses ? [] : PAGE,
+        total: params.statuses ? 0 : 2,
+        totalNoFilter: 2,
+        statusCounts: {},
+        controllerStopped: false,
+        hasNext: false,
+      })
+    );
+    await openAt('?owner=all&status=SUCCEEDED');
+    expect(await screen.findByText('No jobs match your filters')).toBeTruthy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+  });
+
+  it('shows loading immediately on a direct All Jobs page refresh', async () => {
+    let resolveIdentity;
+    let resolveJobs;
+    getCurrentUserInfo.mockReturnValue(
+      new Promise((resolve) => {
+        resolveIdentity = resolve;
+      })
+    );
+    getPaginatedJobs.mockReturnValue(
+      new Promise((resolve) => {
+        resolveJobs = resolve;
+      })
+    );
+    window.history.replaceState({}, '', '/jobs?owner=all');
+    render(<ManagedJobs />);
+    expect(screen.queryByText('No active jobs')).toBeNull();
+    expect(screen.getAllByText('Loading...').length).toBeGreaterThan(0);
+    expect(getPaginatedJobs).not.toHaveBeenCalled();
+    await act(async () =>
+      resolveIdentity({ id: 'alice', name: 'alice@example.com' })
+    );
+    await waitFor(() => expect(getPaginatedJobs).toHaveBeenCalled());
+    expect(lastParams().userMatch).toBeFalsy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+    expect(screen.getAllByText('Loading...').length).toBeGreaterThan(0);
+    await act(async () =>
+      resolveJobs({
+        jobs: PAGE,
+        total: PAGE.length,
+        totalNoFilter: PAGE.length,
+        statusCounts: { RUNNING: PAGE.length },
+        controllerStopped: false,
+        hasNext: false,
+      })
+    );
+    expect(await screen.findByText('ocmask-lm80')).toBeTruthy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+    expect(screen.queryAllByText('Loading...')).toHaveLength(0);
+  });
+
+  it('fetches All Jobs immediately even while unrelated preloads are pending', async () => {
+    getCurrentUserInfo.mockResolvedValue({
+      id: 'alice',
+      name: 'alice@example.com',
+    });
+    cachePreloader.preloadForPage.mockReturnValue(new Promise(() => {}));
+    let resolveEveryone;
+    const everyone = new Promise((resolve) => {
+      resolveEveryone = resolve;
+    });
+    const empty = {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      statusCounts: {},
+      controllerStopped: false,
+      hasNext: false,
+    };
+    getPaginatedJobs.mockImplementation((params) => {
+      if (params.userMatch) return Promise.resolve(empty);
+      if (params.limit === 1)
+        return Promise.resolve({ ...empty, total: 1, totalNoFilter: 1 });
+      return everyone;
+    });
+    await openAt('');
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'View all jobs' })
+    );
+    await waitFor(() =>
+      expect(
+        getPaginatedJobs.mock.calls.some(
+          ([params]) => !params.userMatch && params.limit === 10
+        )
+      ).toBe(true)
+    );
+    expect(screen.queryByText('No active jobs')).toBeNull();
+    expect(screen.getAllByText('Loading...').length).toBeGreaterThan(0);
+    // Clicking the already-selected scope must not orphan its pending request.
+    fireEvent.click(screen.getByRole('tab', { name: 'All Jobs' }));
+    await act(async () =>
+      resolveEveryone({
+        ...empty,
+        jobs: [
+          job(123, 'scope-switch-job', 'Kubernetes', 'cluster-2', '1xH100'),
+        ],
+        total: 1,
+        totalNoFilter: 1,
+      })
+    );
+    expect(await screen.findByText('scope-switch-job')).toBeTruthy();
+    expect(screen.queryByText('No active jobs')).toBeNull();
+    expect(screen.queryAllByText('Loading...')).toHaveLength(0);
   });
 
   it('sends the spec to the server rather than matching it here', async () => {
@@ -265,6 +547,8 @@ describe('managed jobs Infra filter', () => {
     respondWith(PAGE);
 
     await openAt('?owner=all&infra=slurm');
+    await screen.findByText(/Cannot filter these jobs by infra/);
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
     await waitFor(() => expect(screen.queryByText('ocmask-lm80')).toBeTruthy());
     expect(screen.queryByText(/Cannot filter these jobs by infra/)).toBeNull();
   });

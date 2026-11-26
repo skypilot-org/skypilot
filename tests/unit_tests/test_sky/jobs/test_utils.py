@@ -1,4 +1,5 @@
 """Unit tests for sky.jobs.utils functions."""
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import MagicMock
@@ -224,12 +225,17 @@ class TestGetManagedJobQueue:
             'job_duration': 0,
             'end_at': None,
             'failure_reason': None,
+            'created_at': None,
         }
         defaults.update(kwargs)
         return defaults
 
-    def _patch_managed_job_state(self, monkeypatch: pytest.MonkeyPatch,
-                                 jobs: List[Dict[str, Any]]):
+    def _patch_managed_job_state(
+            self,
+            monkeypatch: pytest.MonkeyPatch,
+            jobs: List[Dict[str, Any]],
+            unfinished_dependencies: Optional[Dict[int, List[int]]] = None,
+            dependencies: Optional[Dict[int, List[int]]] = None):
         """Patch managed_job_state functions for testing."""
 
         def fake_get_managed_jobs_total():
@@ -248,7 +254,9 @@ class TestGetManagedJobQueue:
             # Return all jobs for simplicity, filtering would be tested separately
             return jobs, len(jobs)
 
-        def fake_get_managed_jobs_highest_priority():
+        def fake_get_managed_jobs_highest_priority(
+                max_launching_jobs_per_user=None):
+            del max_launching_jobs_per_user
             if not jobs:
                 return 0
             return max(job.get('priority', 0) for job in jobs)
@@ -265,6 +273,20 @@ class TestGetManagedJobQueue:
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'get_managed_jobs_highest_priority',
                             fake_get_managed_jobs_highest_priority)
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_unfinished_dependencies',
+            lambda job_ids: {
+                job_id: deps
+                for job_id, deps in (unfinished_dependencies or {}).items()
+                if job_id in job_ids
+            })
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_jobs_dependencies',
+            lambda job_ids: {
+                job_id: deps
+                for job_id, deps in (dependencies or {}).items()
+                if job_id in job_ids
+            })
 
     def _patch_global_user_state(self, monkeypatch: pytest.MonkeyPatch):
         """Patch global_user_state for testing."""
@@ -480,6 +502,45 @@ class TestGetManagedJobQueue:
         job1 = next(j for j in result['jobs'] if j['job_id'] == 1)
         assert 'Waiting for higher priority jobs to launch' in job1['details']
 
+    @pytest.mark.parametrize(('dependencies', 'expected'), [
+        ([7], 'Dependency: 7'),
+        ([7, 8], 'Dependencies: 7, 8'),
+    ])
+    def test_details_for_job_waiting_on_dependencies(self, monkeypatch,
+                                                     dependencies, expected):
+        jobs = [self._make_test_job(1, priority=10)]
+        self._patch_managed_job_state(monkeypatch,
+                                      jobs,
+                                      unfinished_dependencies={1: dependencies})
+        self._patch_global_user_state(monkeypatch)
+
+        result = jobs_utils.get_managed_job_queue()
+
+        assert result['jobs'][0]['details'] == expected
+
+    def test_depends_on_field(self, monkeypatch):
+        jobs = [self._make_test_job(1), self._make_test_job(2)]
+        self._patch_managed_job_state(monkeypatch,
+                                      jobs,
+                                      dependencies={1: [7, 8]})
+        self._patch_global_user_state(monkeypatch)
+
+        by_id = {
+            job['job_id']: job
+            for job in jobs_utils.get_managed_job_queue()['jobs']
+        }
+        assert by_id[1]['depends_on'] == [7, 8]
+        assert by_id[2]['depends_on'] is None
+
+        # get_managed_job_queue rewrites the job records in place.
+        self._patch_managed_job_state(
+            monkeypatch, [self._make_test_job(1),
+                          self._make_test_job(2)],
+            dependencies={1: [7, 8]})
+        only_status = jobs_utils.get_managed_job_queue(
+            fields=['job_id', 'status'])['jobs']
+        assert all('depends_on' not in job for job in only_status)
+
     def test_details_for_waiting_state_with_same_priority(self, monkeypatch):
         """Test details generation for WAITING state with same priority."""
         jobs = [
@@ -664,15 +725,13 @@ class TestGetManagedJobQueue:
         monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayResourceHandle',
                             type(mock_handle))
 
-        # Mock InfraInfo
-        class MockInfraInfo:
+        # Mock InfraInfo. Subclass the real one: the patch replaces the
+        # shared infra_utils attribute, so the state layer's
+        # InfraInfo(...).to_str() (infra filter options) sees it too and
+        # must keep working; only the display string is pinned here.
+        class MockInfraInfo(jobs_utils.infra_utils.InfraInfo):
 
-            def __init__(self, cloud, region, zone):
-                self.cloud = cloud
-                self.region = region
-                self.zone = zone
-
-            def formatted_str(self):
+            def formatted_str(self, truncate: bool = True):
                 return f'{self.cloud}/{self.region}/{self.zone}'
 
         monkeypatch.setattr(jobs_utils.infra_utils, 'InfraInfo', MockInfraInfo)
@@ -911,7 +970,10 @@ class TestStreamLogsByIdTaskFiltering:
         # Task filter is int 1, should match task_id=1 (eval)
         # We need to verify the filter finds the right task by checking
         # that it doesn't return NOT_FOUND
-        # Mock get_status to return a terminal status so we exit early
+        # Mock the task's status to a terminal one so we exit early
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_status_with_task_id',
+            lambda jid, tid: managed_job_state.ManagedJobStatus.SUCCEEDED)
         monkeypatch.setattr(
             jobs_utils.managed_job_state, 'get_status',
             lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
@@ -939,6 +1001,9 @@ class TestStreamLogsByIdTaskFiltering:
             'get_all_task_ids_names_statuses_logs',
             lambda jid: task_info,
         )
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_status_with_task_id',
+            lambda jid, tid: managed_job_state.ManagedJobStatus.SUCCEEDED)
         monkeypatch.setattr(
             jobs_utils.managed_job_state, 'get_status',
             lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
@@ -1093,6 +1158,200 @@ class TestStreamLogsByIdTaskFiltering:
         assert exit_code == exceptions.JobExitCode.NOT_FOUND
         # Single task should show '0' not '0-0'
         assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg
+
+
+class TestStreamLogsByIdFinishedTaskInRunningJob:
+    """A task that finished while another task keeps the job running.
+
+    This is a job group task, or a pipeline task followed by the next one.
+    Its logs come from the copy the controller saved, not from its cluster,
+    which may be gone by then: a pipeline tears it down, and a job group keeps
+    its record until the group ends while its idle autodown deletes it.
+    """
+
+    def _patch_group(self, monkeypatch, trainer_statuses, log_files=(None,)):
+        """Stubs job 7: task 0 (trainer) takes trainer_statuses in turn, and
+        successive reads of its log path return log_files in turn (the last
+        of each repeats). Task 1 (inference) keeps the job RUNNING."""
+        running = managed_job_state.ManagedJobStatus.RUNNING
+        statuses = iter(trainer_statuses)
+        trainer_status = [trainer_statuses[-1]]
+        paths = iter(log_files)
+        trainer_log = [log_files[-1]]
+
+        def _task_status(job_id, task_id):
+            assert job_id == 7, job_id
+            if task_id == 1:
+                return running
+            trainer_status[0] = next(statuses, trainer_status[0])
+            return trainer_status[0]
+
+        def _task_info(job_id):
+            assert job_id == 7, job_id
+            trainer_log[0] = next(paths, trainer_log[0])
+            return [(0, 'trainer', trainer_status[0], trainer_log[0], None),
+                    (1, 'inference', running, None, None)]
+
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        mock_state.get_num_tasks.return_value = 2
+        mock_state.get_status.return_value = running
+        mock_state.get_latest_task_id_status.return_value = (1, running)
+        mock_state.get_job_status_with_task_id.side_effect = _task_status
+        mock_state.get_all_task_ids_names_statuses_logs.side_effect = _task_info
+        mock_state.get_submitted_task_ids.return_value = {0, 1}
+        mock_state.get_job_schedule_state.return_value = (
+            managed_job_state.ManagedJobScheduleState.ALIVE)
+        mock_state.is_batch_job.return_value = False
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'trainer'
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, '_runtimes', [])
+        monkeypatch.setattr(jobs_utils.log_lib, 'start_orphan_watchdog',
+                            lambda: None)
+        mock_logs = MagicMock()
+        mock_logs.get_log_reader.return_value = None
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        sleeps = []
+
+        def _sleep(seconds):
+            # Before the fix the tail retried the cluster for as long as the
+            # job ran; fail instead of hanging.
+            sleeps.append(seconds)
+            if len(sleeps) > 3:
+                raise AssertionError(f'tail did not stop; slept {sleeps}')
+
+        monkeypatch.setattr(jobs_utils.time, 'sleep', _sleep)
+
+    @pytest.mark.parametrize('follow', [False, True])
+    def test_prints_saved_log_without_the_cluster(self, monkeypatch, tmp_path,
+                                                  capsys, follow):
+        log_file = tmp_path / 'trainer.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\n'
+            'trainer output\n',
+            encoding='utf-8')
+        self._patch_group(monkeypatch,
+                          [managed_job_state.ManagedJobStatus.SUCCEEDED],
+                          log_files=[str(log_file)])
+        monkeypatch.setattr(
+            jobs_utils.global_user_state, 'get_handle_from_cluster_name',
+            MagicMock(side_effect=AssertionError('must not tail the cluster')))
+
+        _, code = jobs_utils.stream_logs_by_id(7, follow=follow, task=0)
+
+        out = capsys.readouterr().out
+        assert 'trainer output' in out
+        assert 'Task trainer(0) finished (status: SUCCEEDED)' in out
+        # The job is still running.
+        assert 'Job finished' not in out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_waits_for_the_saved_log_of_a_just_finished_task(
+            self, monkeypatch, tmp_path, capsys):
+        # The controller marks the task SUCCEEDED before it records the path
+        # of the log it saves, so the first reads find none.
+        log_file = tmp_path / 'trainer.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\n'
+            'trainer output\n',
+            encoding='utf-8')
+        self._patch_group(monkeypatch,
+                          [managed_job_state.ManagedJobStatus.SUCCEEDED],
+                          log_files=[None, None, str(log_file)])
+
+        _, code = jobs_utils.stream_logs_by_id(7, follow=False, task=0)
+
+        assert 'trainer output' in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    @pytest.mark.parametrize('task_filter', [0, 'completed'])
+    @pytest.mark.parametrize('follow', [False, True])
+    @pytest.mark.parametrize('storage', ['local', 'external', 'missing'])
+    @pytest.mark.parametrize('task_status',
+                             ['SUCCEEDED', 'FAILED', 'CANCELLED'])
+    def test_log_sources(self, monkeypatch, tmp_path, capsys, task_filter,
+                         follow, storage, task_status):
+        status = managed_job_state.ManagedJobStatus
+        log_file = tmp_path / 'completed.log'
+        log_file.write_text(jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT +
+                            '\nCOMPLETED_TASK_MARKER\n')
+        task_info = [
+            (0, 'completed', status[task_status],
+             str(log_file) if storage == 'local' else None, None),
+            (1, 'running', status.RUNNING, None, None),
+        ]
+        state = MagicMock(wraps=managed_job_state)
+        state.ManagedJobStatus = status
+        state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        state.get_num_tasks.return_value = 2
+        state.get_status.return_value = status.RUNNING
+        state.get_job_status_with_task_id.side_effect = (
+            lambda jid, tid: task_info[tid][2])
+        state.get_all_task_ids_names_statuses_logs.return_value = task_info
+        state.get_submitted_task_ids.return_value = {0, 1}
+        state.get_job_schedule_state.return_value = (
+            managed_job_state.ManagedJobScheduleState.ALIVE)
+        state.get_pool_from_job_id.return_value = None
+        state.is_batch_job.return_value = False
+        state.get_latest_task_id_status.side_effect = AssertionError(
+            'Completed task must replay saved logs without live polling')
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', state)
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, '_runtimes', [])
+        monkeypatch.setattr(jobs_utils.log_lib, 'start_orphan_watchdog',
+                            lambda: None)
+        reader = MagicMock() if storage == 'external' else None
+        if reader is not None:
+            reader.read_cluster_job_logs.return_value = 0
+        monkeypatch.setattr(jobs_utils.logs, 'get_log_reader', lambda: reader)
+        # A SUCCEEDED task whose log was never saved waits out the deadline.
+        clock = iter(range(0, 1000, 5))
+        monkeypatch.setattr(jobs_utils.time, 'time', lambda: next(clock))
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+
+        msg, code = jobs_utils.stream_logs_by_id(5,
+                                                 follow=follow,
+                                                 tail=10,
+                                                 task=task_filter)
+
+        output = capsys.readouterr().out
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            status[task_status])
+        assert 'Job finished' not in output
+        if storage == 'local':
+            assert 'COMPLETED_TASK_MARKER' in output
+        elif storage == 'external':
+            reader.read_cluster_job_logs.assert_called_once_with(
+                jobs_utils.generate_managed_job_cluster_name('completed', 5),
+                None,
+                follow=False,
+                tail=10)
+        else:
+            assert 'Task completed(0) of job 5' in msg
+            assert task_status in msg
+
+    def test_live_tail_stops_once_the_task_finishes(self, monkeypatch):
+        running = managed_job_state.ManagedJobStatus.RUNNING
+        # RUNNING when the tail starts, SUCCEEDED once the tail fails.
+        self._patch_group(
+            monkeypatch,
+            [running, running, managed_job_state.ManagedJobStatus.SUCCEEDED])
+        monkeypatch.setattr(
+            jobs_utils.global_user_state, 'get_handle_from_cluster_name', lambda
+            _: MagicMock(spec=jobs_utils.backends.CloudVmRayResourceHandle))
+        backend = MagicMock()
+        # The cluster is gone, so the tail fails without a job exit code.
+        backend.tail_logs.return_value = 255
+        monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayBackend',
+                            lambda: backend)
+
+        _, code = jobs_utils.stream_logs_by_id(7, follow=False, task=0)
+
+        backend.tail_logs.assert_called_once()
+        assert code == exceptions.JobExitCode.SUCCEEDED
 
 
 class TestFormatJobDetails:
@@ -1599,6 +1858,297 @@ class TestStreamLogsByIdExternalStoreFallback:
         assert 'external log store' in msg
 
 
+class TestStreamLogsByIdJobFinishedBetweenChecks:
+    """A followed tail prints a job's logs even if it never saw it RUNNING.
+
+    A short job is RUNNING only until the controller's next status check, which
+    can come before the tail's next one. The tail then goes from STARTING
+    straight to a terminal status without streaming from the cluster, and must
+    print the logs the controller persists for the finished job instead.
+    """
+
+    def _patch_job(
+            self,
+            monkeypatch,
+            final_status,
+            log_files,
+            submitted=True,
+            batch=False,
+            schedule_state=managed_job_state.ManagedJobScheduleState.ALIVE,
+            reader=None):
+        """Stubs a job that is STARTING on entry and final_status afterwards.
+
+        log_files: what successive reads of the task's local log path return;
+            the last one repeats.
+        submitted: whether the task began launching (False for a task with
+            no run command).
+        batch: whether the job is a batch coordinator job.
+        schedule_state: the job's schedule state while the tail waits.
+        reader: the registered log reader, if any.
+        """
+        starting = managed_job_state.ManagedJobStatus.STARTING
+        statuses = iter([starting])
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        mock_state.get_job_schedule_state.return_value = schedule_state
+        mock_state.get_num_tasks.return_value = 1
+        mock_state.get_status.side_effect = (
+            lambda _: next(statuses, final_status))
+        mock_state.is_batch_job.return_value = batch
+        mock_state.get_submitted_task_ids.return_value = ({0} if submitted else
+                                                          set())
+        mock_state.get_latest_task_id_status.side_effect = [(0, starting),
+                                                            (0, final_status)]
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'mytask'
+        reads = iter(log_files)
+        last = [log_files[-1]]
+
+        def _task_info(_):
+            last[0] = next(reads, last[0])
+            return [(0, 'mytask', final_status, last[0], None)]
+
+        mock_state.get_all_task_ids_names_statuses_logs.side_effect = _task_info
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        # The cluster is never seen while the job is RUNNING.
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name', lambda _: None)
+        monkeypatch.setattr(jobs_utils, 'read_provision_status_from_log',
+                            lambda path, pos, msg: (pos, msg))
+        monkeypatch.setattr(jobs_utils, '_parked_launch_reason',
+                            lambda *args: None)
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+        mock_logs = MagicMock()
+        mock_logs.get_log_reader.return_value = reader
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        return mock_state
+
+    def test_prints_persisted_logs(self, monkeypatch, tmp_path, capsys):
+        log_file = tmp_path / 'run.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\njob output\n',
+            encoding='utf-8')
+        # The controller records the log path only after it marks the job
+        # SUCCEEDED, so the first reads find none.
+        self._patch_job(monkeypatch,
+                        managed_job_state.ManagedJobStatus.SUCCEEDED,
+                        [None, None, str(log_file)])
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'job output' in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_waits_for_a_local_copy_with_a_reader_registered(
+            self, monkeypatch, tmp_path, capsys):
+        # A registered reader does not mean the controller keeps no copy: in
+        # a placement without a logging agent it keeps one, and the tail must
+        # wait for it rather than ask a store that never got the logs.
+        log_file = tmp_path / 'run.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\njob output\n',
+            encoding='utf-8')
+        self._patch_job(monkeypatch,
+                        managed_job_state.ManagedJobStatus.SUCCEEDED,
+                        [None, None, str(log_file)],
+                        reader=MagicMock())
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'job output' in capsys.readouterr().out
+
+    def test_stops_waiting_once_the_job_is_done(self, monkeypatch):
+        # The controller kept no copy (the logs are in the store) and is done
+        # with the job: nothing more will be recorded, so stop waiting.
+        mock_state = self._patch_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.SUCCEEDED, [None],
+            schedule_state=managed_job_state.ManagedJobScheduleState.DONE)
+        clock = iter(range(0, 1000, 5))
+        monkeypatch.setattr(jobs_utils.time, 'time', lambda: next(clock))
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        # One read in the wait, one in the terminal-job read.
+        assert mock_state.get_all_task_ids_names_statuses_logs.call_count == 2
+        mock_state.get_job_schedule_state.assert_called_once_with(5)
+
+    def test_no_persisted_logs_to_wait_for(self, monkeypatch, capsys):
+        # A job that failed before it ran user code has no logs to wait for.
+        mock_state = self._patch_job(
+            monkeypatch, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+            [None])
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        assert 'already in terminal state' not in capsys.readouterr().out
+
+    def test_task_without_run_command_does_not_wait(self, monkeypatch, capsys):
+        # A task with no run command is SUCCEEDED without launching a cluster,
+        # so it never gets a log path; waiting for one would only delay the
+        # launch's exit.
+        mock_state = self._patch_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.SUCCEEDED, [None],
+            submitted=False)
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        assert 'already in terminal state' not in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_batch_job_does_not_wait(self, monkeypatch, capsys):
+        # A batch coordinator runs on the controller and keeps no task log.
+        mock_state = self._patch_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.SUCCEEDED, [None],
+            batch=True)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        mock_state.get_submitted_task_ids.assert_not_called()
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        assert 'already in terminal state' not in capsys.readouterr().out
+
+    def test_failed_task_without_log_does_not_wait(self, monkeypatch, capsys):
+        # The controller records a failed task's log path, if any, before it
+        # marks the task failed, so there is nothing to wait for.
+        mock_state = self._patch_job(monkeypatch,
+                                     managed_job_state.ManagedJobStatus.FAILED,
+                                     [None])
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        # One read in the wait, one in the terminal-job read.
+        assert mock_state.get_all_task_ids_names_statuses_logs.call_count == 2
+        assert 'already in terminal state' not in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.FAILED
+
+    def test_log_never_persisted_prints_no_warning(self, monkeypatch, capsys):
+        # The log path never shows up (e.g. the download failed): the wait
+        # gives up and the tail ends as it did before, with no warning.
+        self._patch_job(monkeypatch,
+                        managed_job_state.ManagedJobStatus.SUCCEEDED, [None])
+        clock = iter(range(0, 1000, 5))
+        monkeypatch.setattr(jobs_utils.time, 'time', lambda: next(clock))
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'already in terminal state' not in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+
+class TestStreamLogsByIdStoreFollowAcrossTasks:
+    """A tail that follows each task from the log store moves on per task."""
+
+    def _patch_job(self, monkeypatch, num_tasks):
+        """Stubs a RUNNING job whose tasks finish one per store follow."""
+        running = managed_job_state.ManagedJobStatus.RUNNING
+        succeeded = managed_job_state.ManagedJobStatus.SUCCEEDED
+        latest = {'task_id': 0, 'status': running}
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = num_tasks
+        mock_state.get_status.side_effect = lambda _: latest['status']
+        mock_state.get_latest_task_id_status.side_effect = (
+            lambda _: (latest['task_id'], latest['status']))
+        mock_state.is_batch_job.return_value = False
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'mytask'
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        monkeypatch.setattr(
+            jobs_utils.global_user_state, 'get_handle_from_cluster_name', lambda
+            _: MagicMock(spec=jobs_utils.backends.CloudVmRayResourceHandle))
+        monkeypatch.setattr(jobs_utils, 'read_provision_status_from_log',
+                            lambda path, pos, msg: (pos, msg))
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+        followed = []
+
+        def _follow(job_id, task_id, *args):
+            del job_id, args
+            followed.append(task_id)
+            # The task finishes and the controller moves on.
+            if task_id < num_tasks - 1:
+                latest['task_id'] = task_id + 1
+            else:
+                latest['status'] = succeeded
+            return 100.0
+
+        monkeypatch.setattr(jobs_utils, '_follow_from_log_store', _follow)
+        monkeypatch.setattr(jobs_utils, '_wait_for_task_recovery',
+                            lambda *args: False)
+        display = MagicMock()
+        monkeypatch.setattr(jobs_utils.rich_utils, 'safe_status',
+                            lambda msg: display)
+        return display, followed
+
+    def test_shows_the_next_task_spinner(self, monkeypatch):
+        display, followed = self._patch_job(monkeypatch, num_tasks=2)
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert followed == [0, 1]
+        assert code == exceptions.JobExitCode.SUCCEEDED
+        calls = [(c[0], c.args) for c in display.mock_calls]
+        waiting = ('update', (jobs_utils.ux_utils.spinner_message(
+            'Waiting for the next task: 1'),))
+        # The display was stopped for the store follow, so it is started
+        # again after the update rather than left hidden.
+        assert waiting in calls
+        assert ('start', ()) in calls[calls.index(waiting):]
+
+    def test_resume_point_is_used_once(self, monkeypatch):
+        # After a recovery the next follow resumes from when the task left
+        # RUNNING. When that follow falls back to the cluster, a later follow
+        # of the same task must not replay the attempt already streamed.
+        self._patch_job(monkeypatch, num_tasks=1)
+        mock_state = jobs_utils.managed_job_state
+        succeeded = managed_job_state.ManagedJobStatus.SUCCEEDED
+        results = iter([100.0, None, 300.0])
+        recoveries = iter([True, False])
+        sinces = []
+
+        def _follow(job_id, task_id, task_name, handle, tail, since):
+            del job_id, task_id, task_name, handle, tail
+            sinces.append(since)
+            result = next(results)
+            if result == 300.0:
+                mock_state.get_status.side_effect = lambda _: succeeded
+                mock_state.get_latest_task_id_status.side_effect = (
+                    lambda _: (0, succeeded))
+            return result
+
+        monkeypatch.setattr(jobs_utils, '_follow_from_log_store', _follow)
+        monkeypatch.setattr(jobs_utils, '_wait_for_task_recovery',
+                            lambda *args: next(recoveries))
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, 'is_registered',
+                            lambda: False)
+        backend = MagicMock()
+        # Not a known exit code: the cluster tail ended without a result.
+        backend.tail_logs.return_value = 1
+        monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayBackend',
+                            lambda: backend)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert sinces == [None, 100.0, None]
+
+    def test_last_task_shows_no_next_task_spinner(self, monkeypatch):
+        display, followed = self._patch_job(monkeypatch, num_tasks=1)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert followed == [0]
+        updates = [
+            c.args[0] for c in display.mock_calls if c[0] == 'update' and c.args
+        ]
+        assert not any('Waiting for the next task' in u for u in updates)
+
+
 class TestTryToGetJobEndTime:
     """Tests for try_to_get_job_end_time's best-effort fallback."""
 
@@ -1849,3 +2399,267 @@ class TestWaitingLineFallback:
     def test_nothing_to_show(self):
         """Neither available renders the plain waiting line."""
         assert jobs_utils._waiting_line_detail(None, None) is None
+
+
+class TestFieldsForController:
+    """Queue fields are trimmed to what a remote controller's skylet knows."""
+
+    _NEW = ['root_job_id', 'parent_job_id', 'parent_task_id']
+
+    def test_new_controller_keeps_everything(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, '41') == fields
+        assert jobs_utils.fields_for_controller(fields, '57') == fields
+
+    def test_old_controller_loses_the_parent_link_fields(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields,
+                                                '40') == ['job_id', 'status']
+
+    def test_none_fields_and_unknown_versions_pass_through(self):
+        assert jobs_utils.fields_for_controller(None, '40') is None
+        fields = ['job_id'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, None) == fields
+        assert jobs_utils.fields_for_controller(fields, 'dev') == fields
+
+    def test_dynamic_task_index_needs_controller_42(self):
+        fields = ['job_id'] + self._NEW + ['dynamic_task_index']
+        assert jobs_utils.fields_for_controller(fields, '42') == fields
+        assert jobs_utils.fields_for_controller(fields,
+                                                '41') == ['job_id'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, '40') == ['job_id']
+
+    def test_version_is_only_asked_for_when_a_gated_field_is_requested(self):
+        # The gRPC queue path pays the version round trip only when it must.
+        assert not jobs_utils.queue_fields_need_controller_version(None)
+        assert not jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'status'])
+        assert jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'root_job_id'])
+
+
+class TestFormatJobTableDynamicMembers:
+    """`sky jobs queue` shows jobs launched from a group under that group."""
+
+    @staticmethod
+    def _row(job_id,
+             task_id=0,
+             task_name=None,
+             root_job_id=None,
+             status='RUNNING',
+             is_primary=None,
+             job_name=None,
+             dynamic_task_index=None):
+        return {
+            'job_id': job_id,
+            'task_id': task_id,
+            'task_name': task_name or f'task-{job_id}-{task_id}',
+            'job_name': job_name or f'job-{job_id}',
+            'workspace': 'default',
+            'resources': '1x[CPU:1]',
+            'submitted_at': 1_700_000_000.0,
+            'end_at': None,
+            'job_duration': 10,
+            'recovery_count': 0,
+            'status': managed_job_state.ManagedJobStatus(status),
+            'schedule_state': 'ALIVE',
+            'failure_reason': None,
+            'details': None,
+            'pool': None,
+            'is_primary_in_job_group': is_primary,
+            'root_job_id': root_job_id,
+            'parent_job_id': root_job_id,
+            'parent_task_id': None if root_job_id is None else 1,
+            'dynamic_task_index': dynamic_task_index,
+        }
+
+    @staticmethod
+    def _id_task_status(rows):
+        # Columns (show_all=False, no user column): ID, TASK, NAME, RESOURCES,
+        # SUBMITTED, TOT. DURATION, JOB DURATION, #RECOVERIES, STATUS, ...
+        ansi = re.compile(r'\x1b\[[0-9;]*m')
+        return [(str(r[0]), str(r[1]), ansi.sub('', str(r[8])).split(' ')[0])
+                for r in rows]
+
+    def test_members_render_under_their_group(self):
+        rows = [
+            # Newest first, as the queue returns them: the members precede
+            # their group.
+            self._row(58, task_id=1, root_job_id=42),
+            self._row(58, task_id=0, root_job_id=42),
+            self._row(57, root_job_id=42),
+            self._row(42,
+                      task_id=1,
+                      task_name='watcher',
+                      is_primary=False,
+                      job_name='rl'),
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      job_name='rl'),
+            self._row(60),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        cells = self._id_task_status(table)
+        # Group row, its declared tasks, then the members with their own ids
+        # (a multi-task member shows task ids, a single-task one '-'), then
+        # the unrelated job on its own.
+        assert cells == [
+            ('42', '', 'RUNNING'),
+            (' ↳', '1', 'RUNNING'),
+            (' ↳', '0', 'RUNNING'),
+            (' ↳ 58', '1', 'RUNNING'),
+            (' ↳ 58', '0', 'RUNNING'),
+            (' ↳ 57', '-', 'RUNNING'),
+            # The table separates a multi-row job from the next with a blank
+            # row.
+            ('', '', ''),
+            ('60', '-', 'RUNNING'),
+        ]
+
+    def test_max_jobs_keeps_whole_trees(self):
+        # `sky status` asks for a handful of jobs and `sky jobs queue` for
+        # 50, by job; the server page is N trees with every row of each.
+        # Group 42 has two tasks and six evals (43-48), all newer than the
+        # group so listed first, and 49 is an unrelated newer job. A cut by
+        # rows would keep five evals and drop the group's declared-task rows, so
+        # the
+        # group would render under an eval's name with an eval's status.
+        rows = [self._row(49, status='SUCCEEDED')]
+        rows += [
+            self._row(eval_id, root_job_id=42, job_name=f'eval-{eval_id}')
+            for eval_id in range(48, 42, -1)
+        ]
+        rows += [
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      job_name='rl',
+                      status='FAILED'),
+            self._row(42,
+                      task_id=1,
+                      task_name='watcher',
+                      is_primary=True,
+                      job_name='rl'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=2)
+        # Blank separator rows aside: two jobs, 49, then the whole tree of
+        # 42 (declared tasks first, then the members), with the group's status
+        # the trainer's.
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        assert cells == [
+            ('49', '-', 'SUCCEEDED'),
+            ('42', '', 'FAILED'),
+            (' ↳', '0', 'FAILED'),
+            (' ↳', '1', 'RUNNING'),
+        ] + [(f' ↳ {eval_id}', '-', 'RUNNING') for eval_id in range(48, 42, -1)]
+        # A budget of one job is just 49; the group is not partially shown.
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=1)
+        assert self._id_task_status(table) == [('49', '-', 'SUCCEEDED')]
+
+    def test_members_do_not_change_group_status(self):
+        rows = [
+            self._row(57, root_job_id=42, status='FAILED'),
+            self._row(42, task_id=1, task_name='watcher', is_primary=False),
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      status='SUCCEEDED'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        group_row = self._id_task_status(table)[0]
+        # Primary-driven: the failed member leaves the group SUCCEEDED.
+        assert group_row == ('42', '', 'SUCCEEDED')
+
+    def test_single_task_root_keeps_its_row_and_lists_members(self):
+        rows = [
+            self._row(57, root_job_id=42),
+            self._row(42),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        # A plain job with a member: its own row as usual, member indented.
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        assert cells == [
+            ('42', '-', 'RUNNING'),
+            (' ↳ 57', '-', 'RUNNING'),
+        ]
+
+    def test_members_with_an_index_read_like_tasks(self):
+        # Rows as the query returns them: declared tasks first, then the members
+        # by dynamic task index; the table keeps that order.
+        rows = [
+            self._row(42, task_id=0, task_name='trainer', job_name='rl'),
+            self._row(42, task_id=1, task_name='watcher', job_name='rl'),
+            self._row(57, root_job_id=42, dynamic_task_index=2),
+            self._row(58, task_id=0, root_job_id=42, dynamic_task_index=3),
+            self._row(58, task_id=1, root_job_id=42, dynamic_task_index=3),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        # The group's declared tasks are 0 and 1; the dynamic tasks number on as
+        # 2 and 3, the multi-task one as <index>.<task id>. No job id shown
+        # by default: `sky jobs logs 42 2` / `sky jobs cancel 42 --task 2`
+        # address them like the declared tasks.
+        assert cells == [
+            ('42', '', 'RUNNING'),
+            (' ↳', '0', 'RUNNING'),
+            (' ↳', '1', 'RUNNING'),
+            (' ↳', '2', 'RUNNING'),
+            (' ↳', '3.0', 'RUNNING'),
+            (' ↳', '3.1', 'RUNNING'),
+        ]
+
+    def test_verbose_shows_the_member_s_job_id(self):
+        # -v keeps the index in TASK and puts the member's own job id in the
+        # ID cell: the SDK, cluster names and controller logs still use it.
+        rows = [
+            self._row(42, task_id=0, task_name='trainer', job_name='rl'),
+            self._row(57, root_job_id=42, dynamic_task_index=1),
+        ]
+        for row in rows:
+            # Columns shown only with -v.
+            row.update(start_at=None,
+                       cluster_resources='1x[CPU:1]',
+                       region='-',
+                       zone=None,
+                       cloud=None,
+                       infra=None)
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=True,
+                                            show_user=False,
+                                            return_rows=True)
+        id_task = [(str(r[0]), str(r[1])) for r in table if str(r[0]).strip()]
+        assert id_task[0][0] == '42'
+        assert (' ↳ 57', '1') in id_task
+
+    def test_member_with_unlisted_root_is_its_own_job(self):
+        # Root 99 filtered out of this listing (or gone): no dangling group.
+        rows = [self._row(70, root_job_id=99)]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        assert self._id_task_status(table) == [('70', '-', 'RUNNING')]

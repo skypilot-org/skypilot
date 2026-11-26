@@ -1,7 +1,10 @@
 """Utils for sky databases."""
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import enum
+import functools
 import math
 import os
 import pathlib
@@ -11,20 +14,32 @@ import typing
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
 import urllib.parse
 
-import aiosqlite
-import aiosqlite.context
-import sqlalchemy
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy.ext import asyncio as sqlalchemy_async
-
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.utils.db import sql_metrics
+from sky.utils.db import sqlalchemy_deps
 
 logger = sky_logging.init_logger(__name__)
+
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
 if typing.TYPE_CHECKING:
+    import aiosqlite
+    import aiosqlite.context
+    import sqlalchemy
+    from sqlalchemy.ext import asyncio as sqlalchemy_async
     from sqlalchemy.orm import Session
+    sqlalchemy_exc = sqlalchemy.exc
+else:
+    aiosqlite = adaptors_common.LazyImport('aiosqlite',
+                                           import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+    sqlalchemy_exc = adaptors_common.LazyImport('sqlalchemy.exc',
+                                                import_error_message=_SA_MSG)
+    sqlalchemy_async = adaptors_common.LazyImport('sqlalchemy.ext.asyncio',
+                                                  import_error_message=_SA_MSG)
 
 # This parameter (passed to sqlite3.connect) controls how long we will wait to
 # obtains a database lock (not necessarily during connection, but whenever it is
@@ -306,6 +321,19 @@ def fault_point():
     pass
 
 
+def _aiosqlite_contextmanager(fn: Callable):
+    """Apply aiosqlite.context.contextmanager lazily (server dep)."""
+    decorated: list = []
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not decorated:
+            decorated.append(aiosqlite.context.contextmanager(fn))
+        return decorated[0](*args, **kwargs)
+
+    return wrapper
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -371,7 +399,7 @@ class SQLiteConn(threading.local):
         # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
 
-    @aiosqlite.context.contextmanager
+    @_aiosqlite_contextmanager
     async def execute_fetchall_async(self,
                                      sql: str,
                                      parameters: Optional[Iterable[Any]] = None
@@ -503,6 +531,70 @@ def get_max_connections():
     return _max_connections
 
 
+def get_db_connection_pool_size() -> int:
+    """Persistent state-DB connections this process pools, 0 to not pool.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE`` when it is set,
+    otherwise the budget the process was given via ``set_max_connections()``.
+    See that constant for why a deployment may want to state the size itself,
+    and for how to size it.
+
+    The environment is read on each call rather than captured at import time
+    or in ``set_max_connections()``, so the override also covers engines built
+    before the process sets its budget -- ``skypilot_config`` reads the server
+    config from the state DB while it is being imported, long before any
+    server process calls ``set_max_connections()``, and ``get_engine()``
+    caches that engine for the life of the process.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+    """
+    return _read_connection_count_env(
+        constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE,
+        default=_max_connections)
+
+
+def get_db_connection_pool_max_overflow(pool_size: int) -> int:
+    """Burst connections this process may open beyond the pooled ones.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW`` when it is
+    set, otherwise whatever it takes to reach
+    ``constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY`` concurrent
+    connections -- which is 0 once the pool alone is that wide.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+    """
+    return _read_connection_count_env(
+        constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW,
+        default=max(
+            0,
+            constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY - pool_size))
+
+
+def _read_connection_count_env(env_var: str, default: int) -> int:
+    """A number of connections read from ``env_var``, ``default`` if unset.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+            A misconfigured pool is refused loudly rather than silently
+            ignored, since falling back would quietly give a deployment a
+            connection profile it asked not to have.
+    """
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        count = int(raw)
+    except ValueError:
+        raise ValueError(f'{env_var}={raw!r} is not an integer number of '
+                         'connections.') from None
+    if count < 0:
+        raise ValueError(f'{env_var}={raw!r} must be a non-negative number of '
+                         'connections.')
+    return count
+
+
 def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     """Build a SQLAlchemy ``async_creator`` that hands asyncpg a libpq DSN.
 
@@ -538,6 +630,19 @@ def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
         return await asyncpg.connect(dsn, timeout=15, statement_cache_size=0)
 
     return _connect
+
+
+def psycopg2_url(conn_string: str) -> sqlalchemy.engine.URL:
+    """Return *conn_string* as a URL that selects the psycopg2 driver.
+
+    SQLAlchemy 2.1 resolves a bare ``postgresql://`` URL to psycopg 3, which
+    is not a SkyPilot dependency; psycopg2 is. A driver named explicitly in
+    the URL is kept.
+    """
+    url = sqlalchemy.engine.make_url(conn_string)
+    if url.drivername == 'postgresql':
+        url = url.set(drivername='postgresql+psycopg2')
+    return url
 
 
 def _rewrite_hostport(uri: str, hostport: str) -> str:
@@ -822,9 +927,10 @@ def get_engine(
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
+                pool_size = get_db_connection_pool_size()
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
-                    f'maximum {_max_connections} connections')
+                    f'maximum {pool_size} connections')
                 # The engine role that labels this engine's metrics. Derived
                 # from the same conditions as the cache key, so one cached
                 # engine always carries one role: when `direct` resolves to
@@ -836,7 +942,7 @@ def get_engine(
                     # Isolated per-operation engine: never shares (or starves
                     # on) the default engine's pool. See the docstring.
                     engine_no_pool = sqlalchemy.create_engine(
-                        conn_string,
+                        psycopg2_url(conn_string),
                         poolclass=sqlalchemy.NullPool,
                         connect_args={
                             'connect_timeout': _NO_POOL_CONNECT_TIMEOUT_SECONDS
@@ -858,7 +964,7 @@ def get_engine(
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
                             async_creator=_make_asyncpg_creator(conn_string)))
-                elif _max_connections == 0 or (direct and _pooler_configured()):
+                elif pool_size == 0 or (direct and _pooler_configured()):
                     if direct and _pooler_configured():
                         role = sql_metrics.DB_STATE_DIRECT
                     # NullPool: no persistent connections. Used when no pool
@@ -872,16 +978,17 @@ def get_engine(
                     # NullPool the direct path opens a connection only while a
                     # lock or migration actively needs it and closes it after.
                     _postgres_engine_cache[cache_key] = (
-                        sqlalchemy.create_engine(conn_string,
+                        sqlalchemy.create_engine(psycopg2_url(conn_string),
                                                  poolclass=sqlalchemy.NullPool))
                 else:
                     # Sync engines can safely use QueuePool for connection reuse
                     _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(
-                            conn_string,
+                            psycopg2_url(conn_string),
                             poolclass=sqlalchemy.pool.QueuePool,
-                            pool_size=_max_connections,
-                            max_overflow=max(0, 5 - _max_connections),
+                            pool_size=pool_size,
+                            max_overflow=get_db_connection_pool_max_overflow(
+                                pool_size),
                             pool_pre_ping=True,
                             pool_recycle=1800))
                 sql_metrics.install(_postgres_engine_cache[cache_key], role)
@@ -896,13 +1003,19 @@ def get_engine(
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
             # so we should not put it in the cache. Instead, just return.
             async_sqlite_engine = sqlalchemy_async.create_async_engine(
-                'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
+                'sqlite+aiosqlite:///' + db_path,
+                connect_args={'timeout': _DB_TIMEOUT_S})
             sql_metrics.install(async_sqlite_engine, f'sqlite_{db_name}')
             return async_sqlite_engine
         if db_path not in _sqlite_engine_cache:
             _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
-                'sqlite:///' + db_path)
+                'sqlite:///' + db_path, connect_args={'timeout': _DB_TIMEOUT_S})
             sql_metrics.install(_sqlite_engine_cache[db_path],
                                 f'sqlite_{db_name}')
         engine = _sqlite_engine_cache[db_path]
     return engine
+
+
+def get_lock_engine() -> sqlalchemy.engine.Engine:
+    """Return the direct, unpooled engine used by advisory locks."""
+    return get_engine(None, direct=True, no_pool=True)

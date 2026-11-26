@@ -8,10 +8,12 @@ from unittest import mock
 import filelock
 import grpc
 import pytest
+import sqlalchemy
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
+from sky.schemas.generated import jobsv1_pb2
 from sky.schemas.generated import managed_jobsv1_pb2
 from sky.skylet import constants
 from sky.skylet import services
@@ -71,6 +73,11 @@ def _mock_global_user_state_db(tmp_path, monkeypatch):
     global_user_state.create_table(engine)
 
     yield engine
+
+
+def _created_at(job_id: int) -> float:
+    jobs, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+    return jobs[0]['created_at']
 
 
 @pytest.fixture
@@ -173,6 +180,39 @@ class TestGetVersion:
         assert isinstance(response, managed_jobsv1_pb2.GetVersionResponse)
         assert response.controller_version == constants.SKYLET_VERSION
         context_mock.abort.assert_not_called()
+
+
+class TestGetJobSpec:
+    """Test class for GetJobSpec RPC method."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, _seed_test_jobs):
+        self.job_ids = _seed_test_jobs
+        self.service = services.ManagedJobsServiceImpl()
+
+    def test_returns_the_stored_spec(self):
+        job_id = self.job_ids['job_id1']
+        state.set_job_dag_yaml_content(job_id, 'name: a\nrun: echo hi\n')
+        context_mock = mock.Mock()
+        response = self.service.GetJobSpec(
+            managed_jobsv1_pb2.GetJobSpecRequest(job_id=job_id), context_mock)
+        assert response.dag_yaml == 'name: a\nrun: echo hi\n'
+        context_mock.abort.assert_not_called()
+
+    def test_unknown_job_has_no_spec(self):
+        response = self.service.GetJobSpec(
+            managed_jobsv1_pb2.GetJobSpecRequest(job_id=999999), mock.Mock())
+        assert not response.HasField('dag_yaml')
+
+    def test_error_aborts_with_internal(self):
+        with mock.patch('sky.jobs.file_content_utils.get_job_dag_content',
+                        side_effect=Exception('db down')):
+            context_mock = mock.Mock()
+            self.service.GetJobSpec(
+                managed_jobsv1_pb2.GetJobSpecRequest(job_id=1), context_mock)
+        status_code, message = context_mock.abort.call_args[0]
+        assert status_code == grpc.StatusCode.INTERNAL
+        assert 'db down' in message
 
 
 class TestGetAllJobIdsByName:
@@ -347,7 +387,8 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # Never launched, so the queue reports its submission time.
+        assert target_job.submitted_at == _created_at(job_id1)
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -359,6 +400,77 @@ class TestGetJobTable:
         workspaces = [job.workspace for job in response.jobs]
         assert 'ws1' in workspaces
         assert 'ws2' in workspaces
+
+    def test_get_job_table_include_tree(self):
+        """With include_tree, naming a launched job returns its whole tree,
+        and the response says the flag was honoured."""
+        root = self.job_ids['job_id1']
+        member = state.set_job_info_without_job_id(name='member',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='abcd1234',
+                                                   root_job_id=root,
+                                                   parent_job_id=root,
+                                                   parent_task_id=0)
+        state.set_pending(member,
+                          task_id=0,
+                          task_name='member',
+                          resources_str='{}',
+                          metadata='{}')
+        context_mock = mock.Mock()
+        # Without the flag: the member's own row, as before.
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                job_ids=managed_jobsv1_pb2.JobIds(ids=[member])), context_mock)
+        context_mock.abort.assert_not_called()
+        assert [j.job_id for j in response.jobs] == [member]
+        assert response.include_tree_applied is True
+        # With it: the root and the member, keyed on the root.
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                job_ids=managed_jobsv1_pb2.JobIds(ids=[member]),
+                include_tree=True), context_mock)
+        context_mock.abort.assert_not_called()
+        assert sorted(j.job_id for j in response.jobs) == [root, member]
+        assert response.total == 1
+        assert response.include_tree_applied is True
+        member_row = next(j for j in response.jobs if j.job_id == member)
+        assert member_row.root_job_id == root
+
+    def test_get_job_table_after_job_id(self):
+        """The cursor returns the page after a job, and the response says the
+        field was honoured."""
+        context_mock = mock.Mock()
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                limit=2,
+                after_job_id=self.job_ids['job_id3']), context_mock)
+        context_mock.abort.assert_not_called()
+        assert sorted(j.job_id for j in response.jobs) == [
+            self.job_ids['job_id1'], self.job_ids['job_id2']
+        ]
+        assert response.total == 4
+        assert response.after_job_id_applied is True
+        # Ascending: the page above the cursor.
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                limit=2,
+                sort_by='job_id',
+                sort_order='asc',
+                after_job_id=self.job_ids['job_id2']), context_mock)
+        context_mock.abort.assert_not_called()
+        assert [j.job_id for j in response.jobs
+               ] == [self.job_ids['job_id3'], self.job_ids['job_id4']]
 
     def test_get_job_table_no_accessible_workspaces(self):
         """Test basic GetJobTable functionality without specified accessible
@@ -414,7 +526,8 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # Never launched, so the queue reports its submission time.
+        assert target_job.submitted_at == _created_at(job_id1)
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -464,9 +577,10 @@ class TestGetJobTable:
 
         job_data = {job.job_id: job for job in response.jobs}
 
-        # STARTING, RUNNING, SUCCEEDED jobs should have submitted_at > 0
-        # PENDING job should have submitted_at = 0.0
-        assert job_data[self.job_ids['job_id1']].submitted_at == 0.0
+        # Every job reports when it was submitted, including the PENDING
+        # one that has not begun launching.
+        assert job_data[self.job_ids['job_id1']].submitted_at == _created_at(
+            self.job_ids['job_id1'])
         assert job_data[self.job_ids['job_id2']].submitted_at > 0
         assert job_data[self.job_ids['job_id3']].submitted_at > 0
         assert job_data[self.job_ids['job_id4']].submitted_at > 0
@@ -606,23 +720,44 @@ class TestCancelJobs:
             grpc.StatusCode.INVALID_ARGUMENT,
             'exactly one cancellation criteria must be specified.')
 
-    def test_cancel_jobs_by_name_multiple_jobs(self):
-        """Test cancelling jobs by name 'a' which matches multiple jobs."""
-        # Name 'a' matches job_id1 (PENDING) and job_id3 (RUNNING)
-        job_name = "a"
-
-        request = managed_jobsv1_pb2.CancelJobsRequest(job_name=job_name,
+    def test_cancel_jobs_by_name_ignores_other_workspaces(self):
+        """Name 'a' matches job_id1 (ws1) and job_id3 (ws2); only the active
+        workspace's is looked up, and job_id3 is never named."""
+        request = managed_jobsv1_pb2.CancelJobsRequest(job_name="a",
                                                        current_workspace="ws1")
         context_mock = mock.Mock()
 
         response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
-        # Should indicate multiple jobs found (actual message shows job IDs)
-        assert "multiple running jobs found with name 'a'" in response.message.lower(
-        )
-        assert f"job ids: [{self.job_ids['job_id3']}, {self.job_ids['job_id1']}]" in response.message.lower(
-        )
+        assert response.message.lower() == (
+            f"'a' job with id {self.job_ids['job_id1']} is scheduled to be "
+            "cancelled.")
+        assert str(self.job_ids['job_id3']) not in response.message
+        context_mock.abort.assert_not_called()
+
+    def test_cancel_jobs_by_name_multiple_jobs(self):
+        """Two running jobs named 'b' in the active workspace: refused."""
+        job_id = state.set_job_info_without_job_id(name='b',
+                                                   workspace='ws1',
+                                                   entrypoint='ep5',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='abcd1234')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        request = managed_jobsv1_pb2.CancelJobsRequest(job_name="b",
+                                                       current_workspace="ws1")
+        context_mock = mock.Mock()
+
+        response = self.service.CancelJobs(request, context_mock)
+
+        assert "multiple running jobs found with name 'b'" in (
+            response.message.lower())
+        assert (f"job ids: [{job_id}, {self.job_ids['job_id2']}]"
+                in response.message.lower())
         context_mock.abort.assert_not_called()
 
     def test_cancel_jobs_by_name_single_job(self):
@@ -643,22 +778,15 @@ class TestCancelJobs:
         context_mock.abort.assert_not_called()
 
     def test_cancel_jobs_by_name_wrong_workspace(self):
-        """Test cancelling job by name 'b' which matches only one job."""
-        # Name 'b' matches only job_id2 (STARTING), but it's in workspace 'ws1'
-        # The cancel will skip it due to workspace mismatch
-        job_name = "b"
-
-        request = managed_jobsv1_pb2.CancelJobsRequest(job_name=job_name,
+        """Name 'b' matches only job_id2, which is in ws1: not found from
+        ws9, and its id is not revealed."""
+        request = managed_jobsv1_pb2.CancelJobsRequest(job_name="b",
                                                        current_workspace="ws9")
         context_mock = mock.Mock()
 
         response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
-        # Should indicate no job to cancel due to workspace mismatch
-        assert "no job to cancel" in response.message.lower()
-        assert f"job with id {self.job_ids['job_id2']} is skipped as they are not in the active workspace 'ws9'" in response.message.lower(
-        )
+        assert response.message == "No running job found with name 'b'."
         context_mock.abort.assert_not_called()
 
     def test_cancel_jobs_by_pool_success(self):
@@ -678,6 +806,18 @@ class TestCancelJobs:
         # Only job_id1 should be cancelled, as job_id4 is already SUCCEEDED
         assert response.message.lower(
         ) == f"job with id {self.job_ids['job_id1']} is scheduled to be cancelled."
+        context_mock.abort.assert_not_called()
+
+    def test_cancel_jobs_by_pool_wrong_workspace(self):
+        request = managed_jobsv1_pb2.CancelJobsRequest(pool_name="test-pool",
+                                                       current_workspace="ws9")
+        context_mock = mock.Mock()
+
+        response = self.service.CancelJobs(request, context_mock)
+
+        assert response.message == "No running job found in pool 'test-pool'."
+        assert state.get_status(
+            self.job_ids['job_id1']) == (state.ManagedJobStatus.PENDING)
         context_mock.abort.assert_not_called()
 
     def test_cancel_jobs_by_nonexistent_pool(self):
@@ -708,11 +848,37 @@ class TestCancelJobs:
 
         assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         # Jobs 1, 2 should be cancelled (in workspace 'ws1', non-terminal states)
-        # Job 3 is in workspace 'ws2' so gets skipped
+        # Job 3 is in workspace 'ws2': not looked up, not named.
         # Job 4 is SUCCEEDED so should not be cancelled
         expected_jobs = [self.job_ids['job_id1'], self.job_ids['job_id2']]
         assert response.message.lower(
-        ) == f"jobs with ids {expected_jobs[0]}, {expected_jobs[1]} are scheduled to be cancelled. job with id {self.job_ids['job_id3']} is skipped as they are not in the active workspace 'ws1'. check the workspace of the job with: sky jobs queue"
+        ) == f"jobs with ids {expected_jobs[0]}, {expected_jobs[1]} are scheduled to be cancelled."
+        context_mock.abort.assert_not_called()
+
+    def test_cancel_jobs_all_users_without_workspace_matches_nothing(self):
+        """An unset proto string arrives as '': fail closed."""
+        request = managed_jobsv1_pb2.CancelJobsRequest(all_users=True)
+        context_mock = mock.Mock()
+
+        response = self.service.CancelJobs(request, context_mock)
+
+        assert response.message.lower() == "no job to cancel."
+        context_mock.abort.assert_not_called()
+
+    def test_cancel_own_jobs_keeps_the_skipped_hint(self):
+        """`-a` (own jobs) still names the caller's job in another
+        workspace."""
+        request = managed_jobsv1_pb2.CancelJobsRequest(
+            all_users=False,
+            user_hash="abcd1234",
+            current_workspace="ws1",
+        )
+        context_mock = mock.Mock()
+
+        response = self.service.CancelJobs(request, context_mock)
+
+        assert (f"job with id {self.job_ids['job_id3']} is skipped as they are "
+                "not in the active workspace 'ws1'" in response.message.lower())
         context_mock.abort.assert_not_called()
 
     def test_cancel_jobs_all_users_false(self):
@@ -748,3 +914,48 @@ class TestCancelJobs:
         assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         assert "are scheduled to be cancelled" in response.message.lower()
         context_mock.abort.assert_not_called()
+
+
+class TestSetJobInfoWithoutJobId:
+    """Test class for the JobsService SetJobInfoWithoutJobId RPC method."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, _mock_managed_jobs_db_conn):
+        self.engine = _mock_managed_jobs_db_conn
+        self.service = services.JobsServiceImpl()
+
+    def test_more_jobs_than_tasks(self):
+        """--num-jobs N with fewer than N tasks: each job gets every task,
+        with that task's is_primary_in_job_group."""
+        request = jobsv1_pb2.SetJobInfoWithoutJobIdRequest(
+            name='group',
+            workspace='default',
+            entrypoint='sky jobs launch',
+            pool='p',
+            pool_hash='h',
+            task_ids=[0, 1],
+            task_names=['head', 'worker'],
+            resources_str='1x[CPU:1+]',
+            metadata_jsons=['{}', '{}'],
+            num_jobs=3,
+            execution='parallel',
+            is_primary_in_job_groups=[True, False])
+        context_mock = mock.Mock()
+
+        # The pool exists and is in the request's workspace.
+        with mock.patch.object(services.serve_utils,
+                               'get_pool_refusal',
+                               return_value=None):
+            response = self.service.SetJobInfoWithoutJobId(
+                request, context_mock)
+
+        context_mock.abort.assert_not_called()
+        assert len(response.job_ids) == 3
+        spot = state.spot_table
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                sqlalchemy.select(spot.c.spot_job_id, spot.c.task_id,
+                                  spot.c.is_primary_in_job_group)).fetchall()
+        assert sorted(rows) == sorted((job_id, task_id, task_id == 0)
+                                      for job_id in response.job_ids
+                                      for task_id in (0, 1))

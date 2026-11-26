@@ -923,10 +923,8 @@ def test_get_slurm_metrics_clusters_tolerates_enumeration_failure(monkeypatch):
 
 
 def test_get_slurm_metrics_clusters_respects_allowed_clusters(monkeypatch):
-    # A cluster with a prometheus.url that is NOT in allowed_clusters is
-    # excluded: federation is scoped to slurm.allowed_clusters (via
-    # Slurm.existing_allowed_clusters), mirroring the Kubernetes federation's
-    # use of allowed_contexts.
+    # A cluster with a prometheus.url that no workspace allows is excluded,
+    # mirroring the Kubernetes federation's use of allowed_contexts.
     def _cfg(keys, default_value=None, **_):
         if tuple(keys) in (
             ('slurm', 'cluster_configs', 'hpc', 'prometheus', 'url'),
@@ -1062,6 +1060,29 @@ def test_slurm_sibling_filter_becomes_negative_matcher(monkeypatch):
         assert utils.slurm_federate_matchers('prod') == ['cluster!="site-lab"']
         # The claimant itself keeps only its positive matcher.
         assert utils.slurm_federate_matchers('lab') == ['cluster="site-lab"']
+
+
+def test_slurm_sibling_filter_uses_the_given_federated_list(monkeypatch):
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({
+            'prod': None,
+            'lab': {
+                'cluster': 'site-lab'
+            },
+        }))
+    # The scrape passes its snapshot, so nothing is enumerated again.
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters') as listing:
+        assert utils.slurm_federate_matchers(
+            'prod', federated=['prod', 'lab']) == ['cluster!="site-lab"']
+        assert utils.slurm_federate_matchers('prod', federated=['prod']) == []
+        with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                        return_value=(0, '', '')) as run:
+            asyncio.run(
+                utils.get_metrics_for_slurm_cluster('prod',
+                                                    federated=['prod', 'lab']))
+    listing.assert_not_called()
+    assert 'cluster%21%3D%22site-lab%22' in run.call_args.args[1]
 
 
 def test_slurm_own_filter_wins_over_sibling_negation(monkeypatch):
@@ -1400,3 +1421,67 @@ def test_slurm_trailing_slash_urls_count_as_shared(monkeypatch):
     with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
                     return_value=['prod', 'lab']):
         assert utils.slurm_federate_matchers('prod') == ['cluster!="site-lab"']
+
+
+# ---------------------------------------------------------------------------
+# Managed-job launch-retry counter: bounded labels, with the closed families
+# exempt so the budget is spent only where kinds can actually grow.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(name='empty_retry_kinds')
+def _empty_retry_kinds():
+    """The cap's seen-set is module state; give each test a fresh one."""
+    with utils._launch_retry_kinds_lock:
+        saved = set(utils._launch_retry_kinds)
+        utils._launch_retry_kinds.clear()
+    yield
+    with utils._launch_retry_kinds_lock:
+        utils._launch_retry_kinds.clear()
+        utils._launch_retry_kinds.update(saved)
+
+
+def test_capped_kind_exempts_closed_families(empty_retry_kinds):
+    """Bare class names and the fixed no-exception kinds are never folded.
+
+    They change only when the tree changes, so capping them would spend the
+    budget on the one part that cannot grow.
+    """
+    for _ in range(utils._MAX_LAUNCH_RETRY_KINDS + 50):
+        assert utils._capped_launch_retry_kind('ValueError') == 'ValueError'
+    # Even with the budget already full of open-family kinds.
+    for i in range(utils._MAX_LAUNCH_RETRY_KINDS):
+        utils._capped_launch_retry_kind(f'aws:Error{i}')
+    assert utils._capped_launch_retry_kind(
+        'job_submit_failed') == 'job_submit_failed'
+
+
+def test_capped_kind_folds_open_families_past_the_budget(empty_retry_kinds):
+    for i in range(utils._MAX_LAUNCH_RETRY_KINDS):
+        kind = f'aws:Error{i}'
+        assert utils._capped_launch_retry_kind(kind) == kind
+    assert utils._capped_launch_retry_kind(
+        'aws:OneTooMany') == utils.LAUNCH_RETRY_KIND_OTHER
+    assert utils._capped_launch_retry_kind(
+        'opaque:LateError') == utils.LAUNCH_RETRY_KIND_OTHER
+    # An already-admitted kind keeps its own series.
+    assert utils._capped_launch_retry_kind('aws:Error0') == 'aws:Error0'
+
+
+def test_count_launch_retry_is_a_noop_when_metrics_are_off(
+        monkeypatch, empty_retry_kinds):
+    monkeypatch.setattr(utils, 'METRICS_ENABLED', False)
+    counter = mock.MagicMock()
+    monkeypatch.setattr(utils, 'SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL', counter)
+    utils.count_launch_retry('aws:Boom')
+    counter.labels.assert_not_called()
+
+
+def test_count_launch_retry_never_raises_at_the_call_site(
+        monkeypatch, empty_retry_kinds):
+    """Metric emission must not disrupt the launch path it observes."""
+    monkeypatch.setattr(utils, 'METRICS_ENABLED', True)
+    counter = mock.MagicMock()
+    counter.labels.side_effect = RuntimeError('multiproc dir went away')
+    monkeypatch.setattr(utils, 'SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL', counter)
+    utils.count_launch_retry('aws:Boom')  # must not raise

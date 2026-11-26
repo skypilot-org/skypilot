@@ -1,0 +1,8 @@
+# Like low_resource_sky_config.yaml, but the jobs controller stops after one
+# idle minute, so a test can act on a stopped controller.
+jobs:
+  controller:
+    resources:
+      cpus: 4+
+      memory: 16+
+    autostop: 1

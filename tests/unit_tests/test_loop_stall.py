@@ -473,7 +473,9 @@ def test_starved_loop_dumps_other_threads(stall_logs):
     parked in its selector holds only asyncio frames, which is the condition
     under test, and a real GIL-starvation race would be flaky.
     """
-    loop = asyncio.new_event_loop()
+    # Not new_event_loop(): an earlier test on this worker can leave uvloop's
+    # policy installed, and a parked uvloop loop has no Python frames.
+    loop = asyncio.SelectorEventLoop()
     loop_ready = threading.Event()
 
     def park_the_loop():
@@ -773,3 +775,62 @@ def test_start_watchdog_is_idempotent(monkeypatch):
         assert not thread.is_alive()
 
     asyncio.run(main())
+
+
+# ── the shared lag timer ────────────────────────────────────────────
+
+
+def test_start_lag_monitor_measures_a_blocked_loop():
+    """The lag a blocking callback causes reaches the observer.
+
+    One timer for the whole loop, so this is also the tick that feeds the
+    stall watchdog's heartbeat -- assert both, since each consumer is gated
+    on its own and a regression could silently drop either.
+    """
+    block_seconds = 0.4
+    observed: List[float] = []
+    beats: List[int] = []
+
+    class _FakeWatchdog:
+
+        def beat(self):
+            beats.append(1)
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        loop_stall.start_lag_monitor(loop,
+                                     observed.append,
+                                     interval=0.01,
+                                     stall_watchdog=_FakeWatchdog())
+        # Let a few clean ticks through first, so the blocked tick is
+        # distinguishable from start-up noise.
+        await asyncio.sleep(0.1)
+        time.sleep(block_seconds)
+        await asyncio.sleep(0.1)
+
+    asyncio.run(scenario())
+
+    assert observed, 'observer never called'
+    assert beats, 'watchdog heartbeat never fed'
+    assert len(beats) == len(observed)
+    # Ticks around the sleeps are near zero; the one behind the blocking
+    # call is charged the whole of it.
+    assert max(observed) >= block_seconds * 0.8, (
+        f'largest lag {max(observed):.3f}s did not reflect a '
+        f'{block_seconds}s block')
+    assert min(observed) < block_seconds / 2, (
+        'every tick looked stalled; the baseline is wrong')
+
+
+def test_start_lag_monitor_runs_without_a_watchdog():
+    """Metrics-only callers pass no watchdog; the tick must still run."""
+    observed: List[float] = []
+
+    async def scenario():
+        loop_stall.start_lag_monitor(asyncio.get_running_loop(),
+                                     observed.append,
+                                     interval=0.01)
+        await asyncio.sleep(0.1)
+
+    asyncio.run(scenario())
+    assert observed

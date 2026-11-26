@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import functools
+import inspect
 import os
 import queue
 import random
@@ -11,7 +12,7 @@ import shlex
 import subprocess
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 import urllib.parse
 
 import httpx
@@ -46,8 +47,7 @@ _MEM_BUCKETS = [
 logger = sky_logging.init_logger(__name__)
 
 # Whether the metrics are enabled, cannot be changed at runtime.
-METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                                 'false').lower() == 'true'
+METRICS_ENABLED = constants.server_metrics_enabled()
 
 # Default Prometheus deployment that each context's metrics are federated
 # from. Overridable via the `metrics.prometheus` server config section.
@@ -155,6 +155,24 @@ _anchor_read_failed = False
 _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
                     60, 120, 300, 600, 1000, float('inf'))
 
+# Interactive-SSH scale, for the round trips a keystroke takes. _LATENCY_BUCKETS
+# starts at 5ms and runs to 1000s because it is sized for request durations; a
+# healthy API-server-to-pod round trip inside one cluster is sub-millisecond to
+# a few ms, so every good value would land in that ladder's first bucket.
+#
+# The ladder stops at 2s because that is the largest value the sampler can
+# produce: _BackendTurnaroundSampler discards a reply that takes longer than
+# _MAX_PENDING_SECONDS, since past that it is far more likely to be unrelated
+# output than a very slow echo. Buckets above the cap would be structurally
+# empty and would advertise a reach the measurement does not have. Keep the two
+# numbers in step -- raising one without the other is what made 2.5/5/10 dead
+# boundaries. A late reply that does arrive is not silently lost: it
+# increments SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL, which is how
+# a backend too slow to measure stays visible. A write the backend never
+# answers at all is a different case and is not counted -- see that counter.
+_SSH_ROUND_TRIP_BUCKETS = (0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
+                           0.5, 1, 2, float('inf'))
+
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
@@ -179,6 +197,15 @@ SKY_APISERVER_BLOB_CHECK_SIZE_BYTES = prom.Histogram(
     ['result'],
     buckets=[2**exponent for exponent in range(10, 37, 2)],
 )
+
+SKY_APISERVER_STORED_RESULTS_TOTAL = prom.Counter(
+    'sky_apiserver_stored_results_total',
+    'Request results stored outside the requests table', ['name'])
+
+SKY_APISERVER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_stored_result_bytes_total',
+    'Bytes of request results stored outside the requests table, as encoded '
+    'and as compressed on disk', ['name', 'form'])
 
 # Total number of API server requests per user.
 # This is a separate metric to avoid high cardinality in the primary metric.
@@ -210,12 +237,69 @@ SKY_APISERVER_REQUEST_GET_DURATION_SECONDS = prom.Histogram(
     buckets=_LATENCY_BUCKETS,
 )
 
+# Usage by caller, recorded through sky/server/caller_usage.py, which bounds
+# the distinct (caller, name) pairs per process. `name` is the request name
+# (sky.jobs.queue_v2) or, for a route handler that schedules no request, the
+# method and route path. `kind` is long/short (request executed from the queue
+# or in-process), sync (request executed inline for a synchronous call) or
+# handler (route handler).
+_CALLER_LABELS = ['caller', 'caller_id', 'caller_type', 'name']
+
+SKY_APISERVER_CALLER_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_calls_total',
+    'Requests executed and route handler calls, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_EXECUTION_SECONDS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_execution_seconds_total',
+    'Seconds spent executing requests and route handlers, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_stored_result_bytes_total',
+    'Encoded request result bytes written to the request store, by caller',
+    _CALLER_LABELS,
+)
+
+SKY_APISERVER_CALLER_RETURNED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_returned_result_bytes_total',
+    'Response body bytes returned with a request result or by a route '
+    'handler, by caller',
+    _CALLER_LABELS,
+)
+
+# HTTP calls by caller and client: X-SkyPilot-Client-Type, User-Agent family
+# and the declared X-SkyPilot-API-Version ('none' when absent).
+SKY_APISERVER_CALLER_CLIENT_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_client_calls_total',
+    'API server HTTP calls, by caller and client',
+    [
+        'caller', 'caller_id', 'caller_type', 'client_type', 'ua_family',
+        'api_version'
+    ],
+)
+
 # Aggregated across all worker processes — the prometheus_client multiprocess
 # collector sums per-process histograms automatically. For per-process
 # visibility, see SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS below.
 SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
     'sky_apiserver_event_loop_lag_seconds',
     'Scheduling delay of the server event loop',
+    buckets=_LATENCY_BUCKETS,
+)
+
+# Scheduling delay of the event loop the metrics server runs on -- the one
+# serving /metrics itself alongside the two federation routes. Deliberately a
+# metric of its own rather than a label on the series above: that series is
+# the request-serving loops' and carries no label to tell one loop from
+# another, and an alert is keyed on it, so feeding a second loop into it
+# would change what that alert means. Nothing else runs on this loop, so a
+# non-zero value here is a federation route (or a collector) blocking it.
+SKY_APISERVER_METRICS_LOOP_LAG_SECONDS = prom.Histogram(
+    'sky_apiserver_metrics_loop_lag_seconds',
+    'Scheduling delay of the event loop serving the metrics endpoints',
     buckets=_LATENCY_BUCKETS,
 )
 
@@ -263,10 +347,66 @@ SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
 # the request counter's point of view, so without this counter a storm of
 # refused handshakes is invisible: it only shows up as fewer connections.
 # `path` is restricted to the registered WebSocket routes, else `other`.
+#
+# `status` is the status the middleware answered with, and it is not
+# derivable from `outcome`: `error` is every refusal that is not a 401 or a
+# 403, which covers a 503 (drain, saturated auth pool), a 500 (a middleware
+# crash), a 400 (client API version) and a middleware that answers 2xx/3xx
+# without passing the handshake on. Only the status separates the server's
+# own failures from the client's, which is what an error-ratio alert is
+# about, so without it such an alert has to treat all of those alike.
+# `outcome` stays: it is what the client actually got, the close code.
 SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
     'sky_apiserver_websocket_handshake_rejections_total',
-    'WebSocket handshakes refused by a middleware, by decision',
-    ['path', 'outcome'],
+    'WebSocket handshakes refused by a middleware, by decision and status',
+    ['path', 'outcome', 'status'],
+)
+
+# WebSocket connection scopes that reached the middleware stack, by route:
+# the attempt volume, and the denominator of any handshake ratio. Counted
+# inside `middleware_utils.websocket_aware`, at scope entry, once per
+# handshake.
+#
+# The outcomes are each counted, not derived: refusals above, accepts below.
+# Deriving accepts as attempts - refusals would over-count, because passing
+# every middleware is not the same as being accepted -- FastAPI validates a
+# route's required query parameters after the middlewares and closes the
+# connection itself when one is missing, so nothing refuses that handshake
+# and nothing accepts it. What is left over, attempts - refusals - accepts,
+# is exactly that class: closed before the accept, by the router or by a
+# handler.
+#
+# Published at zero for every `path` value from process start, by
+# `middleware_utils.preinitialize_websocket_metrics()`: a labelled counter
+# does not exist until its first increment, and `increase()` over a series
+# that springs into existence at 1 returns no sample at all, so a rule using
+# this as a denominator would read no data rather than zero. With the series
+# pre-published, `absent()` on it means the build predates the counter --
+# build drift -- rather than "nobody has used ssh".
+#
+# Two notes for anyone reading this alongside the SSH metrics below. `path`
+# here is the route, while `sky_apiserver_ssh_sessions_total`'s `path` is the
+# transport the session was served over, so the two must never be joined on
+# it. And that counter is incremented once a session is actually being served
+# -- only from the two ssh-proxy routes, after the accept and after cluster
+# validation -- so the accepts counter below bounds it from above, and the
+# gap is handshakes accepted and then dropped before the session ran.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_attempts_total',
+    'WebSocket handshake attempts reaching the middleware stack, by route',
+    ['path'],
+)
+
+# WebSocket handshakes this server accepted, by route, counted where it
+# happens: the `websocket.accept` message on its way out to the client.
+# Measured rather than inferred, for the reason in the comment above.
+#
+# Published at zero for every `path` value from process start, like the
+# attempt counter, so a ratio against it cannot read as no data.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_accepts_total',
+    'WebSocket handshakes this server accepted, by route',
+    ['path'],
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
@@ -292,16 +432,21 @@ SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL = prom.Counter(
     ['request', 'pid'],
 )
 
+# 'liveall' for the same reason as sky_apiserver_threads_active below: keep
+# the per-pid series, but only for processes that still exist. The default
+# ('all') would keep emitting each dead worker's last value forever.
 SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
     'sky_apiserver_process_peak_rss',
     'Peak RSS we saw in each process in last 30 seconds',
     ['pid', 'type'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
     'sky_apiserver_process_cpu_total',
     'Total CPU times a worker process has been running',
     ['pid', 'type', 'mode'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
@@ -314,29 +459,128 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
     'RSS increment after requests', ['name'],
     buckets=_MEM_BUCKETS)
 
+SKY_APISERVER_MEMORY_RELEASES_TOTAL = prom.Counter(
+    'sky_apiserver_memory_releases_total',
+    'Memory releases after requests in executor processes, by result '
+    '(released or skipped)', ['result'])
+
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
-    ('Time taken for ssh message to go from client to API server and back'
-     'to the client. This does not include: latency to reach the pod, '
-     'overhead from sending through the k8s port-forward tunnel, or '
-     'ssh server lag on the destination pod.'),
+    # NOT keystroke latency. Read the whole string before alerting on it.
+    ('SSH websocket heartbeat round trip, client to API server and back. '
+     'This is a synthetic PING the client sends every 10s while a session is '
+     'open -- NOT keystroke latency, and not tied to any user input. The '
+     'server echoes the PING without forwarding it, so the k8s port-forward '
+     'tunnel and the destination pod sshd are excluded by construction; see '
+     'sky_apiserver_ssh_backend_turnaround_seconds for those. Because the '
+     'PONG cannot be sent until the websocket read loop is free, this is '
+     'also an indirect event-loop responsiveness probe. Empty -- not zero -- '
+     'when clients are older than API version 21, when '
+     'SKYPILOT_SSH_DISABLE_LATENCY_MEASUREMENT=1, or when a plugin redirected '
+     'the session away from this API server.'),
     buckets=_LATENCY_BUCKETS,
 )
 
+# The leg the heartbeat above cannot see: API server -> (k8s API server ->
+# kubelet -> pod sshd, or a route a hook supplies) -> shell
+# echo -> back. Measured by pairing a small write to the backend with the next
+# read from it, so it costs two clock reads on a path that already inspects
+# every frame -- no injected bytes, no added latency, and no client support
+# needed. See sky.server.websocket_utils._BackendTurnaroundSampler for the
+# pairing rules and what makes a sample get dropped.
+#
+# `path` distinguishes how the session reached the pod: 'portforward' for this
+# server's kubectl port-forward, or a plugin-supplied value when a hook routes
+# the connection elsewhere. Two or three values in practice, so no cardinality
+# concern.
+#
+# A redirect hook that hands the session off labels it SSH_PATH_REDIRECTED here
+# and records no turnaround -- this server never touches the stream, so it has
+# nothing to time. A plugin that terminates the stream itself instead calls
+# run_websocket_proxy() with its own `path`, and that sample lands in whichever
+# process runs the proxy. So an empty histogram alongside redirected sessions is
+# expected rather than a fault, which is what SKY_APISERVER_SSH_SESSIONS_TOTAL
+# below exists to make legible.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
+    'sky_apiserver_ssh_backend_turnaround_seconds',
+    ('Round trip from the API server to the SSH backend and back, measured by '
+     'pairing a keystroke-sized write with the next read. Covers everything '
+     'the websocket heartbeat excludes: the port-forward tunnel, both sshd '
+     'hops and the shell echo. A distribution, not a per-keystroke truth -- '
+     'unpaired backend traffic can attach a read to the wrong write.'),
+    ['path'],
+    buckets=_SSH_ROUND_TRIP_BUCKETS,
+)
+
+# The histogram's blind spot, made visible. A keystroke-sized write whose reply
+# does not arrive within _MAX_PENDING_SECONDS is dropped rather than observed,
+# because at that age a reply is far more likely to be unrelated output than a
+# very slow echo -- admitting it would put a multi-second sample in a
+# distribution whose real values are single-digit milliseconds, and one such
+# sample moves p99 by four orders of magnitude.
+#
+# Dropping is right for the distribution and wrong as the whole story: a
+# backend that genuinely echoes slower than the cap would go quiet rather than
+# look slow. So count the drops. A rising ratio of dropped to observed is the
+# signal for "too slow to measure", which the distribution cannot express and
+# the session counter cannot either.
+#
+# Scope, precisely: this counts a late reply that *arrives*. It is incremented
+# from _BackendTurnaroundSampler.on_read(), which the proxy calls only when the
+# backend returns bytes, and there is no flush at teardown -- so a session that
+# closes with a write still unanswered discards its pending timestamp without
+# counting anything. Covering that too means counting a still-pending stamp
+# when the proxy tears down, which is not obviously free: SSH teardown sends
+# small client-to-backend packets, and one the backend never answers before the
+# socket closes would put a baseline drop on every ordinary session and blunt
+# the ratio this counter exists to carry. Left out until that baseline is
+# measured on a live server.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_backend_turnaround_dropped_total',
+    ('Keystroke-sized writes whose backend reply arrived later than the '
+     'pairing window, so no turnaround sample was taken. Does not count a '
+     'write the backend never answered at all. Read against '
+     'sky_apiserver_ssh_backend_turnaround_seconds_count: a rising share of '
+     'drops means the backend is slower than the measurement can express, '
+     'not that SSH went idle.'),
+    ['path'],
+)
+
+# Denominator for the histograms above. Without it an empty
+# sky_apiserver_ssh_backend_turnaround_seconds is ambiguous: nobody is SSHing,
+# or every session was redirected away, or the pairing never fires. An alert on
+# the histogram alone is a rule that can go silently dead.
+SKY_APISERVER_SSH_SESSIONS_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_sessions_total',
+    'SSH proxy sessions accepted, by how the session was served',
+    ['path'],
+)
+
+# Server-wide free-executor counts, so 'livesum'. The default ('all') emits
+# one series per pid and never drops dead ones, so the count kept including
+# workers that had exited.
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
     'sky_apiserver_long_executors',
     'Total number of long-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'sky_apiserver_short_executors',
     'Total number of short-running request executors in the API server',
+    multiprocess_mode='livesum',
+)
+
+SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
+    'sky_apiserver_heavy_executors',
+    'Number of free heavy request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 # Active threads in on-demand thread executors. Each process has its own
 # executor with a per-process max_workers limit, so per-pid series are kept:
-# exhaustion is a per-process condition and a fleet-wide sum can exceed the
-# limit while no single executor is full. Compare against
+# exhaustion is a per-process condition and a sum across processes can exceed
+# the limit while no single executor is full. Compare against
 # sky_apiserver_threads_max with the same labels.
 #
 # multiprocess_mode must be 'liveall': for the aggregating modes (livesum
@@ -369,6 +613,14 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     ['name'],
 )
 
+# Thread start waits for the GIL, so a start on the event loop stalls it
+# under contention; on_loop="true" should stay flat once a process is warm.
+SKY_APISERVER_THREADS_STARTED_TOTAL = prom.Counter(
+    'sky_apiserver_threads_started_total',
+    'Number of threads started in API server processes',
+    ['on_loop'],
+)
+
 # Auth-path work that ended in a timeout instead of a result. This is the
 # earliest signal that authentication is degrading: in a production incident
 # the first one landed 13 minutes before the first client-visible 503, and it
@@ -399,10 +651,9 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
 # `site` is the name of the function that was called. Bounded, not
 # attacker-influenced: every call site passes a module-level function or a
 # bound method, so the values are fixed at build time. It is not only the
-# eight OSS names, though -- `call_with_deadline` is also called from the
-# enterprise plugin's session and RBAC middlewares and its volume gate, which
-# contribute their own, so a hosted deployment has more. A callable with no
-# `__name__` (a partial) records `unknown` rather than widening the label.
+# eight OSS names, though -- `call_with_deadline` may also be called from
+# plugin code, which contributes its own. A callable with no `__name__` (a
+# partial) records `unknown` rather than widening the label.
 #
 # Two things are deliberately NOT counted here. Executor exhaustion, which
 # already has `sky_apiserver_threads_exhausted_total`; and whatever response
@@ -424,6 +675,31 @@ SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
     ['schedule_type'],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
              120.0, 300.0, 600.0, float('inf')),
+)
+
+# Reads made through sky.provision.kubernetes.reads. reason is '' for a read
+# served from the cluster state source.
+SKY_APISERVER_KUBE_READS_TOTAL = prom.Counter(
+    'sky_apiserver_kube_reads_total',
+    'Kubernetes object reads by context, resource, the source that served '
+    'them, and why a read went to the API server',
+    ['context', 'resource', 'source', 'reason'],
+)
+
+# One sample per GET call to an API server, retries included.
+SKY_APISERVER_KUBE_READ_API_CALL_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_api_call_seconds',
+    'Duration of the Kubernetes API calls made by object reads, by resource '
+    'and outcome',
+    ['resource', 'outcome'],
+    buckets=_LATENCY_BUCKETS,
+)
+
+SKY_APISERVER_KUBE_READ_STALENESS_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_staleness_seconds',
+    'How long the watch behind a cached object read had been failing',
+    ['resource'],
+    buckets=(0, 1, 5, 15, 30, 60, 120, 300, 600, float('inf')),
 )
 
 # --- ~/sky_logs retention ---
@@ -465,6 +741,308 @@ SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
     'sky_apiserver_sky_logs_pruned_entries_total',
     'Expired ~/sky_logs artifacts removed by the retention sweep',
 )
+
+# --- Launch latency -----------------------------------------------------------
+
+# Launch phases span seconds (a container starting) to hours (a workload
+# waiting for quota), so the API-latency buckets, which stop at 1000s, would
+# put every interesting queue wait in +Inf and make p95 meaningless.
+_LAUNCH_PHASE_BUCKETS = (1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0,
+                         1200.0, 1800.0, 3600.0, 7200.0, 21600.0, 43200.0,
+                         86400.0, float('inf'))
+
+# One phase of one provisioning attempt.
+#
+# phase partitions the attempt's wall clock, so a stacked panel of the phases
+# adds up to the whole attempt and nothing is counted twice:
+#   provision_setup  provision start -> instances/pods asked for
+#   queue_wait       asked for -> admitted by an external scheduler (absent
+#                    where nothing gates the workload)
+#   node_startup     admitted (or asked for) -> instances/pods up
+#
+# attempt is 'final' for the attempt that delivered the cluster and
+# 'superseded' for one that was thrown away. Do not mix them in one quantile:
+# a superseded attempt answers how long doomed launches burn, which is a
+# different question from how long a launch takes.
+#
+# Labels stop at workspace on purpose. Adding infra and queue here multiplies
+# every bucket by both and puts this one metric an order of magnitude over the
+# series budget; per-launch detail belongs in the launch_attempts table.
+SKY_LAUNCH_PHASE_DURATION_SECONDS = prom.Histogram(
+    'sky_launch_phase_duration_seconds',
+    'Duration of one phase of a provisioning attempt',
+    ['phase', 'attempt', 'workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# Segments that never closed, so no duration could be observed. Counted rather
+# than skipped: a phase silently missing from the histogram looks the same as a
+# phase that was fast.
+SKY_LAUNCH_PHASE_DROPPED_TOTAL = prom.Counter(
+    'sky_launch_phase_dropped_total',
+    'Launch phases that could not be measured',
+    ['phase', 'reason'],
+)
+
+# A segment whose end preceded its start. Clamped to zero before observing, but
+# counted here: a negative observation lands in the lowest bucket, so absorbing
+# it silently would leave the histogram looking healthy while being wrong.
+SKY_LAUNCH_PHASE_ANOMALIES_TOTAL = prom.Counter(
+    'sky_launch_phase_anomalies_total',
+    'Launch phase durations that were not usable as measured',
+    ['phase', 'reason'],
+)
+
+# The admission wait alone, sliced by the queue the workload sat in. Carried
+# separately from the phase histogram because the queue dimension is only
+# meaningful for this one phase, and folding it in would multiply every other
+# phase's buckets by the number of queues for no added answer.
+SKY_LAUNCH_QUEUE_WAIT_SECONDS = prom.Histogram(
+    'sky_launch_queue_wait_seconds',
+    'Time a launch waited for admission, by scheduler queue',
+    ['workspace', 'queue'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+
+def observe_launch_queue_wait(workspace: str, queue_name: str,
+                              duration_seconds: float) -> None:
+    """Record an admission wait against the queue it happened in."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_LAUNCH_QUEUE_WAIT_SECONDS.labels(workspace=workspace,
+                                             queue=queue_name).observe(
+                                                 max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe queue wait metric: {e}')
+
+
+def observe_launch_phase(phase: str, attempt: str, workspace: str,
+                         duration_seconds: float) -> None:
+    """Record one launch phase duration.
+
+    Metric emission must never disrupt the caller, so any failure is logged
+    and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        if duration_seconds < 0:
+            SKY_LAUNCH_PHASE_ANOMALIES_TOTAL.labels(phase=phase,
+                                                    reason='negative').inc()
+        SKY_LAUNCH_PHASE_DURATION_SECONDS.labels(phase=phase,
+                                                 attempt=attempt,
+                                                 workspace=workspace).observe(
+                                                     max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe launch phase metric: {e}')
+
+
+def count_kube_read(context: str, resource: str, source: str,
+                    reason: str) -> None:
+    """Record one Kubernetes object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READS_TOTAL.labels(context=context,
+                                              resource=resource,
+                                              source=source,
+                                              reason=reason).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count Kubernetes read: {e}')
+
+
+def observe_kube_read_api_call(resource: str, outcome: str,
+                               duration_seconds: float) -> None:
+    """Record one Kubernetes API call made by an object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_API_CALL_SECONDS.labels(
+            resource=resource, outcome=outcome).observe(duration_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes API call: {e}')
+
+
+def observe_kube_read_staleness(resource: str,
+                                staleness_seconds: float) -> None:
+    """Record the staleness of one cached object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_STALENESS_SECONDS.labels(
+            resource=resource).observe(staleness_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes read staleness: {e}')
+
+
+def count_launch_phase_dropped(phase: str, reason: str) -> None:
+    """Record a launch phase that could not be measured."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_LAUNCH_PHASE_DROPPED_TOTAL.labels(phase=phase, reason=reason).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count dropped launch phase: {e}')
+
+
+# One phase of a managed job's path from submission to running. Unlike
+# sky_launch_phase_duration_seconds, which describes a single provisioning
+# attempt, these partition the *job's* wall clock -- so a retried job's thrown
+# away attempts show up as retry_overhead rather than disappearing:
+#   controller_queue  accepted -> a controller claimed the job
+#   retry_overhead    attempts that were thrown away, plus backoff between them
+#   provision_setup   the final attempt's provision start -> instances asked for
+#   queue_wait        asked for -> admitted by an external scheduler
+#   node_startup      admitted -> instances up
+#   runtime_setup     instances up -> the job is RUNNING
+SKY_MANAGED_JOB_PHASE_DURATION_SECONDS = prom.Histogram(
+    'sky_managed_job_phase_duration_seconds',
+    'Duration of one phase of a managed job reaching RUNNING',
+    ['phase', 'workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# The headline: submission to running. Measured directly rather than summed
+# from the phases above, because histogram quantiles are not additive --
+# p95 of the total is not the sum of the phases' p95s.
+SKY_MANAGED_JOB_TIME_TO_RUNNING_SECONDS = prom.Histogram(
+    'sky_managed_job_time_to_running_seconds',
+    'Time from a managed job being accepted to it running',
+    ['workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# The denominator for the timings above. Without it a fleet where half the
+# jobs never start shows a healthy p95 computed only over the survivors, and
+# nothing says how many there were.
+#
+# outcome is 'running' for a job that reached RUNNING and so has a timing, or
+# 'never_ran' for one that went terminal first. path separates jobs placed on a
+# warm pool -- they skip provisioning entirely, so their absence from the
+# provisioning phases is expected rather than missing data.
+SKY_MANAGED_JOB_STARTS_TOTAL = prom.Counter(
+    'sky_managed_job_starts_total',
+    'Managed job tasks that finished waiting to start, by how they ended up',
+    ['outcome', 'path', 'workspace'],
+)
+
+JOB_OUTCOME_RUNNING = 'running'
+JOB_OUTCOME_NEVER_RAN = 'never_ran'
+JOB_PATH_POOL = 'pool'
+JOB_PATH_PROVISION = 'provision'
+
+
+def count_managed_job_start(outcome: str, path: str, workspace: str) -> None:
+    """Record that a job finished waiting to start, however it ended up."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_STARTS_TOTAL.labels(outcome=outcome,
+                                            path=path,
+                                            workspace=workspace).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count a managed job start: {e}')
+
+
+# Launch attempts the managed-jobs controller absorbed and retried. Counted
+# even though they are retried: a job's initial launch retries forever, so an
+# error that is only logged is invisible no matter how often it happens.
+#
+# kind is structural -- an exception class, or the clause for the paths that
+# carry no exception -- never a formatted message. It is bounded per release
+# except for the two open families (`<cloud>:<class>` and `opaque:<class>`,
+# both spelled with a colon), which are capped per process below. The durable
+# job_events.code column carries the same value uncapped, and is what an
+# inventory of the real population is read from.
+SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL = prom.Counter(
+    'sky_managed_job_launch_retry_total',
+    'Managed-job launch attempts that failed and were retried, by kind',
+    ['kind'],
+)
+
+# Series budget for the open kind families. Sized per *fleet*, not per process:
+# each controller keeps its own set and the scrape exposes the union, so the
+# real bound is this times the controller count, which
+# controller_utils.MAX_CONTROLLERS puts at 64. At 8 that is ~512 series worst
+# case; the obvious 100 would have been 6400, i.e. no cap at all in the case a
+# cap exists for.
+#
+# Admission is first-seen rather than by count -- ranking needs counts, which a
+# Counter cannot read back -- so a dominant kind that arrives once the set is
+# full stays in OTHER for that process's life. Both that and the tightness here
+# are tolerable only because job_events.code is uncapped: a kind missing from
+# the metric is still in the inventory by name. Raise this deliberately if a
+# deployment's inventory shows a tail worth alerting on.
+_MAX_LAUNCH_RETRY_KINDS = 8
+LAUNCH_RETRY_KIND_OTHER = 'other'
+_launch_retry_kinds: Set[str] = set()
+_launch_retry_kinds_lock = threading.Lock()
+
+
+def _capped_launch_retry_kind(kind: str) -> str:
+    """Fold an open-family kind into OTHER once the budget is spent.
+
+    Closed families (a bare class name, or one of the fixed no-exception
+    kinds) are exempt: they change only when the tree changes, so capping
+    them would spend the budget on the one part that cannot grow.
+    """
+    if ':' not in kind:
+        return kind
+    with _launch_retry_kinds_lock:
+        if kind in _launch_retry_kinds:
+            return kind
+        if len(_launch_retry_kinds) >= _MAX_LAUNCH_RETRY_KINDS:
+            return LAUNCH_RETRY_KIND_OTHER
+        _launch_retry_kinds.add(kind)
+        return kind
+
+
+def count_launch_retry(kind: str) -> None:
+    """Record one absorbed launch failure.
+
+    Best-effort by construction, and lossy in one way worth knowing: an API
+    server restart wipes PROMETHEUS_MULTIPROC_DIR, which permanently silences
+    the metrics of jobs controllers that outlive it. Read a population from
+    job_events.code, not from this.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL.labels(
+            kind=_capped_launch_retry_kind(kind)).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count a managed job launch retry: {e}')
+
+
+def observe_managed_job_phase(phase: str, workspace: str,
+                              duration_seconds: float) -> None:
+    """Record one phase of a managed job reaching RUNNING."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        if duration_seconds < 0:
+            SKY_LAUNCH_PHASE_ANOMALIES_TOTAL.labels(phase=phase,
+                                                    reason='negative').inc()
+        SKY_MANAGED_JOB_PHASE_DURATION_SECONDS.labels(
+            phase=phase,
+            workspace=workspace).observe(max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe managed job phase metric: {e}')
+
+
+def observe_managed_job_time_to_running(workspace: str,
+                                        duration_seconds: float) -> None:
+    """Record a managed job's submission-to-running time."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_TIME_TO_RUNNING_SECONDS.labels(
+            workspace=workspace).observe(max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe time-to-running metric: {e}')
+
 
 # Time a request spent before its execution first started: from the request
 # row being created (PENDING) to its first transition to RUNNING. Unlike
@@ -546,7 +1124,8 @@ SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT = prom.Gauge(
 
 SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
     'sky_managed_jobs_controller_running_count',
-    'Number of running job tasks on this controller process',
+    'Number of running job tasks on this controller process, including '
+    'jobs claimed but not started yet',
     ['pid'],
     multiprocess_mode='liveall',
 )
@@ -554,6 +1133,22 @@ SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
 SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS = prom.Gauge(
     'sky_managed_jobs_controller_max_jobs',
     'Computed max jobs for this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_COST_UNITS = prom.Gauge(
+    'sky_managed_jobs_controller_cost_units',
+    'Cost units of the jobs held by this controller process; a job costs '
+    'JOB_COST_UNITS unless its runtime reports less',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_MAX_COST_UNITS = prom.Gauge(
+    'sky_managed_jobs_controller_max_cost_units',
+    'Cost units this controller process may hold before it stops claiming '
+    'jobs',
     ['pid'],
     multiprocess_mode='liveall',
 )
@@ -660,6 +1255,28 @@ SKY_APISERVER_LOCAL_CONTEXT_PROBE_QUEUE_DEPTH = prom.Gauge(
 # verdict existed) | unknown (no verdict yet; served as remote for the
 # request). A context stuck at result="unknown" is one whose probes
 # never conclude.
+# When the federation routes last refreshed their view of which clusters to
+# scrape (see sky/server/metrics.py _FederationTargets). The routes serve
+# whatever the last refresh produced, so time() - this is the age of the
+# cluster list they are federating; a refresh that hangs or keeps failing
+# leaves them on a frozen list while the event loop, /metrics and the scrape
+# all stay healthy, which is what makes it invisible otherwise. 0 means no
+# refresh has ever completed.
+#
+# multiprocess_mode='max', not 'livemax': livemax needs prometheus_client
+# >= 0.15.0 while dependencies.py allows >= 0.8.0, where it is rejected at
+# import and the server would not start at all. 'max' is equivalent for a
+# timestamp that only moves forward -- a dead writer's value is older, so it
+# can never win the max -- and unlike 'livemax' it keeps the series present
+# after the writer exits, so an alert on time() - this does not have to carry
+# an absent() clause to avoid the up-absent-not-zero trap.
+SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS = prom.Gauge(
+    'sky_apiserver_federation_targets_last_success_timestamp_seconds',
+    'Unix timestamp of the last successful federation target refresh; 0 if '
+    'none has completed since process start',
+    multiprocess_mode='max',
+)
+
 SKY_APISERVER_LOCAL_CONTEXT_SERVED_TOTAL = prom.Counter(
     'sky_apiserver_local_context_served_total',
     'Verdicts served by the non-blocking request path, per context',
@@ -794,7 +1411,34 @@ def time_it(name: str, group: str = 'default'):
 
 
 def time_me(func):
-    """Measure the duration of decorated function."""
+    """Measure the duration of decorated function.
+
+    Coroutine and generator functions are dispatched to wrappers that span
+    their execution: calling them only builds the coroutine/generator object,
+    so timing the call alone would record a near-zero duration.
+
+    Async generator functions are rejected: delegating to one without losing
+    ``asend`` and ``athrow`` is not expressible, and timing only their
+    construction is exactly what this dispatch exists to prevent.
+    """
+    if inspect.isasyncgenfunction(func):
+        raise TypeError('time_me does not support async generator functions: '
+                        f'{func.__module__}/{func.__name__}')
+
+    if inspect.iscoroutinefunction(func):
+        return time_me_async(func)
+
+    if inspect.isgeneratorfunction(func):
+
+        @functools.wraps(func)
+        def generator_wrapper(*args, **kwargs):
+            if not METRICS_ENABLED:
+                return (yield from func(*args, **kwargs))
+            name = f'{func.__module__}/{func.__name__}'
+            with time_it(name, group='function'):
+                return (yield from func(*args, **kwargs))
+
+        return generator_wrapper
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -839,12 +1483,12 @@ def _get_prometheus_target() -> Tuple[str, str, int]:
 
 def _read_cluster_identity_uid(core) -> Optional[str]:
     """Reads the kube-system namespace UID through the given CoreV1Api."""
-    namespace = core.read_namespace(
-        _CLUSTER_IDENTITY_NAMESPACE,
-        _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
-    if namespace is None or namespace.metadata is None:
-        return None
-    return namespace.metadata.uid
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    return kubernetes_utils.read_cluster_uid(core,
+                                             _NAMESPACE_PROBE_TIMEOUT_SECONDS)
 
 
 def _get_in_cluster_identity_uid() -> Optional[str]:
@@ -1168,7 +1812,7 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
     env = os.environ.copy()
     # Use SkyPilot's kubeconfig discovery which respects KUBECONFIG env var
-    # (set by credential manager plugin) and falls back to ~/.kube/config.
+    # and falls back to ~/.kube/config.
     # Always set explicitly so subprocess gets the resolved paths even if
     # env var was modified after os.environ was last copied.
     # Import lazily to avoid circular import (metrics -> provision -> clouds
@@ -1257,6 +1901,11 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 def stop_svc_port_forward(port_forward_process: subprocess.Popen,
                           timeout: int = 5) -> None:
     """Stops a port forward to a service in a Kubernetes cluster.
+
+    Blocking (up to roughly 2x timeout when kubectl ignores SIGTERM). Call it
+    from a thread, never from the metrics event loop -- see
+    stop_svc_port_forward_off_loop.
+
     Args:
         port_forward_process: The subprocess.Popen process to terminate
     """
@@ -1265,7 +1914,34 @@ def stop_svc_port_forward(port_forward_process: subprocess.Popen,
         port_forward_process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         port_forward_process.kill()
-        port_forward_process.wait()
+        try:
+            port_forward_process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # SIGKILL cannot be caught, so anything still unreaped here is
+            # stuck in the kernel (uninterruptible sleep). Waiting forever
+            # for it would pin this thread for the life of the process;
+            # leaving the zombie to be reaped later is the lesser cost.
+            logger.warning(
+                f'Port forward process {port_forward_process.pid} did not exit '
+                f'{timeout}s after SIGKILL; abandoning it.')
+
+
+def stop_svc_port_forward_off_loop(
+        port_forward_process: subprocess.Popen) -> None:
+    """Tears a port forward down without spending event-loop time on it.
+
+    The teardown cannot be awaited: asyncio.wait_for() cancels the federation
+    coroutine at the per-context budget, and an `await` in the `finally` that
+    follows re-raises CancelledError immediately -- the kubectl child would
+    leak. Running it inline instead keeps the guarantee but charges the
+    terminate-and-wait to the loop that also serves /metrics, once per
+    context. A detached thread keeps both: the teardown always runs to
+    completion, and the loop never waits for it.
+    """
+    threading.Thread(target=stop_svc_port_forward,
+                     args=(port_forward_process,),
+                     name='metrics-port-forward-stop',
+                     daemon=True).start()
 
 
 async def send_metrics_request_with_port_forward(
@@ -1349,12 +2025,12 @@ async def send_metrics_request_with_port_forward(
             return text
 
     finally:
-        # Clean up port forward synchronously to guarantee cleanup
-        # even if the task is cancelled by asyncio.wait_for().
-        # Using await here would risk CancelledError preventing
-        # cleanup.
+        # Hand the teardown to a detached thread: it must run even when this
+        # coroutine is being cancelled by asyncio.wait_for(), and it must not
+        # be charged to the loop that serves /metrics. See
+        # stop_svc_port_forward_off_loop.
         if port_forward_process:
-            stop_svc_port_forward(port_forward_process)
+            stop_svc_port_forward_off_loop(port_forward_process)
 
 
 # Matches an existing `cluster="..."` label token in a metric line's label
@@ -1498,15 +2174,47 @@ async def add_cluster_name_label(metrics_text: str,
                                    replace_existing)
 
 
+# node-exporter's InfiniBand / RoCE series, one per RDMA device port. Per node
+# (no pod label): the GPU dashboard's node network panel joins them to DCGM's
+# series on (cluster, node).
+_NODE_RDMA_METRICS = (
+    # tx/rx bytes: the GPU dashboard's node network panel.
+    'node_infiniband_port_data_transmitted_bytes_total',
+    'node_infiniband_port_data_received_bytes_total',
+    # Work-completion errors. A NIC can fail every multi-node job while its
+    # link stays up at full rate with no link errors; these are what rise then.
+    'node_infiniband_req_cqes_errors_total',
+    'node_infiniband_req_cqes_flush_errors_total',
+    'node_infiniband_resp_cqes_errors_total',
+    'node_infiniband_resp_cqes_flush_errors_total',
+    'node_infiniband_req_remote_invalid_request_errors_total',
+    # Link drops, recoveries and physical-layer errors.
+    'node_infiniband_link_downed_total',
+    'node_infiniband_link_error_recovery_total',
+    'node_infiniband_symbol_error_total',
+    'node_infiniband_port_errors_received_total',
+    'node_infiniband_local_link_integrity_errors_total',
+    # RoCE transport retransmits and ack timeouts.
+    'node_infiniband_roce_adp_retransmits_total',
+    'node_infiniband_local_ack_timeout_errors_total',
+    # Negotiated link rate: a port that trained below its rated speed.
+    'node_infiniband_rate_bytes_per_second',
+)
+
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
-# CPU/memory, kube_pod_labels, and cAdvisor container metrics (per-pod
-# CPU/Memory in the Telemetry section joins on (pod, namespace) with
-# kube_pod_labels — same join shape the GPU panels use to filter by SkyPilot
-# cluster name).
+# CPU/memory, node RDMA throughput, errors and link changes, kube_pod_labels,
+# and cAdvisor container metrics (per-pod CPU/Memory in the Telemetry section
+# joins on (pod, namespace) with kube_pod_labels — same join shape the GPU
+# panels use to filter by SkyPilot cluster name).
 GPU_METRICS_MATCH_PATTERNS = [
     '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
     'kube_pod_labels',
     'node_cpu_seconds_total{mode="idle"}',
+    '{__name__=~"' + '|'.join(_NODE_RDMA_METRICS) + '"}',
+    # Link drops of the RDMA network interfaces (rdma* for RoCE, ib* for
+    # InfiniBand), one per drop. A flapping RoCE port leaves
+    # node_infiniband_link_downed_total at 0; this is what rises.
+    'node_network_carrier_down_changes_total{device=~"rdma.*|ib.*"}',
     'container_cpu_usage_seconds_total{container!="",container!="POD"}',
     'container_memory_working_set_bytes{container!="",container!="POD"}',
     # GPU allocation metrics — pod requests + node capacity for nvidia/amd
@@ -1562,8 +2270,8 @@ SLURM_GPU_METRICS_MATCH_PATTERNS = [
     'node_cpu_seconds_total{mode="idle"}',
 ]
 
-# Context-string prefix under which Slurm series are stamped; matches the
-# GPU Manager's Slurm context vocabulary ('slurm/<cluster>').
+# Context-string prefix under which Slurm series are stamped
+# ('slurm/<cluster>').
 SLURM_CONTEXT_PREFIX = 'slurm/'
 
 # Headroom, in seconds, that curl's own limit leaves inside a Slurm cluster's
@@ -1636,7 +2344,9 @@ def get_slurm_prometheus_filters(cluster_name: str) -> Dict[str, str]:
     return filters
 
 
-def slurm_federate_matchers(cluster_name: str) -> List[str]:
+def slurm_federate_matchers(
+        cluster_name: str,
+        federated: Optional[Iterable[str]] = None) -> List[str]:
     """Label matchers appended to this cluster's /federate selectors.
 
     Two sources, both aimed at the same problem: one Prometheus that
@@ -1657,6 +2367,9 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
        is logged instead of silently double-counting. A label this
        cluster already constrains is left alone, since its own filter is
        the more specific statement.
+
+    ``federated`` is the list of clusters being federated; when omitted it
+    is enumerated with get_slurm_metrics_clusters().
     """
     own = get_slurm_prometheus_filters(cluster_name)
     matchers = [
@@ -1685,10 +2398,11 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
     if not candidates:
         return matchers
 
-    # Narrowed to clusters actually federated: a cluster excluded by
-    # slurm.allowed_clusters claims nothing, so subtracting its slice here
-    # would drop series no cluster goes on to collect.
-    federated = set(get_slurm_metrics_clusters())
+    # Narrowed to clusters actually federated: a cluster no workspace allows
+    # claims nothing, so subtracting its slice here would drop series no
+    # cluster goes on to collect.
+    federated = set(
+        get_slurm_metrics_clusters() if federated is None else federated)
     for sibling in candidates:
         if sibling not in federated:
             continue
@@ -1732,9 +2446,9 @@ def _with_label_matchers(pattern: str, matchers: List[str]) -> str:
 def get_slurm_metrics_clusters() -> List[str]:
     """Slurm clusters opted into GPU metrics federation.
 
-    A cluster participates when it is allowed by ``slurm.allowed_clusters``
-    (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
-    in ``~/.slurm/config``) *and*
+    A cluster participates when some workspace allows it (the server's
+    ``slurm.allowed_clusters`` or a workspace's override, as with Kubernetes
+    contexts; defaults to every cluster in ``~/.slurm/config``) *and*
     ``slurm.cluster_configs.<name>.prometheus.url`` is set: the URL of a
     Prometheus reachable *from a login node* — the cluster's own, or the
     ``prometheus.via`` cluster's — that scrapes the cluster's node/DCGM
@@ -1744,21 +2458,28 @@ def get_slurm_metrics_clusters() -> List[str]:
     try:
         # pylint: disable=import-outside-toplevel
         from sky import clouds
+        # In-function: visibility imports global_user_state (through
+        # workspaces.core), which imports this module.
+        from sky.workspaces import visibility
 
-        # Scope federation to the same clusters the rest of SkyPilot uses,
-        # honoring slurm.allowed_clusters (mirrors how the Kubernetes federation
-        # respects allowed_contexts). Defaults to all clusters in
-        # ~/.slurm/config when allowed_clusters is unset.
-        names = clouds.Slurm.existing_allowed_clusters(silent=True)
+        names = set(clouds.Slurm.existing_allowed_clusters(silent=True))
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not enumerate Slurm clusters: {e}')
         return []
-    return [name for name in names if _slurm_prometheus_url(name)]
+    # Clusters only another workspace allows are federated too, as the
+    # Kubernetes federation does with get_every_workspace_contexts().
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {})
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    names |= visibility.visible_for_workspaces(workspaces, 'slurm')
+    return sorted(name for name in names if _slurm_prometheus_url(name))
 
 
-async def get_metrics_for_slurm_cluster(cluster_name: str,
-                                        stats: Optional[FederationStats] = None,
-                                        timeout: float = 30.0) -> str:
+async def get_metrics_for_slurm_cluster(
+        cluster_name: str,
+        stats: Optional[FederationStats] = None,
+        timeout: float = 30.0,
+        federated: Optional[Iterable[str]] = None) -> str:
     """Federate GPU metrics from a Slurm cluster's own Prometheus.
 
     The /federate request is executed *on* a login node (curl) through
@@ -1771,7 +2492,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     each through the login node that can reach it. Series are stamped with
     ``cluster="slurm/<name>"`` regardless of which login node fetched
     them, mirroring the Kubernetes federation path, so every downstream
-    consumer (central Prometheus, Grafana dashboards, GPU Manager queries)
+    consumer (central Prometheus, Grafana dashboards, other queries)
     treats the Slurm cluster like any other context.
 
     Timeouts mirror the Kubernetes path's single per-context budget: the
@@ -1787,6 +2508,9 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
         timeout: Budget in seconds for the whole fetch. Must fit within the
             per-context timeout in sky/server/metrics.py
             (_PER_CONTEXT_TIMEOUT_SECONDS).
+        federated: The clusters being federated, passed so the sibling
+            filter does not enumerate them again on the event loop. See
+            slurm_federate_matchers().
 
     Raises:
         Exception: If the login-node curl or the federate request fails.
@@ -1803,7 +2527,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     # Scope the pull when the source Prometheus aggregates several fleets;
     # without this every fleet's series would be stamped with this cluster's
     # context. See slurm_federate_matchers().
-    matchers = slurm_federate_matchers(cluster_name)
+    matchers = slurm_federate_matchers(cluster_name, federated)
     query = '&'.join('match[]=' +
                      urllib.parse.quote(_with_label_matchers(pattern, matchers))
                      for pattern in SLURM_GPU_METRICS_MATCH_PATTERNS)
@@ -1854,6 +2578,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
 # (not /gpu-metrics) because they exist solely for endpoint observability.
 ENDPOINT_METRICS_MATCH_PATTERNS = [
     '{__name__=~"vllm:.*"}',
+    '{__name__=~"litellm_.*"}',
     '{__name__=~"kube_deployment_.*|kube_horizontalpodautoscaler_spec_target_metric"}',  # pylint: disable=line-too-long
 ]
 
@@ -1864,8 +2589,8 @@ async def get_endpoint_metrics_for_context(
 
     Mirrors get_metrics_for_context() but federates the serving engines'
     native Prometheus series instead of DCGM/node metrics. vLLM exports
-    ``vllm:*``-prefixed names; future engines append their own prefixes
-    here (e.g. ``sglang:*``).
+    ``vllm:*``-prefixed names and LiteLLM proxies export ``litellm_*``.
+    Future engines append their own prefixes here (e.g. ``sglang:*``).
 
     Args:
         context: Kubernetes context name

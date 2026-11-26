@@ -9,14 +9,18 @@ Set SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS (seconds) to refresh the
 client proactively at a fixed interval so it is rebuilt from the updated
 kubeconfig (e.g. for short-lived certs).
 """
+import copy
 import functools
+import hashlib
 import logging
 import os
 import platform
 import threading
 import time
 import typing
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
+
+import cachetools
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -59,6 +63,12 @@ IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
 # interval.
 KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = (
     'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS')
+# Connections an ApiClient keeps for reuse. The API server normally closes
+# idle connections, but if something in between does not pass that close on,
+# every connection opened at peak concurrency stays open for as long as the
+# client lives, which can be the whole process (e.g. a jobs controller).
+# Requests beyond this many in parallel use a connection that closes afterwards.
+CONNECTION_POOL_MAXSIZE = 4
 
 logger = sky_logging.init_logger(__name__)
 
@@ -145,6 +155,11 @@ def _get_api_client(context: Optional[str] = None) -> Any:
     """
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    def _new_configuration() -> Any:
+        config = kubernetes.client.Configuration()
+        config.connection_pool_maxsize = CONNECTION_POOL_MAXSIZE
+        return config
+
     def _get_api_client_from_kubeconfig(context: Optional[str] = None) -> Any:
         """Load kubeconfig, return ApiClient without modifying global state."""
         try:
@@ -152,7 +167,9 @@ def _get_api_client(context: Optional[str] = None) -> Any:
             # specified context WITHOUT modifying the global configuration.
             # This is the key to thread-safety.
             return kubernetes.config.new_client_from_config(
-                config_file=_get_config_file(), context=context)
+                config_file=_get_config_file(),
+                context=context,
+                client_configuration=_new_configuration())
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
             context_name = '(current-context)' if context is None else context
@@ -214,7 +231,7 @@ def _get_api_client(context: Optional[str] = None) -> Any:
             if 'KUBERNETES_SERVICE_PORT' not in os.environ:
                 os.environ['KUBERNETES_SERVICE_PORT'] = '443'
 
-            config = kubernetes.client.Configuration()
+            config = _new_configuration()
             kubernetes.config.load_incluster_config(config)
             return _enable_response_compression(
                 kubernetes.client.ApiClient(configuration=config))
@@ -228,8 +245,92 @@ def _get_api_client(context: Optional[str] = None) -> Any:
         _get_api_client_from_kubeconfig(context))
 
 
+def kubeconfig_fingerprint() -> Tuple[Any, ...]:
+    """Changes whenever a file on KUBECONFIG is written, replaced or removed.
+
+    Hashes the content rather than comparing stat fields: a same-size rewrite
+    within one timestamp tick, or one that keeps the mtime (`cp -p`), leaves
+    every stat field unchanged. Reading a kubeconfig costs far less than
+    parsing it.
+    """
+    return _fingerprint(_get_config_file())
+
+
+def _fingerprint(config_file: str) -> Tuple[Any, ...]:
+    fingerprint: List[Tuple[Any, ...]] = []
+    for path in config_file.split(ENV_KUBECONFIG_PATH_SEPARATOR):
+        if not path:
+            continue
+        path = os.path.expanduser(path)
+        try:
+            with open(path, 'rb') as f:
+                digest = hashlib.sha256(f.read()).hexdigest()
+            fingerprint.append((path, digest))
+        except OSError:
+            fingerprint.append((path, None))
+    return tuple(fingerprint)
+
+
+# A kept client is dropped at the first sync refresh this long after the last
+# clear. A client can be stale with an unchanged kubeconfig: credentials that
+# an exec plugin or a token file renews, a client built during a change that
+# was reverted, or one built from the old file while a refresh was clearing.
+_KEEP_CLIENTS_MAX_SECONDS = 60
+_last_refresh_fingerprint: Optional[Tuple[Any, ...]] = None
+_clients_cleared_at = 0.0
+
+
+def _kubeconfig_unchanged_since_last_refresh() -> bool:
+    """`keep_if` of the client caches below.
+
+    A sync handler's config refresh clears the request-level caches; rebuilding
+    every client then costs tens of ms per request. They are kept while the
+    kubeconfig is unchanged, for at most _KEEP_CLIENTS_MAX_SECONDS.
+    """
+    global _last_refresh_fingerprint, _clients_cleared_at
+    fingerprint = kubeconfig_fingerprint()
+    now = time.monotonic()
+    keep = (fingerprint == _last_refresh_fingerprint and
+            now - _clients_cleared_at < _KEEP_CLIENTS_MAX_SECONDS)
+    _last_refresh_fingerprint = fingerprint
+    if not keep:
+        _clients_cleared_at = now
+    return keep
+
+
+# kubeconfig fingerprint -> (contexts, current context), or the ConfigException
+# the parse raised. A few entries, since KUBECONFIG can alternate within a
+# process (e.g. a path appended for one request and dropped after it).
+_contexts_cache: 'cachetools.LRUCache[Tuple[Any, ...], Any]' = (
+    cachetools.LRUCache(maxsize=4))
+_contexts_cache_lock = threading.Lock()
+
+
 def list_kube_config_contexts():
-    return kubernetes.config.list_kube_config_contexts(_get_config_file())
+    """(contexts, current context) of the kubeconfig, as copies.
+
+    Parsed again only when a file on KUBECONFIG, or KUBECONFIG itself,
+    changes. A ConfigException (no usable kubeconfig, or no valid current
+    context) is raised again on every call until then.
+    """
+    # Read KUBECONFIG once, so the parse matches the fingerprint's paths.
+    config_file = _get_config_file()
+    fingerprint = _fingerprint(config_file)
+    with _contexts_cache_lock:
+        result = _contexts_cache.get(fingerprint)
+    if result is None:
+        try:
+            result = kubernetes.config.list_kube_config_contexts(config_file)
+        except kubernetes.config.config_exception.ConfigException as e:
+            # A copy never raised: no traceback or context to keep alive.
+            result = type(e)(*e.args)
+        # A file that changed during the parse may hold either version.
+        if _fingerprint(config_file) == fingerprint:
+            with _contexts_cache_lock:
+                _contexts_cache[fingerprint] = result
+    if isinstance(result, Exception):
+        raise type(result)(*result.args)
+    return copy.deepcopy(result)
 
 
 @functools.lru_cache(maxsize=None)
@@ -349,21 +450,24 @@ def _retryable_kubernetes_client(getter: Callable) -> Callable:
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def core_api(context: Optional[str] = None):
     return kubernetes.client.CoreV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def storage_api(context: Optional[str] = None):
     return kubernetes.client.StorageV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def auth_api(context: Optional[str] = None):
     return kubernetes.client.RbacAuthorizationV1Api(
@@ -371,7 +475,8 @@ def auth_api(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def networking_api(context: Optional[str] = None):
     return kubernetes.client.NetworkingV1Api(
@@ -379,7 +484,8 @@ def networking_api(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def custom_objects_api(context: Optional[str] = None):
     return kubernetes.client.CustomObjectsApi(
@@ -387,35 +493,40 @@ def custom_objects_api(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def node_api(context: Optional[str] = None):
     return kubernetes.client.NodeV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def apps_api(context: Optional[str] = None):
     return kubernetes.client.AppsV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def batch_api(context: Optional[str] = None):
     return kubernetes.client.BatchV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def api_client(context: Optional[str] = None):
     return _get_api_client(context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def custom_resources_api(context: Optional[str] = None):
     return kubernetes.client.CustomObjectsApi(
@@ -423,7 +534,8 @@ def custom_resources_api(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='request')
+@annotations.lru_cache(scope='request',
+                       keep_if=_kubeconfig_unchanged_since_last_refresh)
 @_retryable_kubernetes_client
 def watch(context: Optional[str] = None):
     w = kubernetes.watch.Watch()

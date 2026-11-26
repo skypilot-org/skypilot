@@ -12,23 +12,14 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _list_volumes() -> List[Dict[str, Any]]:
-    # GET /v1/networkvolumes returns a list
-    result = runpod.rest_request('GET', '/networkvolumes')
-    if isinstance(result, list):
-        return result
-    # Some deployments may wrap the list.
-    if isinstance(result, dict):
-        for key in ('items', 'data', 'networkVolumes'):
-            if key in result and isinstance(result[key], list):
-                return result[key]
-    return []
+    return runpod.rest_list('/network-volumes', 'networkVolumes')
 
 
 def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Create or resolve a RunPod network volume via REST API.
 
     If a volume with the same `name_on_cloud` exists, reuse it. Otherwise,
-    create a new one using POST /v1/networkvolumes.
+    create a new one using POST /v2/network-volumes.
     """
     name_on_cloud = config.name_on_cloud
     assert name_on_cloud is not None
@@ -59,11 +50,11 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             raise RuntimeError(f'Invalid volume size {size!r}: {e}') from e
 
         payload = {
-            'dataCenterId': data_center_id,
+            'dataCenter': data_center_id,
             'name': name_on_cloud,
             'size': size_int,
         }
-        resp = runpod.rest_request('POST', '/networkvolumes', json=payload)
+        resp = runpod.rest_request('POST', '/network-volumes', json=payload)
         if isinstance(resp, dict):
             config.id_on_cloud = resp.get('id')
         else:
@@ -111,7 +102,8 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             f'RunPod network volume id not found for {name_on_cloud}; '
             f'skip delete')
         return config
-    runpod.rest_request('DELETE', f'/networkvolumes/{vol_id}')
+    runpod.rest_request('DELETE',
+                        f'/network-volumes/{runpod.path_segment(vol_id)}')
     logger.info(f'Deleted RunPod network volume {name_on_cloud} '
                 f'(id={vol_id})')
     return config
@@ -121,7 +113,7 @@ def _try_resolve_volume_id(name_on_cloud: str,
                            data_center_id: str) -> Optional[str]:
     vols = _list_volumes()
     matched = next((v for v in vols if v.get('name') == name_on_cloud and
-                    v.get('dataCenterId') == data_center_id), None)
+                    v.get('dataCenter') == data_center_id), None)
     if matched is not None:
         return matched.get('id')
     return None
@@ -131,7 +123,12 @@ def _try_resolve_volume_by_name(
         name_on_cloud: str, data_center_id: str) -> Optional[Dict[str, Any]]:
     vols = _list_volumes()
     return next((v for v in vols if v.get('name') == name_on_cloud and
-                 v.get('dataCenterId') == data_center_id), None)
+                 v.get('dataCenter') == data_center_id), None)
+
+
+def _pod_mounts_volume(pod: Dict[str, Any], vol_id: str) -> bool:
+    network_mounts = (pod.get('mounts') or {}).get('network') or []
+    return any(mount.get('volumeId') == vol_id for mount in network_mounts)
 
 
 def get_volume_usedby(
@@ -153,22 +150,11 @@ def get_volume_usedby(
     if vol_id is None:
         return [], []
 
-    # Query all pods for current user and filter by networkVolumeId
-    query = """
-    query Pods {
-      myself {
-        pods {
-          id
-          name
-          networkVolumeId
-        }
-      }
-    }
-    """
-    resp = runpod.runpod.api.graphql.run_graphql_query(query)
-    pods = resp.get('data', {}).get('myself', {}).get('pods', [])
-    used_pods = [p for p in pods if p.get('networkVolumeId') == vol_id]
-    usedby_pod_names = [p.get('name') for p in used_pods if p.get('name')]
+    usedby_pod_names = [
+        pod['name']
+        for pod in runpod.rest_list('/pods', 'pods')
+        if _pod_mounts_volume(pod, vol_id) and pod.get('name')
+    ]
 
     # Map pod names back to SkyPilot cluster names using heuristics.
     clusters = global_user_state.get_clusters()

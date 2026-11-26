@@ -16,6 +16,12 @@ class TestCostReportControllers(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # The records' mock resources cannot be pickled for the response.
+        patcher = mock.patch.object(core.encoders,
+                                    'encode_resources',
+                                    return_value='encoded')
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.controller_cluster_record = {
             'name': 'sky-jobs-controller-fdeaebfa',
             'status': status_lib.ClusterStatus.UP,
@@ -41,7 +47,7 @@ class TestCostReportControllers(unittest.TestCase):
 
     def test_cost_report_controller_name_fix(self):
         """Test that cost report correctly gets controller name from controller.value.name (not cluster_name)."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             with mock.patch('sky.utils.controller_utils.Controllers.from_name'
                            ) as mock_from_name:
@@ -65,7 +71,7 @@ class TestCostReportControllers(unittest.TestCase):
         error_cluster_record['resources'].get_cost = mock.Mock(
             side_effect=Exception("Cost calculation error"))
 
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = [error_cluster_record]
 
@@ -214,7 +220,7 @@ class TestCostReportControllers(unittest.TestCase):
         serve_controller_record['resources'].get_cost = mock.Mock(
             return_value=0.10)
 
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = [
                 jobs_controller_record, serve_controller_record
@@ -256,7 +262,7 @@ class TestCostReportControllers(unittest.TestCase):
         incomplete_controller_record['resources'].get_cost = mock.Mock(
             return_value=0.03)
 
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = [incomplete_controller_record]
 

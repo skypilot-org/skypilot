@@ -436,12 +436,23 @@ def test_resolve_default_context_skips_disallowed_current_context():
         ) == 'first-allowed'
 
 
-def test_resolve_default_context_falls_back_when_no_allowed_contexts():
-    """No allowed contexts to cross-check against → previous behavior."""
+def test_resolve_default_context_refuses_when_no_context_is_allowed():
+    """The kubeconfig has contexts, but the workspace allows none of them.
+
+    Falling back to current-context would create the PVC where no pod of the
+    workspace can mount it.
+    """
     patch_current, patch_allowed = _patch_context_resolution('my-context', [])
     with patch_current, patch_allowed:
-        assert volume_provision._resolve_context_for_new_volume(
-        ) == 'my-context'
+        with pytest.raises(ValueError, match='No Kubernetes context'):
+            volume_provision._resolve_context_for_new_volume()
+
+
+def test_resolve_default_context_falls_back_without_kubeconfig():
+    """No kubeconfig at all → previous behavior; the K8s call reports it."""
+    patch_current, patch_allowed = _patch_context_resolution(None, [])
+    with patch_current, patch_allowed:
+        assert volume_provision._resolve_context_for_new_volume() is None
 
 
 def _region_less_config() -> models.VolumeConfig:

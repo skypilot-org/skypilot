@@ -94,6 +94,9 @@ class APIHealthResponse(ResponseBaseModel):
     # includes admin-only secrets). Lets the dashboard hide the config UI for
     # non-admins when enabled.
     restrict_config_to_admins: bool = True
+    # The largest `limit` this server accepts in a sync call; unset when the
+    # server does not answer sync calls (see server constants SYNC_CALL_HEADER).
+    sync_call_max_limit: Optional[int] = None
 
 
 class StatusResponse(ResponseBaseModel):
@@ -119,6 +122,8 @@ class StatusResponse(ResponseBaseModel):
     user_name: str
     config_hash: Optional[str] = None
     workspace: str
+    # User-facing name of `workspace` (an id); unset from older servers.
+    workspace_name: Optional[str] = None
     last_creation_yaml: Optional[str] = None
     last_creation_command: Optional[str] = None
     is_managed: bool
@@ -188,6 +193,12 @@ class StorageRecord(ResponseBaseModel):
     store: List[data.StoreType]
     last_use: str
     status: status_lib.StorageStatus
+    # Optional so an older server's response still validates; storage that
+    # predates the recording of its creator has no user.
+    user_hash: Optional[str] = None
+    user_name: Optional[str] = None
+    workspace: Optional[str] = None
+    workspace_name: Optional[str] = None
 
 
 # TODO (syang) figure out which fields are always present
@@ -202,6 +213,7 @@ class ManagedJobRecord(ResponseBaseModel):
     task_name: Optional[str] = None
     job_duration: Optional[float] = None
     workspace: Optional[str] = None
+    workspace_name: Optional[str] = None
     status: Optional[job_state.ManagedJobStatus] = None
     schedule_state: Optional[str] = None
     resources: Optional[str] = None
@@ -254,6 +266,25 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Where this job came from, when launched from inside another managed
+    # job. All None for top-level jobs. root_job_id is the top-level job of
+    # the tree (the group it is shown under and shares a lifecycle with);
+    # parent_job_id/parent_task_id is the job and task that launched it.
+    root_job_id: Optional[int] = None
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+    # A dynamic task's ordinal within its root's tree: the root's declared tasks
+    # are 0..n-1, dynamic tasks number on from n in attach order. None for
+    # top-level jobs.
+    dynamic_task_index: Optional[int] = None
+    # Managed jobs this job waits for. None for a job without dependencies.
+    depends_on: Optional[List[int]] = None
+
+    @property
+    def group_job_id(self) -> Optional[int]:
+        """The job this record is grouped under: its root, else itself."""
+        return self.root_job_id if self.root_job_id is not None else self.job_id
+
     # Whether this job is a batch coordinator (ds.map())
     is_batch: Optional[bool] = None
     # Batch progress fields (NULL for non-batch jobs)
@@ -281,6 +312,7 @@ class VolumeRecord(ResponseBaseModel):
     user_hash: str
     user_name: str
     workspace: str
+    workspace_name: Optional[str] = None
     last_attached_at: Optional[int] = None
     last_use: Optional[str] = None
     status: Optional[str] = None

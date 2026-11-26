@@ -1,0 +1,4 @@
+# The dashboard e2e server loads only the test plugin: refresh daemons off,
+# header-scoped server twists on.
+plugins:
+- class: framework.server_plugin.E2ETestPlugin

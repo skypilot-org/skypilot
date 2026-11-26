@@ -109,6 +109,12 @@ INITIAL_VERSION = 1
 # Replica ID environment variable name that can be accessed on the replica.
 REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 
+# Blob holding the task's workdir and file mounts, passed to a service
+# controller started in consolidation mode. An env var rather than a flag: the
+# HA recovery daemon reruns the stored controller script with its own code, and
+# an older API server replica's code would reject an unknown flag.
+FILE_MOUNTS_BLOB_ID_ENV_VAR = 'SKYPILOT_SERVE_FILE_MOUNTS_BLOB_ID'
+
 # The version of the lib files that serve use. Whenever there is an API
 # change for the serve_utils.ServeCodeGen, we need to bump this version, so that
 # the user can be notified to update their SkyPilot serve version on the remote
@@ -119,7 +125,9 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # v3.0 - Added pool.
 # v4.0 - Added pool argument to wait_service_registration.
 # v5.0 - Added pool argument to stream_serve_process_logs & stream_replica_logs.
-SERVE_VERSION = 5
+# v6.0 - terminate_services matches an exact name exactly (no LIKE expansion);
+#        status records carry `serve_version`.
+SERVE_VERSION = 6
 
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '

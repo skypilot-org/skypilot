@@ -1,14 +1,18 @@
 """SDK functions for managed jobs."""
+import contextlib
+import copy
 import datetime
+import inspect
 import ipaddress
 import os
 import pathlib
+import re
 import shlex
 import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, NoReturn, Optional, Set, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
@@ -16,6 +20,7 @@ import colorama
 from pydantic import SecretStr as _SecretStr
 
 from sky import backends
+from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import execution
@@ -33,6 +38,7 @@ from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import file_content_utils
 from sky.jobs import runner as managed_job_runner
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -42,15 +48,19 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server import plugin_hooks
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import infra_utils
+from sky.utils import message_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -100,6 +110,14 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
     'metadata',
     'user_name',
     'user_hash',
+]
+
+_MANAGED_JOB_FIELDS_FOR_WAIT = [
+    'job_id',
+    'job_name',
+    'task_id',
+    'task_name',
+    'status',
 ]
 
 
@@ -221,6 +239,18 @@ def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
     return managed_job_utils.format_job_ids_as_ranges(job_ids)
 
 
+def _runner_accepts(method: Any, keyword: str) -> bool:
+    """Whether a runner method takes ``keyword`` (or ``**kwargs``)."""
+    try:
+        params = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        # Signature not available (a C callable, a mock without a spec).
+        # Assume the current protocol so the request is not silently dropped.
+        return True
+    return keyword in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 class _DefaultManagedJobRunner:
     """Default implementation — codegen + run_on_head on the controller.
 
@@ -236,12 +266,15 @@ class _DefaultManagedJobRunner:
         skip_finished: bool,
         accessible_workspaces: List[str],
         job_ids: Optional[List[int]],
+        include_tree: bool,
         workspace_match: Optional[str],
         name_match: Optional[str],
         pool_match: Optional[str],
         infra_match: Optional[str],
         page: Optional[int],
         limit: Optional[int],
+        # Default so a caller on the previous protocol still works.
+        after_job_id: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]],
         statuses: Optional[List[str]],
         fields: Optional[List[str]],
@@ -275,12 +308,14 @@ class _DefaultManagedJobRunner:
                 skip_finished=skip_finished,
                 accessible_workspaces=accessible_workspaces,
                 job_ids=job_ids,
+                include_tree=include_tree,
                 workspace_match=workspace_match,
                 name_match=name_match,
                 pool_match=pool_match,
                 infra_match=infra_match,
                 page=page,
                 limit=limit,
+                after_job_id=after_job_id,
                 user_hashes=user_hashes,
                 statuses=statuses,
                 fields=fields,
@@ -298,16 +333,27 @@ class _DefaultManagedJobRunner:
 
         if returncode != 0:
             output = job_table_payload + stderr
-            marker = managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER
-            if marker in output:
-                # The controller refused the infra filter rather than answering
-                # without it. Its message names the version it actually runs,
-                # so surface that line on its own instead of a traceback.
+            refusals = (
+                (managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER,
+                 managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE,
+                 exceptions.NotSupportedError),
+                (managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MARKER,
+                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE,
+                 exceptions.NotSupportedError),
+                (managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MARKER,
+                 managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE,
+                 exceptions.QueueCursorNotSupportedError),
+            )
+            for marker, default_message, error_class in refusals:
+                if marker not in output:
+                    continue
+                # The controller refused the infra filter, the include_tree
+                # request or the cursor because it predates it. Show the
+                # controller's own message instead of a traceback.
                 detail = output.partition(f'{marker}: ')[2].splitlines()
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        detail[0].strip() if detail else managed_job_utils.
-                        INFRA_FILTER_UNSUPPORTED_MESSAGE)
+                    raise error_class(
+                        detail[0].strip() if detail else default_message)
             logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
                                f'{returncode}.\n{output}')
@@ -422,21 +468,102 @@ def _consolidated_launch(
         os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs'))
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
-    log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    # Name the log by the id span, not the full list: concurrent batch
+    # launches interleave ids, and the list can pass the 255-byte limit.
+    # No two requests share an id, so the span's first id keeps it unique.
+    first_id, last_id = min(job_ids), max(job_ids)
+    log_name = (str(first_id)
+                if first_id == last_id else f'{first_id}-{last_id}')
+    log_path = os.path.join(log_dir, f'submit-job-{log_name}.log')
+    # The span may cover other requests' ids; record this request's own.
+    # The runner appends to the log.
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(f'Job IDs: {job_ids_str}\n')
     # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
     # a clean server env on the subprocess by default to keep per-request
     # env pollution from leaking into the long-lived controller process
     # tree. See LocalProcessCommandRunner.run for details.
-    backend.run_on_head(local_handle, run_script, log_path=log_path)
+    #
+    # Surface the script's exit code so that a failure here marks the
+    # `jobs.launch` request as FAILED. Without this, a non-zero exit from the
+    # scheduler script (e.g. unreachable controller DB, interpreter mismatch,
+    # OOM mid-`scheduler_set_waiting`) is silently dropped — leaving a
+    # PENDING+INACTIVE job row while the user is told the launch succeeded.
+    returncode = backend.run_on_head(local_handle,
+                                     run_script,
+                                     log_path=log_path)
+    if returncode != 0:
+        _cancel_failed_submission(job_ids, returncode, log_path)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
+
+
+def _cancel_failed_submission(job_ids: List[int], returncode: int,
+                              log_path: str) -> None:
+    """Cancels the jobs whose submission script failed, then raises.
+
+    The request is about to fail, so none of its jobs may run. A job whose
+    script failed before scheduler_set_waiting committed stays
+    PENDING+INACTIVE, which nothing ever picks up; after the commit, a
+    controller may claim the job at any moment. Cancel them the way `sky jobs
+    cancel` does: an unclaimed job is cancelled in the database, and the
+    controller of a claimed one is signalled to cancel it and tear down
+    anything it launched.
+
+    Raises:
+        exceptions.CommandError: always.
+    """
+    job_ids_str = _job_ids_to_str(job_ids)
+    request_id = (common_utils.get_current_request_id()
+                  if common_utils.is_in_request_context() else None)
+    cancel_request_info = managed_job_utils.CancelRequestInfo(
+        request_id=request_id,
+        note=(f'because the job submission failed (exit code {returncode}). '
+              f'Submission log: {log_path}'))
+    try:
+        # cancel_jobs_by_id skips jobs outside the workspace it is given, and
+        # launch runs this under the default workspace, so pass each job's
+        # own.
+        job_ids_by_workspace: Dict[str, List[int]] = {}
+        for job_id in job_ids:
+            workspace = managed_job_state.get_workspace(job_id)
+            job_ids_by_workspace.setdefault(workspace, []).append(job_id)
+        for workspace, workspace_job_ids in job_ids_by_workspace.items():
+            result = managed_job_utils.cancel_jobs_by_id(
+                workspace_job_ids,
+                current_workspace=workspace,
+                cancel_request_info=cancel_request_info)
+            logger.debug(
+                f'Cancelling the jobs of a failed submission: {result}')
+        error_msg = (f'Managed job submission failed; cancelled job(s) '
+                     f'{job_ids_str}, so it is safe to retry.')
+    except Exception as e:  # pylint: disable=broad-except
+        # The DB may be the reason the script failed in the first place.
+        logger.warning(f'Failed to cancel job(s) {job_ids_str} after their '
+                       f'submission failed: '
+                       f'{common_utils.format_exception(e)}')
+        cancel_ids = ' '.join(str(job_id) for job_id in job_ids)
+        error_msg = (f'Managed job submission failed, and cancelling job(s) '
+                     f'{job_ids_str} failed too, so they may still run. Check '
+                     '`sky jobs queue` before retrying, and cancel them with '
+                     f'`sky jobs cancel {cancel_ids}` if needed.')
+    error_msg += f' Submission log: {log_path}'
+    raise exceptions.CommandError(
+        returncode=returncode,
+        command=f'sky.jobs.scheduler[job_ids={job_ids_str}]',
+        error_msg=error_msg,
+        detailed_reason='')
 
 
 def _maybe_submit_job_locally(
         prefix: str,
         dag: 'sky.Dag',
         num_jobs: int,
-        file_mounts_blob_id: Optional[str] = None) -> Optional[List[int]]:
+        file_mounts_blob_id: Optional[str] = None,
+        parent_job_id: Optional[int] = None,
+        parent_task_id: Optional[int] = None,
+        root_job_id: Optional[int] = None,
+        depends_on: Optional[List[int]] = None) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -455,8 +582,8 @@ def _maybe_submit_job_locally(
     pool_hash = None
     if pool is not None:
         pool_hash = serve_state.get_service_hash(pool)
-        # Already checked in the sdk.
-        assert pool_hash is not None, f'Pool {pool} not found'
+        if pool_hash is None:  # Taken down since _launch checked it.
+            _raise_pool_refused(pool, False, None)
     for _ in range(num_jobs):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
@@ -476,6 +603,11 @@ def _maybe_submit_job_locally(
         # would drop back to the literal 'default' for users who never set
         # `active_workspace` server-side, which breaks users without
         # access to the 'default' workspace.
+        # A dynamic task gets its ordinal within the root's tree here, from
+        # the counter on the root's row (race-free without a lock of ours).
+        dynamic_task_index = (
+            managed_job_state.next_dynamic_task_index(root_job_id)
+            if root_job_id is not None else None)
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -486,7 +618,14 @@ def _maybe_submit_job_locally(
                 user_hash=common_utils.get_user_hash(),
                 execution=execution_mode,
                 is_batch=is_batch,
-                file_mounts_blob_id=file_mounts_blob_id))
+                file_mounts_blob_id=file_mounts_blob_id,
+                parent_job_id=parent_job_id,
+                parent_task_id=parent_task_id,
+                root_job_id=root_job_id,
+                dynamic_task_index=dynamic_task_index))
+        if depends_on:
+            managed_job_state.set_job_dependencies(consolidation_mode_job_id,
+                                                   depends_on)
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -498,10 +637,18 @@ def _maybe_submit_job_locally(
                 is_primary_in_job_group = (dag.primary_tasks is None or
                                            task.name in dag.primary_tasks)
             assert task.name is not None, 'task must have a name'
+            # A job group's tasks all start waiting now; so does task 0 of
+            # anything. A pipeline's later tasks are waiting on the task before
+            # them, not on us, so their origin is written at the handoff. A job
+            # with dependencies waits on them; the controller writes its origin
+            # once they have succeeded.
+            eligible_at = (time.time() if
+                           (task_id == 0 or dag.is_job_group()) and
+                           not depends_on else None)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
-                                          is_primary_in_job_group)
+                                          is_primary_in_job_group, eligible_at)
         job_ids.append(consolidation_mode_job_id)
     return job_ids
 
@@ -635,23 +782,215 @@ def _submit_remotely(controller: controller_utils.Controllers,
     # Detect batch coordinator jobs (ds.map()) via task metadata.
     is_batch = any(
         t.metadata.get('batch_coordinator', False) for t in dag.tasks)
-    job_ids = backend.set_job_info_without_job_id(
-        handle=local_handle,
-        name=dag.name,
-        workspace=workspace,
-        entrypoint=entrypoint,
-        pool=pool,
-        pool_hash=pool_hash,
-        user_hash=user_hash,
-        task_ids=task_ids,
-        task_names=task_names,
-        resources_str=resources_str,
-        metadata_jsons=metadata_jsons,
-        num_jobs=num_jobs,
-        execution=execution_mode,
-        is_primary_in_job_groups=(is_primary_in_job_groups),
-        is_batch=is_batch)
+    try:
+        job_ids = backend.set_job_info_without_job_id(
+            handle=local_handle,
+            name=dag.name,
+            workspace=workspace,
+            entrypoint=entrypoint,
+            pool=pool,
+            pool_hash=pool_hash,
+            user_hash=user_hash,
+            task_ids=task_ids,
+            task_names=task_names,
+            resources_str=resources_str,
+            metadata_jsons=metadata_jsons,
+            num_jobs=num_jobs,
+            execution=execution_mode,
+            is_primary_in_job_groups=(is_primary_in_job_groups),
+            is_batch=is_batch)
+    except exceptions.PoolRefusedError as e:
+        _raise_pool_refused(pool or '', e.exists, e.workspace)
     return job_ids
+
+
+def _raise_pool_refused(pool: str, exists: bool,
+                        pool_workspace: Optional[str]) -> NoReturn:
+    """Words a pool refusal. A pool in a workspace the caller cannot read is
+    reported as not found, as listings leave it out."""
+    not_found = ValueError(f'Pool {pool!r} not found.')
+    try:
+        pool_workspace = (skypilot_config.resolve_workspace_ref(pool_workspace)
+                          if exists and pool_workspace else None)
+    except ValueError:  # Two workspaces share this name.
+        pool_workspace = None
+    readable, writable = workspaces_core.get_workspace_access_sets()
+    active_workspace = skypilot_config.get_active_workspace()
+    # The request's stacktrace goes to the client, so each raise drops the
+    # chained refusal, which names the workspace.
+    with ux_utils.print_exception_no_traceback():
+        if pool_workspace is None or pool_workspace not in readable:
+            raise not_found from None
+        pool_name = skypilot_config.get_workspace_name(pool_workspace)
+        if pool_workspace == active_workspace:
+            # Only a hand-edited controller config gets here.
+            raise ValueError(
+                f'Pool {pool!r} records workspace {pool_name!r} in a form the '
+                'jobs controller does not match. Re-create the pool.') from None
+        active_name = skypilot_config.get_workspace_name(active_workspace)
+        if pool_workspace in writable:
+            raise ValueError(
+                f'Pool {pool!r} is in workspace {pool_name!r}, not the active '
+                f'workspace {active_name!r}. Switch to workspace '
+                f'{pool_name!r} to use it.') from None
+        raise ValueError(f'Pool {pool!r} is in workspace {pool_name!r}, which '
+                         'is read-only for you.') from None
+
+
+def _client_set_workspace() -> bool:
+    """Whether the request named a workspace itself.
+
+    The executor resolves an unset workspace to the user's preferred one and
+    sets it as the thread-local context before the handler runs, so the
+    context alone cannot tell "the client said default" from "nothing was
+    said". The merged config still can: the client's override only carries
+    ``active_workspace`` when it was set.
+    """
+    return skypilot_config.get_nested(keys=('active_workspace',),
+                                      default_value=None) is not None
+
+
+def _check_job_group_attachment(
+    parent_job_id: Optional[int], parent_task_id: Optional[int],
+    job_group_explicit: bool
+) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
+    """Validate, and possibly drop, a dynamic job group attachment.
+
+    Attachments are recorded in consolidation mode only, where the
+    managed-jobs state lives on the API server and the parent can be checked.
+    With a remote jobs controller (OSS local API server) dynamic job groups
+    are not supported: an explicit request errors, the in-job-group default
+    is dropped with a log so a watcher's nested launch keeps working as a
+    top-level job, as it did before.
+
+    Returns ``(parent_job_id, parent_task_id, root_job_id, workspace)``: the
+    ids to record (all None when nothing is to be recorded; the root comes
+    from the parent's row, which is authoritative for the tree) and the
+    workspace the launch must run in when it did not name one itself, i.e.
+    the parent's (None when the request already runs in it).
+
+    Raises:
+        ValueError: parent_task_id without parent_job_id; or the parent does
+            not exist, is not a job group or part of one, is no longer
+            running (finished, or being cancelled), or is in a different
+            workspace than the one the request named.
+        exceptions.NotSupportedError: explicit attachment with a remote jobs
+            controller.
+    """
+    if parent_job_id is None:
+        if parent_task_id is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('parent_task_id requires parent_job_id.')
+        return None, None, None, None
+    if not managed_job_utils.is_consolidation_mode():
+        if job_group_explicit:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Attaching a job to a job group requires the API server '
+                    'to run managed jobs in consolidation mode (a remote API '
+                    'server). This server uses a separate jobs controller.')
+        logger.info(f'Not attaching to job group {parent_job_id}: dynamic '
+                    'job groups are not supported with a separate jobs '
+                    'controller (non-consolidation mode). Launching as a '
+                    'top-level job.')
+        return None, None, None, None
+    parent = managed_job_state.get_job_info_row(parent_job_id)
+    status = managed_job_state.get_status(parent_job_id)
+    if parent is None or status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: no such '
+                             'managed job.')
+    # The target is a job group, or a job already inside one (a dynamic task
+    # launching its own). A plain job's own nested launches stay top-level
+    # (the controller gives its tasks no tree marker), so letting an outside
+    # launch root a tree at it would leave that tree inconsistent: cancel it
+    # and one child goes, the other does not.
+    if not parent.is_job_group and parent.root_job_id is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: it is not '
+                             'a job group. Pass a job group\'s id or name.')
+    # Only a job that is still running accepts new tasks. A finished one
+    # has nothing left to sweep them, and a cancel in flight would orphan
+    # them, so both are refused rather than special-cased.
+    if (status.is_terminal() or
+            status == managed_job_state.ManagedJobStatus.CANCELLING):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: it is '
+                             f'{status.value}; only a running job group '
+                             'accepts new tasks.')
+    # A nested launch carries no workspace of its own: the controller sets
+    # the job and root ids on the task, not the workspace, so the request
+    # arrives unset and resolves to the user's preferred workspace. It must
+    # run where its group runs, so the parent's workspace is adopted unless
+    # the request named one, in which case a mismatch is an error (same
+    # rule as cancel; a row from before workspaces existed counts as the
+    # default workspace, which JobInfoRow resolves).
+    workspace: Optional[str] = None
+    active_workspace = skypilot_config.get_active_workspace()
+    if parent.workspace != active_workspace:
+        if _client_set_workspace():
+            parent_label = workspaces_core.workspace_label_for_caller(
+                parent.workspace)
+            active_name = skypilot_config.get_workspace_name(active_workspace)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot attach to job {parent_job_id}: it is in '
+                    f'workspace {parent_label!r}, not the requested '
+                    f'workspace {active_name!r}.')
+        # The executor authorized the caller for the workspace the request
+        # resolved to, not for this one. Switching workspaces is a launch
+        # there, so it needs the same write access a `--workspace` launch
+        # would; a group id is not a capability.
+        workspaces_core.check_workspace_permission(
+            common_utils.get_current_user(),
+            parent.workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE)
+        workspace = parent.workspace
+    return parent_job_id, parent_task_id, parent.tree_root_job_id, workspace
+
+
+def _check_job_dependencies(depends_on: Optional[List[int]]) -> List[int]:
+    """Validate the jobs a launch depends on; returns them deduplicated.
+
+    Raises:
+        exceptions.NotSupportedError: dependencies with a separate jobs
+            controller (non-consolidation mode).
+        ValueError: a dependency does not exist, is in another workspace than
+            the launch, or has already ended without succeeding.
+    """
+    if not depends_on:
+        return []
+    if not managed_job_utils.is_consolidation_mode():
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Job dependencies require the API server to run managed jobs '
+                'in consolidation mode (a remote API server). This server '
+                'uses a separate jobs controller.')
+    dependencies = sorted(set(depends_on))
+    active_workspace = skypilot_config.get_active_workspace()
+    for dependency in dependencies:
+        row = managed_job_state.get_job_info_row(dependency)
+        status = managed_job_state.get_status(dependency)
+        if row is None or status is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Cannot depend on job {dependency}: no such '
+                                 'managed job.')
+        if row.workspace != active_workspace:
+            row_label = workspaces_core.workspace_label_for_caller(
+                row.workspace)
+            active_name = skypilot_config.get_workspace_name(active_workspace)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot depend on job {dependency}: it is in workspace '
+                    f'{row_label!r}, not {active_name!r}.')
+        if status.is_terminal():
+            succeeded, outcome = managed_job_state.get_job_outcome(dependency)
+            if not succeeded:
+                outcome_str = outcome.value if outcome is not None else None
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Cannot depend on job {dependency}: it '
+                                     f'ended as {outcome_str}.')
+    return dependencies
 
 
 def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
@@ -697,6 +1036,10 @@ def launch(
     num_jobs: Optional[int] = None,
     stream_logs: bool = True,
     file_mounts_blob_id: Optional[str] = None,
+    parent_job_id: Optional[int] = None,
+    parent_task_id: Optional[int] = None,
+    job_group_explicit: bool = False,
+    depends_on: Optional[List[int]] = None,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -707,10 +1050,22 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
         name: Name of the managed job.
+        parent_job_id: Managed job to attach this job to as a dynamic member
+          (it is shown under that job and cancelled with it). None for a
+          top-level job.
+        parent_task_id: Task within the parent that launched this job, when
+          known. Recorded for display only.
+        job_group_explicit: Whether the caller asked for the attachment (as
+          opposed to the in-job-group default). Only matters where
+          attachments are unsupported (non-consolidation mode): explicit
+          errors, automatic launches top-level.
+        depends_on: Managed jobs this job waits for. It starts once all of
+          them succeed, and is cancelled if any of them ends otherwise. The
+          launch fails if one of them has already ended without succeeding.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
-            chain dag.
+            chain dag. Or, a job in depends_on cannot be depended on.
         sky.exceptions.NotSupportedError: the feature is not supported.
         sky.exceptions.CachedClusterUnavailable: cached jobs controller cluster
             is unavailable
@@ -722,6 +1077,42 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
+    parent_job_id, parent_task_id, root_job_id, workspace = (
+        _check_job_group_attachment(parent_job_id, parent_task_id,
+                                    job_group_explicit))
+    # A launch attaching to a group runs in the group's workspace when it
+    # did not name one (see _check_job_group_attachment): the row it writes,
+    # the policies and the credentials it launches with all follow.
+    workspace_ctx = (skypilot_config.local_active_workspace_ctx(workspace)
+                     if workspace is not None else contextlib.nullcontext())
+    with workspace_ctx:
+        dependencies = _check_job_dependencies(depends_on)
+        return _launch(task,
+                       name=name,
+                       pool=pool,
+                       num_jobs=num_jobs,
+                       stream_logs=stream_logs,
+                       file_mounts_blob_id=file_mounts_blob_id,
+                       parent_job_id=parent_job_id,
+                       parent_task_id=parent_task_id,
+                       root_job_id=root_job_id,
+                       depends_on=dependencies)
+
+
+def _launch(
+    task: Union['sky.Task', 'sky.Dag'],
+    name: Optional[str],
+    pool: Optional[str],
+    num_jobs: Optional[int],
+    stream_logs: bool,
+    file_mounts_blob_id: Optional[str],
+    parent_job_id: Optional[int],
+    parent_task_id: Optional[int],
+    root_job_id: Optional[int],
+    depends_on: List[int],
+) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
+    """``launch`` after the attachment and dependencies are resolved; ids are
+    recorded as-is."""
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -743,6 +1134,7 @@ def launch(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
+    managed_job_utils.check_event_callbacks_allowed(dag)
     dag.resolve_and_validate_volumes()
     if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
@@ -752,7 +1144,24 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
+    # A remote controller checks this when the job is submitted.
+    if pool is not None and managed_job_utils.is_consolidation_mode():
+        refusal = serve_utils.get_pool_refusal(
+            pool, skypilot_config.get_active_workspace())
+        if refusal is not None:
+            _raise_pool_refused(pool, *refusal)
     dag.validate()
+    # Every storage the tasks name is checked here, whichever branch of
+    # _upload_files_to_controller runs: without a jobs bucket the tasks go
+    # to the controller as they are, and the controller constructs their
+    # storage outside any request, where there is no caller to check.
+    for task_ in dag.tasks:
+        for storage in (task_.storage_mounts or {}).values():
+            storage.check_accessible()
+    if pool is None:  # A pool job launches no cluster of its own.
+        clouds.Kubernetes.check_request_keeps_server_identity()
+        for task_ in dag.tasks:
+            clouds.Kubernetes.check_task_keeps_server_identity(task_)
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
@@ -920,6 +1329,11 @@ def launch(
     # Warn if file mounts may be lost during rolling update
     _warn_file_mounts_rolling_update(dag)
 
+    # Hooks receive the submitted paths before controller staging rewrites them.
+    submitted_dag = None
+    if plugin_hooks.has_managed_job_submitted_hooks():
+        submitted_dag = copy.deepcopy(dag)
+        submitted_dag.pool = pool
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     controller_name = controller.value.cluster_name
@@ -936,11 +1350,19 @@ def launch(
     job_ids = _maybe_submit_job_locally(prefix,
                                         dag,
                                         num_jobs,
-                                        file_mounts_blob_id=file_mounts_blob_id)
+                                        file_mounts_blob_id=file_mounts_blob_id,
+                                        parent_job_id=parent_job_id,
+                                        parent_task_id=parent_task_id,
+                                        root_job_id=root_job_id,
+                                        depends_on=depends_on)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)
     assert job_ids is not None, 'job_ids is not set'
+    if submitted_dag is not None:
+        plugin_hooks.fire_managed_job_submitted(job_ids, submitted_dag,
+                                                file_mounts_blob_id,
+                                                common_utils.get_user_hash())
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
@@ -1236,8 +1658,12 @@ def _maybe_restart_controller(
             jobs_controller_type.value.cluster_name,
             status_lib.ClusterStatus.INIT, 'Jobs controller restarted.',
             global_user_state.ClusterEventType.STATUS_CHANGE)
-        handle = core.start(
-            cluster_name=jobs_controller_type.value.cluster_name)
+        # Job controller is not placed in kueue, as the controller pod is
+        # considered a "system" pod and is not subject to queue limits or
+        # preemption.
+        with skypilot_config.remove_queue_name_from_config():
+            handle = core.start(
+                cluster_name=jobs_controller_type.value.cluster_name)
 
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
@@ -1314,6 +1740,8 @@ def queue_v2_api(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
+    after_job_id: Optional[int] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int,
            List[str]]:
     """Gets statuses of managed jobs and parse the
@@ -1323,6 +1751,7 @@ def queue_v2_api(
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        include_tree=include_tree,
         user_match=user_match,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -1330,6 +1759,7 @@ def queue_v2_api(
         infra_match=infra_match,
         page=page,
         limit=limit,
+        after_job_id=after_job_id,
         statuses=statuses,
         fields=fields,
         sort_by=sort_by,
@@ -1348,6 +1778,11 @@ def queue_v2_api(
         # and clients key records on them.
         keep = set(fields) | {'job_id', 'task_id', 'status'}
         jobs = [{k: v for k, v in job.items() if k in keep} for job in jobs]
+    workspaces = skypilot_config.get_nested(('workspaces',), {})
+    for job in jobs:
+        if job.get('workspace') is not None:
+            job['workspace_name'] = skypilot_config.get_workspace_name(
+                job['workspace'], workspaces)
     return ([responses.ManagedJobRecord(**job) for job in jobs], total,
             status_counts, total_no_filter, infra_options)
 
@@ -1371,6 +1806,8 @@ def queue_v2(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
+    after_job_id: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int, List[str]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -1415,6 +1852,7 @@ def queue_v2(
         # remote traceback. The parsed value is discarded: the controller
         # filters on the spec itself.
         infra_utils.InfraInfo.from_str(infra_match)
+    managed_job_utils.check_queue_cursor(after_job_id, page, limit, sort_by)
     if limit is not None:
         if limit < 1:
             raise ValueError(f'Limit must be at least 1, got {limit}')
@@ -1426,6 +1864,31 @@ def queue_v2(
         if page is not None:
             raise ValueError('Limit must be specified when page is specified')
 
+    if include_tree:
+        # The tree lookup takes job ids and nothing else. Whether a filter
+        # should test the named jobs, their roots, or every row of the tree
+        # is undecided, so the combination is refused rather than
+        # answered one way. Visibility (workspace access, all_users) still
+        # applies; it is not a filter the caller chose.
+        if job_ids is None:
+            raise ValueError('include_tree requires job_ids.')
+        if page is not None or limit is not None:
+            raise ValueError('include_tree cannot be combined with pagination.')
+        extras = {
+            'skip_finished': skip_finished or None,
+            'user_match': user_match,
+            'workspace_match': workspace_match,
+            'name_match': name_match,
+            'pool_match': pool_match,
+            'infra_match': infra_match,
+            'statuses': statuses,
+            'submitted_after': submitted_after,
+            'submitted_before': submitted_before,
+        }
+        given = sorted(k for k, v in extras.items() if v is not None)
+        if given:
+            raise ValueError('include_tree cannot be combined with filters; '
+                             f'got {", ".join(given)}.')
     with metrics_lib.time_it('jobs.queue.restart_controller', group='jobs'):
         handle = _maybe_restart_controller(refresh,
                                            stopped_message='No in-progress '
@@ -1454,21 +1917,46 @@ def queue_v2(
     accessible_workspaces = list(
         workspaces_core.get_accessible_workspace_names(
             action=workspace_constants.WORKSPACE_ACTION_READ))
+    if workspace_match is not None:
+        # The filter is typed against workspace names, while the controller
+        # stores ids.
+        accessible_workspaces = workspaces_core.filter_workspace_ids_by_name(
+            accessible_workspaces, workspace_match)
+        workspace_match = None
+        # Controllers older than MANAGED_JOBS_VERSION 12 read an empty list as
+        # no workspace filter at all.
+        if not accessible_workspaces:
+            return [], 0, {}, 0, []
 
     if handle.is_grpc_enabled_with_flag:
         try:
+            # The controller may be older than this server (it only picks up
+            # new skylet code on the next launch). When the request names a
+            # field some controller versions lack, ask its version first and
+            # drop the fields it does not know, or it rejects the whole
+            # request. Skipped otherwise: one round trip, not two.
+            if managed_job_utils.queue_fields_need_controller_version(fields):
+                version_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel(
+                        )).get_managed_job_controller_version(
+                            managed_jobsv1_pb2.GetVersionRequest()))
+                fields = managed_job_utils.fields_for_controller(
+                    fields, version_response.controller_version)
             request = managed_jobsv1_pb2.GetJobTableRequest(
                 skip_finished=skip_finished,
                 accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
                     workspaces=accessible_workspaces)),
                 job_ids=managed_jobsv1_pb2.JobIds(
                     ids=job_ids) if job_ids is not None else None,
+                include_tree=include_tree,
                 workspace_match=workspace_match,
                 name_match=name_match,
                 pool_match=pool_match,
                 infra_match=infra_match,
                 page=page,
                 limit=limit,
+                after_job_id=after_job_id,
                 # Remove None from user_hashes, as the gRPC server uses the
                 # show_jobs_without_user_hash flag instead.
                 user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
@@ -1495,13 +1983,50 @@ def queue_v2(
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
+            if include_tree and not response.include_tree_applied:
+                # Same for include_tree: an old controller ignores the field
+                # and returns only the requested jobs' rows.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+            if after_job_id is not None and not response.after_job_id_applied:
+                # Same for the cursor: an old controller returns the first
+                # page again.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.QueueCursorNotSupportedError(
+                        managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return (jobs, response.total, dict(response.status_counts),
                     response.total_no_filter, list(response.infra_options))
         except exceptions.SkyletMethodNotImplementedError:
             pass
 
-    fetched = managed_job_runner.current().fetch_managed_job_table(
+    runner = managed_job_runner.current()
+    # A runner registered by a plugin may predate `include_tree`. Passing the
+    # keyword to it would raise TypeError on every queue request, not only the
+    # ones asking for a tree. Pass the keyword only to a runner that takes it.
+    # If the runner does not take it and a tree was asked for, refuse the
+    # request the way an old controller does.
+    # Only consolidation mode records dependencies, and a separate jobs
+    # controller may be too old to know the field.
+    if (fields is not None and 'depends_on' in fields and
+            not managed_job_utils.is_consolidation_mode()):
+        fields = [field for field in fields if field != 'depends_on']
+    protocol_kwargs: Dict[str, Any] = {}
+    if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
+        protocol_kwargs['include_tree'] = include_tree
+    elif include_tree:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+    # Same for the cursor.
+    if _runner_accepts(runner.fetch_managed_job_table, 'after_job_id'):
+        protocol_kwargs['after_job_id'] = after_job_id
+    elif after_job_id is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.QueueCursorNotSupportedError(
+                managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
+    fetched = runner.fetch_managed_job_table(
         handle=handle,
         backend=backend,
         skip_finished=skip_finished,
@@ -1520,6 +2045,7 @@ def queue_v2(
         sort_order=sort_order,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        **protocol_kwargs,
     )
     # A runner registered out of tree may still be on the five-value signature
     # that predates the infra options. That costs the dashboard its option list
@@ -1584,6 +2110,329 @@ def queue_v2(
     return filtered_jobs, total, status_counts, total_no_filter, infra_options
 
 
+# Matches a generated restart suffix, e.g. the '-rerun-1a2b3c' in
+# 'train-rerun-1a2b3c', so restarting a restart does not stack suffixes.
+_RERUN_SUFFIX_RE = re.compile(r'-rerun-[0-9a-f]{6}$')
+
+
+def _generate_rerun_name(original_name: str) -> str:
+    """Returns '<original-name>-rerun-<random hex>' for a restarted job.
+
+    The random suffix keeps concurrent restarts of the same job from picking
+    the same name, so outputs keyed on the job name never collide.
+    """
+    base = _RERUN_SUFFIX_RE.sub('', original_name)
+    return f'{base}-rerun-{uuid.uuid4().hex[:6]}'
+
+
+def _resolve_job_to_restart(
+        job_id: Optional[int],
+        job_name: Optional[str]) -> List[responses.ManagedJobRecord]:
+    """Returns the task records of the single job named by id or name."""
+    # Metadata only: the job's spec, which holds its secrets, is read
+    # separately by _get_job_spec() and never goes through the queue.
+    fields = [
+        'job_id', 'task_id', 'job_name', 'status', 'pool', 'workspace',
+        'user_hash'
+    ]
+    if job_id is not None:
+        # All users: the caller may restart a job they can see but did not
+        # submit (the dashboard lists every user's jobs). Workspace access is
+        # still enforced by the queue. refresh=True starts a stopped jobs
+        # controller, as `sky jobs launch` does.
+        records, _, _, _, _ = queue_v2_api(refresh=True,
+                                           all_users=True,
+                                           job_ids=[job_id],
+                                           fields=fields)
+        if not records:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Managed job {job_id} not found.')
+        return records
+    assert job_name is not None
+    # By name, only the caller's own jobs: another user's job of the same
+    # name must not be picked, nor make the name ambiguous.
+    records, _, _, _, _ = queue_v2_api(refresh=True,
+                                       all_users=False,
+                                       name_match=job_name,
+                                       fields=fields)
+    # name_match is a substring match; restart needs the exact name.
+    records = [r for r in records if r.job_name == job_name]
+    job_ids = sorted({r.job_id for r in records if r.job_id is not None})
+    if not job_ids:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Managed job {job_name!r} not found.')
+    if len(job_ids) > 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Multiple managed jobs are named {job_name!r} (IDs: '
+                f'{", ".join(map(str, job_ids))}). Restart one by ID instead.')
+    return [r for r in records if r.job_id == job_ids[0]]
+
+
+def _get_job_spec(job_id: int) -> Optional[str]:
+    """Returns the DAG YAML a managed job was submitted with, or None.
+
+    The spec holds the job's secrets, so it is read here, for one job, and
+    never exposed through the queue. The caller must already have resolved
+    the job through the queue, which enforces workspace access.
+    """
+    if managed_job_utils.is_consolidation_mode():
+        return file_content_utils.get_job_dag_content(job_id)
+
+    # The controller is up: _resolve_job_to_restart() started it if needed.
+    handle = _maybe_restart_controller(refresh=True,
+                                       stopped_message='',
+                                       spinner_message='Reading job spec')
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_managed_job_spec(
+                        managed_jobsv1_pb2.GetJobSpecRequest(job_id=job_id)))
+            return (response.dag_yaml
+                    if response.HasField('dag_yaml') else None)
+        except exceptions.SkyletMethodNotImplementedError:
+            # A controller older than this server has no GetJobSpec yet; it
+            # picks up new skylet code on its next launch. Read the spec with
+            # generated code instead.
+            pass
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    code = managed_job_utils.ManagedJobCodeGen.get_job_spec(job_id)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False,
+                                                     separate_stderr=True)
+    if returncode != 0:
+        logger.debug(f'Failed to read the spec of managed job {job_id}: '
+                     f'{stderr}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'The jobs controller runs a SkyPilot version that cannot read '
+                f'the spec of managed job {job_id}. It is upgraded on the next '
+                '`sky jobs launch`; retry the restart after that.')
+    return message_utils.decode_payload(stdout)
+
+
+def _assert_restartable(dag: 'sky.Dag', job_id: int) -> None:
+    """Rejects jobs whose local files can no longer be re-mounted.
+
+    A restart re-submits the compiled DAG. A local workdir or local
+    file_mounts were copied for that one run, and the copy is removed when
+    the job finishes, so the DAG points at files that are gone:
+
+    - Uploaded to cloud storage (a temporary bucket, or a per-run path under
+      `jobs.bucket`): a non-persistent storage mount.
+    - Staged on a separate jobs controller when no storage cloud is enabled
+      (two-hop): a file mount from a controller path.
+    - Kept on the API server in consolidation mode: a local workdir or file
+      mount from the uploaded blob, which is reclaimed once the job is done.
+
+    Jobs that use a git workdir, cloud bucket file mounts or persistent
+    storage restart cleanly.
+    """
+    for task in dag.tasks:
+        staged = []
+        if isinstance(task.workdir, str):
+            staged.append('the workdir')
+        staged += [
+            repr(dst)
+            for dst, src in (task.file_mounts or {}).items()
+            if not data_utils.is_cloud_store_url(src)
+        ]
+        staged += [
+            repr(dst)
+            for dst, storage in (task.storage_mounts or {}).items()
+            if storage is not None and not storage.persistent
+        ]
+        if staged:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'Managed job {job_id} cannot be restarted: its local '
+                    f'files (mounted at {", ".join(staged)}) were copied for '
+                    'that run only and removed when it finished. Restart '
+                    'works for jobs that use a git workdir, cloud bucket file '
+                    'mounts or persistent storage. Launch the job again from '
+                    'its source directory with `sky jobs launch`.')
+
+
+def _resources_override_from_wire(
+        resources_override: Dict[str, Any]) -> Dict[str, Any]:
+    """Turns a JSON resources override back into Resources.copy() kwargs."""
+    override = dict(resources_override)
+    if override.get('cloud') is not None:
+        override['cloud'] = registry.CLOUD_REGISTRY.from_str(override['cloud'])
+    if override.get('ports') is not None:
+        override['ports'] = tuple(override['ports'])
+    return override
+
+
+@usage_lib.entrypoint
+def restart(
+    job_id: Optional[int] = None,
+    job_name: Optional[str] = None,
+    name: Optional[str] = None,
+    pool: Optional[str] = None,
+    resources_override: Optional[Dict[str, Any]] = None,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+    num_nodes: Optional[int] = None,
+) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Launches a finished managed job again, as a new managed job.
+
+    Behaves like running `sky jobs launch` again with the job's YAML and
+    flags: the stored spec goes through launch() as a new job, with the same
+    admin policy, permission checks and validation. A git workdir is cloned
+    at the ref the job named (a branch resolves to its current head, as on
+    a new launch). Overrides are applied on top, as for `sky jobs launch`.
+    Jobs whose local workdir or file mounts were uploaded for that run
+    cannot be restarted: the upload is removed when the job finishes.
+
+    Like `sky jobs cancel`, it needs write access to the workspace the job
+    ran in, also when the new job goes to another workspace. A job with
+    secrets can only be restarted by its owner. Envs are not secret: they
+    are carried over for whoever restarts the job, so put credentials in
+    secrets. A member of a job group is restarted on its own, as a
+    standalone job.
+
+    Args:
+        job_id: ID of the managed job to restart. Exactly one of job_id and
+            job_name must be set.
+        job_name: Name of the managed job to restart; must match one job.
+        name: Name of the new job. Defaults to
+            ``<original-name>-rerun-<random suffix>``.
+        pool: Pool to submit to. Defaults to the original job's pool.
+        resources_override: Resource fields to override, as accepted by
+            ``Resources.copy()`` (with ``cloud`` as a string). Single-task
+            jobs only.
+        env_overrides: Environment variables to set on every task.
+        secrets_overrides: Secrets to set on every task.
+        num_nodes: Number of nodes for the task. Single-task jobs only.
+
+    Returns:
+        Same as :func:`launch`: the new job ID(s) and the controller handle.
+
+    Raises:
+        ValueError: the job does not exist, is ambiguous, is not finished, or
+            an override does not apply to it.
+        sky.exceptions.NotSupportedError: the job cannot be restarted.
+    """
+    if (job_id is None) == (job_name is None):
+        raise ValueError('Specify exactly one of job_id and job_name.')
+    records = _resolve_job_to_restart(job_id, job_name)
+    job_id = records[0].job_id
+    assert job_id is not None
+
+    # Every task must be done: restarting a job that still runs would leave
+    # two copies running side by side.
+    for record in records:
+        status = record.status
+        if isinstance(status, str):
+            status = managed_job_state.ManagedJobStatus(status)
+        if status is None or not status.is_terminal():
+            status_str = status.value if status is not None else 'unknown'
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Managed job {job_id} is still {status_str}. Only '
+                    'finished jobs can be restarted; cancel it first with '
+                    f'`sky jobs cancel {job_id}`.')
+
+    # Acting on a job needs write access to the workspace it ran in, as
+    # `sky jobs cancel` does; seeing it (read access) is not enough. This holds
+    # with `--workspace` too: the executor only authorized the workspace the
+    # new job goes to. Checked before the spec, with its envs, is read.
+    original_workspace = (records[0].workspace or
+                          skylet_constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if original_workspace != skypilot_config.get_active_workspace():
+        label = workspaces_core.workspace_label_for_caller(original_workspace)
+        try:
+            workspaces_core.check_workspace_permission(
+                common_utils.get_current_user(),
+                original_workspace,
+                action=workspace_constants.WORKSPACE_ACTION_WRITE,
+                workspace_ref=label)
+        except exceptions.PermissionDeniedError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.PermissionDeniedError(
+                    f'Managed job {job_id} ran in workspace {label!r}. '
+                    'Restarting it needs write access to that workspace, as '
+                    f'cancelling it does: {e}') from e
+
+    dag_yaml = _get_job_spec(job_id)
+    if not dag_yaml:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'The spec of managed job {job_id} is not available, so it '
+                'cannot be restarted. Launch it again with `sky jobs launch`.')
+
+    dag = dag_utils.load_dag_from_yaml_str(dag_yaml)
+    _assert_restartable(dag, job_id)
+
+    for task_ in dag.tasks:
+        # The original launch minted an API token for the job and revoked it
+        # when the job finished; drop it so launch() mints a fresh one.
+        task_._secrets.pop(  # pylint: disable=protected-access
+            skylet_constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR, None)
+    # The stored secrets belong to the job's owner. Seeing a job (a viewer of
+    # its workspace) must not let anyone else run with them, in whichever
+    # workspace the new job goes. Jobs without secrets carry nothing a viewer
+    # cannot already read from the job's YAML.
+    owner = records[0].user_hash
+    if (owner != common_utils.get_user_hash() and
+            any(task_.secrets for task_ in dag.tasks)):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.PermissionDeniedError(
+                f'Managed job {job_id} has secrets that belong to its owner, '
+                'so only its owner can restart it. Launch it yourself with '
+                '`sky jobs launch` and your own secrets instead.')
+
+    for task_ in dag.tasks:
+        task_.update_envs(env_overrides or [])
+        task_.update_secrets(secrets_overrides or [])
+
+    if resources_override or num_nodes is not None:
+        if len(dag.tasks) > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Managed job {job_id} has {len(dag.tasks)} tasks; '
+                    'resource and --num-nodes overrides only apply to '
+                    'single-task jobs. Only --env and --secret can be '
+                    'overridden.')
+        task_ = dag.tasks[0]
+        if resources_override:
+            task_.set_resources_override(
+                _resources_override_from_wire(resources_override))
+        if num_nodes is not None:
+            task_.num_nodes = num_nodes
+
+    original_name = records[0].job_name or dag.name or f'job-{job_id}'
+    if name is None:
+        name = _generate_rerun_name(original_name)
+    # launch() only fills in a missing DAG name; it does not rename.
+    dag.name = name
+    if len(dag.tasks) == 1:
+        dag.tasks[0].name = name
+    if pool is None:
+        pool = records[0].pool
+
+    # The new job runs where the original ran unless the request named a
+    # workspace (the executor authorized that one; the original workspace was
+    # checked above).
+    workspace_ctx: Any = contextlib.nullcontext()
+    if (original_workspace != skypilot_config.get_active_workspace() and
+            not _client_set_workspace()):
+        workspace_ctx = skypilot_config.local_active_workspace_ctx(
+            original_workspace)
+
+    logger.info(f'Restarting managed job {job_id} ({original_name!r}) as '
+                f'{name!r}.')
+    with workspace_ctx:
+        return launch(dag, name=name, pool=pool)
+
+
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def cancel(name: Optional[str] = None,
@@ -1592,16 +2441,38 @@ def cancel(name: Optional[str] = None,
            all_users: bool = False,
            pool: Optional[str] = None,
            graceful: bool = False,
-           graceful_timeout: Optional[int] = None) -> None:
+           graceful_timeout: Optional[int] = None,
+           task: Optional[Union[str, int]] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
 
+    Args:
+        task: With exactly one job id, cancel only this dynamic task of it
+            (a job launched from inside it, by the index shown in the queue
+            or by name), and the jobs launched from that task in turn. One
+            of the job's a task declared in the job\'s YAML cannot be cancelled
+            alone; it goes with the job.
+
     Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
+        ValueError: invalid arguments, or ``task`` names a declared task.
     """
+    if task is not None:
+        if (not job_ids or len(job_ids) != 1 or name is not None or
+                pool is not None or all or all_users):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('task requires exactly one job id and no '
+                                 'name, pool, all or all_users.')
+        if not managed_job_utils.is_consolidation_mode():
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Cancelling one task of a job requires the API server '
+                    'to run managed jobs in consolidation mode.')
+        member_job_id, _ = _resolve_job_task(job_ids[0], task, for_cancel=True)
+        job_ids = [member_job_id]
     with rich_utils.safe_status(
             ux_utils.spinner_message('Cancelling managed jobs')):
         job_ids = [] if job_ids is None else job_ids
@@ -1673,6 +2544,11 @@ def cancel(name: Optional[str] = None,
                 graceful_timeout=graceful_timeout,
             )
 
+        # The controller has no workspace names; show the name here.
+        workspace = skypilot_config.get_active_workspace()
+        workspace_name = skypilot_config.get_workspace_name(workspace)
+        stdout = stdout.replace(f'active workspace {workspace!r}',
+                                f'active workspace {workspace_name!r}')
         logger.info(stdout)
         if 'Multiple jobs found with name' in stdout:
             with ux_utils.print_exception_no_traceback():
@@ -1716,6 +2592,14 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+    requested_job_id = job_id
+    # `sky jobs logs 39 2`: task 2 may be a dynamic task (a job launched
+    # from inside job 39, numbered on from its declared tasks); then it is that
+    # job's log. Declared tasks resolve as before. Dynamic tasks exist in
+    # consolidation mode only, where the state is on this server.
+    if (task is not None and job_id is not None and
+            managed_job_utils.is_consolidation_mode()):
+        job_id, task = _resolve_job_task(job_id, task, for_cancel=False)
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
@@ -1736,6 +2620,27 @@ def tail_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
+    # Dedicated controllers are not checked: their job state is on the
+    # controller, so a check would cost a queue round-trip per request.
+    readable = (workspaces_core.get_readable_workspace_names()
+                if managed_job_utils.is_consolidation_mode() else None)
+    if readable is not None:
+        if (requested_job_id is not None and requested_job_id != job_id and
+                managed_job_state.get_workspace(requested_job_id)
+                not in readable):
+            # A dynamic task shares its parent's workspace; answering about
+            # the parent id keeps the parent -> task job id mapping hidden.
+            job_id = requested_job_id
+        job_id, message, exit_code = _resolve_readable_tail_job_id(
+            readable, job_id, name, controller)
+        if job_id is None:
+            ctx = context_lib.get()
+            print(message,
+                  file=ctx.output_stream(sys.stdout) if ctx else sys.stdout,
+                  flush=True)
+            return exit_code
+        name = None
+
     return managed_job_runner.current().tail_managed_job_logs(
         handle=handle,
         backend=backend,
@@ -1747,6 +2652,79 @@ def tail_logs(name: Optional[str],
         tail_offset=tail_offset,
         task=task,
     )
+
+
+def _resolve_readable_tail_job_id(
+        readable: Set[str], job_id: Optional[int], name: Optional[str],
+        controller: bool) -> Tuple[Optional[int], str, int]:
+    """The job `stream_logs` would pick, among jobs in `readable` workspaces.
+
+    Returns (job_id, '', 0), or (None, message, exit code) for the answer
+    `stream_logs` gives when nothing (or more than one job) matches. Reads
+    the local jobs DB only: a queue call here is a subprocess per log request
+    under consolidation.
+    """
+    not_found = exceptions.JobExitCode.NOT_FOUND
+    if job_id is not None:
+        if managed_job_state.get_workspace(job_id) in readable:
+            return job_id, '', 0
+        return None, f'Job {job_id} not found.', not_found
+    if name is None:
+        job_id = managed_job_state.get_latest_job_id(workspaces=readable)
+        if job_id is None:
+            return None, 'No managed job found.', not_found
+        return job_id, '', 0
+    # An ambiguous name raises inside `stream_logs`, which the default runner
+    # runs as `python -c`: the message lands in the stream and the code is 1.
+    if controller:
+        job_ids = managed_job_state.get_all_job_ids_by_name(name,
+                                                            workspaces=readable)
+        if not job_ids:
+            return None, f'No managed job found with name {name!r}.', not_found
+        if len(job_ids) > 1:
+            job_ids_str = ', '.join(str(i) for i in job_ids)
+            return None, (f'Multiple managed jobs found with name {name!r} '
+                          f'(Job IDs: {job_ids_str}). Please specify the '
+                          'job_id instead.'), 1
+    else:
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
+            name, workspaces=readable)
+        if not job_ids:
+            return None, (f'No running managed job found with name '
+                          f'{name!r}.'), not_found
+        if len(job_ids) > 1:
+            return None, f'Multiple running jobs found with name {name!r}.', 1
+    return job_ids[0], '', 0
+
+
+def _resolve_readable_sync_down_job_id(readable: Set[str],
+                                       job_id: Optional[int],
+                                       name: Optional[str],
+                                       controller: bool) -> Optional[int]:
+    """The job `sync_down_managed_job_logs` would pick, among `readable`.
+
+    None when nothing matches, after logging what that function logs then.
+    """
+    if job_id is not None:
+        if managed_job_state.get_workspace(job_id) in readable:
+            return job_id
+        job_ids = []
+    else:
+        job_ids = managed_job_state.get_all_job_ids_by_name(name,
+                                                            workspaces=readable)
+    if not job_ids:
+        logger.info(f'{colorama.Fore.YELLOW}No matching job found'
+                    f'{colorama.Style.RESET_ALL}')
+        return None
+    if len(job_ids) > 1:
+        name_str = ''
+        if name is not None:
+            name_str = f'Multiple jobs IDs found under the name {name}. '
+        controller_str = ' (controller)' if controller else ''
+        logger.info(f'{colorama.Fore.YELLOW}{name_str}'
+                    f'Downloading the latest job logs{controller_str}.'
+                    f'{colorama.Style.RESET_ALL}')
+    return job_ids[0]
 
 
 def wait(name: Optional[str],
@@ -1795,7 +2773,9 @@ def wait(name: Optional[str],
 
     # Resolve name to job_id on the first call.
     if name is not None:
-        records, _, _, _, _ = queue_v2_api(refresh=False, name_match=name)
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           name_match=name,
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         matching = [r for r in records if r.job_name == name]
         if not matching:
             with ux_utils.print_exception_no_traceback():
@@ -1808,7 +2788,9 @@ def wait(name: Optional[str],
     start_time = time.time()
 
     while True:
-        records, _, _, _, _ = queue_v2_api(refresh=False, job_ids=[job_id])
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           job_ids=[job_id],
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         if not records:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Managed job {job_id} not found.')
@@ -1894,6 +2876,15 @@ def download_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
+    readable = (workspaces_core.get_readable_workspace_names()
+                if managed_job_utils.is_consolidation_mode() else None)
+    if readable is not None:
+        job_id = _resolve_readable_sync_down_job_id(readable, job_id, name,
+                                                    controller)
+        if job_id is None:
+            return {}
+        name = None
+
     return backend.sync_down_managed_job_logs(handle,
                                               job_id=job_id,
                                               job_name=name,
@@ -1907,9 +2898,15 @@ def pool_apply(
     pool_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     workers: Optional[int] = None,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> None:
     """Apply a config to a pool."""
-    return impl.apply(task, workers, pool_name, mode, pool=True)
+    return impl.apply(task,
+                      workers,
+                      pool_name,
+                      mode,
+                      pool=True,
+                      file_mounts_blob_id=file_mounts_blob_id)
 
 
 @usage_lib.entrypoint
@@ -2007,6 +3004,69 @@ def _get_job_clusters(
     return list(dict.fromkeys(clusters))
 
 
+def _resolve_job_task(
+        job_id: int, task: Union[str, int], *,
+        for_cancel: bool) -> Tuple[int, Optional[Union[str, int]]]:
+    """Resolve ``<job> <task>`` to the job to act on.
+
+    A dynamic task (a job launched from inside ``job_id``, shown under it
+    with an index that continues from its declared tasks) is addressed the same
+    way as a declared task: ``sky jobs logs 39 2`` / ``sky jobs logs 39 eval-3``
+    / ``sky jobs cancel 39 --task 2``. Declared tasks take precedence: an int
+    below the declared task count or a str naming a declared task is that task.
+    Anything else is looked up among the jobs launched under the root by
+    index or name.
+
+    Returns ``(job_id, task)`` to pass on: for a declared task, unchanged; for
+    a dynamic task, its own job id and ``None`` (the whole member job).
+
+    For logs, anything that is neither is also returned unchanged: the log
+    reader on the controller path already answers an unknown task with
+    ``No task found matching ...`` *in the stream*, which is what
+    ``--no-follow`` and SDK callers with ``follow=False`` read (a server-side
+    error raised before streaming would reach neither). Cancel has no stream,
+    so it raises.
+
+    Raises:
+        ValueError: for cancel only: the job does not exist, nothing matches,
+            or the task is a declared one (it shares the job's lifecycle and
+            cannot be cancelled alone).
+    """
+    if isinstance(task, str) and task.isdigit():
+        task = int(task)
+    declared_tasks = managed_job_state.get_managed_job_tasks(job_id)
+    if not declared_tasks:
+        if not for_cancel:
+            return job_id, task
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No managed job with ID {job_id}.')
+    is_declared = (any(t.get('task_id') == task for t in declared_tasks)
+                   if isinstance(task, int) else any(
+                       t.get('task_name') == task for t in declared_tasks))
+    if is_declared:
+        if for_cancel:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Task {task!r} of job {job_id} is not a dynamic task; '
+                    f'it can only be cancelled together with the job '
+                    f'(sky jobs cancel {job_id}).')
+        return job_id, task
+    member_job_id = managed_job_state.get_dynamic_task_job_id(job_id, task)
+    if member_job_id is None:
+        if not for_cancel:
+            return job_id, task
+        names = ', '.join(
+            repr(t.get('task_name'))
+            for t in declared_tasks
+            if t.get('task_name'))
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Job {job_id} has no task {task!r}: it is not one of its '
+                f'declared tasks ({names}), and no dynamic task launched from '
+                'inside it has that index or name.')
+    return member_job_id, None
+
+
 def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:
     """Resolve a task name or id to a task id, the way `sky jobs logs` does.
 
@@ -2044,12 +3104,17 @@ def get_job_events(
 ) -> List[Dict[str, Any]]:
     """Get task events for a managed job.
 
-    Routed through the registered ``ManagedJobRunner`` so a runner can add
-    what the infrastructure knows about the same job -- on Slurm, what the
-    allocation waited on and for how long. The default implementation
-    answers from the jobs database and the cluster's own events; see
-    ``_job_events`` for the arguments and the row shape.
+    Routed through the registered ``ManagedJobRunner``. The default
+    implementation answers from the jobs database and the cluster's own
+    events; see ``_job_events`` for the arguments and the row shape.
     """
+    readable = workspaces_core.get_readable_workspace_names()
+    if (readable is not None and
+            managed_job_state.get_workspace(job_id) not in readable):
+        # Answer as for a job that does not exist.
+        if task is not None:
+            raise ValueError(f'Managed job {job_id} not found.')
+        return []
     runner = managed_job_runner.current()
     # A runner that predates this method: the plugins that register one are
     # distributed separately from the server, so an older one can be
@@ -2116,6 +3181,9 @@ def _job_events(
     event_types = [
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        # Boundaries that have been passed, with how long the phase they close
+        # took.
+        global_user_state.ClusterEventType.LAUNCH_MILESTONE,
     ]
     # (event, task_id) so each merged row keeps the task it belongs to.
     cluster_events: List[Tuple[Dict[str, Any], Optional[int]]] = []

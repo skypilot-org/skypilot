@@ -47,6 +47,13 @@ def _reset_client_sdk_cache():
     sky._client_sdk_entry_points.cache_clear()  # pylint: disable=protected-access
 
 
+def _forget_resolved_sdk():
+    """Drop a resolved ``sky.<name>`` alias from both places it is cached."""
+    sys.modules.pop(f'sky.{_SDK_NAME}', None)
+    if hasattr(sky, _SDK_NAME):
+        delattr(sky, _SDK_NAME)
+
+
 @pytest.fixture
 def fake_sdk(monkeypatch):
     """Register a fake client SDK and the target module it aliases to."""
@@ -62,12 +69,18 @@ def fake_sdk(monkeypatch):
         return _SelectableEntryPoints([_make_entry_point()])
 
     monkeypatch.setattr(importlib.metadata, 'entry_points', _entry_points)
+    # Establish the cold state rather than assume it. Tearing down alone is not
+    # enough: ``sky.<name>`` resolves through importlib.import_module, which
+    # short-circuits on sys.modules, so a stale alias left by anything else in
+    # the process makes every test here resolve to the *previous* target and
+    # fail as `assert <module 'x'> is <module 'x'>` -- same name, different
+    # object. That made the suite order-dependent, and which order you get
+    # depends on how pytest-xdist happens to distribute tests that run.
+    _forget_resolved_sdk()
     yield target
     # The loader caches resolution in sys.modules and as an attribute on the
     # ``sky`` module; undo both so each test starts from a cold state.
-    sys.modules.pop(f'sky.{_SDK_NAME}', None)
-    if hasattr(sky, _SDK_NAME):
-        delattr(sky, _SDK_NAME)
+    _forget_resolved_sdk()
 
 
 def test_attribute_access_resolves_sdk(fake_sdk):

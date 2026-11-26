@@ -25,6 +25,9 @@ Below is the configuration syntax and some example values.  See details under ea
 
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
+  :ref:`job <yaml-spec-job>`:
+    :ref:`wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`: 2h
+
   :ref:`resources <yaml-spec-resources>`:
     # Infra to use. Click to see schema and example values.
     :ref:`infra <yaml-spec-resources-infra>`: aws
@@ -191,6 +194,56 @@ A task can set this to a smaller value than the size of a cluster.
 .. code-block:: yaml
 
   num_nodes: 4
+
+
+.. _yaml-spec-job:
+
+``job``
+~~~~~~~
+
+Lifecycle settings for :ref:`managed jobs <managed-jobs>` (optional).
+
+Only ``sky jobs launch`` reads this section; ``sky launch`` and ``sky exec``
+ignore it. In a :ref:`pipeline <pipeline>` or :ref:`job group <job-groups>`,
+each task can set its own ``job`` section.
+
+.. code-block:: yaml
+
+  job:
+    wait_for_scheduling_timeout: 2h
+
+
+.. _yaml-spec-job-wait-for-scheduling-timeout:
+
+``job.wait_for_scheduling_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cancel the managed job if the task has not started running within this long
+of being submitted (optional; defaults to no limit, i.e. keep retrying until
+resources are found).
+
+Format: a positive duration with an optional unit suffix: ``s`` (seconds),
+``m`` (minutes), ``h`` (hours), ``d`` (days), ``w`` (weeks), e.g. ``90s``,
+``30m``, ``2h``. A plain integer is treated as seconds.
+
+The clock starts at the task's :code:`SUBMITTED` time and covers launch
+retries, backoff and waiting in a Kubernetes scheduler's queue (e.g., Kueue).
+It is the only bound on a wait for Kueue admission, unless
+:ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>`
+is set explicitly. It covers only the initial wait: once the task has started,
+a later recovery does not re-arm it. In a pipeline or job group, each task has
+its own clock, and any task exceeding its timeout cancels the whole job.
+
+The job then ends :code:`CANCELLED`, as with :code:`sky jobs cancel`, and the
+reason is shown in :code:`sky jobs queue`. The timeout is checked every 30
+seconds, including across controller restarts; when many jobs time out
+together, they are cancelled a few at a time over the next checks. See
+:ref:`jobs-wait-for-scheduling-timeout` for an example.
+
+.. code-block:: yaml
+
+  job:
+    wait_for_scheduling_timeout: 2h
 
 
 .. _yaml-spec-resources:
@@ -386,7 +439,7 @@ OR
 ``resources.accelerator_args``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Additional accelerator metadata (optional); only used for TPU node and TPU VM.
+Additional accelerator metadata (optional); only used for TPUs.
 
 Example usage:
 
@@ -406,6 +459,15 @@ Example usage:
       accelerator_args:
         tpu_name: mytpu
         tpu_vm: false
+
+- To request a TPU v6e multi-host slice of 8 chips (two 4-chip VMs on one ``2x4`` slice) on GKE instead of one 8-chip VM. Only supported with ``tpu-v6e-8`` on Kubernetes. Larger slices (``tpu-v6e-16`` and up) are always multi-host and do not need it:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v6e-8
+      accelerator_args:
+        multi_host: true
 
 By default, the value for ``runtime_version`` is decided based on which is requested and should work for either case. If passing in an incompatible version, GCP will throw an error during provisioning.
 

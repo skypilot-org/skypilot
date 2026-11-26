@@ -1,6 +1,9 @@
 """YAML utilities."""
 import io
+import os
+import stat
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
+import uuid
 
 from sky.adaptors import common
 
@@ -61,28 +64,25 @@ def check_no_duplicate_keys(yaml_str: str) -> None:
             walk(node)
 
 
-def safe_load(stream) -> Any:
+def _get_safe_loader() -> Any:
     global _c_extension_unavailable
-    if _c_extension_unavailable:
-        return yaml.load(stream, Loader=yaml.SafeLoader)
-
-    try:
-        return yaml.load(stream, Loader=yaml.CSafeLoader)
-    except AttributeError:
+    if not _c_extension_unavailable:
+        # LazyImport returns a non-callable submodule proxy for missing
+        # attributes, so catching AttributeError does not detect a missing
+        # C extension. Select the loader before parsing (load_all is lazy).
+        loader = getattr(yaml, 'CSafeLoader', None)
+        if callable(loader):
+            return loader
         _c_extension_unavailable = True
-        return yaml.load(stream, Loader=yaml.SafeLoader)
+    return yaml.SafeLoader
+
+
+def safe_load(stream) -> Any:
+    return yaml.load(stream, Loader=_get_safe_loader())
 
 
 def safe_load_all(stream) -> Any:
-    global _c_extension_unavailable
-    if _c_extension_unavailable:
-        return yaml.load_all(stream, Loader=yaml.SafeLoader)
-
-    try:
-        return yaml.load_all(stream, Loader=yaml.CSafeLoader)
-    except AttributeError:
-        _c_extension_unavailable = True
-        return yaml.load_all(stream, Loader=yaml.SafeLoader)
+    return yaml.load_all(stream, Loader=_get_safe_loader())
 
 
 def read_yaml(path: Optional[str]) -> Dict[str, Any]:
@@ -132,6 +132,38 @@ def dump_yaml(path: str,
             # when dumping to yaml, an empty dict will go in as {}.
             contents = ''
         f.write(contents)
+
+
+def dump_yaml_atomic(path: str, config: Dict[str, Any]) -> None:
+    """Dumps a YAML file by replacing it: a concurrent reader sees the old or
+    the new contents, never a truncated file."""
+    contents = dump_yaml_str(config)
+    # Replace the resolved path, so a symlinked file keeps its link.
+    real_path = os.path.realpath(path)
+    try:
+        mode: Optional[int] = stat.S_IMODE(os.stat(real_path).st_mode)
+    except FileNotFoundError:
+        mode = None
+    tmp_path = os.path.join(os.path.dirname(real_path),
+                            f'.{uuid.uuid4().hex}.tmp')
+    # Created with the target's mode, so the file is never more readable than
+    # the target; a new file gets 0o666 under the umask, as open(path, 'w').
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                 0o666 if mode is None else mode)
+    replaced = False
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            if mode is not None:
+                # Restores the bits the umask stripped.
+                os.fchmod(f.fileno(), mode)
+            f.write(contents)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, real_path)
+        replaced = True
+    finally:
+        if not replaced:
+            os.remove(tmp_path)
 
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:

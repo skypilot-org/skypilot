@@ -184,6 +184,14 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class KubernetesResourceNotServedError(Exception):
+    """The Kubernetes API server does not serve a resource type.
+
+    For example, the CRD that defines it is not installed.
+    """
+    pass
+
+
 class KubeAPIUnreachableError(ResourcesUnavailableError):
     """Raised when the Kubernetes API is currently unreachable.
 
@@ -253,6 +261,15 @@ class ManagedJobStatusError(Exception):
     """Raised when a managed job task status update is invalid.
 
     For instance, a RUNNING job cannot become PENDING.
+    """
+    pass
+
+
+class ManagedJobRecordMissingError(Exception):
+    """Raised when a managed job's database record no longer exists.
+
+    A job-state read or write found no row for the job, so callers should
+    stop retrying bookkeeping that can never be recorded.
     """
     pass
 
@@ -380,12 +397,23 @@ class NotSupportedError(Exception):
     pass
 
 
+class QueueCursorNotSupportedError(NotSupportedError):
+    """Raised when the managed jobs queue cannot be paged by `after_job_id`."""
+    pass
+
+
 class StorageError(Exception):
     pass
 
 
 class StorageSpecError(ValueError):
     # Errors raised due to invalid specification of the Storage object
+    pass
+
+
+class StorageWorkspaceError(StorageSpecError):
+    """The storage named exists, but not in a workspace the caller can read,
+    or the controller runs for, or the active one when that is required."""
     pass
 
 
@@ -493,6 +521,21 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
+class InvalidUserIdError(Exception):
+    """Raised when a user id does not have the expected form."""
+    pass
+
+
+class WorkspaceConfigConflictError(Exception):
+    """Raised when a workspace update was based on an outdated config.
+
+    The caller sent the config it started from (``expected_config``) and the
+    workspace no longer holds it, i.e. someone else changed the workspace in
+    the meantime.
+    """
+    pass
+
+
 class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     """Raised when a user belongs to multiple workspaces and none is chosen.
 
@@ -501,7 +544,7 @@ class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     `sky workspace use <name>` or `~/.sky/config.yaml`. The `--workspace`
     flag is listed as a footnote because it only exists on the launch
     commands (`sky launch` / `sky jobs launch`); listing it as a main
-    fix would mislead users running `sky status` / `sky queue` / etc.
+    fix would mislead users of the other commands that write.
 
     `note` is an optional drift explanation populated when the user has a
     saved preference that is no longer accessible — so the user understands
@@ -760,8 +803,9 @@ class ExecutionPausedError(ExecutionRetryableError):
     """Pause execution mid-attempt while keeping provisioned resources.
 
     Raised from inside an in-progress attempt waiting on an external condition
-    (e.g. admission or quota). The partially provisioned resources are kept so
-    the request can resume, so teardown layers must not clean up the resources.
+    (e.g. a cluster lock held by another operation). Any partially provisioned
+    resources are kept so the request can resume, so teardown layers must not
+    clean up the resources.
 
     ``continue_condition`` optionally says how to wait for the resume signal
     (see ``continue_condition.py``); it must be picklable, as the error crosses
@@ -794,6 +838,29 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class StorageReadOnlyError(StorageSpecError, PermissionDeniedError):
+    """The storage named is in a workspace the caller can only read.
+
+    A ``StorageSpecError`` so a managed job naming it fails its prechecks,
+    and a ``PermissionDeniedError`` so callers that handle denials still
+    catch it."""
+    pass
+
+
+class QueueNotAllowedError(PermissionDeniedError):
+    """Raised when a job's queue is not in its workspace's allowed queues."""
+    pass
+
+
+class InfraTargetNotFoundError(ValueError):
+    """Raised when a named Kubernetes context or Slurm cluster is not found.
+
+    Also what a caller gets for a target outside their workspaces, so a hidden
+    target reads the same as a missing one.
+    """
     pass
 
 
@@ -865,6 +932,20 @@ class SkyletMethodNotImplementedError(Exception):
 class SkyletUnavailableError(Exception):
     """Raised when the Skylet gRPC server is unreachable."""
     pass
+
+
+class PoolRefusedError(Exception):
+    """The jobs controller refused a pool for the job's workspace.
+
+    Raised and handled on the API server, which words the error the user sees.
+    """
+
+    def __init__(self, exists: bool, workspace: Optional[str]) -> None:
+        # The workspace stays out of the message: it may be one the caller
+        # cannot read, and a chained exception's message reaches the client.
+        super().__init__('Pool refused by the jobs controller.')
+        self.exists = exists
+        self.workspace = workspace
 
 
 # Exception types that indicate gRPC failed and the caller should fall

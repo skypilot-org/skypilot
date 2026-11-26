@@ -111,6 +111,21 @@ def _validate_skypilot_yaml(content: str, recipe_type: Union[RecipeType,
         raise ValueError(f'Invalid SkyPilot YAML: {e}') from e
 
 
+def validate_recipe_content(content: str, recipe_type: Union[RecipeType,
+                                                             str]) -> None:
+    """Validate recipe YAML content for the given recipe type.
+
+    Used by callers that store recipes without going through
+    ``create_recipe`` (e.g. externally managed recipes).
+
+    Raises:
+        ValueError: If the recipe type or the content is invalid.
+    """
+    if isinstance(recipe_type, str):
+        recipe_type = RecipeType.from_str(recipe_type)
+    _validate_skypilot_yaml(content, recipe_type)
+
+
 def get_recipe_content(recipe_name: str) -> Tuple[str, str]:
     """Get recipe content and type by name.
 
@@ -137,6 +152,8 @@ def list_recipes(
     pinned_only: bool = False,
     my_recipes_only: bool = False,
     recipe_type: Optional[str] = None,
+    limit: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """List recipes with optional filters.
 
@@ -147,10 +164,14 @@ def list_recipes(
         pinned_only: If True, only return pinned recipes.
         my_recipes_only: If True, only return recipes owned by user_id.
         recipe_type: Filter by type ('cluster' or 'job' or 'pool' or 'volume').
+        limit: Return at most this many recipes, by name instead of pinned
+            first.
+        after_name: Return only recipes named after this.
 
     Returns:
         List of recipe dictionaries.
     """
+    common_utils.check_page(limit, after_name is not None)
     recipe_type = (None
                    if recipe_type is None else RecipeType.from_str(recipe_type))
     recipes = recipes_db.list_recipes(
@@ -158,6 +179,8 @@ def list_recipes(
         pinned_only=pinned_only,
         my_recipes_only=my_recipes_only,
         recipe_type=recipe_type,
+        limit=limit,
+        after_name=after_name,
     )
     return [r.to_dict() for r in recipes]
 

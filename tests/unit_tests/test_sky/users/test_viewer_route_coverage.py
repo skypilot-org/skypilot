@@ -77,6 +77,7 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/users/me/workspace', 'POST'),
     # --- Managed jobs writes ---
     ('/jobs/launch', 'POST'),
+    ('/jobs/restart', 'POST'),
     ('/jobs/cancel', 'POST'),
     ('/jobs/pool_apply', 'POST'),
     ('/jobs/pool_down', 'POST'),
@@ -100,6 +101,7 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/users/service-account-tokens/update-role', 'POST'),
     ('/users/service-account-tokens/get-role', 'POST'),
     ('/users/service-account-tokens/rotate', 'POST'),
+    ('/users/default-role', 'GET'),  # feeds the admin-only SA create dialog
     # --- Workspaces writes (incl. sensitive config read) ---
     ('/workspaces/create', 'POST'),
     ('/workspaces/update', 'POST'),

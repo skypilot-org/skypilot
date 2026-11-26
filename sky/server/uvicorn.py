@@ -21,6 +21,7 @@ from uvicorn.supervisors import multiprocess
 
 from sky import exceptions
 from sky import sky_logging
+from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import state
@@ -44,11 +45,7 @@ _GRACEFUL_SHUTDOWN_LOCK_PATH = '/tmp/skypilot_graceful_shutdown.lock'
 _WAIT_REQUESTS_INTERVAL_SECONDS = 5
 
 # Timeout for waiting for on-going requests to finish.
-try:
-    _WAIT_REQUESTS_TIMEOUT_SECONDS = int(
-        os.environ.get(constants.GRACE_PERIOD_SECONDS_ENV_VAR, '60'))
-except ValueError:
-    _WAIT_REQUESTS_TIMEOUT_SECONDS = 60
+_WAIT_REQUESTS_TIMEOUT_SECONDS = server_constants.GRACE_PERIOD_SECONDS
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
@@ -98,6 +95,11 @@ def _bind_reuse_port_socket(config: uvicorn.Config) -> socket.socket:
     Mirrors ``uvicorn.Config.bind_socket`` for the TCP host/port case but also
     sets SO_REUSEPORT so that multiple workers can bind the same address and
     the kernel load-balances new connections across them.
+
+    The socket must stay non-inheritable: a child spawned with
+    ``close_fds=False`` that held it would keep it in the SO_REUSEPORT group
+    after the worker exits, and the connections routed to it would never be
+    accepted.
     """
     host = config.host or ''
     family = socket.AF_INET
@@ -112,7 +114,6 @@ def _bind_reuse_port_socket(config: uvicorn.Config) -> socket.socket:
     except OSError as exc:
         logger.error(exc)
         sys.exit(1)
-    sock.set_inheritable(True)
     return sock
 
 

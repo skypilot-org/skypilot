@@ -42,6 +42,25 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 
 
+# ---------- Modal. ----------
+@pytest.mark.modal
+def test_modal_basic():
+    name = smoke_tests_utils.get_cluster_name()
+    resources = smoke_tests_utils.LOW_RESOURCE_ARG
+    test = smoke_tests_utils.Test(
+        'modal_basic',
+        [
+            f'sky launch -y -c {name} --infra modal {resources} '
+            '-- echo modal-launch',
+            f'sky exec {name} -- echo modal-exec',
+            f's=$(sky status {name}); echo "$s"; echo "$s" | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Job Queue. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
@@ -106,8 +125,9 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
     [
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
-        # Test latest image with python 3.11 installed by default.
-        'docker:continuumio/miniconda3:24.1.2-0',
+        # Test a pinned miniconda image on a supported Debian release
+        # (bookworm), with python 3.13 installed by default.
+        'docker:continuumio/miniconda3:25.3.1-1',
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
@@ -898,6 +918,7 @@ def test_slurm_container_autodown(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
+@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
@@ -1477,8 +1498,8 @@ def test_azure_remote_identity():
 def test_azure_vpc_name():
     """Test Azure vpc_name with a custom VNet.
 
-    Creates a VNet, launches a cluster using it, and verifies the VM's
-    NIC is attached to the custom VNet's subnet.
+    Selects the second subnet of a custom VNet, verifies the VM's NIC,
+    and checks that a nonexistent subnet fails without falling back.
     """
     name = smoke_tests_utils.get_cluster_name()
     vnet_name = f'sky-test-vnet-{name}'
@@ -1487,11 +1508,16 @@ def test_azure_vpc_name():
     template_str = pathlib.Path(
         'tests/test_yamls/test_azure_vpc.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(vpc_name=vnet_name, region=region)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
+    content = template.render(vpc_name=vnet_name,
+                              region=region,
+                              subnet_id='SUBNET_ID')
+    invalid_name = f'{name}-invalid'
+    with tempfile.TemporaryDirectory() as temp_dir:
+        template_path = pathlib.Path(temp_dir) / 'template.yaml'
+        template_path.write_text(content)
+        file_path = pathlib.Path(temp_dir) / 'valid.yaml'
+        invalid_path = pathlib.Path(temp_dir) / 'invalid.yaml'
+        error_path = pathlib.Path(temp_dir) / 'invalid.log'
         test = smoke_tests_utils.Test(
             'azure_vpc_name',
             [
@@ -1502,17 +1528,34 @@ def test_azure_vpc_name():
                 f'az network vnet create -g {rg_name} -n {vnet_name} '
                 f'--address-prefix 10.0.0.0/16 '
                 f'--subnet-name default --subnet-prefix 10.0.0.0/24',
-                # Launch cluster using the custom VNet
+                f'az network vnet subnet create -g {rg_name} '
+                f'--vnet-name {vnet_name} -n workers '
+                '--address-prefixes 10.0.1.0/24',
+                # Resolve the full ID from Azure for the task-level override.
+                f'subnet_id=$(az network vnet subnet show -g {rg_name} '
+                f'--vnet-name {vnet_name} -n workers --query id -o tsv) && '
+                'test -n "$subnet_id" && '
+                f'sed "s|SUBNET_ID|$subnet_id|g" {template_path} > {file_path} && '
+                f'sed "s|SUBNET_ID|$subnet_id-missing|g" {template_path} > {invalid_path}',
+                # Launch cluster using the second subnet of the custom VNet.
                 f'sky launch -y -c {name} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
-                # Verify the VM NIC is in the custom VNet
+                # The VNet is unique to this test; require its second subnet.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, f'az network nic list '
                     f'--query "[?contains(ipConfigurations[0].subnet.id, '
                     f"'{vnet_name}'"
-                    f')].name" --output tsv | grep .'),
+                    f')].ipConfigurations[0].subnet.id" --output tsv '
+                    '| grep -E "/subnets/workers$"'),
+                # Require the subnet error, not just any launch failure.
+                f'if sky launch -y -c {invalid_name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {invalid_path} '
+                f'> {error_path} 2>&1; then cat {error_path}; exit 1; fi; '
+                f'cat {error_path}; '
+                f'grep -F "workers-missing" {error_path} && '
+                f'grep -F "does not identify exactly one subnet" {error_path}',
             ],
-            f'sky down -y {name}; '
+            f'sky down -y {name} {invalid_name}; '
             f'az group delete -n {rg_name} -y --no-wait; '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
             timeout=25 * 60,
@@ -1652,6 +1695,7 @@ def test_services_on_kubernetes():
 
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_pod_annotations_for_autodown_with_launch():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1691,6 +1735,7 @@ def test_add_pod_annotations_for_autodown_with_launch():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_and_remove_pod_annotations_with_autostop():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -2033,9 +2078,8 @@ def test_volume_env_mount_kubernetes():
                 # Cancel by name, never -a: on a shared remote API server all
                 # concurrently running smoke tests submit jobs as the same
                 # service-account user, so `-a` cancels *their* in-flight jobs
-                # too (observed in enterprise CI: one such teardown killed an
-                # unrelated job-group test's job and another lane's kueue
-                # blocker mid-run).
+                # too (observed in CI: one such teardown killed an unrelated
+                # job-group test's job mid-run).
                 f'sky jobs cancel -y -n {name}-job || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets
@@ -2341,6 +2385,9 @@ def test_volume_not_ready_on_kubernetes():
 
 # ---------- A volume that cannot be judged before the launch ----------
 @pytest.mark.kubernetes
+# The auto-mount is set in the client config, and a remote server ignores a
+# client's kubernetes.auto_mounts.
+@pytest.mark.no_remote_server
 def test_auto_mount_pending_volume_on_kubernetes():
     """A WaitForFirstConsumer claim, which no pre-launch check can catch.
 
@@ -3587,6 +3634,76 @@ def test_use_spot(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# Reads the head VM's spec through SkyPilot's nebius adaptor, the same
+# GetInstance read the provisioner's start() check uses, and asserts the
+# spot pricing opt-in. The nebius CLI's JSON output does not include the
+# pricing field, so the SDK is used here.
+_NEBIUS_PRICING_MODEL_CHECK = textwrap.dedent("""\
+    import os
+    from sky.adaptors import nebius
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
+    instance = nebius.sync_call(
+        service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=os.environ['PROJECT_ID'],
+            name=os.environ['INSTANCE_NAME'])))
+    instance = nebius.sync_call(
+        service.get(nebius.compute().GetInstanceRequest(
+            id=instance.metadata.id)))
+    mode = instance.spec.which_field_in_oneof('pricing_model')
+    print(f'{instance.metadata.id}: preemptible='
+          f'{instance.spec.check_presence("preemptible")}, '
+          f'pricing_model={mode}')
+    assert mode == 'follows_spot_price', f'unexpected pricing_model: {mode}'
+    """)
+
+
+@pytest.mark.nebius
+def test_use_spot_nebius_gpu():
+    """Test Nebius GPU spot launch with explicit pricing opt-in verification.
+
+    Spot on Nebius is GPU-only, so unlike test_use_spot (CPU, excluded for
+    Nebius) this launches an L40S spot cluster. Verifies that:
+    1. The cluster launches and the job succeeds with --use-spot
+    2. The head VM's Nebius spec selects the price-taking spot pricing
+       model (follows_spot_price)
+    3. sky stop + sky start round-trips on the spot cluster (a restarted
+       spot VM keeps its pricing opt-in, so start does not require manual
+       migration)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # The provision log records the head VM's instance name and Nebius
+    # project ("Creating instance <name> in project <id>.").
+    check_pricing_model_cmd = (
+        f'PROVISION_LINE=$(sky logs --provision {name} | '
+        f'grep -oE \'Creating instance [^ .]+ in project [^ .]+\' | '
+        f'head -1) && '
+        f'INSTANCE_NAME=$(echo "$PROVISION_LINE" | awk \'{{print $3}}\') && '
+        f'PROJECT_ID=$(echo "$PROVISION_LINE" | awk \'{{print $NF}}\') && '
+        f'echo "Head instance: $INSTANCE_NAME in project $PROJECT_ID" && '
+        f'INSTANCE_NAME="$INSTANCE_NAME" PROJECT_ID="$PROJECT_ID" '
+        f'python -c {shlex.quote(_NEBIUS_PRICING_MODEL_CHECK)}')
+    test = smoke_tests_utils.Test(
+        'use-spot-nebius-gpu',
+        [
+            f'sky launch -y -c {name} --infra nebius --gpus L40S:1 '
+            f'--use-spot \'echo hello from nebius spot\'',
+            f'sky logs {name} 1 --status',
+            check_pricing_model_cmd,
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.STOPPED], timeout=10 * 60),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.UP], timeout=15 * 60),
+            f'sky exec {name} \'echo hello after spot restart\'',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=40 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_spot_instance_verification():
     """Test Azure spot instance provisioning with explicit verification.
@@ -3732,8 +3849,9 @@ def test_aws_custom_docker_image_with_motd(image_id):
     [
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
-        # Test latest image with python 3.11 installed by default.
-        'docker:continuumio/miniconda3:24.1.2-0',
+        # Test a pinned miniconda image on a supported Debian release
+        # (bookworm), with python 3.13 installed by default.
+        'docker:continuumio/miniconda3:25.3.1-1',
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
@@ -4120,6 +4238,7 @@ def _volume_tags_cmd(region: str, name_on_cloud: str, must_be_tagged: bool,
 
 @pytest.mark.aws
 @pytest.mark.no_remote_server  # Restarts the API server to declare a workspace.
+@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
 def test_aws_volume_tagging_degrades_without_permission():
     """`sky launch` must survive credentials that cannot tag EBS volumes.
 
@@ -4607,6 +4726,7 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -5130,6 +5250,7 @@ def test_kubernetes_pod_config_change_detection():
 
 # ---------- Testing Kubernetes remote_identity override ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Sets other identities on purpose.
 def test_kubernetes_remote_identity_override():
     """Test that config.kubernetes.remote_identity can be overridden in task YAML.
 
@@ -5159,6 +5280,75 @@ def test_kubernetes_remote_identity_override():
         ],
         f'sky down -y {name}',
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Kubernetes remote_identity: NONE ----------
+_K8S_SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token'
+_K8S_IDENTITY_NONE = '--config kubernetes.remote_identity=NONE'
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none():
+    """With remote_identity: NONE the pod has no API token, and the cluster
+    still launches, runs, takes exec/ssh/logs and tears down.
+
+    Under --remote-identity-none the whole session is NONE, so the control
+    (a token without NONE) is skipped.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y --infra kubernetes '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    commands = [
+        f'{launch} -c {name} {_K8S_IDENTITY_NONE} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 1 --status',
+        f'sky exec {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 2 --status',
+        f'ssh {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky queue {name}',
+        f'sky down -y {name}',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        commands += [
+            f'{launch} -c {name}-sa "test -e {_K8S_SA_TOKEN}"',
+            f'sky logs {name}-sa 1 --status',
+        ]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none',
+        commands,
+        f'sky down -y {name} {name}-sa',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none_refusals():
+    """NONE refuses what would need, or hand back, pod credentials: autodown,
+    and a pod_config that mounts the token. Dryrun only, so no pods.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y -c {name} --infra kubernetes --dryrun '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    autodown = f'{launch} --down -i 1 echo hi'
+    automount = (f'{launch} --config '
+                 'kubernetes.pod_config.spec.automountServiceAccountToken=true'
+                 ' echo hi')
+    commands = [
+        f's=$({autodown} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "Autodown needs the pod to delete itself"',
+        f's=$({automount} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "automountServiceAccountToken would give them some"',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        # Controls: the same commands without NONE are accepted.
+        commands += [autodown, automount]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none_refusals',
+        commands,
+        f'sky down -y {name}',
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -5418,6 +5608,12 @@ def test_resize(generic_cloud: str):
             # --- Scale down (idle) ---
             f'sky launch -y -c {name} --resize --num-nodes 2',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x"',
+            # The replaced workers stay listed in `ray status` long after
+            # they are gone; a refresh must still find the cluster UP.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=120),
             # --- Scale down rejected when job running ---
             f'sky exec {name} --num-nodes 2 -d -- sleep 300',
             'sleep 5',

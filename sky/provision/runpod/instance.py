@@ -13,6 +13,8 @@ from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
+# A pod in one of these states never becomes RUNNING again.
+_FAILED_STATUSES = ('EXITED', 'ERROR', 'TERMINATED')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -49,7 +51,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     del cluster_name  # unused
-    pending_status = ['CREATED', 'RESTARTING']
+    pending_status = ['PROVISIONING', 'STARTING']
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -57,6 +59,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             break
         logger.info(f'Waiting for {len(instances)} instances to be ready.')
         time.sleep(POLL_INTERVAL)
+    # RunPod cannot resume a pod for us (STOP is unsupported), and an exited
+    # or errored pod keeps billing its disk under the cluster name. Delete
+    # such pods before counting, so `sky start` replaces them.
+    stale_instances = _filter_instances(cluster_name_on_cloud,
+                                        ['EXITED', 'ERROR'])
+    for instance_id, instance in stale_instances.items():
+        logger.info(f'Deleting stale instance {instance_id} in status '
+                    f'{instance["status"]}.')
+        utils.remove(instance_id)
     exist_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(exist_instances)
 
@@ -127,10 +138,20 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Wait for instances to be ready.
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+        instances = _filter_instances(cluster_name_on_cloud, None)
+        failed_instances = {
+            instance_id: instance['status']
+            for instance_id, instance in instances.items()
+            if instance['status'] in _FAILED_STATUSES
+        }
+        if failed_instances:
+            raise RuntimeError(
+                f'Failed to start instances for cluster '
+                f'{cluster_name_on_cloud}, with statuses: {failed_instances}')
         ready_instance_cnt = 0
         for instance_id, instance in instances.items():
-            if instance.get('ssh_port') is not None:
+            if (instance['status'] == 'RUNNING' and
+                    instance.get('ssh_port') is not None):
                 ready_instance_cnt += 1
         logger.info('Waiting for instances to be ready: '
                     f'({ready_instance_cnt}/{config.count}).')
@@ -170,7 +191,7 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
-    template_name, registry_auth_id = utils.get_registry_auth_resources(
+    template_id, registry_auth_id = utils.get_registry_auth_resources(
         cluster_name_on_cloud)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
@@ -184,8 +205,8 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
-    if template_name is not None:
-        utils.delete_pod_template(template_name)
+    if template_id is not None:
+        utils.delete_pod_template(template_id)
     if registry_auth_id is not None:
         utils.delete_register_auth(registry_auth_id)
 
@@ -202,7 +223,9 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info['internal_ip'],
+                # RunPod pods have no private network; the public IP is the
+                # only address other nodes can reach.
+                internal_ip=instance_info['external_ip'],
                 external_ip=instance_info['external_ip'],
                 ssh_port=instance_info['ssh_port'],
                 tags={},
@@ -247,19 +270,26 @@ def query_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
+    # An ERROR pod still exists (and bills) on RunPod, so it must stay
+    # visible as abnormal for `sky down` to clean it up. Only TERMINATED
+    # pods map to None.
     status_map = {
-        'CREATED': status_lib.ClusterStatus.INIT,
-        'RESTARTING': status_lib.ClusterStatus.INIT,
-        'PAUSED': status_lib.ClusterStatus.INIT,
+        'PROVISIONING': status_lib.ClusterStatus.INIT,
+        'STARTING': status_lib.ClusterStatus.INIT,
         'RUNNING': status_lib.ClusterStatus.UP,
+        'EXITED': status_lib.ClusterStatus.STOPPED,
+        'ERROR': status_lib.ClusterStatus.INIT,
     }
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                               Optional[str]]] = {}
     for inst_id, inst in instances.items():
-        status = status_map[inst['status']]
+        status = status_map.get(inst['status'])
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = (status, None)
+        reason = None
+        if inst['status'] == 'ERROR':
+            reason = 'Pod is in an unrecoverable ERROR state on RunPod.'
+        statuses[inst_id] = (status, reason)
     return statuses
 
 

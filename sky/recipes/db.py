@@ -5,13 +5,12 @@ used in the Recipes feature. The database stores recipes that can be
 pinned globally, filtered by category/tags, and deployed as clusters, jobs,
 pools, or volumes.
 """
+from __future__ import annotations
+
+import json
 import os
 import time
 from typing import Any, Dict, List, Optional, Union
-
-import sqlalchemy
-from sqlalchemy import orm
-from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
@@ -20,144 +19,158 @@ from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
 
 logger = sky_logging.init_logger(__name__)
 
 # SQLAlchemy Base
-Base = declarative.declarative_base()
+if sqlalchemy_deps.sqlalchemy_available():
+    import sqlalchemy
+    from sqlalchemy import orm
+    from sqlalchemy.ext import declarative
 
-# Table name
-RECIPES_TABLE = 'recipes'
+    Base = declarative.declarative_base()
 
-# SQLAlchemy table definition
-# Note: 'name' is the primary key and unique identifier for recipes
-recipes_table = sqlalchemy.Table(
-    RECIPES_TABLE,
-    Base.metadata,
-    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('description', sqlalchemy.Text),
-    sqlalchemy.Column('content', sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column('recipe_type', sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column('pinned', sqlalchemy.Integer, default=0),
-    sqlalchemy.Column('user_id', sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column('user_name', sqlalchemy.Text),
-    sqlalchemy.Column('created_at', sqlalchemy.Float),
-    sqlalchemy.Column('updated_at', sqlalchemy.Float),
-    sqlalchemy.Column('updated_by_id', sqlalchemy.Text),
-    sqlalchemy.Column('updated_by_name', sqlalchemy.Text),
-    sqlalchemy.Column('is_editable', sqlalchemy.Integer, default=1),
-    sqlalchemy.Column('is_pinnable', sqlalchemy.Integer, default=1),
-    sqlalchemy.Index('idx_recipe_user_id', 'user_id'),
-    sqlalchemy.Index('idx_recipe_pinned', 'pinned'),
-    sqlalchemy.Index('idx_recipe_type', 'recipe_type'),
-)
+    # Table name
+    RECIPES_TABLE = 'recipes'
 
-# Directory containing example YAML files
-_EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), 'examples')
+    # SQLAlchemy table definition
+    # Note: 'name' is the primary key and unique identifier for recipes
+    recipes_table = sqlalchemy.Table(
+        RECIPES_TABLE,
+        Base.metadata,
+        sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+        sqlalchemy.Column('description', sqlalchemy.Text),
+        sqlalchemy.Column('content', sqlalchemy.Text, nullable=False),
+        sqlalchemy.Column('recipe_type', sqlalchemy.Text, nullable=False),
+        sqlalchemy.Column('pinned', sqlalchemy.Integer, default=0),
+        sqlalchemy.Column('user_id', sqlalchemy.Text, nullable=False),
+        sqlalchemy.Column('user_name', sqlalchemy.Text),
+        sqlalchemy.Column('created_at', sqlalchemy.Float),
+        sqlalchemy.Column('updated_at', sqlalchemy.Float),
+        sqlalchemy.Column('updated_by_id', sqlalchemy.Text),
+        sqlalchemy.Column('updated_by_name', sqlalchemy.Text),
+        sqlalchemy.Column('is_editable', sqlalchemy.Integer, default=1),
+        sqlalchemy.Column('is_pinnable', sqlalchemy.Integer, default=1),
+        # JSON describing where an externally managed recipe comes from (e.g.
+        # {"kind": "git", "url": ..., "ref": ..., "sha": ..., "path": ...}).
+        # NULL for recipes created through the API.
+        sqlalchemy.Column('source', sqlalchemy.Text),
+        sqlalchemy.Index('idx_recipe_user_id', 'user_id'),
+        sqlalchemy.Index('idx_recipe_pinned', 'pinned'),
+        sqlalchemy.Index('idx_recipe_type', 'recipe_type'),
+    )
 
-# Default templates: maps filename (without .yaml) to metadata
-# Content is loaded from sky/recipes/examples/{filename}.yaml
-# Note: Recipe names must use letters, numbers, and dashes only
-DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
-    'basic_cluster': {
-        'name': 'basic-cluster',
-        'description': 'A simple cluster with GPU resources',
-        'recipe_type': 'cluster',
-    },
-    'basic_managed_job': {
-        'name': 'basic-managed-job',
-        'description': 'A simple job with recovery',
-        'recipe_type': 'job',
-    },
-    'basic_pool': {
-        'name': 'basic-pool',
-        'description': 'A pool for concurrent jobs',
-        'recipe_type': 'pool',
-    },
-    'basic_volume': {
-        'name': 'basic-volume',
-        'description': 'A starting point for a k8s volume',
-        'recipe_type': 'volume',
-    },
-}
+    # Directory containing example YAML files
+    _EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), 'examples')
 
+    # Default templates: maps filename (without .yaml) to metadata
+    # Content is loaded from sky/recipes/examples/{filename}.yaml
+    # Note: Recipe names must use letters, numbers, and dashes only
+    DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
+        'basic_cluster': {
+            'name': 'basic-cluster',
+            'description': 'A simple cluster with GPU resources',
+            'recipe_type': 'cluster',
+        },
+        'basic_managed_job': {
+            'name': 'basic-managed-job',
+            'description': 'A simple job with recovery',
+            'recipe_type': 'job',
+        },
+        'basic_pool': {
+            'name': 'basic-pool',
+            'description': 'A pool for concurrent jobs',
+            'recipe_type': 'pool',
+        },
+        'basic_volume': {
+            'name': 'basic-volume',
+            'description': 'A starting point for a k8s volume',
+            'recipe_type': 'volume',
+        },
+    }
 
-def _load_example_content(filename: str) -> str:
-    """Load YAML content from an example file.
+    def _load_example_content(filename: str) -> str:
+        """Load YAML content from an example file.
 
-    Args:
-        filename: The filename without .yaml extension.
+        Args:
+            filename: The filename without .yaml extension.
 
-    Returns:
-        The file content as a string.
+        Returns:
+            The file content as a string.
 
-    Raises:
-        FileNotFoundError: If the example file doesn't exist.
-    """
-    filepath = os.path.join(_EXAMPLES_DIR, f'{filename}.yaml')
-    with open(filepath, 'r', encoding='utf-8') as f:
-        return f.read()
+        Raises:
+            FileNotFoundError: If the example file doesn't exist.
+        """
+        filepath = os.path.join(_EXAMPLES_DIR, f'{filename}.yaml')
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
 
+    def _create_table(engine: sqlalchemy.engine.Engine) -> None:
+        """Create tables and run migrations."""
+        # Enable WAL mode for SQLite to avoid locking issues
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
+                not common_utils.is_wsl()):
+            try:
+                with orm.Session(engine) as session:
+                    session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+                    session.commit()
+            except sqlalchemy.exc.OperationalError as e:
+                if 'database is locked' not in str(e):
+                    raise
 
-def _create_table(engine: sqlalchemy.engine.Engine) -> None:
-    """Create tables and run migrations."""
-    # Enable WAL mode for SQLite to avoid locking issues
-    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
-            not common_utils.is_wsl()):
-        try:
-            with orm.Session(engine) as session:
-                session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+        # Run migrations
+        migration_utils.safe_alembic_upgrade(engine,
+                                             migration_utils.RECIPES_DB_NAME,
+                                             migration_utils.RECIPES_VERSION)
+
+    def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
+        """Insert default templates if the table is empty.
+
+        Loads recipe content from example files in sky/recipes/examples/ and
+        populates the database with the default templates.
+        """
+        with orm.Session(engine) as session:
+            # Check if table is empty
+            # pylint: disable=not-callable
+            count = session.execute(
+                sqlalchemy.select(sqlalchemy.func.count()).select_from(
+                    recipes_table)).scalar()
+            if count == 0:
+                now = time.time()
+                for filename, metadata in DEFAULT_TEMPLATES.items():
+                    try:
+                        content = _load_example_content(filename)
+                    except FileNotFoundError:
+                        logger.warning(
+                            f'Example file not found: {filename}.yaml')
+                        continue
+
+                    session.execute(recipes_table.insert().values(
+                        name=metadata['name'],
+                        description=metadata['description'],
+                        content=content,
+                        recipe_type=metadata['recipe_type'],
+                        pinned=1,
+                        user_id='system',
+                        user_name='SkyPilot',
+                        created_at=now,
+                        updated_at=now,
+                        is_editable=0,
+                        is_pinnable=1,
+                    ))
                 session.commit()
-        except sqlalchemy.exc.OperationalError as e:
-            if 'database is locked' not in str(e):
-                raise
 
-    # Run migrations
-    migration_utils.safe_alembic_upgrade(engine,
-                                         migration_utils.RECIPES_DB_NAME,
-                                         migration_utils.RECIPES_VERSION)
-
-
-def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
-    """Insert default templates if the table is empty.
-
-    Loads recipe content from example files in sky/recipes/examples/ and
-    populates the database with the default templates.
-    """
-    with orm.Session(engine) as session:
-        # Check if table is empty
-        # pylint: disable=not-callable
-        count = session.execute(
-            sqlalchemy.select(
-                sqlalchemy.func.count()).select_from(recipes_table)).scalar()
-        if count == 0:
-            now = time.time()
-            for filename, metadata in DEFAULT_TEMPLATES.items():
-                try:
-                    content = _load_example_content(filename)
-                except FileNotFoundError:
-                    logger.warning(f'Example file not found: {filename}.yaml')
-                    continue
-
-                session.execute(recipes_table.insert().values(
-                    name=metadata['name'],
-                    description=metadata['description'],
-                    content=content,
-                    recipe_type=metadata['recipe_type'],
-                    pinned=1,
-                    user_id='system',
-                    user_name='SkyPilot',
-                    created_at=now,
-                    updated_at=now,
-                    is_editable=0,
-                    is_pinnable=1,
-                ))
-            session.commit()
-
-
-_db_manager = db_utils.DatabaseManager('recipes',
-                                       _create_table,
-                                       post_init_fn=_insert_default_templates)
+    _db_manager = db_utils.DatabaseManager(
+        'recipes', _create_table, post_init_fn=_insert_default_templates)
+else:
+    # Client-only install: enums/helpers below still import. DB APIs
+    # fail with a clear install hint when first used.
+    sqlalchemy = None  # type: ignore
+    orm = None  # type: ignore
+    declarative = None  # type: ignore
+    Base = None  # type: ignore  # pylint: disable=invalid-name
+    _db_manager = sqlalchemy_deps.UnavailableDatabaseManager()  # type: ignore
 
 # =============================================================================
 # Data classes
@@ -186,6 +199,7 @@ class Recipe:
         updated_by_name: Optional[str] = None,
         is_editable: bool = True,
         is_pinnable: bool = True,
+        source: Optional[Dict[str, Any]] = None,
     ):
         self.name = name
         self.description = description
@@ -200,6 +214,7 @@ class Recipe:
         self.updated_by_name = updated_by_name
         self.is_editable = is_editable
         self.is_pinnable = is_pinnable
+        self.source = source
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -217,6 +232,7 @@ class Recipe:
             'updated_by_name': self.updated_by_name,
             'is_editable': self.is_editable,
             'is_pinnable': self.is_pinnable,
+            'source': self.source,
         }
 
     @classmethod
@@ -226,7 +242,7 @@ class Recipe:
             name=row.name,
             description=row.description,
             content=row.content,
-            recipe_type=RecipeType.from_str(row.recipe_type),
+            recipe_type=_load_recipe_type(row.recipe_type),
             pinned=bool(row.pinned),
             user_id=row.user_id,
             user_name=row.user_name,
@@ -236,7 +252,33 @@ class Recipe:
             updated_by_name=row.updated_by_name,
             is_editable=bool(row.is_editable),
             is_pinnable=bool(row.is_pinnable),
+            source=_load_source(row.source),
         )
+
+
+def _load_recipe_type(raw: str) -> Union[RecipeType, str]:
+    """Parse a stored recipe type without failing on unregistered types.
+
+    A recipe whose type is provided by a plugin may be read back in a
+    process where that plugin has not registered its validator. Reading
+    must not fail there; return the stored string as-is.
+    """
+    try:
+        return RecipeType.from_str(raw)
+    except ValueError:
+        return raw
+
+
+def _load_source(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Parse the stored source JSON, tolerating malformed values."""
+    if not raw:
+        return None
+    try:
+        source = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning(f'Ignoring malformed recipe source: {raw!r}')
+        return None
+    return source if isinstance(source, dict) else None
 
 
 # =============================================================================
@@ -337,6 +379,8 @@ def list_recipes(
     pinned_only: bool = False,
     my_recipes_only: bool = False,
     recipe_type: Optional[Union[RecipeType, str]] = None,
+    limit: Optional[int] = None,
+    after_name: Optional[str] = None,
 ) -> List[Recipe]:
     """List recipes with optional filters.
 
@@ -348,6 +392,9 @@ def list_recipes(
         pinned_only: If True, only return pinned templates.
         my_recipes_only: If True, only return recipes owned by user_id.
         recipe_type: Filter by type.
+        limit: Return at most this many recipes, by name instead of pinned
+            first.
+        after_name: Return only recipes named after this.
 
     Returns:
         List of matching YamlTemplate objects.
@@ -364,8 +411,13 @@ def list_recipes(
         query = query.where(
             recipes_table.c.recipe_type == recipe_type_to_str(recipe_type))
 
-    query = query.order_by(recipes_table.c.pinned.desc(),
-                           recipes_table.c.name.asc())
+    if after_name is not None:
+        query = query.where(recipes_table.c.name > after_name)
+    if limit is None:
+        query = query.order_by(recipes_table.c.pinned.desc(),
+                               recipes_table.c.name.asc())
+    else:
+        query = query.order_by(recipes_table.c.name.asc()).limit(limit)
 
     with orm.Session(engine) as session:
         result = session.execute(query)
@@ -514,3 +566,131 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
             return None
         # Recipe exists but wasn't updated -> not pinnable
         raise ValueError('This recipe cannot be pinned or unpinned')
+
+
+# =============================================================================
+# Externally managed recipes
+# =============================================================================
+#
+# Recipes whose content is owned by a system outside the API (for example a
+# repository kept in sync by an integration). They are read-only through the
+# regular update/delete APIs, but pinnable like any other recipe. Every
+# managed recipe carries an ``owner_id`` (stored as ``user_id``) identifying
+# the system that manages it, and the functions below only ever touch rows with
+# that owner, so they cannot clobber a recipe created by a user.
+
+
+def upsert_managed_recipe(
+    name: str,
+    content: str,
+    recipe_type: Union[RecipeType, str],
+    owner_id: str,
+    owner_name: str,
+    source: Dict[str, Any],
+    description: Optional[str] = None,
+    updated_by_name: Optional[str] = None,
+) -> Recipe:
+    """Create or update an externally managed recipe.
+
+    A new recipe starts pinned. Updates never change the pinned status, so an
+    unpinned managed recipe stays unpinned. ``updated_at`` and
+    ``updated_by_name`` only change when the content, type or description
+    changes; ``source`` is always replaced.
+
+    Args:
+        name: Unique recipe name.
+        content: The YAML content (the caller is responsible for validating
+            it, e.g. with ``sky.recipes.core.validate_recipe_content``).
+        recipe_type: Type of recipe.
+        owner_id: Identifier of the managing system, stored as ``user_id``.
+        owner_name: Display name of the managing system.
+        source: JSON-serializable description of where the recipe comes from.
+        description: Optional description.
+        updated_by_name: Optional name to record as the last updater when the
+            content changes.
+
+    Returns:
+        The stored Recipe.
+
+    Raises:
+        exceptions.InvalidRecipeNameError: If the name format is invalid.
+        exceptions.RecipeAlreadyExistsError: If a recipe with this name exists
+            and is not managed by ``owner_id``.
+    """
+    engine = _db_manager.get_engine()
+    common_utils.check_recipe_name_is_valid(name)
+    type_str = recipe_type_to_str(recipe_type)
+    source_json = json.dumps(source)
+    now = time.time()
+
+    try:
+        with orm.Session(engine) as session:
+            session.execute(recipes_table.insert().values(
+                name=name,
+                description=description,
+                content=content,
+                recipe_type=type_str,
+                pinned=1,
+                user_id=owner_id,
+                user_name=owner_name,
+                created_at=now,
+                updated_at=now,
+                updated_by_name=updated_by_name,
+                is_editable=0,
+                is_pinnable=1,
+                source=source_json,
+            ))
+            session.commit()
+    except sqlalchemy.exc.IntegrityError:
+        pass
+    else:
+        recipe = get_recipe(name)
+        assert recipe is not None
+        return recipe
+
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(recipes_table).where(
+                recipes_table.c.name == name).where(
+                    recipes_table.c.user_id == owner_id)).fetchone()
+        if row is None:
+            raise exceptions.RecipeAlreadyExistsError(
+                f'A recipe with name "{name}" already exists')
+        updates: Dict[str, Any] = {
+            'source': source_json,
+            'user_name': owner_name,
+        }
+        if (row.content != content or row.recipe_type != type_str or
+                row.description != description):
+            updates.update(content=content,
+                           recipe_type=type_str,
+                           description=description,
+                           updated_at=now,
+                           updated_by_name=updated_by_name)
+        session.execute(
+            recipes_table.update().where(recipes_table.c.name == name).where(
+                recipes_table.c.user_id == owner_id).values(**updates))
+        session.commit()
+
+    recipe = get_recipe(name)
+    assert recipe is not None
+    return recipe
+
+
+def delete_managed_recipe(name: str, owner_id: str) -> bool:
+    """Delete an externally managed recipe.
+
+    Args:
+        name: The recipe's unique name.
+        owner_id: Identifier of the managing system.
+
+    Returns:
+        True if a recipe managed by ``owner_id`` was deleted.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            recipes_table.delete().where(recipes_table.c.name == name).where(
+                recipes_table.c.user_id == owner_id))
+        session.commit()
+        return result.rowcount > 0

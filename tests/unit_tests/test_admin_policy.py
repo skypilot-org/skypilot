@@ -19,6 +19,7 @@ from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import plugin_hooks
 from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
@@ -33,6 +34,19 @@ if not os.path.exists(POLICY_PATH):
     # This is used for GitHub Actions, as we copy the examples to the package.
     POLICY_PATH = os.path.join(os.path.dirname(__file__), 'examples',
                                'admin_policy')
+
+
+@pytest.fixture(autouse=True)
+def _restore_config_env():
+    # Tests here point ENV_VAR_SKYPILOT_CONFIG at temp configs via os.environ;
+    # restore it and reload so later tests on this worker don't inherit them.
+    old = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    yield
+    if old is None:
+        os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    else:
+        os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = old
+    skypilot_config.reload_config()
 
 
 @pytest.fixture
@@ -1020,3 +1034,302 @@ def test_mutated_user_request_log_redacts_secrets(add_example_policy_paths,
     assert '<redacted>' in logged, (
         'the token should be replaced, not dropped, so the log still shows '
         'that the field was set')
+
+
+@pytest.fixture
+def applied_hook(monkeypatch):
+    """Registers a recording admin-policy-applied hook on an empty registry."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    hook = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook('test', hook)
+    return hook
+
+
+def test_applied_hook_receives_mutated_request(add_example_policy_paths, task,
+                                               applied_hook):
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        dag, config = _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    applied_hook.assert_called_once()
+    hook_dag, hook_config, request_name, request_options = (
+        applied_hook.call_args.args)
+    # A copy of the effective request, not the request itself.
+    assert hook_dag is not dag
+    assert [t.name for t in hook_dag.tasks] == [t.name for t in dag.tasks]
+    assert hook_config == config
+    assert hook_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels', 'app'), None) == 'skypilot'
+    assert request_name == (request_names.AdminPolicyRequestName.CLUSTER_LAUNCH)
+    assert request_options.cluster_name == 'test'
+
+
+def test_applied_hook_fires_without_policy(task, applied_hook, tmp_path):
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    applied_hook.assert_called_once()
+    assert applied_hook.call_args.args[0].tasks[0].run == dag.tasks[0].run
+    assert applied_hook.call_args.args[1] == config
+
+
+def test_applied_hook_skipped_at_client_side(add_example_policy_paths, task,
+                                             applied_hook):
+    _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    admin_policy_utils.apply(
+        task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        at_client_side=True)
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_skipped_when_rejected(add_example_policy_paths, task,
+                                            applied_hook):
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy):
+        _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'reject_all.yaml'))
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_failure_does_not_fail_request(task, monkeypatch,
+                                                    tmp_path):
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    following = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'failing', mock.Mock(side_effect=RuntimeError('hook failed')))
+    plugin_hooks.register_admin_policy_applied_hook('following', following)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, _ = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks
+    following.assert_called_once()
+
+
+@pytest.mark.parametrize('raises', [False, True])
+def test_applied_hook_mutation_does_not_alter_request(task, monkeypatch,
+                                                      tmp_path, raises):
+    """A callback that mutates its arguments (and maybe then raises) changes
+    neither the request the caller executes nor what later callbacks see."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+
+    def mutate(dag, config, _request_name, request_options):
+        dag.tasks[0].run = 'echo tampered'
+        dag.tasks[0].update_envs({'TAMPERED': '1'})
+        config.set_nested(('allowed_clouds',), ['gcp'])
+        request_options.cluster_name = 'tampered'
+        if raises:
+            raise RuntimeError('hook failed')
+
+    seen = []
+    plugin_hooks.register_admin_policy_applied_hook('mutate', mutate)
+    plugin_hooks.register_admin_policy_applied_hook(
+        'following', lambda dag, config, _name, options: seen.append(
+            (dag.tasks[0].run, dict(dag.tasks[0].envs),
+             config.get_nested(
+                 ('allowed_clouds',), None), options.cluster_name)))
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    original_run = task.run
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks[0].run == original_run
+    assert 'TAMPERED' not in dag.tasks[0].envs
+    assert config.get_nested(('allowed_clouds',), None) == ['aws']
+    assert seen == [(original_run, dict(dag.tasks[0].envs), ['aws'], 'test')]
+
+
+def test_applied_hook_observes_only_its_request_names(task, monkeypatch):
+    """A hook registered for some request names is skipped, without copying
+    anything, for the others."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    launches = mock.Mock()
+    everything = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'launches',
+        launches,
+        request_names=[request_names.AdminPolicyRequestName.CLUSTER_LAUNCH])
+    plugin_hooks.register_admin_policy_applied_hook('everything', everything)
+    dag = sky.Dag()
+    dag.add(task)
+    config = config_utils.Config({'allowed_clouds': ['aws']})
+    deepcopy = mock.Mock(side_effect=copy.deepcopy)
+    monkeypatch.setattr(plugin_hooks.copy, 'deepcopy', deepcopy)
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.OPTIMIZE, None)
+    launches.assert_not_called()
+    everything.assert_called_once()
+    assert deepcopy.call_count == 3  # dag, config, options: one hook only
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.CLUSTER_LAUNCH, None)
+    launches.assert_called_once()
+    assert everything.call_count == 2
+    assert deepcopy.call_count == 9
+
+
+# --- Workspace allowed_queues at submission -----------------------------------
+
+_Requests = request_names.AdminPolicyRequestName
+
+_QUEUE_CONFIG = config_utils.Config({
+    'active_workspace': 'team-a',
+    'workspaces': {
+        'team-a': {
+            'kubernetes': {
+                'quota': {
+                    'queue': 'team-a-low',
+                    'allowed_queues': ['team-a-high', 'team-a-low'],
+                },
+            },
+            'slurm': {
+                'quota': {
+                    'allowed_queues': ['team-a-qos']
+                }
+            },
+        },
+        'team-b': {},
+    },
+})
+
+
+def _queued_task(task_config: Optional[dict] = None,
+                 name: str = 'train') -> sky.Task:
+    task = sky.Task(run='echo hi', name=name)
+    task.set_resources(sky.Resources(_cluster_config_overrides=task_config))
+    return task
+
+
+def _apply_in(workspace: str,
+              entrypoint,
+              request_name,
+              config: config_utils.Config = _QUEUE_CONFIG,
+              **kwargs):
+    with skypilot_config.replace_skypilot_config_in_process(config), \
+            skypilot_config.local_active_workspace_ctx(workspace):
+        return admin_policy_utils.apply(entrypoint,
+                                        request_name=request_name,
+                                        **kwargs)
+
+
+@pytest.mark.parametrize('request_name', list(_Requests))
+def test_every_new_submission_is_checked_unless_exempt(request_name):
+    """Controller relaunches, replicas and exec keep the queue the job was
+    submitted with."""
+    task = _queued_task({'kubernetes': {'quota': {'queue': 'other'}}})
+    if request_name in admin_policy_utils._VOLUME_CHECK_EXEMPT_REQUESTS:
+        _apply_in('team-a', task, request_name)
+    else:
+        with pytest.raises(exceptions.PermissionDeniedError,
+                           match="Queue 'other' is not allowed in workspace "
+                           "'team-a'"):
+            _apply_in('team-a', task, request_name)
+
+
+@pytest.mark.parametrize('task_config, allowed', [
+    ({
+        'kubernetes': {
+            'quota': {
+                'queue': 'other'
+            }
+        }
+    }, "'team-a-high', 'team-a-low'"),
+    ({
+        'slurm': {
+            'quota': {
+                'queue': 'other'
+            }
+        }
+    }, "'team-a-qos'"),
+])
+def test_queue_outside_allowed_queues_is_rejected(task_config, allowed):
+    with pytest.raises(exceptions.PermissionDeniedError, match=allowed):
+        _apply_in('team-a', _queued_task(task_config), _Requests.JOBS_LAUNCH)
+
+
+@pytest.mark.parametrize('task_config', [
+    None,
+    {
+        'kubernetes': {
+            'quota': {
+                'queue': 'team-a-high'
+            }
+        }
+    },
+    {
+        'slurm': {
+            'quota': {
+                'queue': 'team-a-qos'
+            }
+        }
+    },
+])
+def test_allowed_queue_or_no_queue_is_accepted(task_config):
+    _apply_in('team-a', _queued_task(task_config), _Requests.CLUSTER_LAUNCH)
+
+
+def test_job_group_checks_every_task():
+    dag = sky.Dag()
+    dag.add(_queued_task(name='ok-task'))
+    dag.add(
+        _queued_task({'kubernetes': {
+            'quota': {
+                'queue': 'other'
+            }
+        }},
+                     name='bad-task'))
+    with pytest.raises(exceptions.PermissionDeniedError, match="'bad-task'"):
+        _apply_in('team-a', dag, _Requests.JOBS_LAUNCH)
+
+
+def test_workspace_without_allowed_queues_or_client_side_is_not_checked():
+    task = _queued_task({'kubernetes': {'quota': {'queue': 'other'}}})
+    _apply_in('team-b', task, _Requests.CLUSTER_LAUNCH)
+    _apply_in('team-a', task, _Requests.CLUSTER_LAUNCH, at_client_side=True)
+
+
+class _SetsQueue(sky.AdminPolicy):
+
+    @classmethod
+    def validate_and_mutate(cls, user_request):
+        user_request.task.set_resources(
+            sky.Resources(_cluster_config_overrides={
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'other'
+                    }
+                }
+            }))
+        return sky.MutatedUserRequest(user_request.task,
+                                      user_request.skypilot_config)
+
+
+def test_queue_set_by_admin_policy_is_not_checked(monkeypatch):
+    monkeypatch.setattr(admin_policy_utils, '_get_policy_impl',
+                        lambda location: _SetsQueue())
+    dag, _ = _apply_in('team-a', _queued_task(), _Requests.CLUSTER_LAUNCH)
+    resources = next(iter(dag.tasks[0].resources))
+    assert resources.cluster_config_overrides['kubernetes']['quota'][
+        'queue'] == 'other'
+
+
+def test_workspace_named_by_name_is_checked():
+    """Workspaces are keyed by id; a request may name its workspace by name."""
+    config = config_utils.Config({
+        'active_workspace': 'team-a',
+        'workspaces': {
+            'ws-1234': {
+                'name': 'team-a',
+                'kubernetes': {
+                    'quota': {
+                        'allowed_queues': ['team-a-high']
+                    }
+                },
+            },
+        },
+    })
+    task = _queued_task({'kubernetes': {'quota': {'queue': 'other'}}})
+    with pytest.raises(exceptions.PermissionDeniedError,
+                       match="workspace 'team-a'"):
+        with skypilot_config.replace_skypilot_config_in_process(config):
+            admin_policy_utils.apply(task,
+                                     request_name=_Requests.CLUSTER_LAUNCH)

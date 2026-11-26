@@ -57,6 +57,7 @@ from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.modal import modal_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
 from sky.server import common as server_common
@@ -355,6 +356,7 @@ def _get_cluster_config_template(cloud):
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
         clouds.Mithril: 'mithril-ray.yml.j2',
+        clouds.Modal: 'modal-ray.yml.j2',
         clouds.Verda: 'verda-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -1166,6 +1168,9 @@ class RetryingVmProvisioner(object):
                                     keep_launch_fields_in_existing_config=
                                     cluster_exists,
                                     volume_mounts=volume_mounts,
+                                    storage_mounts=(task.storage_mounts
+                                                    if task is not None else
+                                                    None),
                                     cloud_specific_failover_overrides=
                                     failover_overrides,
                                     extra_template_variables=extra_vars,
@@ -1228,6 +1233,12 @@ class RetryingVmProvisioner(object):
                     if zones and len(zones) == 1:
                         launched_resources = launched_resources.copy(
                             zone=zones[0].name)
+                    if isinstance(to_provision.cloud, clouds.Kubernetes):
+                        # Record what the pods received at launch for autodown.
+                        provider = global_user_state.get_cluster_yaml_dict(
+                            cluster_config_file).get('provider', {})
+                        launched_resources.set_remote_identity_none_at_launch(
+                            bool(provider.get('remote_identity_none', False)))
 
                     prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None,
                                                                            None,
@@ -1876,6 +1887,16 @@ class RetryingVmProvisioner(object):
                     # requested, so use discard() instead of remove().
                     requested_features.discard(
                         clouds.CloudImplementationFeatures.AUTOSTOP)
+                # The jobs controller's autodown is a leak guard, not the
+                # user's ask. A NONE pod cannot delete itself, so the job runs
+                # without the guard (execution skips setting it) rather than
+                # being refused.
+                if (self._is_launched_by_jobs_controller and
+                        isinstance(to_provision.cloud, clouds.Kubernetes) and
+                        clouds.Kubernetes.remote_identity_is_none(
+                            to_provision.region, to_provision)):
+                    requested_features.discard(
+                        clouds.CloudImplementationFeatures.AUTODOWN)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
@@ -1963,13 +1984,17 @@ class RetryingVmProvisioner(object):
                 assert len(failover_history) > 0
                 resource_exceptions[to_provision] = failover_history[-1]
             else:
-                # If we reach here, it means that the existing cluster must have
-                # a previous status of INIT, because other statuses (UP,
-                # STOPPED) will not trigger the failover due to `no_failover`
-                # flag; see _yield_zones(). Also, the cluster should have been
-                # terminated by _retry_zones().
-                assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                       ), prev_cluster_status
+                if prev_cluster_status != status_lib.ClusterStatus.INIT:
+                    # An UP or STOPPED cluster is never failed over for (see
+                    # _yield_zones). Errors raised without `no_failover`, e.g.
+                    # invalid credentials or config, are reported as is.
+                    last_error = failover_history[-1]
+                    raise exceptions.ResourcesUnavailableError(
+                        common_utils.format_exception(last_error),
+                        no_failover=True,
+                        failover_history=failover_history) from last_error
+                # An INIT cluster should have been terminated by
+                # _retry_zones(), so it can be retried on other resources.
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
@@ -2012,6 +2037,9 @@ class RetryingVmProvisioner(object):
             assert task in self._dag.tasks, 'Internal logic error.'
             assert best_resources is not None, task
             to_provision = best_resources
+            # A multi-host TPU slice on Kubernetes has one node per VM.
+            num_nodes = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
+                to_provision)
         return config_dict
 
 
@@ -2118,7 +2146,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.stable_ssh_ports},'
                 '\n\tcluster_yaml='
                 f'{self.cluster_yaml}, '
-                f'\n\tlaunched_resources={self.launched_nodes}x '
+                f'\n\tlaunched_resources={self.launched_task_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
                 f'\n\tssh_user={self.ssh_user},'
@@ -2489,9 +2517,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         assert cached_ssh_ports is not None, 'update_ssh_ports failed.'
         return cached_ssh_ports
 
+    @property
+    def launched_task_nodes(self) -> int:
+        """Task nodes of the cluster, as described by launched_resources.
+
+        Equal to launched_nodes except on a multi-host TPU slice on
+        Kubernetes, where launched_nodes counts pods (one per VM) and each
+        task node is one slice.
+        """
+        return kubernetes_utils.num_task_nodes(self.launched_nodes,
+                                               self.launched_resources)
+
     def get_hourly_price(self) -> float:
         hourly_cost = (self.launched_resources.get_cost(3600) *
-                       self.launched_nodes)
+                       self.launched_task_nodes)
         return hourly_cost
 
     def setup_docker_user(self, cluster_config_file: str):
@@ -2501,20 +2540,23 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
+    # A skylet tunnel is a process on the host that opened it, so each host
+    # (see backend_utils.skylet_tunnel_owner_id) reads, writes and closes
+    # only its own entry in the cluster row.
     def _get_skylet_ssh_tunnel(self) -> Optional[SSHTunnelInfo]:
-        metadata = global_user_state.get_cluster_skylet_ssh_tunnel_metadata(
-            self.cluster_name)
+        metadata = global_user_state.get_cluster_skylet_ssh_tunnel(
+            self.cluster_name, backend_utils.skylet_tunnel_owner_id())
         if metadata is None:
             return None
         return SSHTunnelInfo(port=metadata[0], pid=metadata[1])
 
     def _set_skylet_ssh_tunnel(self, tunnel: Optional[SSHTunnelInfo]) -> None:
-        global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
-            self.cluster_name,
+        global_user_state.set_cluster_skylet_ssh_tunnel(
+            self.cluster_name, backend_utils.skylet_tunnel_owner_id(),
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
     def close_skylet_ssh_tunnel(self) -> None:
-        """Terminate the SSH tunnel process and clear its metadata."""
+        """Terminate this host's SSH tunnel process and clear its metadata."""
         tunnel = self._get_skylet_ssh_tunnel()
         if tunnel is None:
             return
@@ -2574,7 +2616,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     logger.debug(f'Acquired exclusive lock for {lock_id} after '
                                  f'{wait_elapsed:.2f}s')
                     try:
-                        tunnel = self._open_and_update_skylet_tunnel()
+                        # Another process may have opened a healthy tunnel
+                        # since our last read, before we acquired the lock.
+                        tunnel = self._get_skylet_ssh_tunnel()
+                        if tunnel is None or not _is_tunnel_healthy(tunnel):
+                            tunnel = self._open_and_update_skylet_tunnel()
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
                     except Exception as e:  # pylint: disable=broad-except
@@ -2662,7 +2708,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             local_port = random.randint(10000, 65535)
             try:
                 ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
-                    head_runner, (local_port, constants.SKYLET_GRPC_PORT))
+                    head_runner, (local_port, self.skylet_port))
             except exceptions.CommandError as e:
                 # Don't retry if the error is due to timeout,
                 # connection refused, Kubernetes pods not found,
@@ -2741,6 +2787,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if external_ssh_ports:
             return external_ssh_ports[0]
         return None
+
+    @property
+    def skylet_port(self) -> int:
+        """The port the head's skylet listens on.
+
+        The default, except on a Kubernetes hostNetwork head, which shares its
+        node's ports with other clusters' heads and so is assigned one.
+        """
+        info = self.cached_cluster_info
+        head = info.get_head_instance() if info is not None else None
+        # getattr: an InstanceInfo pickled before the field existed.
+        return (getattr(head, 'skylet_port', None) or
+                constants.SKYLET_GRPC_PORT)
 
     @property
     def num_ips_per_node(self) -> int:
@@ -3211,6 +3270,13 @@ class SkyletClient:
     ) -> 'managed_jobsv1_pb2.CancelJobsResponse':
         return self._managed_jobs_stub.CancelJobs(request, timeout=timeout)
 
+    def get_managed_job_spec(
+        self,
+        request: 'managed_jobsv1_pb2.GetJobSpecRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetJobSpecResponse':
+        return self._managed_jobs_stub.GetJobSpec(request, timeout=timeout)
+
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
@@ -3307,7 +3373,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Usage Collection:
         usage_lib.messages.usage.update_cluster_resources(
-            handle.launched_nodes, launched_resources)
+            handle.launched_task_nodes, launched_resources)
         status = global_user_state.get_status_from_cluster_name(cluster_name)
         if status is not None:
             usage_lib.messages.usage.update_cluster_status(status)
@@ -3322,8 +3388,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # matching (resize) while still reporting the user's real num_nodes
         # in any error message below.
         fit_num_nodes = (handle.launched_nodes
-                         if skip_num_nodes_check else task.num_nodes)
+                         if skip_num_nodes_check else task.num_nodes *
+                         kubernetes_utils.tpu_vms_per_slice(launched_resources))
+        tpu_slice_error = None
         for resource in task.resources:
+            slice_error = kubernetes_utils.tpu_slice_fit_error(
+                resource, handle.launched_task_nodes
+                if skip_num_nodes_check else task.num_nodes, launched_resources,
+                handle.launched_task_nodes)
+            if slice_error is not None:
+                tpu_slice_error = tpu_slice_error or slice_error
+                requested_resource_list.append(f'{task.num_nodes}x {resource}')
+                continue
             if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
@@ -3333,6 +3409,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 break
             else:
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
+
+        if valid_resource is None and tpu_slice_error is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    f'{tpu_slice_error}. {mismatch_str}')
 
         if valid_resource is None:
             for example_resource in task.resources:
@@ -3376,7 +3457,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Requested resources do not match the existing '
                     'cluster.\n'
                     f'  Requested:\t{requested_resource_str}\n'
-                    f'  Existing:\t{handle.launched_nodes}x '
+                    f'  Existing:\t{handle.launched_task_nodes}x '
                     f'{handle.launched_resources}\n'
                     f'{mismatch_str}')
         else:
@@ -3473,11 +3554,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # on a dedicated controller, it is the controller's local API
                 # server, where parking is equally safe -- the controller
                 # explicitly supports parked launch requests (see
-                # _wait_for_parked_request in recovery_strategy), since
-                # admission-wait pauses already park its launches via this
-                # same mechanism. Only callers with no request context (no
-                # scheduler to hand the pause to) keep the blocking behavior
-                # below.
+                # _wait_for_parked_request in recovery_strategy). Only callers
+                # with no request context (no scheduler to hand the pause to)
+                # keep the blocking behavior below.
                 #
                 # Note on expected impact: in a healthy system controller
                 # launches should rarely contend on their own cluster lock at
@@ -3660,7 +3739,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         global_user_state.add_cluster_event(
                             cluster_name,
                             None,
-                            'Provision failed: ' + str(e),
+                            global_user_state.PROVISION_FAILED_PREFIX + str(e),
                             global_user_state.ClusterEventType.STATUS_CHANGE,
                             nop_if_duplicate=True)
                         global_user_state.remove_cluster(cluster_name,
@@ -3848,7 +3927,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             config_hash: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
-            handle.launched_nodes, handle.launched_resources)
+            handle.launched_task_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
@@ -4606,6 +4685,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).set_job_info_without_job_id(request))
                 return list(response.job_ids)
+            except grpc.RpcError as e:
+                # Not chained: the details name a workspace the caller may
+                # not be able to read.
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    raise exceptions.PoolRefusedError(False, None) from None
+                if e.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                    raise exceptions.PoolRefusedError(True,
+                                                      e.details()) from None
+                raise
             except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
                 logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
@@ -4637,6 +4725,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to fetch job id.',
                                                stderr)
+            for line in result_str.splitlines():
+                if line.startswith(job_lib.POOL_REFUSED_MARKER):
+                    exists, pool_workspace = json.loads(
+                        line[len(job_lib.POOL_REFUSED_MARKER):])
+                    raise exceptions.PoolRefusedError(exists, pool_workspace)
             try:
                 # Parse job IDs from output
                 job_ids_match = _JOB_IDS_PATTERN.search(result_str)
@@ -4712,15 +4805,62 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
 
-        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
-        # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
+        # At most one of the two multipliers exceeds 1: num_ips_per_node for a
+        # GCP TPU VM pod (one node with an IP per VM), tpu_vms_per_slice for a
+        # multi-host TPU slice on Kubernetes (task num_nodes counts slices;
+        # the cluster has one pod per VM of each slice).
+        num_actual_nodes = (
+            task.num_nodes * handle.num_ips_per_node *
+            kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
+        # Case: task_lib.Task(run, num_nodes=N), TPU VM Pods, or multi-host
+        # TPU slices on Kubernetes (one cluster node per VM of the slice)
         if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, log_dir)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task_copy, job_id, log_dir)
 
+        # After the job is submitted: recording is best-effort and nothing
+        # reads the spec before now, so it must not delay the job's start.
+        self._record_job_spec(handle, job_id, task)
         return job_id
+
+    def _record_job_spec(self, handle: CloudVmRayResourceHandle, job_id: int,
+                         task: task_lib.Task) -> None:
+        """Records the job's task YAML and entrypoint for the dashboard.
+
+        Best-effort: a failure here is logged and does not fail the job, which
+        has already been submitted.
+
+        Skipped for jobs the jobs/serve controllers are involved in, as nothing
+        reads their spec (the managed job and service pages show the user's own
+        YAML) and the rows would only pile up:
+        - jobs on a controller cluster itself (every managed job or service
+          adds one). A plain prefix check: `Controllers.from_name` asserts on,
+          or adopts, a name that is not the current user's controller.
+        - jobs a controller submits to the clusters it launched (a managed
+          job's cluster, recovery relaunches, pool workers), which are recorded
+          as `is_managed`; see `get_job_spec_cluster_hash`.
+        """
+        if handle.cluster_name.startswith(
+            (common.JOB_CONTROLLER_PREFIX, common.SKY_SERVE_CONTROLLER_PREFIX)):
+            return
+        try:
+            cluster_hash = global_user_state.get_job_spec_cluster_hash(
+                handle.cluster_name)
+            if cluster_hash is None:
+                return
+            # The YAML as the user wrote it (secrets redacted), like the
+            # cluster's last_creation_yaml, but with the `--env`, `--secret`
+            # and resource overrides the job actually runs with.
+            task_yaml = yaml_utils.dump_yaml_str(
+                task.to_submitted_yaml_config())
+            entrypoint = common_utils.get_current_command()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to build the spec of job {job_id}: {e}')
+            return
+        global_user_state.add_cluster_job_spec(cluster_hash, job_id, task_yaml,
+                                               entrypoint)
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
@@ -6242,7 +6382,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         For scale-up or same-size: no-op (bulk_provision handles it).
         """
         current_nodes = handle.launched_nodes
-        requested_nodes = task.num_nodes
+        # On a multi-host TPU slice, a task node is one slice and the cluster
+        # has one node per VM of the slice. Compare cluster node counts.
+        requested_nodes = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
+            handle.launched_resources)
 
         if requested_nodes >= current_nodes:
             # Scale-up or no-op: nothing to do pre-provision.
@@ -6482,6 +6625,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     logger.warning(grace_warning)
                 to_provision = to_provision.copy(hooks=one_task_resource.hooks)
 
+            # An in-process caller's account (execution.launch) also applies to
+            # a cluster launched before it passed one.
+            if one_task_resource.kubernetes_identity is not None:
+                to_provision = to_provision.copy()
+                to_provision.set_kubernetes_identity(
+                    one_task_resource.kubernetes_identity)
+
             # cluster_config_overrides should be the same for all resources.
             for resource in task.resources:
                 assert (resource.cluster_config_overrides ==
@@ -6585,6 +6735,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                     existing_slurm_host_mounts.add(
                                         (host_path, mount_path,
                                          config.get('mode')))
+                        elif isinstance(to_provision.cloud, clouds.Modal):
+                            # See sky/templates/modal-ray.yml.j2.
+                            volume_mounts_config = node_config.get(
+                                'ModalVolumes', [])
+                            for vol_mount in volume_mounts_config:
+                                vol_name = vol_mount.get('VolumeNameOnCloud')
+                                if vol_name:
+                                    existing_volume_names.add(vol_name)
                 except Exception as e:  # pylint: disable=broad-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
@@ -6635,7 +6793,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
-            num_nodes = (task.num_nodes if resize else handle.launched_nodes)
+            num_nodes = (task.num_nodes *
+                         kubernetes_utils.tpu_vms_per_slice(to_provision)
+                         if resize else handle.launched_nodes)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
@@ -6693,7 +6853,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
             to_provision,
-            task.num_nodes,
+            # A multi-host TPU slice on Kubernetes has one node per VM.
+            task.num_nodes * kubernetes_utils.tpu_vms_per_slice(to_provision),
             prev_cluster_status=None,
             prev_handle=None,
             prev_cluster_ever_up=False,
@@ -6842,6 +7003,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'File mount sync took {end - start} seconds.')
         logger.info(ux_utils.finishing_message('Synced file_mounts.', log_path))
 
+    @staticmethod
+    def _check_modal_storage_mounts(
+            handle: CloudVmRayResourceHandle,
+            storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
+        """Raises if a mount was not part of the Modal cluster's launch."""
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+        node_config = config.get('available_node_types',
+                                 {}).get('ray_head_default',
+                                         {}).get('node_config', {})
+        mounted = {
+            mount['Path'] for mount in node_config.get('CloudBucketMounts', [])
+        }
+        missing = [
+            dst for dst in storage_mounts
+            if modal_utils.resolve_mount_path(dst) not in mounted
+        ]
+        if missing:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Modal mounts buckets when a cluster is launched, so '
+                    f'{", ".join(sorted(missing))} cannot be mounted on the '
+                    f'running cluster {handle.cluster_name!r}. Launch a new '
+                    'cluster with this mount, or use mode: COPY.')
+
     def _execute_storage_mounts(
             self, handle: CloudVmRayResourceHandle,
             storage_mounts: Optional[Dict[Path, storage_lib.Storage]]):
@@ -6865,6 +7050,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # MOUNT_CACHED mode.
         if not storage_mounts:
             return
+
+        if isinstance(handle.launched_resources.cloud, clouds.Modal):
+            # Modal mounts buckets into the Function at launch (see
+            # CloudBucketMounts in the cluster YAML), so a mount can't be
+            # added to a running cluster.
+            self._check_modal_storage_mounts(handle, storage_mounts)
+            return
+
         start = time.time()
         runners = handle.get_command_runners()
         num_threads = subprocess_utils.get_parallel_threads(
@@ -7167,11 +7360,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
-        # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
-        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
+        # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips.
+        # A multi-host TPU slice on Kubernetes has one cluster node per VM.
+        # At most one of the two multipliers exceeds 1 (see _execute()).
+        num_actual_nodes = (
+            task.num_nodes * handle.num_ips_per_node *
+            kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
         codegen = self._get_task_codegen_class(handle)
+        # Each VM of a multi-host TPU slice on Kubernetes gets its worker
+        # identity, which the provisioner recorded on the node.
+        if handle.cached_cluster_info is not None:
+            tpu_env_by_ip: Dict[str, Dict[str, str]] = {}
+            for infos in handle.cached_cluster_info.instances.values():
+                for info in infos:
+                    env = kubernetes_utils.tpu_worker_env_vars(info.tags)
+                    if env:
+                        tpu_env_by_ip[info.internal_ip] = env
+            codegen.set_per_ip_env_vars(tpu_env_by_ip)
 
         codegen.add_prologue(job_id)
         codegen.add_setup(

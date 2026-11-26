@@ -227,16 +227,25 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Delete branches
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           VERSION="${{ needs.extract-version.outputs.version }}"
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
 
-          # Check if test branch exists and delete it
+          # Delete the test branch only if it still points at the closed PR's
+          # head. A new Release Build started right after the PR was closed
+          # recreates the branch under the same name, and that new branch
+          # must not be deleted.
           TEST_BRANCH="test_releases/${VERSION}"
-          if git ls-remote --heads origin ${TEST_BRANCH} | grep ${TEST_BRANCH}; then
-            echo "Deleting test branch: ${TEST_BRANCH}"
-            git push origin --delete ${TEST_BRANCH}
-          else
+          BRANCH_SHA=$(git ls-remote --heads origin "refs/heads/${TEST_BRANCH}" | cut -f1)
+          if [ -z "${BRANCH_SHA}" ]; then
             echo "Test branch ${TEST_BRANCH} does not exist, skipping"
+          elif [ "${BRANCH_SHA}" != "${PR_HEAD_SHA}" ]; then
+            echo "Test branch ${TEST_BRANCH} is at ${BRANCH_SHA}, not the closed PR head ${PR_HEAD_SHA}; it was recreated, skipping"
+          else
+            echo "Deleting test branch: ${TEST_BRANCH}"
+            # The lease makes the delete fail if the branch moves after the check.
+            git push --force-with-lease="${TEST_BRANCH}:${PR_HEAD_SHA}" origin --delete "${TEST_BRANCH}"
           fi

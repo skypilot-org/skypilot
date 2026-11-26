@@ -29,27 +29,6 @@ The JSONL file should have one JSON object per line, all following the same sche
 
 Supported cloud storage backends: S3 (`s3://`) and GCS (`gs://`).
 
-### Custom Input Readers
-
-You can define custom input formats by subclassing `InputReader` and registering with the format registry:
-
-```python
-from dataclasses import dataclass
-from sky.batch.io_formats import InputReader
-from sky.utils.registry import INPUT_READER_REGISTRY
-
-@INPUT_READER_REGISTRY.type_register(name='range')
-@dataclass
-class RangeReader(InputReader):
-    count: int
-
-    def __len__(self) -> int:
-        return self.count
-
-    def download_batch(self, start_idx, end_idx, cache_dir):
-        return [{'index': i} for i in range(start_idx, end_idx + 1)]
-```
-
 ---
 
 ## Step 2: Configure Your Worker Pool
@@ -232,11 +211,9 @@ If `stream` is True, `ds.map()` blocks until all batches are processed, displayi
 |---------|-------------|----------|
 | Simple | Text doubling with CPU workers | `examples/batch/simple/` |
 | Diffusion | Image generation with GPU workers, multi-output | `examples/batch/diffusion/` |
-| Custom Formats | Custom InputReader/OutputWriter classes | `examples/batch/custom_formats/` |
 
 Run an example:
 
 ```bash
 bash examples/batch/simple/run.sh
 ```
-

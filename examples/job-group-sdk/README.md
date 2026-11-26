@@ -14,6 +14,7 @@ This example shows how to create and launch [Job Groups](https://docs.skypilot.c
 | `job_group_sdk.py` | Builds and launches a server-client Job Group in Python |
 | `job_group_primary_aux_sdk.py` | Demonstrates primary/auxiliary task lifecycle |
 | `job_group.yaml` | Equivalent YAML for reference |
+| `job_group_eval_watcher.yaml` | An eval watcher that launches evaluation jobs from inside the group |
 
 ## Usage
 
@@ -42,6 +43,16 @@ This example shows how to designate a primary task (trainer) and an auxiliary ta
 ```bash
 python examples/job-group-sdk/job_group_primary_aux_sdk.py
 ```
+
+### Launching jobs from inside the group
+
+This example shows a trainer alongside an eval watcher. The watcher launches one evaluation job per "checkpoint" with `sky jobs launch`, from inside its task. Each evaluation is a member of the group: it is listed under the group in `sky jobs queue` with its own job id, and is cancelled with the group. The watcher is a primary task, so the group stays alive until the evaluations it launched have finished.
+
+```bash
+sky jobs launch examples/job-group-sdk/job_group_eval_watcher.yaml
+```
+
+Attaching to a job group requires a remote API server running managed jobs in consolidation mode. See [Launching jobs from inside a job group](https://docs.skypilot.co/en/latest/examples/job-groups.html#launching-jobs-from-inside-a-job-group).
 
 ## Example output
 

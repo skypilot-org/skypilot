@@ -23,6 +23,7 @@ Overview
 - **Heterogeneous resources**: Different resource requirements per task (e.g., GPUs for training, CPUs for data serving)
 - **Automatic service discovery**: Tasks discover each other and communicate via hostnames
 - **Independent recovery**: Each task recovers from preemptions without affecting other tasks
+- **Launching jobs from inside the group**: A task can launch further managed jobs, which are listed under the group and cancelled with it
 
 **When to Use Job Groups:**
 
@@ -128,6 +129,8 @@ Each task document after the header follows the standard :ref:`SkyPilot task YAM
     Every task in a Job Group **must have a unique name**. The name is used for
     service discovery and log viewing.
 
+
+.. _job-groups-service-discovery:
 
 Service discovery
 -----------------
@@ -350,6 +353,8 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
 
 See the `full RL post-training example <https://github.com/skypilot-org/skypilot/tree/master/llm/rl-post-training-jobgroup>`_ in the SkyPilot repository.
 
+.. _job-groups-primary-auxiliary:
+
 Primary and auxiliary tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -386,6 +391,120 @@ When the trainer task finishes, the data-server (auxiliary) task will receive a
 termination signal after the 30-second delay, allowing it to flush pending data
 or perform cleanup.
 
+.. _job-groups-dynamic-members:
+
+Dynamically attaching jobs to a job group
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A job can be attached to a running job group after the group has launched, in
+two ways:
+
+- **From inside**: a task in the group launches it with ``sky jobs launch`` or
+  :func:`sky.jobs.launch` (see :ref:`nested-skypilot-managed-jobs`). It
+  attaches to that group by default.
+- **From outside**: ``sky jobs launch --job-group <job id or name>`` attaches a
+  job to a running group from anywhere.
+
+Either way the job becomes a *dynamic task* of the group:
+
+- It is listed under the group in ``sky jobs queue`` and the dashboard, and is
+  addressed like any other task: ``sky jobs logs 39 2`` tails it and
+  ``sky jobs cancel 39 --task 2`` cancels it on its own.
+- Dynamic tasks are :ref:`auxiliary <job-groups-primary-auxiliary>`: they do
+  not keep the group alive and are cancelled when it finishes. A failed dynamic
+  task does not fail the group.
+
+One common use case for dynamic tasks is an **eval watcher** during model
+training: one task watches for new checkpoints and launches one evaluation job
+per checkpoint, each on its own resources, while the trainer keeps going
+without being blocked by evaluation.
+
+.. code-block:: yaml
+
+    ---
+    name: train-and-eval
+    execution: parallel
+    # The watcher is primary so the group stays alive until its evals finish.
+    primary_tasks: [trainer, eval-watcher]
+    ---
+    name: trainer
+    resources:
+      accelerators: H100:8
+    volumes:
+      /checkpoints: checkpoints  # shared volume, also mounted by the watcher
+    run: |
+      python train.py --checkpoint-dir /checkpoints
+    ---
+    name: eval-watcher
+    resources:
+      cpus: 2
+    volumes:
+      /checkpoints: checkpoints
+    setup: |
+      pip install skypilot-nightly
+    run: |
+      # API server credentials are injected into the task automatically.
+      # Launch one eval job per new checkpoint; each becomes a dynamic task
+      # of this group.
+      for ckpt in $(python watch_checkpoints.py /checkpoints); do
+        sky jobs launch -y -d -n "eval-$ckpt" eval.yaml --env CKPT=$ckpt
+      done
+
+      # Wait for the evals: any still running when the group finishes is
+      # cancelled.
+      python wait_for_evals.py
+
+A runnable demo example is available at
+`job_group_eval_watcher.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/job-group-sdk/job_group_eval_watcher.yaml>`_.
+
+The dashboard lists the dynamic tasks with the group's declared tasks, marked
+``Dynamic``:
+
+.. figure:: ../images/job-groups-dynamic-tasks.png
+   :alt: The dashboard's jobs list with a job group expanded: the trainer, the eval watcher, and three dynamic evaluation tasks marked Dynamic
+   :align: center
+   :width: 90%
+
+The tasks also appear underneath the parent job in ``sky jobs queue``:
+
+.. dropdown:: Example output
+
+    .. code-block:: console
+
+        $ sky jobs queue
+        ID    TASK  NAME              ...  STATUS
+        122   -     train-and-eval    ...  RUNNING
+         ↳    0     trainer [P]       ...  RUNNING
+         ↳    1     eval-watcher [P]  ...  RUNNING
+         ↳    2     eval-step-1       ...  SUCCEEDED
+         ↳    3     eval-step-2       ...  RUNNING
+         ↳    4     eval-step-3       ...  RUNNING
+
+**Controlling where a job attaches.**
+
+- A launch from inside a job group attaches to that group by default.
+- ``--job-group <job id or name>`` attaches to a specific running group, from
+  inside another group or from outside.
+- ``--no-job-group`` launches a top-level job even from inside a group.
+- In the SDK, :func:`sky.jobs.launch` takes ``job_group``:
+  ``sky.jobs.AUTO_JOB_GROUP`` (the default), a job id or unique running job
+  name, or ``None`` for a top-level job.
+
+.. note::
+
+   Attaching to a job group requires a :ref:`remote SkyPilot API server
+   <sky-api-server>` running managed jobs in :ref:`consolidation mode
+   <jobs-consolidation-mode>`, and :ref:`API server access from within the
+   job <nested-skypilot-managed-jobs>` for the launching task. Elsewhere,
+   ``--job-group`` is rejected and a launch from inside a group runs as a
+   top-level job.
+
+.. note::
+
+   Dynamic tasks are not part of the group's :ref:`service discovery
+   <job-groups-service-discovery>`: they get no group hostname and cannot
+   reach the group's tasks by hostname.
+
 Using the Python SDK
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -416,12 +535,12 @@ Here is a minimal example:
 Current limitations
 -------------------
 
-- **Co-location**: All tasks in a Job Group run on the same infrastructure
-  (same Kubernetes cluster or cloud zone).
-
-- **Networking**: Service discovery (hostname-based communication between tasks)
-  currently only works on Kubernetes. On other clouds, tasks can run in parallel
-  but cannot communicate with each other using the hostname format.
+- **Networking**: Service discovery (hostname-based communication between
+  tasks) requires all tasks to run on a single Kubernetes cluster
+  (``inter_connection`` ``true`` or unset). A Job Group can span Kubernetes
+  clusters or run on other infrastructure with ``inter_connection: false``;
+  its tasks then run in parallel without in-group networking. See
+  :ref:`job-groups-inter-connection`.
 
 .. note::
 

@@ -232,6 +232,7 @@ class TestWorkspaceRemoteIdentityCallSite:
         resources.cluster_config_overrides = {}
         resources.image_id = None
         resources.requires_fuse = False
+        resources.kubernetes_identity = None
         resources.network_tier = resources_utils.NetworkTier.BEST
         # setattr avoids MagicMock's auto-assertion detection on the name.
         setattr(resources, 'assert_launchable', lambda: resources)

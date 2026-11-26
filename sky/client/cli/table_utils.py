@@ -59,6 +59,7 @@ def format_storage_table(storages: List[responses.StorageRecord],
         'NAME',
         'UPDATED',
         'STORE',
+        'WORKSPACE',
         'COMMAND',
         'STATUS',
     ])
@@ -77,6 +78,8 @@ def format_storage_table(storages: List[responses.StorageRecord],
             log_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row.store]),
+            # WORKSPACE
+            row.workspace_name or row.workspace or '-',
             # COMMAND,
             command,
             # STATUS
@@ -186,7 +189,7 @@ class VolumeTable(abc.ABC):
             infra,
             size,
             row.get('user_name', '-'),
-            row.get('workspace', '-'),
+            row.get('workspace_name') or row.get('workspace', '-'),
             log_utils.human_duration(row.get('launched_at', 0)),
             row.get('status', ''),
             last_attached_at_str,
@@ -360,6 +363,17 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
+class ModalVolumeTable(RunPodVolumeTable):
+    """The Modal volume table: the same columns as RunPod's.
+
+    Modal Volumes have no size, so SIZE shows '-'.
+    """
+
+    def format(self) -> str:
+        """Format the Modal volume table for display."""
+        return 'Modal Volumes:\n' + str(self.table)
+
+
 def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
@@ -396,6 +410,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()
+        elif volume_type == volume.VolumeType.MODAL_VOLUME.value:
+            modal_table = ModalVolumeTable(volume_list, show_all)
+            table_str += modal_table.format()
     if table_str:
         return table_str
     else:

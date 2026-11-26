@@ -1,17 +1,39 @@
 """Permission service for SkyPilot API Server."""
+from __future__ import annotations
+
+import atexit
 import contextlib
 import hashlib
 import logging
 import os
 import queue
+import shutil
+import tempfile
 import threading
 import time
-from typing import Dict, Generator, List, Optional, Set, Tuple
+import typing
+from typing import (ContextManager, Dict, Generator, Iterable, List, Optional,
+                    Set, Tuple)
 
-import casbin
-from casbin import util as casbin_util
-import sqlalchemy_adapter
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+if typing.TYPE_CHECKING:
+    import casbin
+    import casbin.util as casbin_util
+    import sqlalchemy
+    import sqlalchemy_adapter
+else:
+    casbin = adaptors_common.LazyImport('casbin', import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+    casbin_util = adaptors_common.LazyImport('casbin.util',
+                                             import_error_message=_SA_MSG)
+    sqlalchemy_adapter = adaptors_common.LazyImport(
+        'sqlalchemy_adapter', import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -72,9 +94,28 @@ _DENIED_LOG_TTL_SECONDS = 300
 _PROBE_DUTY_CYCLE = 0.1
 
 # Cap on repairs queued but not yet run. The per-principal claim bounds the
-# rate; this bounds a burst, so one SCIM push that strands hundreds cannot grow
-# an unbounded queue behind a single worker thread.
+# rate; this bounds a burst, so one bulk change that strands hundreds cannot
+# grow an unbounded queue behind a single worker thread.
 _REPAIR_MAX_IN_FLIGHT = 64
+
+# How often the server's poller reads the policy version, and each worker reads
+# what it published. One database read per server, not per worker: deploy mode
+# runs a worker per CPU, and the policy changes a few times a day.
+_POLICY_REFRESH_INTERVAL_SECONDS = 5
+# A published version older than this means the poller is gone; workers then
+# read the database themselves.
+_POLLER_STALE_SECONDS = 30
+# Bounds connecting and the query on the read. Not a wait in a pooler's queue
+# or on a dead socket: the stale check above covers those.
+_POLLER_DB_TIMEOUT_SECONDS = 5
+# How often a worker rebuilds while the stored version cannot be trusted.
+_UNVERSIONED_RELOAD_INTERVAL_SECONDS = 60
+# Where the poller publishes, inherited by the workers it spawns.
+_POLICY_VERSION_FILE_ENV = 'SKYPILOT_SERVER_RBAC_POLICY_VERSION_FILE'
+# Published when the read worked but the version cannot be trusted (no row, or
+# the trigger is disabled), and when the read failed.
+_UNVERSIONED = 'unversioned'
+_READ_ERROR = 'error'
 
 # Materialized once: the role set is a static enum, and this is consulted on
 # every request.
@@ -149,17 +190,209 @@ def _system_role(user_id: str) -> Optional[str]:
     return _system_user_roles().get(user_id)
 
 
+# TODO(hailong): Remove in the release after this one. Older servers cache
+# workspace member checks under this prefix for an hour and rely on writers
+# to clear them, so a rolling update or a rollback would otherwise serve them
+# stale entries.
+_LEGACY_MEMBER_CACHE_PREFIX = 'perm:ws:'
+
+
+def _clear_legacy_member_cache() -> None:
+    """Drops every member check an older server cached. After a commit: the
+    write stands, so a failure only logs."""
+    try:
+        kv_cache.delete_cache_entries_by_prefix(_LEGACY_MEMBER_CACHE_PREFIX)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to clear member checks cached by older '
+                       f'servers: {common_utils.format_exception(e)}')
+
+
 _enforcer_instance: Optional['PermissionService'] = None
 
-# KV cache constants for workspace permission checks.
-_WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
-_WORKSPACE_PERM_CACHE_KEY_SEP = ':'
-# Long TTL as safety net; primary freshness is explicit invalidation on update.
-_WORKSPACE_PERM_CACHE_TTL_SECONDS = 60 * 60  # 1h
+_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model.conf')
+
+# Triggers on casbin_rule that bump rbac_policy_version on every write
+# (global_user_state migration 027).
+_POLICY_VERSION_PG_TRIGGER = 'casbin_rule_bump_policy_version'
+_POLICY_VERSION_SQLITE_TRIGGERS = (
+    'casbin_rule_bump_policy_version_insert',
+    'casbin_rule_bump_policy_version_update',
+    'casbin_rule_bump_policy_version_delete',
+)
+# Health is read with the version: a disabled trigger is caught on next call.
+# Plain SQL, wrapped in sqlalchemy.text() at use: SQLAlchemy is not installed
+# on a client-only install, so nothing here may touch it at import.
+_POLICY_VERSION_PG_SQL = (
+    'SELECT v.version, t.tgenabled FROM rbac_policy_version v '
+    'LEFT JOIN pg_trigger t ON t.tgrelid = to_regclass(\'casbin_rule\') '
+    'AND t.tgname = :trigger WHERE v.id = 1')
+_POLICY_VERSION_SQLITE_SQL = (
+    'SELECT version FROM rbac_policy_version WHERE id = 1')
+
+# Fields per rule: `g` is (user, role), `p` is (subject, object, action).
+_RULE_WIDTH = {'g': 2, 'p': 3}
+# Ids per IN list in a multi-user write. Bound the IN list so we stay under
+# SQLite's SQLITE_MAX_VARIABLE_NUMBER (default 999 on sqlite < 3.32, 32766+ on
+# newer builds) and avoid pathological IN-clause planning on PostgreSQL. 500
+# is comfortably under both ceilings.
+_IDS_PER_STATEMENT = 500
+
+
+def _chunks(ids: List[str]) -> Iterable[List[str]]:
+    for start in range(0, len(ids), _IDS_PER_STATEMENT):
+        yield ids[start:start + _IDS_PER_STATEMENT]
+
+
+class _PolicyRows:
+    """Reads and writes policy rows on one connection, inside its transaction.
+
+    Multi-row writes go to the adapter's table directly: the adapter commits
+    every row on its own, and its batch calls either do the same or match the
+    wrong rows.
+    """
+
+    def __init__(self, conn: sqlalchemy.engine.Connection,
+                 table: sqlalchemy.Table):
+        self.conn = conn
+        self.c = table.c
+        self._table = table
+
+    def _fields(self, ptype: str) -> List[sqlalchemy.Column]:
+        return [self.c[f'v{i}'] for i in range(_RULE_WIDTH[ptype])]
+
+    def select(self, ptype: str,
+               *where: sqlalchemy.ColumnElement) -> List[Tuple[str, ...]]:
+        rows = self.conn.execute(
+            sqlalchemy.select(*self._fields(ptype)).where(
+                self.c.ptype == ptype, *where))
+        return [tuple(row) for row in rows]
+
+    def delete_where(self, ptype: str, *where: sqlalchemy.ColumnElement) -> int:
+        return self.conn.execute(
+            sqlalchemy.delete(self._table).where(self.c.ptype == ptype,
+                                                 *where)).rowcount
+
+    def delete(self, ptype: str, rules: Iterable[Tuple[str, ...]]) -> None:
+        """Deletes every stored copy of each rule."""
+        params = [{f'f{i}': v for i, v in enumerate(rule)} for rule in rules]
+        if params:
+            self.conn.execute(
+                sqlalchemy.delete(self._table).where(
+                    self.c.ptype == ptype,
+                    *(field == sqlalchemy.bindparam(f'f{i}')
+                      for i, field in enumerate(self._fields(ptype)))), params)
+
+    def insert(self, ptype: str, rules: Iterable[Tuple[str, ...]]) -> None:
+        rows = [{
+            'ptype': ptype,
+            **{f'v{i}': v for i, v in enumerate(rule)}
+        } for rule in rules]
+        if rows:
+            self.conn.execute(sqlalchemy.insert(self._table), rows)
+
+
+class _PolicyVersion:
+    """The stored policy version an enforcer last loaded, and how to read it.
+
+    Shared by every PermissionService over one enforcer.
+    """
+
+    def __init__(self, enforcer: casbin.SyncedEnforcer,
+                 adapter: sqlalchemy_adapter.Adapter,
+                 engine: sqlalchemy.engine.Engine):
+        self.enforcer = enforcer
+        self.adapter = adapter
+        self.engine = engine
+        # One stale reader builds while the others wait for its result,
+        # instead of each building a copy of the policy. Local writes hold it
+        # too, so a build never misses one (see `_local_write`).
+        self.reload_lock = threading.Lock()
+        self.loaded: Optional[int] = None
+        self._is_postgres = (
+            engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value)
+        self._is_sqlite = (
+            engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value)
+        self._trigger_ok = True
+        # SQLite has no runtime toggle for triggers, so checking once is enough.
+        self._sqlite_triggers_ok = (self._is_sqlite and
+                                    self._sqlite_triggers_present())
+
+    def _sqlite_triggers_present(self) -> bool:
+        try:
+            with self.engine.connect() as conn:
+                names = conn.execute(
+                    sqlalchemy.text('SELECT name FROM sqlite_master '
+                                    'WHERE type = \'trigger\'')).scalars()
+                return set(_POLICY_VERSION_SQLITE_TRIGGERS) <= set(names)
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def read(self) -> Optional[int]:
+        """The stored version, or None when it cannot be trusted."""
+        try:
+            with self.engine.connect() as conn:
+                return self.read_on(conn)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the policy version: {e}')
+            return None
+
+    def read_on(self, conn: sqlalchemy.engine.Connection) -> Optional[int]:
+        """Like `read`, on the caller's connection, and raising on error."""
+        if not self._is_postgres and not self._is_sqlite:
+            return None
+        if self._is_postgres:
+            query = sqlalchemy.text(_POLICY_VERSION_PG_SQL).bindparams(
+                trigger=_POLICY_VERSION_PG_TRIGGER)
+        else:
+            query = sqlalchemy.text(_POLICY_VERSION_SQLITE_SQL)
+        row = conn.execute(query).first()
+        if row is None:
+            return None
+        # 'O' and 'A' fire in normal sessions; 'D' is disabled and 'R' fires
+        # only under session_replication_role=replica.
+        trigger_ok = (row[1] in ('O', 'A')
+                      if self._is_postgres else self._sqlite_triggers_ok)
+        if not trigger_ok and self._trigger_ok:
+            logger.warning('The casbin_rule version trigger is missing or '
+                           'disabled; changes to the policy are picked up '
+                           'only by full reloads.')
+        self._trigger_ok = trigger_ok
+        return row[0] if trigger_ok else None
+
+    def is_loaded(self, version: Optional[int]) -> bool:
+        return version is not None and version == self.loaded
+
+
+def _swap_enforcer(synced: casbin.SyncedEnforcer, fresh: casbin.Enforcer,
+                   state: _PolicyVersion, version: Optional[int]) -> None:
+    """Make `synced` serve `fresh`, built from the policy at `version`.
+
+    Caller holds `state.reload_lock` and read `version` before the build.
+    Under the write lock this only swaps a pointer: no database I/O, so a
+    slow database never holds up readers, some of which run on the event
+    loop. A write from another process that landed during the build leaves
+    the model newer than `version`, which costs one extra rebuild later.
+    casbin has no public API for this, so if its private names change,
+    reload in place as before, which does read the database under the lock.
+    """
+    # pylint: disable=protected-access
+    if not (isinstance(getattr(synced, '_e', None), casbin.Enforcer) and
+            hasattr(synced, '_wl')):
+        synced.load_policy()
+        state.loaded = version
+        return
+    with synced._wl:
+        synced._e = fresh
+        # After the model: no reader sees a version its model lacks.
+        state.loaded = version
 
 
 class PermissionService:
     """Permission service for SkyPilot API Server."""
+
+    # None when the enforcer was set up elsewhere: reload unconditionally.
+    # A class default, so instances built without __init__ still have it.
+    _policy_version: Optional[_PolicyVersion] = None
 
     def __init__(self):
         self.enforcer: Optional[casbin.SyncedEnforcer] = None
@@ -196,6 +429,20 @@ class PermissionService:
         self._repair_in_flight: Set[str] = set()
         self._repair_worker: Optional[threading.Thread] = None
         self._repair_lock = threading.Lock()
+        # Background policy refresh: the poller (one per server) and the
+        # watcher (one per process that serves requests). See
+        # `start_policy_version_poller` and `start_policy_watcher`.
+        self._poller_started = False
+        self._watcher_started = False
+        self._refresh_start_lock = threading.Lock()
+        self._poll_engine: Optional[sqlalchemy.engine.Engine] = None
+        self._poller_failing = False
+        self._poller_read_failing = False
+        self._watcher_failing = False
+        # When this watcher first saw the poller publish a read error.
+        self._error_since: Optional[float] = None
+        self._watcher_falling_back = False
+        self._unversioned_reload_at = float('-inf')
         # When the in-flight cap warning was last emitted. A timestamp, not one
         # of the TTL caches: the condition is global, so there is nothing to key
         # by and no cache to bound. Read and written under `_repair_lock`.
@@ -218,16 +465,15 @@ class PermissionService:
                         sqlalchemy_adapter.Base.metadata, engine)
                 adapter = sqlalchemy_adapter.Adapter(
                     engine, db_class=sqlalchemy_adapter.CasbinRule)
-                model_path = os.path.join(os.path.dirname(__file__),
-                                          'model.conf')
                 # Use SyncedEnforcer for thread safety. It uses a
                 # read-write lock internally: concurrent reads (enforce,
                 # get_roles_for_user) take a shared read lock, while
                 # writes (load_policy, add_policy) take an exclusive
                 # write lock. This prevents the RuntimeError from
                 # concurrent iteration/mutation of RoleManager.all_roles.
-                enforcer = casbin.SyncedEnforcer(model_path, adapter)
+                enforcer = casbin.SyncedEnforcer(_MODEL_PATH, adapter)
                 self.enforcer = enforcer
+                self._policy_version = _PolicyVersion(enforcer, adapter, engine)
                 # Only set the enforcer instance once the enforcer
                 # is successfully initialized, if we change it and then fail
                 # we will set it to None and all subsequent calls will fail.
@@ -239,6 +485,7 @@ class PermissionService:
             else:
                 assert _enforcer_instance is not None
                 self.enforcer = _enforcer_instance.enforcer
+                self._policy_version = _enforcer_instance._policy_version  # pylint: disable=protected-access
             # The viewer allowlist is in-process state (not stored in
             # casbin). It MUST be populated in every process that handles
             # requests.
@@ -270,6 +517,18 @@ class PermissionService:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get plugin RBAC rules: {e}')
             return {}
+
+    def _plugin_rbac_rules_complete(self) -> bool:
+        """Whether every configured plugin's RBAC rules were read."""
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky.server import plugins as server_plugins
+            return server_plugins.plugin_rbac_rules_complete()
+        except ImportError:
+            # No plugins outside the server, so none are missing.
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
 
     def _get_plugin_viewer_allowlist(self) -> List[dict]:
         """Get viewer-allowlist entries from loaded plugins.
@@ -359,11 +618,13 @@ class PermissionService:
                             password=password,
                             user_type=models.UserType.BASIC.value))
             enforcer = self._ensure_enforcer()
-            # Same reason as `_maybe_initialize_policies`: the mutator below
-            # decides against this model, which predates the lock unless
-            # refreshed.
+            # The mutator below decides against this model, which predates the
+            # lock unless refreshed.
             self._load_policy_no_lock()
-            enforcer.add_grouping_policy(user_hash, rbac.RoleName.ADMIN.value)
+            with self._local_write():
+                enforcer.add_grouping_policy(user_hash,
+                                             rbac.RoleName.ADMIN.value)
+            _clear_legacy_member_cache()
             logger.info(f'Basic auth user {username} initialized')
 
     def _maybe_initialize_policies(self) -> None:
@@ -373,24 +634,13 @@ class PermissionService:
         """
         logger.debug(f'Initializing policies in process: {os.getpid()}')
 
-        # The model was loaded by the enforcer's constructor, before the lock
-        # was acquired -- and waiting for it can take seconds. Anything another
-        # replica wrote in that window is missing here, so this method would
-        # consider it redundant and delete it.
-        self._load_policy_no_lock()
-
-        # Check if policies are already initialized by looking for existing
-        # permission policies in the enforcer
-        enforcer = self._ensure_enforcer()
-        # Convert existing policies to set of tuples for O(1) lookups
-        existing_policies = {tuple(p) for p in enforcer.get_policy()}
-
         # Get plugin RBAC rules dynamically
         plugin_rules = self._get_plugin_rbac_rules()
+        plugin_rules_complete = self._plugin_rbac_rules_complete()
 
-        # Viewer allowlist is built in `_lazy_initialize` (called above
-        # via `_ensure_enforcer`) so worker processes that never reach
-        # this method still get it. Operator-config changes to
+        # Viewer allowlist is built in `_lazy_initialize` so worker
+        # processes that never reach this method still get it.
+        # Operator-config changes to
         # `rbac.roles.viewer.permissions.allowlist` still require a
         # server restart — same semantics as the existing blocklist
         # for the user role.
@@ -415,59 +665,58 @@ class PermissionService:
         for workspace_name, users in workspace_policy_permissions.items():
             for user in users:
                 expected_policies.append((user, workspace_name, '*'))
-        # Check if all expected policies already exist and find missing ones
-        missing_policies = [
-            p for p in expected_policies if p not in existing_policies
-        ]
-        # Find policies to remove
-        expected_policies_set = set(expected_policies)
-        redundant_policies = [
-            p for p in existing_policies if p not in expected_policies_set
-        ]
-        if missing_policies:
-            # Add missing policies
-            logger.debug(f'Found {len(missing_policies)} missing policies, '
-                         'initializing...')
-            for p in missing_policies:
-                logger.debug(f'Adding policy: {p}')
-                enforcer.add_policy(*p)
-            logger.debug('Missing policies added successfully')
 
-        if redundant_policies:
-            # Remove redundant policies
-            logger.debug(f'Found {len(redundant_policies)} redundant policies, '
-                         'cleaning up...')
-            for p in redundant_policies:
-                logger.debug(f'Removing policy: {p}')
-                enforcer.remove_policy(*p)
-            logger.debug('Redundant policies removed successfully')
-
-        if not missing_policies and not redundant_policies:
-            logger.debug('Policies already in sync, skipping initialization')
-
-        # Always ensure users have default roles (this is idempotent)
-        # Get users who already have roles (g policies) to avoid redundant calls
-        users_with_roles = {tuple(g)[0] for g in enforcer.get_grouping_policy()}
-        all_users = global_user_state.get_all_users()
-        for existing_user in all_users:
-            if existing_user.id in _system_user_roles():
-                # Their explicit role is seeded below. Letting the default land
-                # first would win, because the seed only fills a gap.
-                continue
-            if str(existing_user.id) not in users_with_roles:
-                logger.debug(f'Adding role for user: {existing_user.name}'
-                             f'({existing_user.id})')
-                self._add_user_if_not_exists_no_lock(existing_user.id)
-        for system_user_id, system_user_role in _system_user_roles().items():
+        system_roles = _system_user_roles()
+        for system_user_id in system_roles:
             global_user_state.add_or_update_user(
                 models.User(id=system_user_id,
                             name=system_user_id,
                             user_type=models.UserType.SYSTEM.value))
-            if system_user_id not in users_with_roles:
-                logger.debug(f'Adding role for system user: {system_user_id} '
-                             f'({system_user_role})')
-                self._add_user_if_not_exists_no_lock(system_user_id,
-                                                     system_user_role)
+        all_users = global_user_state.get_all_users()
+
+        # Read from storage under the policy lock, so nothing another process
+        # wrote before it is mistaken for redundant.
+        with self._policy_transaction() as rows:
+            existing_policies = set(rows.select('p'))
+            missing_policies = [
+                p for p in dict.fromkeys(expected_policies)
+                if p not in existing_policies
+            ]
+            redundant_policies = existing_policies - set(expected_policies)
+            if not plugin_rules_complete:
+                # A plugin whose rules were not read would lose its blocklist
+                # rows here, opening its endpoints to every role.
+                kept = {
+                    p for p in redundant_policies if p[0] in _SUPPORTED_ROLES
+                }
+                if kept:
+                    logger.warning(
+                        f'Keeping {len(kept)} role rules not in the expected '
+                        'policy, because some plugin RBAC rules failed to load.'
+                    )
+                redundant_policies -= kept
+            logger.debug(f'Adding {len(missing_policies)} missing policies, '
+                         f'removing {len(redundant_policies)} redundant ones')
+            rows.delete('p', redundant_policies)
+            rows.insert('p', missing_policies)
+
+            # Always ensure users have default roles (this is idempotent)
+            users_with_roles = {user for user, _ in rows.select('g')}
+            # A system user's explicit role is seeded below. Letting the default
+            # land first would win, because the seed only fills a gap.
+            seeds = {
+                str(user.id): rbac.get_default_role()
+                for user in all_users
+                if user.id not in system_roles and
+                str(user.id) not in users_with_roles
+            }
+            seeds.update({
+                user_id: role
+                for user_id, role in system_roles.items()
+                if user_id not in users_with_roles
+            })
+            logger.debug(f'Adding roles for {len(seeds)} users')
+            rows.insert('g', seeds.items())
 
     def add_user_if_not_exists(self,
                                user_id: str,
@@ -478,8 +727,6 @@ class PermissionService:
             # Refresh before deciding: the callee reads this process's
             # in-memory model, which may predate another worker's write, and
             # would then add a *second* role for a user who already has one.
-            # Deliberately here rather than in the callee, which
-            # `_maybe_initialize_policies` calls once per user in a loop.
             self._load_policy_no_lock()
             self._add_user_if_not_exists_no_lock(user_id, role)
 
@@ -494,8 +741,10 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         user_roles = enforcer.get_roles_for_user(user_id)
         if not user_roles:
-            enforcer.add_grouping_policy(user_id, role or
-                                         rbac.get_default_role())
+            with self._local_write():
+                enforcer.add_grouping_policy(user_id, role or
+                                             rbac.get_default_role())
+            _clear_legacy_member_cache()
             return True
         return False
 
@@ -504,43 +753,90 @@ class PermissionService:
 
         User ids are derived from the username, so a delete followed by a
         recreate reuses the id -- anything left behind is silently inherited by
-        the next holder. Both row types are keyed by user id at field 0, and a
-        filtered removal also clears duplicates, which a loop over the
-        deduplicated role list cannot reach.
+        the next holder.
         """
         with _policy_lock():
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            removed_roles = enforcer.remove_filtered_grouping_policy(0, user_id)
-            # Private-workspace membership is a `p` row (user, workspace, '*').
-            # Role names also sit at field 0 of `p` rows (the blocklist rules),
-            # so match the '*' action as well instead of field 0 alone: no user
-            # id is a role name today, but taking out a role's whole blocklist
-            # would leave that role unrestricted rather than merely wrong. ''
-            # matches any value, in the model and in the sqlalchemy adapter.
-            removed_grants = enforcer.remove_filtered_policy(
-                0, user_id, '', '*')
-            if not removed_roles and not removed_grants:
-                # Nothing was removed, so nothing to invalidate.
-                return
-            self.invalidate_user_permission_cache(user_id)
+            with self._policy_transaction() as rows:
+                self._delete_user_policy(rows, user_id)
 
-    def update_role(self, user_id: str, new_role: str) -> None:
-        """Replace every role held by a user with `new_role`."""
+    def delete_user_and_record(self, user_id: str) -> None:
+        """Like `delete_user`, and deletes the user record in the same write.
+
+        The record lives in the policy's database, so a failure leaves neither
+        a user without a policy nor a policy without its user.
+        """
+        users = global_user_state.user_table
         with _policy_lock():
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            if enforcer.get_roles_for_user(user_id) == [new_role]:
-                return
-            # Replace, don't add: a user is only ever meant to hold one role,
-            # and a leftover `admin` would survive a demotion -- silently
-            # restoring what the demotion took away, since the blocklist check
-            # lets admin win over the other role.
-            enforcer.remove_filtered_grouping_policy(0, user_id)
-            enforcer.add_grouping_policy(user_id, new_role)
-            # Always invalidate: even a first role assignment can grant
-            # workspace access that was previously denied and cached.
-            self.invalidate_user_permission_cache(user_id)
+            with self._policy_transaction() as rows:
+                rows.conn.execute(
+                    sqlalchemy.delete(users).where(users.c.id == user_id))
+                # Policy last: each policy statement locks the version row until
+                # commit, so taking it after the user row keeps one lock order.
+                self._delete_user_policy(rows, user_id)
+
+    @staticmethod
+    def _delete_user_policy(rows: _PolicyRows, user_id: str) -> None:
+        rows.delete_where('g', rows.c.v0 == user_id)
+        # Private-workspace membership is a `p` row (user, workspace, '*').
+        # Role names also sit at field 0 of `p` rows (the blocklist rules), so
+        # match the '*' action as well: taking out a role's whole blocklist
+        # would leave that role unrestricted.
+        rows.delete_where('p', rows.c.v0 == user_id, rows.c.v2 == '*')
+
+    def update_role(self,
+                    user_id: str,
+                    new_role: str,
+                    existing_user_only: bool = False) -> bool:
+        """Replace every role held by a user with `new_role`. Returns False if
+        skipped for `existing_user_only` (see `update_roles`)."""
+        return not self.update_roles({user_id: new_role},
+                                     existing_users_only=existing_user_only)
+
+    def update_roles(self,
+                     roles: Dict[str, str],
+                     existing_users_only: bool = False) -> List[str]:
+        """Give each user exactly the role mapped to it, in one write.
+
+        With `existing_users_only`, users without a record are skipped and
+        returned. The check runs under the policy lock that
+        `delete_user_and_record` also holds, so a user deleted after the
+        caller's own check is not given a role a recreated user would inherit.
+        """
+        if not roles:
+            return []
+        with _policy_lock():
+            with self._policy_transaction() as rows:
+                ids = sorted(roles)
+                missing: List[str] = []
+                if existing_users_only:
+                    users = global_user_state.user_table
+                    found = set()
+                    for chunk in _chunks(ids):
+                        found.update(
+                            rows.conn.execute(
+                                sqlalchemy.select(users.c.id).where(
+                                    users.c.id.in_(chunk))).scalars())
+                    missing = [
+                        user_id for user_id in ids if user_id not in found
+                    ]
+                    ids = [user_id for user_id in ids if user_id in found]
+                held: Dict[str, List[str]] = {}
+                for chunk in _chunks(ids):
+                    for user_id, role in rows.select('g', rows.c.v0.in_(chunk)):
+                        held.setdefault(user_id, []).append(role)
+                changed = [
+                    user_id for user_id in ids
+                    if held.get(user_id) != [roles[user_id]]
+                ]
+                # Replace, don't add: a user is only ever meant to hold one
+                # role, and a leftover `admin` would survive a demotion --
+                # silently restoring what the demotion took away, since the
+                # blocklist check lets admin win over the other role.
+                for chunk in _chunks(changed):
+                    rows.delete_where('g', rows.c.v0.in_(chunk))
+                    rows.insert(
+                        'g', [(user_id, roles[user_id]) for user_id in chunk])
+        return missing
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Get the roles directly assigned to a user.
@@ -636,6 +932,21 @@ class PermissionService:
         readable = writable | self._read_only_visible(workspace_names)
         return readable, writable
 
+    def get_readable_workspace_names(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Return workspace names the user can read, or None if unrestricted.
+
+        Same as `get_accessible_workspace_names` with ``action='read'``, except
+        that server-off and admin return None instead of ``workspace_names``.
+        For filtering records that outlive their workspace, such as cluster
+        history, which an admin must still see after the workspace is deleted.
+        """
+        writable = self._writable_workspace_names(user_id, workspace_names)
+        if writable is None:
+            return None
+        return writable | self._read_only_visible(workspace_names)
+
     def _writable_workspace_names(
             self, user_id: str,
             workspace_names: Set[str]) -> Optional[Set[str]]:
@@ -656,14 +967,54 @@ class PermissionService:
         roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in roles:
             return None
-        enforcer = self._ensure_enforcer()
-        writable = set()
-        for rule in enforcer.get_policy():
-            if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
-                                                      rule[0] == '*'):
-                if rule[1] in workspace_names:
-                    writable.add(rule[1])
-        return writable
+        return self._writable(self._workspace_members(workspace_names), user_id)
+
+    def readable_workspace_members_in_memory(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Return the user plus the members of every workspace they can read.
+
+        Returns None if a readable workspace is public, as everyone is its
+        member. The readable set is the non-admin one from
+        `get_readable_workspace_names`. A workspace that is readable only
+        because of ``read_access: all`` adds its members, not everyone.
+
+        Reads this process's policy without reloading it, so the caller must
+        reload first, and must handle admins itself.
+        """
+        members = self._workspace_members(workspace_names)
+        readable = (self._writable(members, user_id) |
+                    self._read_only_visible(workspace_names))
+        result = {user_id}
+        for workspace_name in readable:
+            workspace_members = members.get(workspace_name, set())
+            if '*' in workspace_members:
+                return None
+            result |= workspace_members
+        return result
+
+    def _workspace_members(self,
+                           workspace_names: Set[str]) -> Dict[str, Set[str]]:
+        """Each requested workspace's members, from the policy in memory.
+
+        A member is a direct (user_id, workspace, '*') grant, or '*' for the
+        wildcard ('*', workspace, '*') grant of a public workspace.
+        """
+        members: Dict[str, Set[str]] = {}
+        for rule in self._ensure_enforcer().get_policy():
+            if (len(rule) >= 3 and rule[2] == '*' and
+                    rule[1] in workspace_names):
+                members.setdefault(rule[1], set()).add(rule[0])
+        return members
+
+    @staticmethod
+    def _writable(members: Dict[str, Set[str]], user_id: str) -> Set[str]:
+        """Workspaces in ``members`` that the user, or everyone, belongs to."""
+        return {
+            workspace_name
+            for workspace_name, workspace_members in members.items()
+            if user_id in workspace_members or '*' in workspace_members
+        }
 
     @staticmethod
     def _read_only_visible(workspace_names: Set[str]) -> Set[str]:
@@ -929,12 +1280,9 @@ class PermissionService:
         at all, which `enforce` reads as permitted everywhere -- so the
         unconfigured case must not be the permissive one.
         """
-        # We intentionally don't load the policy here, as it is a hot path, and
-        # we don't support updating the policy.
-        # We don't hold the lock for checking permission, as it is read only and
-        # it is a hot path in every request. It is ok to have a stale policy,
-        # as long as it is eventually consistent.
-        # self._load_policy_no_lock()
+        # No reload here: this runs on every request. The policy watcher keeps
+        # this process within a few seconds of the database
+        # (`start_policy_watcher`).
         enforcer = self._ensure_enforcer()
         system_role = _system_role(user_id)
         if system_role is not None:
@@ -1044,37 +1392,226 @@ class PermissionService:
                 return True
         return False
 
-    def _load_policy_no_lock(self):
-        """Load policy from storage."""
+    def _load_policy_no_lock(self, known_version: Optional[int] = None):
+        """Load policy from storage, unless its stored version is unchanged.
+
+        `known_version` is a version read before this call, used if this
+        process cannot read one, so the load is still labelled and converges.
+        """
         enforcer = self._ensure_enforcer()
-        enforcer.load_policy()
+        state = self._policy_version
+        if state is None or state.enforcer is not enforcer:
+            enforcer.load_policy()
+            return
+        if state.is_loaded(state.read()):
+            return
+        with state.reload_lock:
+            # Read before loading, so a write that lands during the load moves
+            # the version past it and the next call loads again.
+            version = state.read()
+            if version is None:
+                version = known_version
+            if state.is_loaded(version):
+                return
+            # Built without the enforcer's lock, so readers keep the old model
+            # for the whole load instead of waiting for it.
+            _swap_enforcer(enforcer, casbin.Enforcer(_MODEL_PATH,
+                                                     state.adapter), state,
+                           version)
+
+    def _local_write(self) -> ContextManager:
+        """Hold while changing the in-memory model through the enforcer API.
+
+        Such a write changes the model a build in progress is about to
+        replace; excluding builds keeps the swap from discarding it.
+        """
+        state = self._policy_version
+        if state is None:
+            return contextlib.nullcontext()
+        return state.reload_lock
+
+    @contextlib.contextmanager
+    def _policy_transaction(self) -> Generator[_PolicyRows, None, None]:
+        """One transaction for a multi-row policy write, then a reload.
+
+        Caller holds `_policy_lock()`. Every process sees all of the write or
+        none of it.
+        """
+        # The enforcer's own database and table, so this process reads back
+        # what it wrote whoever set the enforcer up. SyncedEnforcer's
+        # get_adapter() returns None, so ask the enforcer it wraps.
+        # pylint: disable=protected-access
+        enforcer = self._ensure_enforcer()
+        adapter = getattr(enforcer, '_e', enforcer).get_adapter()
+        engine = adapter._engine
+        table = adapter._db_class.__table__
+        # pylint: enable=protected-access
+        with engine.begin() as conn:
+            yield _PolicyRows(conn, table)
+        _clear_legacy_member_cache()
+        try:
+            self._load_policy_no_lock()
+        except Exception as e:  # pylint: disable=broad-except
+            # The write is committed and has moved the version, so the next
+            # read reloads anyway.
+            logger.warning('Failed to reload the policy after a write: '
+                           f'{common_utils.format_exception(e)}')
 
     def load_policy(self):
         """Load policy from storage with lock."""
         with _policy_lock():
             self._load_policy_no_lock()
 
-    def _workspace_perm_cache_key(self, workspace_name: str,
-                                  user_id: str) -> str:
-        """Build a KV cache key for a workspace permission entry."""
-        return (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
-                f'{workspace_name}'
-                f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'
-                f'{user_id}')
+    def refresh_policy(self) -> None:
+        """Bring this process's policy up to the stored version, no lock.
 
-    def invalidate_workspace_permission_cache(self,
-                                              workspace_name: str) -> None:
-        """Invalidate all cached permission entries for a workspace."""
-        prefix = (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
-                  f'{workspace_name}'
-                  f'{_WORKSPACE_PERM_CACHE_KEY_SEP}')
-        kv_cache.delete_cache_entries_by_prefix(prefix)
+        For a batch of `roles_in_memory` reads: one version read instead of
+        one per `get_user_roles` call.
+        """
+        self._load_policy_no_lock()
 
-    def invalidate_user_permission_cache(self, user_id: str) -> None:
-        """Invalidate all cached permission entries for a user."""
-        kv_cache.delete_cache_entries_by_prefix_suffix(
-            prefix=_WORKSPACE_PERM_CACHE_PREFIX,
-            suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
+    def start_policy_version_poller(self) -> None:
+        """Publish the stored policy version for this server's workers.
+
+        Call once in the server's main process, before it spawns them: the
+        file's path reaches them through the environment. Writes the first
+        value before returning, so no worker starts without one.
+        """
+        with self._refresh_start_lock:
+            if self._poller_started:
+                return
+            self._ensure_enforcer()
+            state = self._policy_version
+            if state is None:
+                return
+            self._poll_engine = _poller_engine(state.engine)
+            try:
+                # Private, unpredictable, and on the container's own disk:
+                # ~/.sky can be a shared volume.
+                directory = tempfile.mkdtemp(prefix='sky-rbac-')
+                atexit.register(shutil.rmtree, directory, ignore_errors=True)
+                path = os.path.join(directory, 'policy_version')
+                _publish_policy_version(path, self._poll_policy_version_once())
+            except OSError as e:
+                logger.warning('Cannot publish the RBAC policy version; '
+                               'workers will read it from the database: '
+                               f'{common_utils.format_exception(e)}')
+                return
+            os.environ[_POLICY_VERSION_FILE_ENV] = path
+            threading.Thread(target=self._poll_policy_version_forever,
+                             args=(path,),
+                             name='rbac-policy-poller',
+                             daemon=True).start()
+            self._poller_started = True
+            logger.debug(f'RBAC policy version poller started: {path}')
+
+    def _poll_policy_version_forever(self, path: str) -> None:
+        while True:
+            time.sleep(_POLICY_REFRESH_INTERVAL_SECONDS)
+            try:
+                _publish_policy_version(path, self._poll_policy_version_once())
+            except Exception as e:  # pylint: disable=broad-except
+                if not self._poller_failing:
+                    logger.warning('Failed to publish the RBAC policy version; '
+                                   'workers will read it from the database: '
+                                   f'{common_utils.format_exception(e)}')
+                self._poller_failing = True
+                continue
+            if self._poller_failing:
+                logger.info('Publishing the RBAC policy version again.')
+            self._poller_failing = False
+
+    def _poll_policy_version_once(self) -> str:
+        """The stored version as published: the number, or a state word."""
+        state = self._policy_version
+        assert state is not None and self._poll_engine is not None
+        try:
+            value = _read_policy_version_word(state, self._poll_engine)
+        except Exception as e:  # pylint: disable=broad-except
+            if not self._poller_read_failing:
+                logger.warning('Failed to read the RBAC policy version; '
+                               'workers keep their policy until it reads '
+                               'again: '
+                               f'{common_utils.format_exception(e)}')
+            self._poller_read_failing = True
+            return _READ_ERROR
+        if self._poller_read_failing:
+            logger.info('Reading the RBAC policy version again.')
+        self._poller_read_failing = False
+        return value
+
+    def start_policy_watcher(self) -> None:
+        """Keep this process's policy within a few seconds of the database.
+
+        Call in each process that serves requests. The in-memory readers (the
+        RBAC middleware, `roles_in_memory`) never reload on their own, so
+        without this a role changed by another process would not reach them.
+        """
+        with self._refresh_start_lock:
+            if self._watcher_started:
+                return
+            threading.Thread(target=self._watch_policy_forever,
+                             name='rbac-policy-watcher',
+                             daemon=True).start()
+            self._watcher_started = True
+            logger.debug('RBAC policy watcher started.')
+
+    def _watch_policy_forever(self) -> None:
+        while True:
+            time.sleep(_POLICY_REFRESH_INTERVAL_SECONDS)
+            self._watch_policy_once()
+
+    def _watch_policy_once(self) -> None:
+        """Reload if the published version moved. Never raises."""
+        try:
+            # Not before the first request initializes this process: nothing
+            # has read the model yet, and that first load is current.
+            enforcer = self.enforcer
+            state = self._policy_version
+            if (enforcer is None or state is None or
+                    state.enforcer is not enforcer):
+                return
+            published = _read_published_policy_version()
+            if published != _READ_ERROR:
+                self._error_since = None
+            elif self._error_since is None:
+                self._error_since = time.monotonic()
+            elif time.monotonic() - self._error_since > _POLLER_STALE_SECONDS:
+                # Only the poller's connections may be failing.
+                published = None
+            if published is None:
+                if not self._watcher_falling_back:
+                    logger.warning('No current RBAC policy version from the '
+                                   'server\'s poller; reading it from the '
+                                   'database instead.')
+                self._watcher_falling_back = True
+                published = _read_policy_version_word(state, state.engine)
+            elif self._watcher_falling_back and published != _READ_ERROR:
+                logger.info('The server\'s RBAC policy version poller is '
+                            'back.')
+                self._watcher_falling_back = False
+            if published == _READ_ERROR:
+                # Keep the model: rebuilding now would only add load to a
+                # database that is already failing.
+                pass
+            elif published == _UNVERSIONED:
+                now = time.monotonic()
+                if now - self._unversioned_reload_at >= (
+                        _UNVERSIONED_RELOAD_INTERVAL_SECONDS):
+                    self._unversioned_reload_at = now
+                    self._load_policy_no_lock()
+            elif not state.is_loaded(int(published)):
+                self._load_policy_no_lock(known_version=int(published))
+        except Exception as e:  # pylint: disable=broad-except
+            if not self._watcher_failing:
+                logger.warning('Failed to refresh the RBAC policy; roles '
+                               'changed elsewhere may not apply here: '
+                               f'{common_utils.format_exception(e)}')
+            self._watcher_failing = True
+            return
+        if self._watcher_failing:
+            logger.info('Refreshing the RBAC policy again.')
+        self._watcher_failing = False
 
     def check_workspace_permission(
             self,
@@ -1086,9 +1623,8 @@ class PermissionService:
         This method checks if a user has permission to access a specific
         workspace. Membership (write) is granted by the member '*' policy
         (a direct grant for private workspaces, the ('*', ws, '*') wildcard for
-        public ones) and its result is cached in a DB-backed KV cache so all
-        server/executor processes share one view. Read-only visibility is not
-        cached -- see the 'read' branch below.
+        public ones). Read-only visibility is evaluated from config -- see the
+        'read' branch below.
 
         Args:
             action: 'write' (default) checks membership -- write and read are
@@ -1103,8 +1639,8 @@ class PermissionService:
             return True
 
         # Member/write access (admin or the member '*' grant). This is the
-        # cached, casbin-backed part; it is action-agnostic (the '*' grant
-        # covers both read and write).
+        # casbin-backed part; it is action-agnostic (the '*' grant covers both
+        # read and write).
         if self._check_member_permission(user_id, workspace_name):
             return True
 
@@ -1112,7 +1648,7 @@ class PermissionService:
         # (per-workspace read_access, falling back to the org-wide
         # workspace_config.read_access) rather than a materialized casbin
         # grant, so a change takes effect on the next request without a policy
-        # re-sync or cache invalidation. Never cached.
+        # re-sync.
         if (action == workspace_constants.WORKSPACE_ACTION_READ and
                 workspaces_utils.is_read_only_workspace(workspace_name)):
             return True
@@ -1124,15 +1660,10 @@ class PermissionService:
         """Whether the user is a member of (can write) the workspace.
 
         Admin, or the casbin member '*' grant (which also covers public
-        workspaces via the ('*', ws, '*') policy). Result is cached in the
-        DB-backed KV cache so all server/executor processes share one view and
-        the casbin enforce is off the hot path.
+        workspaces via the ('*', ws, '*') policy). Not cached:
+        `get_user_roles` reloads the policy when another process changed it,
+        except for the server's own identities, which skip the reload.
         """
-        cache_key = self._workspace_perm_cache_key(workspace_name, user_id)
-        cached = kv_cache.get_cache_entry(cache_key)
-        if cached is not None:
-            return cached == '1'
-
         role = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in role:
             result = True
@@ -1145,15 +1676,6 @@ class PermissionService:
 
         logger.debug(f'Workspace member check: user={user_id}, '
                      f'workspace={workspace_name}, result={result}')
-
-        # Cache the result; failures are non-critical.
-        try:
-            kv_cache.add_or_update_cache_entry(
-                cache_key, '1' if result else '0',
-                time.time() + _WORKSPACE_PERM_CACHE_TTL_SECONDS)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to cache workspace permission: {e}')
-
         return result
 
     def check_service_account_token_permission(self, user_id: str,
@@ -1202,20 +1724,14 @@ class PermissionService:
                    For private workspaces, this should be specific user IDs.
         """
         with _policy_lock():
-            # Reload from the DB inside the lock before mutating: casbin's
-            # mutators decide against this enforcer's in-memory view and skip
-            # the adapter when it already agrees, so a stale view makes the
-            # write a silent no-op rather than a deferred one.
-            # update_workspace_policy already does this; mirror it here.
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            for user in users:
-                logger.debug(f'Adding workspace policy: user={user}, '
-                             f'workspace={workspace_name}')
-                enforcer.add_policy(user, workspace_name, '*')
-            # Invalidate stale cached denials (e.g. from checks between a
-            # workspace deletion and its re-creation with the same name).
-            self.invalidate_workspace_permission_cache(workspace_name)
+            with self._policy_transaction() as rows:
+                members = {
+                    user for user, _, _ in rows.select(
+                        'p', rows.c.v1 == workspace_name, rows.c.v2 == '*')
+                }
+                rows.insert('p', [(user, workspace_name, '*')
+                                  for user in dict.fromkeys(users)
+                                  if user not in members])
 
     def update_workspace_policy(self, workspace_name: str,
                                 users: List[str]) -> None:
@@ -1227,23 +1743,59 @@ class PermissionService:
                    For public workspaces, this should be ['*'].
                    For private workspaces, this should be specific user IDs.
         """
+        self.sync_workspace_members({workspace_name: users})
+
+    def sync_workspace_members(
+            self,
+            members: Dict[str, List[str]],
+            all_workspaces: Optional[Iterable[str]] = None) -> None:
+        """Make each workspace's members exactly `members[ws]`, in one write.
+
+        With `all_workspaces`, every configured workspace, the members of any
+        workspace outside it are removed as well; a configured workspace
+        missing from `members` keeps its members, and a role's blocklist rules
+        are never touched. A member who stays is never removed, even for a
+        moment, and nothing is written when every set already matches.
+        """
+        known = set(all_workspaces or ())
+        if not members and all_workspaces is None:
+            return
         with _policy_lock():
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            # Remove all existing policies for this workspace
-            enforcer.remove_filtered_policy(1, workspace_name)
-            # Add new policies
-            for user in users:
-                logger.debug(f'Updating workspace policy: user={user}, '
-                             f'workspace={workspace_name}')
-                enforcer.add_policy(user, workspace_name, '*')
-            # Invalidate cached permission entries after the policy is
-            # persisted so other processes re-compute permissions on next
-            # check.
-            self.invalidate_workspace_permission_cache(workspace_name)
+            with self._policy_transaction() as rows:
+                where = [rows.c.v2 == '*']
+                if all_workspaces is None:
+                    where.append(rows.c.v1.in_(sorted(members)))
+                current: Dict[str, Set[str]] = {}
+                for user, workspace_name, _ in rows.select('p', *where):
+                    if workspace_name not in members and (
+                            workspace_name in known or
+                            user in _SUPPORTED_ROLES):
+                        # Left as is: a configured workspace whose members
+                        # were not resolved, or a role's blocklist rule.
+                        continue
+                    current.setdefault(workspace_name, set()).add(user)
+                stale = [
+                    (user, workspace_name, '*')
+                    for workspace_name, users in current.items()
+                    for user in users - set(members.get(workspace_name, ()))
+                ]
+                missing = [(user, workspace_name, '*')
+                           for workspace_name, users in members.items()
+                           for user in dict.fromkeys(users)
+                           if user not in current.get(workspace_name, ())]
+                rows.delete('p', stale)
+                rows.insert('p', missing)
 
     def resync_workspace_policies_for_new_user(self, user_id: str) -> None:
         """Grant a newly-created user any workspace access owed by config.
+
+        See `resync_workspace_policies_for_new_users`.
+        """
+        self.resync_workspace_policies_for_new_users([user_id])
+
+    def resync_workspace_policies_for_new_users(self,
+                                                user_ids: List[str]) -> None:
+        """Grant newly-created users any workspace access owed by config.
 
         Private workspaces list their members in ``allowed_users`` (a mix
         of user_ids and usernames). Those entries are resolved to casbin
@@ -1253,15 +1805,17 @@ class PermissionService:
         ``allowed_users`` before that user has ever logged in therefore
         produces an entry that resolves to nothing at sync time.
 
-        This method re-resolves the config from the perspective of a single
-        newly-created user: for each private workspace whose
-        ``allowed_users`` names this user (by id or unique username), it
+        This method re-resolves the config from the perspective of the given
+        newly-created users: for each private workspace whose
+        ``allowed_users`` names one of them (by id or unique username), it
         adds the missing ``(user_id, workspace_name, '*')`` policy. It is
-        scoped to this one user and does not rebuild all policies.
+        scoped to these users and does not rebuild all policies. A batch
+        takes each lock once, so a bulk import does not pay one lock and
+        policy write per user.
 
         Idempotent and concurrency-safe: policy writes are guarded by the
-        distributed policy lock and ``add_policy`` skips duplicates, so
-        concurrent replicas / workers converge on the same result.
+        distributed policy lock and only missing grants are added, so
+        concurrent server processes converge on the same result.
 
         Lock ordering matters: a workspace update (`update_workspace_fn`)
         takes the config lock exclusively, then the policy lock nested
@@ -1269,14 +1823,14 @@ class PermissionService:
         — config lock (shared, we only read) first, then the policy lock —
         so the two paths cannot deadlock, and holding the config lock
         across the policy write means the matches can never be computed
-        from a config snapshot that predates an admin's removal of this
+        from a config snapshot that predates an admin's removal of a
         user: whichever side takes the config lock second sees the other's
         result. On a config-lock timeout the grant is SKIPPED (never
         computed from a stale config); the zero-accessible retry in
         `workspaces.core.resolve_workspace_for_user` picks it up later.
         The pre-lock computation is only a cheap early exit so user
         creation skips the distributed locks entirely when no private
-        workspace names the user.
+        workspace names the users.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             return
@@ -1286,7 +1840,8 @@ class PermissionService:
         # pylint: disable=import-outside-toplevel
         from sky.users import resolver as user_resolver
 
-        def _matching_workspaces() -> List[str]:
+        def _matching_grants() -> List[Tuple[str, str]]:
+            """(user_id, workspace_name) pairs the config owes these users."""
             workspaces = skypilot_config.get_nested(('workspaces',),
                                                     default_value={})
             private_workspaces = {
@@ -1300,19 +1855,22 @@ class PermissionService:
                 # when there is nothing to match against.
                 return []
             resolver = user_resolver.UserResolver()
-            # Every form of this user that could appear in an allowed_users
-            # list: the user_id itself plus the unique username, if any.
-            user_entries = set(resolver.entries_for(user_id))
-            return [
-                workspace_name for workspace_name, workspace_config in
-                private_workspaces.items() if user_entries.intersection(
-                    workspace_config.get('allowed_users', []))
-            ]
+            grants: List[Tuple[str, str]] = []
+            for user_id in dict.fromkeys(user_ids):
+                # Every form of this user that could appear in an
+                # allowed_users list: the user_id itself plus the username,
+                # if an entry of it means this user.
+                user_entries = set(resolver.entries_for(user_id))
+                grants.extend((user_id, workspace_name)
+                              for workspace_name, workspace_config in
+                              private_workspaces.items()
+                              if user_entries.intersection(
+                                  workspace_config.get('allowed_users', [])))
+            return grants
 
-        if not _matching_workspaces():
+        if not _matching_grants():
             return
 
-        added_any = False
         try:
             with skypilot_config.get_skypilot_config_lock(
                     POLICY_UPDATE_LOCK_TIMEOUT_SECONDS, shared_lock=True):
@@ -1320,30 +1878,37 @@ class PermissionService:
                 # reload_config directly: safe_reload_config would try to
                 # re-acquire the (non-reentrant) config lock we now hold.
                 skypilot_config.reload_config()
-                matching_workspaces = _matching_workspaces()
-                if not matching_workspaces:
+                matching_grants = _matching_grants()
+                if not matching_grants:
                     return
                 with _policy_lock():
-                    self._load_policy_no_lock()
-                    enforcer = self._ensure_enforcer()
-                    for workspace_name in matching_workspaces:
-                        # add_policy returns False if the policy already
-                        # exists.
-                        if enforcer.add_policy(user_id, workspace_name, '*'):
-                            logger.info(
-                                f'Granting user {user_id} access to private '
-                                f'workspace {workspace_name!r} on user '
-                                'creation (matched allowed_users after the '
-                                'user record was created).')
-                            added_any = True
+                    with self._policy_transaction() as rows:
+                        # Filter on workspace, not user: a batch can hold more
+                        # users than a database allows bind parameters.
+                        granted = set(
+                            rows.select(
+                                'p', rows.c.v2 == '*',
+                                rows.c.v1.in_({
+                                    workspace_name
+                                    for _, workspace_name in matching_grants
+                                })))
+                        added = [(user_id, workspace_name, '*')
+                                 for user_id, workspace_name in matching_grants
+                                 if (user_id, workspace_name,
+                                     '*') not in granted]
+                        rows.insert('p', added)
+                for user_id, workspace_name, _ in added:
+                    label = skypilot_config.workspace_label(workspace_name)
+                    logger.info(f'Granting user {user_id} access to private '
+                                f'workspace {label} on user creation '
+                                '(matched allowed_users after the user record '
+                                'was created).')
         except locks.LockTimeout:
             logger.warning(
                 f'Timed out acquiring the config lock; skipping the '
-                f'workspace policy re-sync for user {user_id}. It will be '
-                'retried on their next workspace resolution.')
-            return
-        if added_any:
-            self.invalidate_user_permission_cache(user_id)
+                f'workspace policy re-sync for {len(user_ids)} user(s) '
+                f'(first: {user_ids[0]}). It will be retried on their next '
+                'workspace resolution.')
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
@@ -1352,14 +1917,64 @@ class PermissionService:
             # makes `remove_filtered_policy` find nothing to remove, and casbin
             # then skips the adapter entirely -- so the rows survive in the DB
             # and the caller is told the workspace was cleared.
-            # Same reason as `add_workspace_policy` / `update_workspace_policy`.
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            enforcer.remove_filtered_policy(1, workspace_name)
-            # Invalidate cached permission entries after the policy is
-            # persisted so other processes re-compute permissions on next
-            # check.
-            self.invalidate_workspace_permission_cache(workspace_name)
+            with self._local_write():
+                enforcer.remove_filtered_policy(1, workspace_name)
+            _clear_legacy_member_cache()
+
+
+def _poller_engine(
+        engine: sqlalchemy.engine.Engine) -> sqlalchemy.engine.Engine:
+    """A connection-per-read engine for the poller, off the request pool."""
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        return sqlalchemy.create_engine(
+            engine.url,
+            poolclass=sqlalchemy.NullPool,
+            connect_args={'connect_timeout': _POLLER_DB_TIMEOUT_SECONDS})
+    return sqlalchemy.create_engine(engine.url, poolclass=sqlalchemy.NullPool)
+
+
+def _read_policy_version_word(state: _PolicyVersion,
+                              engine: sqlalchemy.engine.Engine) -> str:
+    """The stored version as published: the number, or `_UNVERSIONED`.
+
+    Raises if the read fails.
+    """
+    with engine.begin() as conn:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+            # Scoped to the transaction, so it also works through a
+            # transaction-mode pooler.
+            conn.execute(
+                sqlalchemy.text('SET LOCAL statement_timeout = '
+                                f'{_POLLER_DB_TIMEOUT_SECONDS * 1000}'))
+        version = state.read_on(conn)
+    return _UNVERSIONED if version is None else str(version)
+
+
+def _publish_policy_version(path: str, value: str) -> None:
+    """Atomically write `value` and a heartbeat for the watchers."""
+    tmp = f'{path}.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        # Monotonic is system-wide, so it compares across processes and a
+        # wall-clock step cannot make a dead poller look alive.
+        f.write(f'{value} {time.monotonic()}\n')
+    os.replace(tmp, path)
+
+
+def _read_published_policy_version() -> Optional[str]:
+    """What the poller published, or None if it is missing or stale."""
+    path = os.environ.get(_POLICY_VERSION_FILE_ENV)
+    if not path:
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            value, beat = f.read().split()
+        if time.monotonic() - float(beat) > _POLLER_STALE_SECONDS:
+            return None
+    except (OSError, ValueError):
+        return None
+    return value
 
 
 @contextlib.contextmanager
@@ -1380,6 +1995,41 @@ def _policy_lock() -> Generator[None, None, None]:
 
 # Singleton instance of PermissionService for other modules to use.
 permission_service = PermissionService()
+
+
+def is_admin(user_id: str) -> bool:
+    """Whether `user_id` holds exactly the admin role.
+
+    An unknown role or a failed lookup is not admin.
+    """
+    try:
+        roles = permission_service.get_user_roles(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to look up roles of {user_id}; '
+                       f'treating as non-admin: {e}')
+        return False
+    return roles == [rbac.RoleName.ADMIN.value]
+
+
+def caller_is_admin() -> bool:
+    """Whether the user behind the current request is an admin.
+
+    Off the API server the request was authorized on the server already. So
+    was a request to a jobs or serve controller's own API server: the job was
+    checked when it was submitted, and that server only knows default roles.
+    That server copies its env from the controller process that started it,
+    which has one of the controller variables below; the main API server never
+    does, and a client cannot send them. Consolidated controller processes
+    have them too, so they must keep reaching these checks via the main
+    server, never in-process.
+    """
+    if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    # Presence, not value: a jobs controller sets the serve one to 'false'.
+    if (os.getenv(constants.OVERRIDE_CONSOLIDATION_MODE) is not None or
+            os.getenv(constants.IS_SKYPILOT_SERVE_CONTROLLER) is not None):
+        return True
+    return is_admin(common_utils.get_current_user().id)
 
 
 def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:

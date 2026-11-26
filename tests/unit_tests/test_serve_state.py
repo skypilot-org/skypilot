@@ -353,3 +353,96 @@ class TestUserHash:
         record = serve_state.get_service_from_name('svc-user-rt')
         assert record is not None
         assert record['user_hash'] == 'abcd1234'
+
+
+class TestFileMountsBlobId:
+    """A service records the upload blob its task's sources point into, so the
+    controller can pass it on with replica launches and the blob GC keeps it
+    while the service exists."""
+
+    def test_persists_blob_id(self, _mock_serve_db):
+        assert serve_state.add_service(
+            name='svc-blob',
+            controller_job_id=1,
+            policy='policy',
+            requested_resources_str='1x[CPU:1+]',
+            load_balancing_policy='round_robin',
+            status=serve_state.ServiceStatus.CONTROLLER_INIT,
+            tls_encrypted=False,
+            pool=True,
+            controller_pid=12345,
+            entrypoint='entry',
+            file_mounts_blob_id='a' * 64) is True
+        assert (serve_state.get_service_file_mounts_blob_id('svc-blob') == 'a' *
+                64)
+
+    def test_without_blob_id(self, _mock_serve_db):
+        _add_minimal_service('svc-no-blob')
+        assert serve_state.get_service_file_mounts_blob_id(
+            'svc-no-blob') is None
+        assert serve_state.get_service_file_mounts_blob_id(
+            'never-existed') is None
+
+    def test_active_blob_ids_follow_service_rows(self, _mock_serve_db):
+        for name, blob_id in [('svc-a', 'a' * 64), ('svc-b', 'b' * 64),
+                              ('svc-a2', 'a' * 64), ('svc-none', None)]:
+            serve_state.add_service(
+                name=name,
+                controller_job_id=1,
+                policy='policy',
+                requested_resources_str='1x[CPU:1+]',
+                load_balancing_policy='round_robin',
+                status=serve_state.ServiceStatus.CONTROLLER_INIT,
+                tls_encrypted=False,
+                pool=True,
+                controller_pid=12345,
+                entrypoint='entry',
+                file_mounts_blob_id=blob_id)
+        # A failed service still holds its blob: it can be recovered or
+        # cleaned up, which reads the task again.
+        serve_state.set_service_status_and_active_versions(
+            'svc-b', serve_state.ServiceStatus.CONTROLLER_FAILED)
+        assert serve_state.get_active_file_mounts_blob_ids() == {
+            'a' * 64, 'b' * 64
+        }
+
+        serve_state.remove_service_completely('svc-b')
+        serve_state.remove_service_completely('svc-a')
+        # svc-a2 shares the content-addressed blob and still needs it.
+        assert serve_state.get_active_file_mounts_blob_ids() == {'a' * 64}
+
+
+def test_get_live_services_in_workspaces(_mock_serve_db):
+    """Only live rows with a recorded workspace, filtered by workspace."""
+
+    def add(name, workspace, pool=False, status=None):
+        assert serve_state.add_service(name=name,
+                                       controller_job_id=1,
+                                       policy='policy',
+                                       requested_resources_str='1x[CPU:1+]',
+                                       load_balancing_policy='round_robin',
+                                       status=status or
+                                       serve_state.ServiceStatus.READY,
+                                       tls_encrypted=False,
+                                       pool=pool,
+                                       controller_pid=12345,
+                                       entrypoint='entry',
+                                       user_hash='alice',
+                                       workspace=workspace)
+
+    add('svc-a', 'ws-a')
+    add('pool-a', 'ws-a', pool=True)
+    add('svc-b', 'ws-b')
+    add('svc-down', 'ws-a', status=serve_state.ServiceStatus.SHUTTING_DOWN)
+    add('svc-legacy', None)
+
+    assert _read_row(_mock_serve_db, 'svc-a')['workspace'] == 'ws-a'
+    got = serve_state.get_live_services_in_workspaces({'ws-a'})
+    assert sorted((s['name'], s['pool'], s['workspace'], s['user_hash'])
+                  for s in got) == [('pool-a', True, 'ws-a', 'alice'),
+                                    ('svc-a', False, 'ws-a', 'alice')]
+    assert sorted(
+        s['name']
+        for s in serve_state.get_live_services_in_workspaces(None)) == [
+            'pool-a', 'svc-a', 'svc-b'
+        ]
