@@ -925,26 +925,33 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
         return False
 
 
-def _interrupted_submission_reason(job_id: int) -> Optional[str]:
+def _interrupted_submission_reason(
+        job_id: int,
+        requests: Dict[str, Optional['requests_lib.Request']]) -> Optional[str]:
     """Why an INACTIVE job can no longer reach the scheduler, else None.
 
     Only the request that created the job moves it from INACTIVE to WAITING,
     so once that request has ended the job stays INACTIVE for good.
+
+    Args:
+        job_id: The INACTIVE job.
+        requests: Requests already looked up in this pass, by id; the jobs of
+            one launch share a request. Filled in as a side effect.
     """
     request_id = managed_job_state.get_submission_request_id(job_id)
     if request_id is None:
         return None
-    request = requests_lib.get_request(request_id,
-                                       fields=['status', 'finished_at'])
-    if request is None:
-        ended = 'no longer exists'
-    elif request.status in requests_lib.RequestStatus.active_statuses():
+    if request_id not in requests:
+        requests[request_id] = requests_lib.get_request(
+            request_id, fields=['status', 'finished_at'])
+    request = requests[request_id]
+    if request is not None and (
+            request.status in requests_lib.RequestStatus.active_statuses() or
+        (request.finished_at is not None and
+         time.time() - request.finished_at < _SUBMISSION_END_GRACE_SECONDS)):
         return None
-    elif (request.finished_at is not None and
-          time.time() - request.finished_at < _SUBMISSION_END_GRACE_SECONDS):
-        return None
-    else:
-        ended = f'ended as {request.status.value}'
+    ended = ('no longer exists'
+             if request is None else f'ended as {request.status.value}')
     return (f'The job was never submitted: its launch request {request_id} '
             f'{ended} before the job reached the scheduler. Launch the job '
             'again.')
@@ -1013,6 +1020,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # job_id is already terminal, or if job_id is None, there are no jobs
         # that need to be checked.
         return
+    submission_requests: Dict[str, Optional['requests_lib.Request']] = {}
 
     for job_id in job_ids:
         assert job_id is not None
@@ -1057,7 +1065,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                              'the managed job.')
             elif (schedule_state ==
                   managed_job_state.ManagedJobScheduleState.INACTIVE):
-                interrupted = _interrupted_submission_reason(job_id)
+                interrupted = _interrupted_submission_reason(
+                    job_id, submission_requests)
                 if interrupted is not None:
                     logger.error(f'Job {job_id}: {interrupted}')
                     managed_job_state.set_failed(
