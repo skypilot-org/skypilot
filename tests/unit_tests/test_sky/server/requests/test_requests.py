@@ -2861,6 +2861,28 @@ async def test_listing_does_not_load_stored_results(isolated_database,
 
 
 @pytest.mark.asyncio
+async def test_listing_does_not_read_request_bodies(isolated_database,
+                                                    monkeypatch):
+    request = _make_request('list-body-req', _launch_body_with_secrets())
+    await requests.create_if_not_exists_async(request)
+    stored_body = request.encode().request_body
+    unpickled = []
+    decode_and_unpickle = decoders.decode_and_unpickle
+    monkeypatch.setattr(
+        decoders, 'decode_and_unpickle', lambda encoded: unpickled.append(
+            encoded) or decode_and_unpickle(encoded))
+
+    listing = orjson.loads(
+        requests.list_requests_json(
+            requests.RequestTaskFilter(fields=requests.DISPLAY_COLUMNS)))
+
+    assert [item['request_id'] for item in listing] == ['list-body-req']
+    assert listing[0]['request_body'] == json.dumps(None)
+    assert unpickled
+    assert stored_body not in unpickled
+
+
+@pytest.mark.asyncio
 async def test_gc_deletes_stored_result_with_its_row(isolated_database,
                                                      store_large_results):
     await requests.create_if_not_exists_async(_running_request('gc-req'))

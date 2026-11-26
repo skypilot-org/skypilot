@@ -3581,7 +3581,8 @@ async def api_status(
     fields: Optional[List[str]] = fastapi.Query(
         None,
         description=('Fields to get. If None, get all fields except '
-                     'return_value and error. Ignored if request_ids is set.')),
+                     'return_value, error and request_body. Ignored if '
+                     'request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
 ) -> Union[List[payloads.RequestPayload], fastapi.Response]:

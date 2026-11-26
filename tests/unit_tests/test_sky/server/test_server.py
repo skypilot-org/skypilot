@@ -1825,7 +1825,7 @@ def test_api_status_does_not_read_stored_results(_request_authz_env,
     for fields in requested_fields:
         assert 'return_value' not in fields
         assert 'error' not in fields
-        assert 'request_body' in fields
+        assert 'request_body' not in fields
 
 
 def test_api_status_listing_matches_model_encoding(_request_authz_env,
