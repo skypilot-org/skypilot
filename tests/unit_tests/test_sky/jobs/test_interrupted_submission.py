@@ -42,7 +42,11 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
     yield engine
 
 
-def _create_inactive_job(submission_request_id: Optional[str]) -> int:
+_OLD = 2 * 3600
+
+
+def _create_inactive_job(submission_request_id: Optional[str],
+                         age_seconds: float = 0) -> int:
     job_id = state.set_job_info_without_job_id(
         'job',
         workspace='default',
@@ -57,6 +61,10 @@ def _create_inactive_job(submission_request_id: Optional[str]) -> int:
                       'resources',
                       '{}',
                       eligible_at=time.time())
+    with state._db_manager.get_engine().begin() as conn:
+        conn.execute(state.spot_table.update().where(
+            state.spot_table.c.spot_job_id == job_id).values(
+                created_at=time.time() - age_seconds))
     return job_id
 
 
@@ -66,36 +74,39 @@ def _stub_request(monkeypatch, request: Optional[requests_lib.Request]):
     return get_request
 
 
-def _request(status: requests_lib.RequestStatus,
-             finished_at: Optional[float] = None) -> requests_lib.Request:
-    return requests_lib.Request(request_id='req-1',
-                                name='jobs.launch',
-                                entrypoint=lambda: None,
-                                request_body=None,
-                                status=status,
-                                created_at=time.time(),
-                                user_id='user',
-                                finished_at=finished_at)
+def _request(
+        status: Optional[requests_lib.RequestStatus],
+        finished_ago: Optional[float] = None) -> Optional[requests_lib.Request]:
+    """The stored request; None for a request the store does not have."""
+    if status is None:
+        return None
+    now = time.time()
+    return requests_lib.Request(
+        request_id='req-1',
+        name='jobs.launch',
+        entrypoint=lambda: None,
+        request_body=None,
+        status=status,
+        created_at=now,
+        user_id='user',
+        finished_at=None if finished_ago is None else now - finished_ago)
 
 
 def _job_row(job_id: int):
     return state.get_managed_job_tasks(job_id)[0]
 
 
-@pytest.mark.parametrize('request_row', [
-    None,
-    _request(requests_lib.RequestStatus.FAILED, finished_at=time.time() - 3600),
-    _request(requests_lib.RequestStatus.CANCELLED,
-             finished_at=time.time() - 3600),
-],
-                         ids=[
-                             'request-gone', 'request-failed',
-                             'request-cancelled'
-                         ])
+@pytest.mark.parametrize(
+    'status,finished_ago', [
+        (None, None),
+        (requests_lib.RequestStatus.FAILED, 3600),
+        (requests_lib.RequestStatus.CANCELLED, 3600),
+    ],
+    ids=['request-gone', 'request-failed', 'request-cancelled'])
 def test_ended_submission_fails_the_job(_mock_managed_jobs_db_conn, monkeypatch,
-                                        request_row):
-    job_id = _create_inactive_job('req-1')
-    _stub_request(monkeypatch, request_row)
+                                        status, finished_ago):
+    job_id = _create_inactive_job('req-1', age_seconds=_OLD)
+    _stub_request(monkeypatch, _request(status, finished_ago))
 
     utils.update_managed_jobs_statuses()
 
@@ -107,16 +118,29 @@ def test_ended_submission_fails_the_job(_mock_managed_jobs_db_conn, monkeypatch,
 
 
 @pytest.mark.parametrize(
-    'request_row', [
-        _request(requests_lib.RequestStatus.PENDING),
-        _request(requests_lib.RequestStatus.RUNNING),
-        _request(requests_lib.RequestStatus.FAILED, finished_at=time.time()),
+    'status,finished_ago', [
+        (requests_lib.RequestStatus.PENDING, None),
+        (requests_lib.RequestStatus.RUNNING, None),
+        (requests_lib.RequestStatus.FAILED, 0),
     ],
     ids=['request-pending', 'request-running', 'request-just-ended'])
 def test_live_submission_is_left_alone(_mock_managed_jobs_db_conn, monkeypatch,
-                                       request_row):
+                                       status, finished_ago):
     job_id = _create_inactive_job('req-1')
-    _stub_request(monkeypatch, request_row)
+    _stub_request(monkeypatch, _request(status, finished_ago))
+
+    utils.update_managed_jobs_statuses()
+
+    row = _job_row(job_id)
+    assert row['status'] == state.ManagedJobStatus.PENDING
+    assert row['schedule_state'] == state.ManagedJobScheduleState.INACTIVE
+
+
+def test_unseen_request_of_a_recent_job_is_left_alone(
+        _mock_managed_jobs_db_conn, monkeypatch):
+    # The request may be running on another API server with its own store.
+    job_id = _create_inactive_job('req-1', age_seconds=60)
+    _stub_request(monkeypatch, None)
 
     utils.update_managed_jobs_statuses()
 
@@ -140,7 +164,7 @@ def test_job_without_submission_request_is_left_alone(
 
 def test_cancelled_job_of_ended_submission_is_done(_mock_managed_jobs_db_conn,
                                                    monkeypatch):
-    job_id = _create_inactive_job('req-1')
+    job_id = _create_inactive_job('req-1', age_seconds=_OLD)
     assert state.set_pending_cancelled(job_id)
     _stub_request(monkeypatch, None)
 
@@ -153,7 +177,9 @@ def test_cancelled_job_of_ended_submission_is_done(_mock_managed_jobs_db_conn,
 
 def test_jobs_of_one_launch_share_one_request_lookup(_mock_managed_jobs_db_conn,
                                                      monkeypatch):
-    job_ids = [_create_inactive_job('req-1') for _ in range(3)]
+    job_ids = [
+        _create_inactive_job('req-1', age_seconds=_OLD) for _ in range(3)
+    ]
     get_request = _stub_request(monkeypatch, None)
 
     utils.update_managed_jobs_statuses()
