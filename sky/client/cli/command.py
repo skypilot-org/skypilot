@@ -6311,7 +6311,9 @@ def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
               help=('Launch a finished managed job again, by ID or name, as a '
                     'new job, like running `sky jobs launch` again with its '
                     'YAML and flags. Resource, --env and --secret flags '
-                    'override it. Takes no ENTRYPOINT.'))
+                    'override it. Takes no ENTRYPOINT. Needs write access to '
+                    'the job\'s workspace. A job group member is restarted '
+                    'on its own, as a standalone job.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint

@@ -656,8 +656,11 @@ def test_restart_allows_files_that_outlive_the_job(mutate):
 def test_restart_of_another_users_job_with_secrets_is_refused():
     # A viewer of the job's workspace must not run with its owner's secrets,
     # even into a workspace the viewer can write to.
+    # bob may write to team-a; the secrets are still alice's.
     with mock.patch.object(jobs_core, '_client_set_workspace',
                            return_value=True), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission'), \
          mock.patch.object(jobs_core, 'launch') as launch:
         with pytest.raises(exceptions.PermissionDeniedError,
                            match='only its owner'):
@@ -699,6 +702,7 @@ def test_restart_runs_in_the_original_workspace():
 
 def test_restart_into_a_requested_workspace():
     # `--workspace` names where the new job goes; the executor authorized it.
+    # The original workspace still needs write access, as for cancel.
     with mock.patch.object(jobs_core, '_client_set_workspace',
                            return_value=True), \
          mock.patch.object(jobs_core.workspaces_core,
@@ -706,8 +710,50 @@ def test_restart_into_a_requested_workspace():
          mock.patch.object(jobs_core.skypilot_config,
                            'local_active_workspace_ctx') as workspace_ctx:
         _restart([_record(workspace='team-a')], active_workspace='team-b')
-    permission.assert_not_called()
+    permission.assert_called_once()
+    assert permission.call_args.args[1] == 'team-a'
+    assert permission.call_args.kwargs['action'] == 'write'
     workspace_ctx.assert_not_called()
+
+
+@pytest.mark.parametrize('client_set_workspace', [True, False],
+                         ids=['requested_workspace', 'original_workspace'])
+def test_restart_needs_write_access_to_the_original_workspace(
+        client_set_workspace):
+    # Like `sky jobs cancel`: read access to the job's workspace lets a user
+    # see the job, not act on it, even when the new job goes elsewhere. The
+    # spec (with the owner's envs) is not even read.
+    spec = mock.MagicMock()
+    with mock.patch.object(jobs_core, '_client_set_workspace',
+                           return_value=client_set_workspace), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission',
+                           side_effect=exceptions.PermissionDeniedError(
+                               'no access to team-a')), \
+         mock.patch.object(jobs_core, '_get_job_spec', spec), \
+         mock.patch.object(jobs_core, 'launch') as launch, \
+         mock.patch.object(jobs_core, 'queue_v2_api',
+                           return_value=([_record(workspace='team-a')], 1, {},
+                                         0, [])), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'workspace_label_for_caller',
+                           return_value='team-a'), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace',
+                           return_value='team-b'):
+        with pytest.raises(exceptions.PermissionDeniedError,
+                           match='ran in workspace .*write access'):
+            jobs_core.restart(job_id=5)
+    spec.assert_not_called()
+    launch.assert_not_called()
+
+
+def test_restart_in_the_jobs_own_workspace_needs_no_extra_check():
+    # The executor already checked write access to the active workspace.
+    with mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission') as permission:
+        _restart([_record(workspace='team-a')], active_workspace='team-a')
+    permission.assert_not_called()
 
 
 def test_restart_queries_metadata_only_and_starts_the_controller():

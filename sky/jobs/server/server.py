@@ -74,7 +74,7 @@ async def restart(request: fastapi.Request,
     # restart re-submits the job's compiled DAG through core.launch, so it
     # has the same scheduling needs as /launch: SHORT in consolidation mode
     # (no controller cluster to spin up), LONG otherwise.
-    consolidation_mode = managed_jobs_utils.is_consolidation_mode()
+    consolidation_mode = await _is_consolidation_mode()
     schedule_type = (api_requests.ScheduleType.SHORT
                      if consolidation_mode else api_requests.ScheduleType.LONG)
     await executor.schedule_request_async(

@@ -2291,6 +2291,13 @@ def restart(
     Jobs whose local workdir or file mounts were uploaded for that run
     cannot be restarted: the upload is removed when the job finishes.
 
+    Like `sky jobs cancel`, it needs write access to the workspace the job
+    ran in, also when the new job goes to another workspace. A job with
+    secrets can only be restarted by its owner. Envs are not secret: they
+    are carried over for whoever restarts the job, so put credentials in
+    secrets. A member of a job group is restarted on its own, as a
+    standalone job.
+
     Args:
         job_id: ID of the managed job to restart. Exactly one of job_id and
             job_name must be set.
@@ -2332,6 +2339,27 @@ def restart(
                     f'Managed job {job_id} is still {status_str}. Only '
                     'finished jobs can be restarted; cancel it first with '
                     f'`sky jobs cancel {job_id}`.')
+
+    # Acting on a job needs write access to the workspace it ran in, as
+    # `sky jobs cancel` does; seeing it (read access) is not enough. This holds
+    # with `--workspace` too: the executor only authorized the workspace the
+    # new job goes to. Checked before the spec, with its envs, is read.
+    original_workspace = (records[0].workspace or
+                          skylet_constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if original_workspace != skypilot_config.get_active_workspace():
+        label = workspaces_core.workspace_label_for_caller(original_workspace)
+        try:
+            workspaces_core.check_workspace_permission(
+                common_utils.get_current_user(),
+                original_workspace,
+                action=workspace_constants.WORKSPACE_ACTION_WRITE,
+                workspace_ref=label)
+        except exceptions.PermissionDeniedError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.PermissionDeniedError(
+                    f'Managed job {job_id} ran in workspace {label!r}. '
+                    'Restarting it needs write access to that workspace, as '
+                    f'cancelling it does: {e}') from e
 
     dag_yaml = _get_job_spec(job_id)
     if not dag_yaml:
@@ -2391,19 +2419,13 @@ def restart(
         pool = records[0].pool
 
     # The new job runs where the original ran unless the request named a
-    # workspace (the executor already authorized that one).
-    workspace = (records[0].workspace or
-                 skylet_constants.SKYPILOT_DEFAULT_WORKSPACE)
+    # workspace (the executor authorized that one; the original workspace was
+    # checked above).
     workspace_ctx: Any = contextlib.nullcontext()
-    if (workspace != skypilot_config.get_active_workspace() and
+    if (original_workspace != skypilot_config.get_active_workspace() and
             not _client_set_workspace()):
-        # Restarting into the original workspace is a launch there, so it
-        # needs the same write access as `sky jobs launch --workspace`.
-        workspaces_core.check_workspace_permission(
-            common_utils.get_current_user(),
-            workspace,
-            action=workspace_constants.WORKSPACE_ACTION_WRITE)
-        workspace_ctx = skypilot_config.local_active_workspace_ctx(workspace)
+        workspace_ctx = skypilot_config.local_active_workspace_ctx(
+            original_workspace)
 
     logger.info(f'Restarting managed job {job_id} ({original_name!r}) as '
                 f'{name!r}.')
