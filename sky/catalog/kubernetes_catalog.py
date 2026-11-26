@@ -275,17 +275,17 @@ def _list_accelerators_in_context(
     if snapshot_inputs is not None:
         nodes, gpu_resource_key, allocated_qty_by_node = snapshot_inputs
     else:
-        # Verify that the credentials are still valid.
-        valid, reason = kubernetes_utils.check_credentials(context,
-                                                           cloud='kubernetes')
-        if not valid:
-            logger.debug(f'Skipping Kubernetes context {context!r}: {reason}')
+        # Verify that the credentials are still valid. A context whose
+        # credentials fail is skipped, so one unreachable cluster does not
+        # abort the listing of the other contexts.
+        if not kubernetes_utils.check_credentials(context,
+                                                  cloud='kubernetes')[0]:
+            logger.debug(f'Skipping Kubernetes context {context!r}: invalid '
+                         'credentials.')
             return [], {}, {}
 
-        has_gpu, _ = kubernetes_utils.detect_accelerator_resource(context)
+        has_gpu = kubernetes_utils.detect_accelerator_resource(context)
         if not has_gpu:
-            logger.debug(
-                f'No accelerators found on Kubernetes context {context!r}.')
             return [], {}, {}
 
         nodes = kubernetes_utils.get_kubernetes_nodes(context=context,
