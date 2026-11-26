@@ -5613,6 +5613,10 @@ def gpus_list(
     GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
     accelerator details.
 
+    With ``-o json``, Kubernetes clusters and SSH Node Pools are listed like
+    in the table: every allowed context, each with its own entries (the
+    ``region`` field is the context), with or without ``--all-regions``.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device

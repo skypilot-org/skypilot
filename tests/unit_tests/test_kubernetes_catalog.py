@@ -15,6 +15,7 @@ from sky import clouds
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.catalog import kubernetes_catalog
+from sky.catalog import ssh_catalog
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import SkyPilotLabelFormatter
 from sky.provision.kubernetes.utils import V1Node
@@ -303,3 +304,67 @@ def test_list_accelerators_same_gpu_in_contexts_is_not_merged(
     assert sorted(
         item.region for item in result['L4']) == [_CONTEXT_A, _CONTEXT_B]
     assert capacity == {'L4': 2}
+
+
+@pytest.mark.usefixtures('checked_contexts')
+@pytest.mark.parametrize('all_regions', [False, True])
+def test_ssh_catalog_lists_every_ssh_pool_and_no_kubernetes_context(
+        monkeypatch, all_regions):
+    """The SSH catalog lists its own pools, never the Kubernetes contexts.
+
+    It used to pass no context to the Kubernetes catalog with --all-regions,
+    which then listed the Kubernetes contexts instead of the SSH pools, and
+    only its first pool without --all-regions.
+    """
+    nodes_by_context = {
+        _CONTEXT_A: [_gpu_node('node-a1', 'l4', 1)],
+        _CONTEXT_B: [_gpu_node('node-b1', 'l4', 1)],
+        'ssh-lab': [_gpu_node('node-lab', 'l4', 1)],
+        'ssh-lab2': [_gpu_node('node-lab2', 'l4', 1)],
+    }
+    monkeypatch.setattr(
+        kubernetes_utils,
+        'get_kubernetes_nodes',
+        lambda context=None, **_: list(nodes_by_context.get(context, [])))
+    monkeypatch.setattr(clouds.SSH,
+                        'existing_allowed_contexts',
+                        lambda silent=False: ['ssh-lab', 'ssh-lab2'])
+
+    result, capacity, _ = ssh_catalog.list_accelerators_realtime(
+        gpus_only=True,
+        name_filter='L4',
+        region_filter=None,
+        quantity_filter=None,
+        all_regions=all_regions)
+    assert sorted(
+        item.region for item in result['L4']) == ['ssh-lab', 'ssh-lab2']
+    assert capacity == {'L4': 2}
+
+    # An explicit region filter lists only that pool, and nothing for a
+    # context that is not an allowed SSH pool.
+    assert _regions(
+        ssh_catalog.list_accelerators(gpus_only=True,
+                                      name_filter=None,
+                                      region_filter='ssh-lab2',
+                                      quantity_filter=None),
+        'L4') == {'ssh-lab2'}
+    assert ssh_catalog.list_accelerators(gpus_only=True,
+                                         name_filter=None,
+                                         region_filter=_CONTEXT_A,
+                                         quantity_filter=None) == {}
+
+
+def test_list_accelerators_skips_known_unreachable_context(
+        checked_contexts, monkeypatch):
+    """A context known to be unreachable is not queried, like the table."""
+    monkeypatch.setattr(
+        kubernetes_utils, 'known_unreachable_reason',
+        lambda context: 'cluster deleted' if context == _CONTEXT_A else None)
+
+    result = kubernetes_catalog.list_accelerators(gpus_only=True,
+                                                  name_filter=None,
+                                                  region_filter=None,
+                                                  quantity_filter=None)
+
+    assert checked_contexts == [_CONTEXT_B]
+    assert list(result) == ['H100']
