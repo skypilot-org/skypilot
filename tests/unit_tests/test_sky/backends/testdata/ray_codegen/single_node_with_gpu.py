@@ -6,6 +6,7 @@ import os
 import pathlib
 import selectors
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -200,6 +201,22 @@ def process_subprocess_stream(proc, stdout_stream_handler,
         stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''
     return stdout, stderr
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill every process in the subprocess's process group.
+
+    The subprocess is started in a new session, so its pid is its process
+    group id, and the group outlives it while any member is alive. A
+    process that escaped the process tree (e.g. it was reparented when an
+    intermediate parent exited) is missed by kill_children_processes, but
+    stays in the group and is reached here. The caller already gave the
+    reachable processes a graceful shutdown through the tree kill, so the
+    group is killed without a grace period.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
 
 def run_with_log(
     cmd: Union[List[str], str],
@@ -397,6 +414,16 @@ def run_with_log(
             # process will only be killed after the python program exits,
             # causing the stream handling stuck at `readline`.
             subprocess_utils.kill_children_processes()
+            _kill_process_group(proc)
+            # Popen.__exit__ closes the pipes, but closing stderr blocks
+            # while the reader thread in process_subprocess_stream holds
+            # its lock, until every writer of the pipe exits. A writer that
+            # escaped both the process tree and the process group would
+            # block the close forever, so detach the pipes instead of
+            # closing them. The reader thread keeps its own references and
+            # finishes once the pipe reaches EOF.
+            proc.stdout = None
+            proc.stderr = None
             raise
 
 def make_task_bash_script(codegen: str,
