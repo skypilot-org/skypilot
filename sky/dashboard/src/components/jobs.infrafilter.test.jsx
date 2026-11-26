@@ -324,6 +324,32 @@ describe('managed jobs Infra filter', () => {
     expect(await screen.findByText('ocmask-lm80')).toBeTruthy();
   });
 
+  it('keeps the Active toggle when Clear filters removes the chips', async () => {
+    getPaginatedJobs.mockImplementation((params) =>
+      Promise.resolve({
+        jobs: params.nameMatch ? [] : PAGE,
+        total: params.nameMatch ? 0 : 2,
+        totalNoFilter: 2,
+        statusCounts: {},
+        controllerStopped: false,
+        hasNext: false,
+      })
+    );
+    await openAt('?owner=all&status=active&name=zz-no-match');
+    const emptyState = (
+      await screen.findByText('No jobs match your filters')
+    ).closest('td');
+    fireEvent.click(
+      within(emptyState).getByRole('button', { name: 'Clear filters' })
+    );
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('name')).toBe(null)
+    );
+    expect(new URLSearchParams(window.location.search).get('status')).toBe(
+      'active'
+    );
+  });
+
   it('says no jobs match when only a status pill empties the table', async () => {
     getPaginatedJobs.mockImplementation((params) =>
       Promise.resolve({

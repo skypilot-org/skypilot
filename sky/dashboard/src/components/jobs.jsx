@@ -3024,7 +3024,11 @@ export function ManagedJobsTable({
                                 size="sm"
                                 onClick={() => {
                                   onClearFilters?.();
-                                  setSelectedStatuses([]);
+                                  // Keep the Active/All toggle: only pills
+                                  // are filters.
+                                  if (selectedStatuses.length > 0) {
+                                    setSelectedStatuses([]);
+                                  }
                                 }}
                                 className="text-brand hover:text-brand-bright"
                               >
