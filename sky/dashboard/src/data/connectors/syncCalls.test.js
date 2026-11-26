@@ -69,6 +69,46 @@ describe('sendRequest', () => {
     expect(got.headers.get('X-Skypilot-Request-ID')).toBe('r');
   });
 
+  test('queues nothing without fallback', async () => {
+    const { sendRequest } = loadWithHealth({ sync_call_max_limit: 100 });
+    const refused = response({ detail: 'no' }, { status: 400, headers: SYNC });
+    const busy = response(null, {
+      status: 429,
+      headers: { ...SYNC, 'Retry-After': '0' },
+    });
+    const send = jest
+      .fn()
+      .mockResolvedValueOnce(refused)
+      .mockResolvedValue(busy);
+    await expect(sendRequest(send, { fallback: false })).resolves.toBe(refused);
+    await expect(sendRequest(send, { fallback: false })).resolves.toBe(busy);
+    // One refused call, then five busy tries; every call carried the header.
+    expect(send).toHaveBeenCalledTimes(6);
+    expect(
+      send.mock.calls.every(([headers]) => headers['X-SkyPilot-Sync'] === '1')
+    ).toBe(true);
+  });
+
+  test('probes /api/health again after a failed probe', async () => {
+    global.fetch.mockReset();
+    global.fetch
+      .mockResolvedValueOnce(response(null, { status: 502 }))
+      .mockResolvedValue(response({ sync_call_max_limit: 100 }));
+    let syncCalls;
+    jest.isolateModules(() => {
+      syncCalls = require('@/data/connectors/syncCalls');
+    });
+    await expect(syncCalls.getSyncCallInfo()).resolves.toMatchObject({
+      maxLimit: null,
+    });
+    await expect(syncCalls.getSyncCallInfo()).resolves.toMatchObject({
+      maxLimit: 100,
+    });
+    // Kept once it succeeds.
+    await syncCalls.getSyncCallInfo();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
   test('retries a busy server after Retry-After', async () => {
     const { sendRequest } = loadWithHealth({ sync_call_max_limit: 100 });
     const busy = response(null, {

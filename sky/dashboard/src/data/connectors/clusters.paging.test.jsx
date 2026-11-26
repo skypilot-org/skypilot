@@ -104,6 +104,30 @@ describe('getClusters on a server that pages the cluster list', () => {
     );
   });
 
+  test('a busy page queues nothing before the one-call fallback', async () => {
+    apiClient.fetchImmediate.mockResolvedValue(
+      response(null, {
+        status: 429,
+        headers: { 'X-SkyPilot-Sync': '1', 'Retry-After': '0' },
+      })
+    );
+    apiClient.fetch.mockResolvedValue([{ name: 'a', launched_at: 1 }]);
+
+    await getClusters();
+
+    // Every page try asked for a sync call; none was sent to be queued.
+    for (const [, , , options] of apiClient.fetchImmediate.mock.calls) {
+      expect(options.headers).toEqual({ 'X-SkyPilot-Sync': '1' });
+    }
+    expect(apiClient.fetch).toHaveBeenCalledTimes(1);
+    expect(apiClient.fetch).toHaveBeenCalledWith(
+      '/status',
+      expect.anything(),
+      'POST',
+      { sync: false }
+    );
+  });
+
   test('fetches named clusters in one sync call', async () => {
     apiClient.fetch.mockResolvedValue([{ name: 'a', launched_at: 1 }]);
 

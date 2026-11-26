@@ -31,7 +31,7 @@ async function fetchRecipes(body) {
               'POST',
               { headers }
             ),
-          { limit: size }
+          { limit: size, fallback: false }
         ),
       cursorOf: (row) => row.name,
     });

@@ -26,7 +26,7 @@ async function fetchVolumes() {
               'GET',
               { headers }
             ),
-          { limit: size }
+          { limit: size, fallback: false }
         );
       },
       cursorOf: (row) => row.name,

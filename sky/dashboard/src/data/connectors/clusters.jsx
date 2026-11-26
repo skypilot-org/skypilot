@@ -142,7 +142,7 @@ async function fetchClusterStatus(body) {
               'POST',
               { headers }
             ),
-          { limit: size }
+          { limit: size, fallback: false }
         ),
       cursorOf: (row) => ({ launchedAt: launchedAt(row), name: row.name }),
     });

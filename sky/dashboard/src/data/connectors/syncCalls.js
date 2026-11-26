@@ -8,6 +8,7 @@ import {
   ENDPOINT,
   VERSION_HEADER,
 } from './constants';
+import { waitForPlugins } from './pluginsReady';
 
 // Sync calls (sky/server/constants.py SYNC_CALL_HEADER). A request sent with
 // this header set to '1' may be answered with its result. A response carrying
@@ -25,10 +26,13 @@ export const MIN_LIST_CURSOR_API_VERSION = 72;
 let syncCallInfoPromise = null;
 
 // What /api/health advertises about sync calls: the largest `limit` the server
-// answers as a sync call (null when it answers none) and its API version.
+// answers as a sync call (null when it answers none) and its API version. A
+// failed probe is not kept, so the next call probes again.
 export function getSyncCallInfo() {
   if (!syncCallInfoPromise) {
     syncCallInfoPromise = (async () => {
+      // Early-init plugins (e.g. fetch interceptors) must see the probe too.
+      await waitForPlugins();
       try {
         const response = await fetch(
           `${window.location.origin}${ENDPOINT}/api/health`,
@@ -39,18 +43,21 @@ export function getSyncCallInfo() {
             },
           }
         );
-        if (!response.ok) return { maxLimit: null, apiVersion: null };
-        const health = await response.json();
-        const maxLimit = health?.sync_call_max_limit;
-        const apiVersion = Number(health?.api_version);
-        return {
-          maxLimit:
-            Number.isInteger(maxLimit) && maxLimit >= 1 ? maxLimit : null,
-          apiVersion: Number.isFinite(apiVersion) ? apiVersion : null,
-        };
+        if (response.ok) {
+          const health = await response.json();
+          const maxLimit = health?.sync_call_max_limit;
+          const apiVersion = Number(health?.api_version);
+          return {
+            maxLimit:
+              Number.isInteger(maxLimit) && maxLimit >= 1 ? maxLimit : null,
+            apiVersion: Number.isFinite(apiVersion) ? apiVersion : null,
+          };
+        }
       } catch {
-        return { maxLimit: null, apiVersion: null };
+        // Treated as a failed probe below.
       }
+      syncCallInfoPromise = null;
+      return { maxLimit: null, apiVersion: null };
     })();
   }
   return syncCallInfoPromise;
@@ -80,7 +87,12 @@ function retryAfterMs(response) {
 // it as a sync call only with a limit between 1 and its maximum. A sync call
 // the server refuses is sent again without the header, and so is one the
 // server stays too busy for after BUSY_RETRIES tries paced by Retry-After.
-export async function sendRequest(send, { sync = true, limit } = {}) {
+// With fallback false, the refusal or the last busy response is returned
+// instead, and nothing is queued.
+export async function sendRequest(
+  send,
+  { sync = true, limit, fallback = true } = {}
+) {
   if (!sync) return send({});
   const { maxLimit } = await getSyncCallInfo();
   if (
@@ -90,14 +102,19 @@ export async function sendRequest(send, { sync = true, limit } = {}) {
   ) {
     return send({});
   }
+  let response;
   for (let attempt = 0; attempt < BUSY_RETRIES; attempt++) {
-    const response = await send({ [SYNC_CALL_HEADER]: '1' });
+    response = await send({ [SYNC_CALL_HEADER]: '1' });
     if (!isMarked(response)) return response;
-    if (response.status === 400) return send({});
+    if (response.status === 400) break;
     if (response.status !== 429) return response;
-    await new Promise((resolve) => setTimeout(resolve, retryAfterMs(response)));
+    if (attempt < BUSY_RETRIES - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, retryAfterMs(response))
+      );
+    }
   }
-  return send({});
+  return fallback ? send({}) : response;
 }
 
 // Sends a request through send(headers) and returns the response with its
@@ -131,8 +148,10 @@ export async function syncPageSize(minApiVersion) {
 
 // Fetches a list as sync calls of up to pageSize rows each.
 //
-// sendPage(cursor, size) sends one page and returns its response; the first
-// cursor is null. cursorOf(row) is the cursor after that row. Rows are
+// sendPage(cursor, size) sends one page with sendRequest's fallback false, so
+// a page the server refuses or is busy for comes back unanswered instead of
+// queued; the first cursor is null. cursorOf(row) is the cursor after that
+// row. Rows are
 // identified by `name`. The list ends at the first empty page: the server can
 // drop rows after applying its limit, so a short page does not end it.
 //
