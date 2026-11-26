@@ -71,7 +71,8 @@ describe.each([
     ['content-tertiary', 'surface'],
     ['content-tertiary', 'surface-subtle'],
     ['brand', 'surface'],
-    ['brand-bright', 'surface']
+    ['brand-bright', 'surface'],
+    ['tooltip-foreground', 'tooltip']
   );
   test.each(pairs)('%s on %s is AA', (fg, bg) => {
     expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(4.5);
