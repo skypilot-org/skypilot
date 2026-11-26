@@ -46,6 +46,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       min_elapsed_seconds: 60
       min_retries: 5
     :ref:`max_launching_jobs_per_user <config-yaml-jobs-max-launching-jobs-per-user>`: 200
+    :ref:`allow_event_callback <config-yaml-jobs-allow-event-callback>`: false
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -240,6 +241,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
     :ref:`remote_identity <config-yaml-azure-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`vpc_name <config-yaml-azure-vpc-name>`: my-vnet
+    :ref:`subnet_id <config-yaml-azure-subnet-id>`: /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet
     :ref:`use_internal_ips <config-yaml-azure-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-azure-ssh-proxy-command>`: ssh -W %h:%p user@host
 
@@ -539,6 +541,28 @@ Example:
 
   jobs:
     max_launching_jobs_per_user: 200
+
+.. _config-yaml-jobs-allow-event-callback:
+
+``jobs.allow_event_callback``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Allow managed jobs to set the deprecated ``event_callback`` field (optional).
+
+``event_callback`` is a shell script that the jobs controller runs whenever a managed job changes status. It is deprecated and will be removed in a future release. It is disabled by default: ``sky jobs launch`` rejects a job that sets it. When the jobs controller runs in the API server (:ref:`consolidation mode <jobs-consolidation-mode>`), jobs that were submitted before it was disabled skip their callbacks.
+
+Set this to ``true`` in the API server's config to keep using ``event_callback``. It cannot be set from a client's config.
+
+Unless locked down with an :ref:`admin policy <advanced-policy-config>`, this can allow users to run code on the API server pod.
+
+Default: ``false``. Changes require an API server restart to take effect.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    allow_event_callback: true
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
@@ -1744,9 +1768,11 @@ errors from the cloud provider will be surfaced.
 
 Name of an existing Azure Virtual Network (VNet) to use for the cluster (optional).
 
-When specified, SkyPilot will use the existing VNet and its first subnet instead of
-creating new networking resources. If the subnet has an associated Network Security Group
-(NSG), it will be used; otherwise, SkyPilot will create its own NSG.
+When specified, SkyPilot will use the existing VNet instead of creating new
+networking resources. By default, it uses the first subnet returned by Azure;
+set :ref:`subnet_id <config-yaml-azure-subnet-id>` to select a specific subnet.
+If the subnet has an associated Network Security Group (NSG), it will be used;
+otherwise, SkyPilot will create its own NSG.
 
 This is useful for organizations that require instances to be launched in a pre-configured
 VNet with specific network policies.
@@ -1755,6 +1781,30 @@ VNet with specific network policies.
 
   azure:
     vpc_name: my-existing-vnet
+
+.. _config-yaml-azure-subnet-id:
+
+``azure.subnet_id``
+~~~~~~~~~~~~~~~~~~~
+
+Full resource ID of an existing Azure subnet to use for the cluster (optional).
+Requires ``azure.vpc_name``. The ID must match exactly one subnet in the resolved
+VNet, ignoring case. If it does not match, provisioning fails rather than falling
+back to another subnet. The selected subnet's NSG is used when present; otherwise,
+SkyPilot creates an NSG.
+
+This setting can also be overridden in a task's ``config.azure`` section.
+When overriding ``vpc_name``, also set ``subnet_id`` if the global configuration
+pins a subnet in a different VNet.
+
+If omitted, SkyPilot uses the first subnet returned by Azure for a custom VNet,
+or creates networking resources when no custom VNet is configured.
+
+.. code-block:: yaml
+
+  azure:
+    vpc_name: my-existing-vnet
+    subnet_id: /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/my-existing-vnet/subnets/my-subnet
 
 .. _config-yaml-azure-use-internal-ips:
 
@@ -1847,6 +1897,12 @@ One of:
 - ``NONE`` (case-insensitive, so ``none`` too): the pods get no Kubernetes
   identity: no token is mounted and no roles are granted. Autodown is not
   available. See :ref:`kubernetes-remote-identity-none`.
+
+With a remote API server, a user who is not an admin cannot make the API
+server's kubeconfig reach clusters that the server's own config does not send
+it to, such as with ``LOCAL_CREDENTIALS`` or by overriding the server's
+``NO_UPLOAD``. Such a value in their client config, task or admin policy
+output is refused; set it in the API server's config instead.
 
 .. _config-yaml-kubernetes-allowed-contexts:
 
@@ -2424,7 +2480,10 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
 Override the APT mirrors tried when installing packages on a pod (optional).
 Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
 fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
-(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``). The image's own sources are
+tried first. A mirror replaces only the image's Ubuntu sources
+(``*.ubuntu.com/ubuntu``), so it must serve Ubuntu packages over HTTP at
+``/ubuntu``.
 
 Example:
 
@@ -2958,7 +3017,9 @@ Supported fields:
     metrics from several clusters. Without a filter, all series returned by
     ``url`` are attributed to this cluster. Clusters sharing a ``url``
     automatically exclude each other's filtered slices, so a fleet is never
-    counted twice.
+    counted twice. URLs are compared as text: give Prometheus servers that
+    run on different login nodes distinct URLs (for example the node's
+    hostname rather than ``localhost``).
   - ``via``: Name of another Slurm cluster whose login node runs the
     ``/federate`` request instead of this cluster's own, for a central
     Prometheus reachable from only some login nodes. The fetched series are
@@ -3063,6 +3124,7 @@ Advanced OCI configuration (optional).
 
 ``oci_config_profile``
     The profile name in ``~/.oci/config`` to use for launching instances.
+    A region-specific section can name a different profile for that region; ``sky check`` probes every profile named this way, and the key and token files of all of them are copied to clusters.
     Default: ``DEFAULT``
 
 ``compartment_ocid``

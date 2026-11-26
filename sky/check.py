@@ -27,6 +27,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -40,6 +41,7 @@ STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME,
 logger = sky_logging.init_logger(__name__)
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+_KUBERNETES_REPR = repr(sky_clouds.Kubernetes())
 
 
 def _is_storage_only(cloud_name: str) -> bool:
@@ -106,6 +108,39 @@ def _build_check_results(
     return out
 
 
+def _check_kubernetes_contexts(
+        contexts: Set[str],
+        workspace: str) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+    """Checks the allowed Kubernetes contexts in `contexts`.
+
+    Allowed contexts with no cached result in `workspace` are checked too.
+    Kubernetes is usable if any checked context is, or any other allowed
+    context is cached as enabled.
+    """
+    try:
+        allowed = sky_clouds.Kubernetes.existing_allowed_contexts()
+    except ImportError:
+        allowed = []
+    if not allowed:
+        # The full check reports why no context can be checked.
+        return sky_clouds.Kubernetes.check_contexts_compute_credentials(None)
+    try:
+        cached = global_user_state.get_cached_check_results(workspace).get(
+            _KUBERNETES_REPR, {})
+    except Exception as e:  # pylint: disable=broad-except
+        # With no cached results, every allowed context is checked.
+        logger.warning(f'Failed to read cached check results: {e}')
+        cached = {}
+    to_check = [c for c in allowed if c in contexts or c not in cached]
+    ok, reason = sky_clouds.Kubernetes.check_contexts_compute_credentials(
+        to_check)
+    if not isinstance(reason, dict):
+        return ok, reason
+    return ok or any(cached[c].get('enabled')
+                     for c in allowed
+                     if c not in contexts and c in cached), reason
+
+
 def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     # Use allowed_clouds from config if it exists, otherwise check all
     # clouds. Also validate names with get_cloud_tuple.
@@ -162,16 +197,26 @@ def check_capabilities(
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
     persist: bool = True,
+    kubernetes_contexts: Optional[Iterable[str]] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
     """Checks the clouds' credentials and caches the result per workspace.
 
     With `persist=False` the result is only returned: the workspace's cached
     rows are left alone, so `workspace` only needs to be readable by the
     caller rather than writable.
+
+    With `kubernetes_contexts` (requires `clouds`), Kubernetes checks only the
+    allowed contexts in it, plus allowed contexts with no cached result. The
+    other allowed contexts keep their cached results and count toward whether
+    Kubernetes is enabled.
     """
     # pylint: disable=import-outside-toplevel
     from sky.workspaces import core
 
+    if kubernetes_contexts is not None and clouds is None:
+        raise ValueError('kubernetes_contexts requires clouds.')
+    contexts_to_check: Optional[Set[str]] = (None if kubernetes_contexts is None
+                                             else set(kubernetes_contexts))
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
@@ -227,7 +272,13 @@ def check_capabilities(
                 # local_active_workspace_ctx is thread-local.
                 _, cloud = cloud_tuple
                 try:
-                    ok, reason = cloud.check_credentials(capability)
+                    if (contexts_to_check is not None and
+                            cloud_tuple[0] == _KUBERNETES_REPR and
+                            capability == sky_cloud.CloudCapability.COMPUTE):
+                        ok, reason = _check_kubernetes_contexts(
+                            contexts_to_check, current_workspace_name)
+                    else:
+                        ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
                     return None
                 except Exception:  # pylint: disable=broad-except
@@ -545,6 +596,7 @@ def check(
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
     workspace_ref: Optional[str] = None,
+    kubernetes_contexts: Optional[Iterable[str]] = None,
 ) -> Dict[str, Dict[str, List[str]]]:
     if workspace is not None:
         # Import here to avoid circular import:
@@ -554,9 +606,13 @@ def check(
             common_utils.get_current_user(),
             workspace,
             workspace_ref=workspace_ref)
-    capabilities_result = check_capabilities(quiet, verbose, clouds,
-                                             sky_cloud.ALL_CAPABILITIES,
-                                             workspace)
+    capabilities_result = check_capabilities(
+        quiet,
+        verbose,
+        clouds,
+        sky_cloud.ALL_CAPABILITIES,
+        workspace,
+        kubernetes_contexts=kubernetes_contexts)
     # Convert CloudCapability enums to strings for JSON serialization.
     result: Dict[str, Dict[str, List[str]]] = {}
     for ws_name, clouds_with_caps in capabilities_result.items():
@@ -655,11 +711,11 @@ def _unstored_enabled_cloud_names(workspace: str,
         return ()
 
 
-# One plain dict per request: it holds state rather than a recomputable result,
-# so nothing may expire or evict an entry before the request ends.
-@annotations.lru_cache(scope='request', maxsize=1)
-def _reader_rechecked(
-) -> Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]:
+_ReaderRechecked = Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]
+_READER_RECHECKED_VAR = 'check.reader_rechecked'
+
+
+def _reader_rechecked() -> _ReaderRechecked:
     """Clouds that non-storing callers' re-checks found enabled in this request.
 
     Keyed by workspace, capability and config fingerprint. `recheck_clouds`
@@ -667,7 +723,21 @@ def _reader_rechecked(
     without it being stored. Reads only look up, so they add no entries. This
     relies on the re-check and those reads running in one request in one
     process under one config, as they do within `Optimizer.optimize`.
+
+    It holds state rather than a recomputable result, so nothing may expire,
+    evict or clear an entry before the request ends: it lives in the request's
+    context, which requests sharing the process do not share.
     """
+    ctx = context_lib.get()
+    if ctx is None:
+        return _process_reader_rechecked()
+    return ctx.vars.setdefault(_READER_RECHECKED_VAR, {})
+
+
+# Without a context the process runs one request at a time, and clears this
+# at each request start.
+@annotations.lru_cache(scope='request', maxsize=1)
+def _process_reader_rechecked() -> _ReaderRechecked:
     return {}
 
 
@@ -917,14 +987,19 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     else:
         cloud_type = cloud
     if isinstance(cloud_type, sky_clouds.SSH):
-        # Get the cluster names by reading from the node pools file
-        contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+        # Pools set up or not, but only those this workspace allows, as for
+        # Kubernetes contexts: others may belong to workspaces the caller
+        # cannot see.
+        contexts = sky_clouds.SSH.allowed_node_pool_contexts()
     elif isinstance(cloud_type, sky_clouds.Slurm):
         # Get the cluster names from SLURM config
         contexts = sky_clouds.Slurm.existing_allowed_clusters()
     else:
         assert isinstance(cloud_type, sky_clouds.Kubernetes)
         contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+        if ctx2text is not None:
+            # A check limited to some contexts lists only those.
+            contexts = [c for c in contexts if c in ctx2text]
 
     filtered_contexts = []
     for context in contexts:
@@ -948,18 +1023,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                 f'{str_to_format}'
                 f'{colorama.Style.RESET_ALL}')
 
-    # For SSH, determine which contexts are disabled due to allowed_node_pools
-    disabled_due_to_allowed_node_pools = set()
-    if isinstance(cloud_type, sky_clouds.SSH):
-        # Get all node pool contexts from file
-        all_node_pool_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
-        # Get allowed contexts (after filtering)
-        allowed_contexts = sky_clouds.SSH.existing_allowed_contexts()
-        # Contexts that exist in file but not in allowed list are disabled
-        # due to allowed_node_pools configuration
-        disabled_due_to_allowed_node_pools = (set(all_node_pool_contexts) -
-                                              set(allowed_contexts))
-
     # Format the context info with consistent styling
     contexts_formatted = []
     for i, context in enumerate(filtered_contexts):
@@ -977,13 +1040,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             if ctx2text is not None:
                 if context in ctx2text:
                     text_suffix = f': {ctx2text[context]}'
-                elif (isinstance(cloud_type, sky_clouds.SSH) and
-                      context in disabled_due_to_allowed_node_pools):
-                    # Context is disabled due to allowed_node_pools config
-                    text_suffix = (': ' + _red_color('disabled. ') +
-                                   _dim_color('Reason: Not included in '
-                                              'allowed_node_pools '
-                                              'configuration.'))
                 else:
                     # Default case - not set up
                     text_suffix = (': ' + _red_color('disabled. ') + _dim_color(

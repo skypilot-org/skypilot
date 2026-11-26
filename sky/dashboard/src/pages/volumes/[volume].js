@@ -94,13 +94,13 @@ function VolumeDetails() {
       <>
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
-            <Link href="/volumes" className="text-sky-blue hover:underline">
+            <Link href="/volumes" className="text-brand hover:underline">
               Volumes
             </Link>
-            <span className="mx-2 text-gray-500">&rsaquo;</span>
+            <span className="mx-2 text-content-tertiary">&rsaquo;</span>
             <Link
               href={`/volumes/${encodeURIComponent(volumeName)}`}
-              className="text-sky-blue hover:underline"
+              className="text-brand hover:underline"
             >
               {volumeName}
             </Link>
@@ -110,7 +110,7 @@ function VolumeDetails() {
             {(loading || isRefreshing) && (
               <div className="flex items-center mr-4">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
+                <span className="ml-2 text-content-tertiary">Loading...</span>
               </div>
             )}
             {volumeData && (
@@ -121,7 +121,7 @@ function VolumeDetails() {
                 <button
                   onClick={handleManualRefresh}
                   disabled={loading || isRefreshing}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+                  className="text-brand hover:text-brand-bright font-medium inline-flex items-center"
                 >
                   <RotateCwIcon className="w-4 h-4 mr-1.5" />
                   {!isMobile && <span>Refresh</span>}
@@ -134,13 +134,15 @@ function VolumeDetails() {
         {loading && isInitialLoad ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">Loading volume details...</span>
+            <span className="text-content-tertiary">
+              Loading volume details...
+            </span>
           </div>
         ) : volumeData ? (
           <VolumeDetailCard volumeData={volumeData} />
         ) : (
           <div className="flex justify-center items-center py-12">
-            <span className="text-gray-500">Volume not found.</span>
+            <span className="text-content-tertiary">Volume not found.</span>
           </div>
         )}
       </>
@@ -168,7 +170,7 @@ function UsedBySection({ clusters, pods }) {
             {isCluster ? (
               <Link
                 href={`/clusters/${encodeURIComponent(name)}`}
-                className="text-blue-600 hover:underline"
+                className="text-blue-fg hover:underline"
               >
                 {name}
               </Link>
@@ -235,7 +237,7 @@ function VolumeDetailCard({ volumeData }) {
           <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Status
                 </div>
                 <div className="text-base mt-1">
@@ -248,11 +250,15 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Name</div>
+                <div className="text-content-secondary font-medium text-base">
+                  Name
+                </div>
                 <div className="text-base mt-1">{volumeData.name}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Infra</div>
+                <div className="text-content-secondary font-medium text-base">
+                  Infra
+                </div>
                 <div className="text-base mt-1">
                   {volumeData.infra ? (
                     <NonCapitalizedTooltip
@@ -262,12 +268,12 @@ function VolumeDetailCard({ volumeData }) {
                       <span>
                         <Link
                           href="/infra"
-                          className="text-blue-600 hover:underline"
+                          className="text-blue-fg hover:underline"
                         >
                           {volumeData.cloud || volumeData.infra}
                         </Link>
                         {volumeData.region && (
-                          <span className="text-gray-600">
+                          <span className="text-content-secondary">
                             {' '}
                             ({volumeData.region}
                             {volumeData.zone ? `/${volumeData.zone}` : ''})
@@ -281,18 +287,22 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Type</div>
+                <div className="text-content-secondary font-medium text-base">
+                  Type
+                </div>
                 <div className="text-base mt-1">{volumeData.type || 'N/A'}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Size</div>
+                <div className="text-content-secondary font-medium text-base">
+                  Size
+                </div>
                 <div className="text-base mt-1">
                   {volumeData.size != null
                     ? formatSize(volumeData.size)
                     : 'N/A'}
                   {volumeData.resize_status &&
                     volumeData.resize_target_size != null && (
-                      <span className="text-gray-500">
+                      <span className="text-content-tertiary">
                         {' '}
                         &rarr; {formatSize(volumeData.resize_target_size)}
                       </span>
@@ -301,13 +311,15 @@ function VolumeDetailCard({ volumeData }) {
                 {/* The size above is the capacity the volume has now; a
                     resize only shows up there once it has landed. */}
                 {volumeData.resize_message && (
-                  <div className="text-sm mt-1 text-gray-500">
+                  <div className="text-sm mt-1 text-content-tertiary">
                     {volumeData.resize_message}
                   </div>
                 )}
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">User</div>
+                <div className="text-content-secondary font-medium text-base">
+                  User
+                </div>
                 <div className="text-base mt-1">
                   <UserDisplay
                     username={volumeData.user_name}
@@ -316,7 +328,7 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Created
                 </div>
                 <div className="text-base mt-1">
@@ -328,7 +340,7 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Last Use
                 </div>
                 <div className="text-base mt-1">
@@ -340,7 +352,7 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Name on Cloud
                 </div>
                 <div className="text-base mt-1">
@@ -348,7 +360,7 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Storage Class
                 </div>
                 <div className="text-base mt-1">
@@ -356,7 +368,7 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Access Mode
                 </div>
                 <div className="text-base mt-1">
@@ -364,7 +376,7 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Namespace
                 </div>
                 <div className="text-base mt-1">
@@ -376,7 +388,7 @@ function VolumeDetailCard({ volumeData }) {
                   Spans both columns: a CSI error runs long. */}
               {volumeData.error_message && (
                 <div className="col-span-2">
-                  <div className="text-gray-600 font-medium text-base">
+                  <div className="text-content-secondary font-medium text-base">
                     Status Details
                   </div>
                   <div
@@ -390,7 +402,7 @@ function VolumeDetailCard({ volumeData }) {
 
               {/* Used By - spans both columns */}
               <div className="col-span-2">
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Used By
                 </div>
                 <div className="text-base mt-1">
@@ -408,7 +420,7 @@ function VolumeDetailCard({ volumeData }) {
                   {volumeData.last_use && (
                     <div>
                       <div className="flex items-center">
-                        <div className="text-gray-600 font-medium text-base">
+                        <div className="text-content-secondary font-medium text-base">
                           Entrypoint
                         </div>
                         <Tooltip
@@ -417,18 +429,18 @@ function VolumeDetailCard({ volumeData }) {
                         >
                           <button
                             onClick={copyCommandToClipboard}
-                            className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                            className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
                           >
                             {isCommandCopied ? (
-                              <CheckIcon className="w-4 h-4 text-green-600" />
+                              <CheckIcon className="w-4 h-4 text-green-fg" />
                             ) : (
                               <CopyIcon className="w-4 h-4" />
                             )}
                           </button>
                         </Tooltip>
                       </div>
-                      <div className="bg-gray-50 border border-gray-200 rounded-md p-3 mt-2">
-                        <code className="text-sm text-gray-800 font-mono break-all">
+                      <div className="bg-surface-subtle border border-line rounded-md p-3 mt-2">
+                        <code className="text-sm text-content-heavy font-mono break-all">
                           {volumeData.last_use}
                         </code>
                       </div>
@@ -441,7 +453,7 @@ function VolumeDetailCard({ volumeData }) {
                       <div className="flex items-center mb-2">
                         <button
                           onClick={toggleYamlExpanded}
-                          className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                          className="flex items-center text-left focus:outline-none text-content hover:text-content-strong transition-colors duration-200"
                         >
                           {isYamlExpanded ? (
                             <ChevronDownIcon className="w-4 h-4 mr-1" />
@@ -457,10 +469,10 @@ function VolumeDetailCard({ volumeData }) {
                         >
                           <button
                             onClick={copyYamlToClipboard}
-                            className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                            className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
                           >
                             {isCopied ? (
-                              <CheckIcon className="w-4 h-4 text-green-600" />
+                              <CheckIcon className="w-4 h-4 text-green-fg" />
                             ) : (
                               <CopyIcon className="w-4 h-4" />
                             )}

@@ -989,7 +989,10 @@ class Resources:
                     # accelerator_args.multi_host only exists on Kubernetes,
                     # so it also resolves a GCP TPU name (tpu-v6e-8) to
                     # Kubernetes (and never gets a GCP runtime_version).
-                    if (kubernetes_utils.is_tpu_on_gke(acc, normalize=False) or
+                    # GKE TPU names are lowercase; match them in any case
+                    # (TPU7x, TPU-V6E-SLICE).
+                    if (kubernetes_utils.is_tpu_on_gke(acc.lower(),
+                                                       normalize=False) or
                             kubernetes_utils.multi_host_requested(
                                 accelerator_args)):
                         self._cloud = clouds.Kubernetes()
@@ -1006,7 +1009,7 @@ class Resources:
 
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if (self.cloud.is_same_cloud(clouds.GCP()) and
-                        not kubernetes_utils.is_tpu_on_gke(acc,
+                        not kubernetes_utils.is_tpu_on_gke(acc.lower(),
                                                            normalize=False)):
                     if 'runtime_version' not in accelerator_args:
 

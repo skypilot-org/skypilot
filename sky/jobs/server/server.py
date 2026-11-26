@@ -1,5 +1,6 @@
 """REST API for managed jobs."""
 
+import asyncio
 import pathlib
 
 import fastapi
@@ -22,12 +23,17 @@ logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()
 
 
-def _controller_refresh_need_long(refresh: bool) -> bool:
+async def _is_consolidation_mode() -> bool:
+    # A cold cache reads the DB, which must not block the event loop.
+    return await asyncio.to_thread(managed_jobs_utils.is_consolidation_mode)
+
+
+async def _controller_refresh_need_long(refresh: bool) -> bool:
     # refresh=True upgrades the request to LONG because it may restart the
     # controller. In consolidation mode the controller is the API server
     # itself and is_controller_accessible short-circuits, so refresh is a
     # no-op — keep SHORT to avoid unnecessary LONG scheduling.
-    return refresh and not managed_jobs_utils.is_consolidation_mode()
+    return refresh and not await _is_consolidation_mode()
 
 
 @router.post('/launch')
@@ -42,7 +48,7 @@ async def launch(request: fastapi.Request,
     # much quicker in consolidation mode. So we avoid the issue by just using
     # the short executor instead - then jobs.launch will not be blocked by
     # sky.launch.
-    consolidation_mode = managed_jobs_utils.is_consolidation_mode()
+    consolidation_mode = await _is_consolidation_mode()
     if jobs_launch_body.depends_on and not consolidation_mode:
         raise fastapi.HTTPException(
             status_code=400,
@@ -62,6 +68,26 @@ async def launch(request: fastapi.Request,
     )
 
 
+@router.post('/restart')
+async def restart(request: fastapi.Request,
+                  jobs_restart_body: payloads.JobsRestartBody) -> None:
+    # restart re-submits the job's compiled DAG through core.launch, so it
+    # has the same scheduling needs as /launch: SHORT in consolidation mode
+    # (no controller cluster to spin up), LONG otherwise.
+    consolidation_mode = await _is_consolidation_mode()
+    schedule_type = (api_requests.ScheduleType.SHORT
+                     if consolidation_mode else api_requests.ScheduleType.LONG)
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.JOBS_RESTART,
+        request_body=jobs_restart_body,
+        func=core.restart,
+        schedule_type=schedule_type,
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
+    )
+
+
 # For backwards compatibility
 # TODO(hailong): Remove before 0.12.0.
 @router.post('/queue')
@@ -70,7 +96,7 @@ async def queue(
     jobs_queue_body: payloads.JobsQueueBody = fastapi.Depends(
         role_filter.force_viewer_jobs_queue_body),
 ) -> None:
-    needs_long = _controller_refresh_need_long(jobs_queue_body.refresh)
+    needs_long = await _controller_refresh_need_long(jobs_queue_body.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_QUEUE,
@@ -89,7 +115,7 @@ async def queue_v2(
     jobs_queue_body_v2: payloads.JobsQueueV2Body = fastapi.Depends(
         role_filter.force_viewer_jobs_queue_v2_body),
 ) -> None:
-    needs_long = _controller_refresh_need_long(jobs_queue_body_v2.refresh)
+    needs_long = await _controller_refresh_need_long(jobs_queue_body_v2.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_QUEUE_V2,
@@ -140,7 +166,7 @@ async def logs(
         role_filter.force_viewer_jobs_logs_body),
 ) -> fastapi.responses.StreamingResponse:
     schedule_type = api_requests.ScheduleType.SHORT
-    if _controller_refresh_need_long(jobs_logs_body.refresh):
+    if await _controller_refresh_need_long(jobs_logs_body.refresh):
         # When refresh is specified, the job controller might be restarted,
         # which takes longer time to finish. We schedule it to long executor.
         schedule_type = api_requests.ScheduleType.LONG
@@ -190,7 +216,8 @@ async def download_logs(
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     jobs_download_logs_body.local_dir = str(logs_dir_on_api_server)
-    needs_long = _controller_refresh_need_long(jobs_download_logs_body.refresh)
+    needs_long = await _controller_refresh_need_long(
+        jobs_download_logs_body.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_DOWNLOAD_LOGS,

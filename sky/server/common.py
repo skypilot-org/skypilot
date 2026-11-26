@@ -48,12 +48,14 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
     import aiohttp
     import pydantic
     import requests
+    import yarl
 
     from sky import dag as dag_lib
     from sky import models
@@ -158,7 +160,8 @@ P = ParamSpec('P')
 
 
 class RequestId(str, Generic[T]):
-    pass
+    # (status code, body) when the server answered a sync call in its response.
+    sync_response: Optional[Tuple[int, Any]] = None
 
 
 ApiVersion = Optional[str]
@@ -188,6 +191,7 @@ class ApiServerStatus(enum.Enum):
 
 @dataclasses.dataclass
 class ApiServerInfo:
+    """What the API server reports in /api/health."""
     status: ApiServerStatus
     api_version: ApiVersion = None
     version: Optional[str] = None
@@ -197,6 +201,7 @@ class ApiServerInfo:
     basic_auth_enabled: bool = False
     error: Optional[str] = None
     latest_version: Optional[str] = None
+    sync_call_max_limit: Optional[int] = None
 
 
 def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
@@ -408,19 +413,208 @@ def _prepare_authenticated_request_params(
     return url, kwargs
 
 
-def _convert_requests_cookies_to_aiohttp(
-        cookie_jar: requests.cookies.RequestsCookieJar) -> Dict[str, str]:
-    """Convert requests cookie jar to aiohttp-compatible dict format."""
-    cookies = {}
-    for cookie in cookie_jar:
-        cookies[cookie.name] = cookie.value
-    return cookies  # type: ignore
+def _cookie_jar_of_sync_client_request(
+    cookie_jar: 'requests.cookies.RequestsCookieJar'
+) -> 'requests.cookies.RequestsCookieJar':
+    """Returns the jar the synchronous client sends one request from.
+
+    `requests` does not look the cookies up in the jar it is given, but in a
+    copy of it (Session.prepare_request). Copying a jar puts its cookies in
+    the jar's iteration order, which is sorted on Python 3.9 and decides the
+    order of same-path cookies in the header. `requests` copies the jar again
+    for every hop of a redirect, and then adds the cookies that the response
+    of the previous hop set (see _add_response_cookies()).
+    """
+    return requests.cookies.merge_cookies(requests.cookies.RequestsCookieJar(),
+                                          cookie_jar)
+
+
+def _cookie_header_of_sync_client(
+        jar_as_sent: 'requests.cookies.RequestsCookieJar',
+        url: str) -> Optional[str]:
+    """Returns the Cookie header the synchronous client sends to the URL.
+
+    This is the lookup `requests` does when it sends a request with the jar:
+    the jar's cookie policy picks the unexpired cookies whose domain and path
+    match the URL, and Secure cookies only for HTTPS. Returns None if no
+    cookie in the jar applies to the URL.
+
+    Args:
+        jar_as_sent: The jar of the request, from
+            _cookie_jar_of_sync_client_request(). The lookup drops its
+            expired cookies.
+        url: The URL the request goes to.
+    """
+    try:
+        prepared_request = requests.Request('GET', url).prepare()
+    except requests.exceptions.RequestException as e:
+        logger.debug(f'Not sending cookies to {redact_url_password(url)}: '
+                     f'{e}')
+        return None
+    return requests.cookies.get_cookie_header(jar_as_sent, prepared_request)
+
+
+# The response statuses that aiohttp and `requests` follow as a redirect.
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+
+class _SetCookieHeaders:
+    """The part of a response that http.cookiejar reads: its headers."""
+
+    def __init__(self, headers: Any) -> None:
+        self._headers = headers
+
+    def info(self) -> '_SetCookieHeaders':
+        return self
+
+    def get_all(self, name: str, default: Any = None) -> Any:
+        return self._headers.getall(name, default)
+
+
+def _add_response_cookies(jar_as_sent: 'requests.cookies.RequestsCookieJar',
+                          url: str, response_headers: Any) -> None:
+    """Adds the cookies that a response sets to the jar of the request.
+
+    `requests` does this with the response of each redirect hop
+    (Session.resolve_redirects), so a cookie set by a redirect is sent on the
+    next hop if its scope allows. The jar's cookie policy decides which
+    cookies the response at `url` may set.
+    """
+    try:
+        prepared_request = requests.Request('GET', url).prepare()
+    except requests.exceptions.RequestException as e:
+        logger.debug('Not taking cookies from the response of '
+                     f'{redact_url_password(url)}: {e}')
+        return
+    # http.cookiejar is typed for urllib's own request and response. It only
+    # uses the response's info().get_all() and the request interface that
+    # `requests` adapts with MockRequest (requests.cookies).
+    jar_as_sent.extract_cookies(
+        typing.cast(Any, _SetCookieHeaders(response_headers)),
+        typing.cast(Any, requests.cookies.MockRequest(prepared_request)))
+
+
+def _credentials_per_hop_middleware(
+    url: str,
+    cookie_jar: Optional['requests.cookies.RequestsCookieJar'],
+    keep_first_cookie_header: bool = False
+) -> Callable[['aiohttp.ClientRequest', Any], Any]:
+    """Returns an aiohttp client middleware that scopes credentials per hop.
+
+    aiohttp calls a client middleware for each request it sends, which
+    includes every hop of a redirect. For each of them, this middleware:
+
+    - Sends the cookies of `cookie_jar` the way the synchronous client does.
+      The Cookie header is what the jar's cookie policy gives for the URL of
+      that hop, and nothing else. The jar is deliberately not passed to
+      aiohttp as `cookies`: that is a plain name-to-value mapping, so it has
+      no domain, path, Secure flag or expiry, and depending on the aiohttp
+      version it is sent on to the target of a redirect.
+    - Adds the cookies that the response of a hop sets to the cookies of the
+      following hops, as the synchronous client does.
+    - Applies the cookie policy to the URL the synchronous client would
+      apply it to. That is the URL as given for the first request, and for
+      a hop of a redirect the Location header resolved against the previous
+      one, which keeps a `user:password@` part across a relative redirect.
+    - Removes the Authorization header from a hop that leaves the origin of
+      the first request (another scheme, host or port). aiohttp does this
+      itself when it follows a redirect, so this only matters if something
+      adds the header again.
+
+    Args:
+        url: The URL of the first request, as the synchronous client would be
+            given it.
+        cookie_jar: The cookie jar to send cookies from. If None, the Cookie
+            header is left as it is.
+        keep_first_cookie_header: The caller set a Cookie header itself. As
+            in the synchronous client, the jar then adds nothing to the first
+            request. Hops of a redirect get the jar's cookies.
+    """
+    first_hop_url: Optional['yarl.URL'] = None
+    jar_as_sent: Optional['requests.cookies.RequestsCookieJar'] = None
+    # Set once a response was a redirect: the URL `requests` would request
+    # next, which is where it applies the cookie policy.
+    redirect_url: Optional[str] = None
+
+    def is_redirect_target(request_url: 'yarl.URL') -> bool:
+        """Whether the request is the hop that redirect_url describes."""
+        if redirect_url is None:
+            return False
+        try:
+            # aiohttp requests the URL without `user:password@` and fragment.
+            # request_url is a yarl.URL; build the other one from its type,
+            # so that yarl is not imported here.
+            expected = type(request_url)(redirect_url).with_user(None)
+        except (TypeError, ValueError):
+            return False
+        return expected.with_fragment(None) == request_url.with_fragment(None)
+
+    async def middleware(request: 'aiohttp.ClientRequest',
+                         handler: Any) -> 'aiohttp.ClientResponse':
+        nonlocal first_hop_url, jar_as_sent, redirect_url
+        # aiohttp removes `user:password@` from the URL it requests. The
+        # synchronous client applies the cookie policy to the URL as it was
+        # given, and to the redirect targets it derives from it.
+        if is_redirect_target(request.url):
+            assert redirect_url is not None
+            is_first_hop = False
+            policy_url = redirect_url
+        elif first_hop_url is None or request.url == first_hop_url:
+            # The first request, or the same request sent again: a caller
+            # that retries sends the request through this middleware again.
+            # Start from the jar of the caller, with no redirect pending.
+            first_hop_url = request.url
+            is_first_hop = True
+            policy_url = url
+            redirect_url = None
+            jar_as_sent = (None if cookie_jar is None else
+                           _cookie_jar_of_sync_client_request(cookie_jar))
+        else:
+            is_first_hop = False
+            policy_url = str(request.url)
+
+        if jar_as_sent is not None and not (is_first_hop and
+                                            keep_first_cookie_header):
+            cookie_header = _cookie_header_of_sync_client(
+                jar_as_sent, policy_url)
+            request.headers.popall('Cookie', None)
+            if cookie_header is not None:
+                request.headers['Cookie'] = cookie_header
+
+        # Set by the first request, which always takes the branch above.
+        assert first_hop_url is not None
+        if request.url.origin() != first_hop_url.origin():
+            request.headers.popall('Authorization', None)
+
+        response = await handler(request)
+        if jar_as_sent is not None:
+            # As `requests` does for the next hop: a new copy of the jar,
+            # then the cookies of this response.
+            jar_as_sent = _cookie_jar_of_sync_client_request(jar_as_sent)
+            _add_response_cookies(jar_as_sent, policy_url, response.headers)
+        redirect_url = None
+        # aiohttp takes the target of a redirect from Location, or else from
+        # the URI header.
+        location = (response.headers.get('Location') or
+                    response.headers.get('URI'))
+        if response.status in _REDIRECT_STATUSES and location:
+            try:
+                redirect_url = urllib.parse.urljoin(policy_url, location)
+            except ValueError as e:
+                # Only the cookie policy needs this URL. Whether and how the
+                # redirect is followed is up to aiohttp and the caller.
+                logger.debug('Could not resolve the redirect target of '
+                             f'{redact_url_password(policy_url)}: {e}')
+        return response
+
+    return middleware
 
 
 def make_authenticated_request(method: str,
                                path: str,
                                server_url: Optional[str] = None,
                                retry: bool = True,
+                               sync_call: bool = False,
                                **kwargs) -> 'requests.Response':
     """Make an authenticated HTTP request to the API server.
 
@@ -432,6 +626,8 @@ def make_authenticated_request(method: str,
         path: API path (e.g., '/api/v1/status')
         server_url: Server URL, defaults to configured server
         retry: Whether to retry on transient errors
+        sync_call: Whether the server may answer with the request's result
+            in the response; see rest.request_without_retry.
         **kwargs: Additional arguments to pass to requests
 
     Returns:
@@ -442,10 +638,13 @@ def make_authenticated_request(method: str,
 
     # Make the request
     if retry:
-        return rest.request(method, url, **kwargs)
+        return rest.request(method, url, sync_call=sync_call, **kwargs)
     else:
         assert method == 'GET', 'Only GET requests can be done without retry'
-        return rest.request_without_retry(method, url, **kwargs)
+        return rest.request_without_retry(method,
+                                          url,
+                                          sync_call=sync_call,
+                                          **kwargs)
 
 
 async def make_authenticated_request_async(
@@ -485,11 +684,24 @@ async def make_authenticated_request_async(
     url, kwargs = _prepare_authenticated_request_params(path, server_url,
                                                         **kwargs)
 
-    # Convert cookies to aiohttp format if needed
-    if 'cookies' in kwargs and isinstance(kwargs['cookies'],
-                                          requests.cookies.RequestsCookieJar):
-        kwargs['cookies'] = _convert_requests_cookies_to_aiohttp(
-            kwargs['cookies'])
+    # A cookie jar is not passed to aiohttp: a middleware sends its cookies
+    # per hop instead, see _credentials_per_hop_middleware(). Cookies the
+    # caller passes in another form are left to aiohttp, as before.
+    cookie_jar = None
+    if isinstance(kwargs.get('cookies'), requests.cookies.RequestsCookieJar):
+        cookie_jar = kwargs.pop('cookies')
+    caller_set_cookie_header = any(
+        name.lower() == 'cookie' for name in kwargs['headers'])
+    middlewares = kwargs.get('middlewares')
+    if middlewares is None:
+        # aiohttp uses per-request middlewares in place of the session's own,
+        # so keep the session's in front of ours.
+        middlewares = getattr(session, '_middlewares', ())
+        if not isinstance(middlewares, (tuple, list)):
+            middlewares = ()
+    kwargs['middlewares'] = (*middlewares,
+                             _credentials_per_hop_middleware(
+                                 url, cookie_jar, caller_set_cookie_header))
 
     # Convert params to strings for aiohttp compatibility
     if 'params' in kwargs and kwargs['params'] is not None:
@@ -511,6 +723,20 @@ async def make_authenticated_request_async(
                                                       **kwargs)
 
 
+# A URL scheme at the start of an endpoint (RFC 3986), e.g. `https://`.
+_URL_SCHEME_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*://')
+
+
+def add_default_scheme(endpoint: str) -> str:
+    """Returns the endpoint with https:// added if it has no scheme.
+
+    An empty endpoint is returned as-is.
+    """
+    if not endpoint or _URL_SCHEME_RE.match(endpoint):
+        return endpoint
+    return f'https://{endpoint}'
+
+
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = get_default_server_url()
@@ -526,7 +752,7 @@ def get_server_url(host: Optional[str] = None) -> str:
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
-    return url.rstrip('/')
+    return add_default_scheme(url).rstrip('/')
 
 
 # Shown in place of a basic-auth password when a server URL is printed for
@@ -701,6 +927,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         commit = result.get('commit')
         user = result.get('user')
         latest_version = result.get('latest_version')
+        sync_call_max_limit = result.get('sync_call_max_limit')
+        rest.set_sync_call_max_limit(sync_call_max_limit)
         # Cache basic_auth_enabled and set client user hash on the
         # client-side usage singleton.
         global basic_auth_enabled, client_user_hash
@@ -716,7 +944,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                     commit=commit,
                                     user=user,
                                     basic_auth_enabled=basic_auth_enabled,
-                                    latest_version=latest_version)
+                                    latest_version=latest_version,
+                                    sync_call_max_limit=sync_call_max_limit)
         if api_version is None or version is None or commit is None:
             server_url = endpoint if endpoint is not None else get_server_url()
             logger.warning(f'API server response missing '
@@ -849,6 +1078,12 @@ def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
 
 
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
+    if rest.is_sync_response(response) and response.status_code in (200, 500):
+        body = response.json()
+        payload = body if response.status_code == 200 else body['detail']
+        sync_request_id: RequestId[T] = RequestId[T](payload['request_id'])
+        sync_request_id.sync_response = (response.status_code, body)
+        return sync_request_id
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
@@ -928,6 +1163,9 @@ def _start_api_server(deploy: bool = False,
                       metrics_port: Optional[int] = None,
                       enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
+    # Local API server needs the DB/ORM stack. Fail with the install hint
+    # before spawning a process that would crash without it.
+    sqlalchemy_deps.require_server_dependencies()
     check_local_api_server_enabled_or_raise()
     server_url = get_server_url(host)
     assert server_url in get_available_local_api_server_urls(), (

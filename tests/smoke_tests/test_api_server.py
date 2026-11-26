@@ -20,6 +20,7 @@ import sky
 from sky import jobs
 from sky import skypilot_config
 from sky.client import common as client_common
+from sky.client import sdk_async
 from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -1061,3 +1062,35 @@ def test_websocket_large_cookie_accepted():
                 'small for enterprise SSO cookies (>8KB).')
 
     asyncio.run(_test())
+
+
+# ---------- Test the async SDK against the API server ----------
+def _async_sdk_reads_request_results() -> None:
+
+    async def _calls() -> None:
+        # get(): the result of a request, fetched from the API server.
+        records = await sdk_async.status(stream_logs=None)
+        assert isinstance(records, list), records
+        # stream_and_get(): the logs of a request are streamed, then its
+        # result is fetched.
+        clouds = await sdk_async.enabled_clouds()
+        assert isinstance(clouds, list), clouds
+
+    asyncio.run(_calls())
+
+
+def test_async_sdk_reads_request_results():
+    """The async SDK reads the results of requests from the API server.
+
+    `sky.client.sdk_async` fetches results and streams logs through its own
+    request path, apart from the one the CLI and the sync SDK use. That path
+    adds the client's cookies and other credentials to each request it sends,
+    including the hops of a redirect. This runs it end to end against the API
+    server under test, with and without log streaming.
+    """
+    test = smoke_tests_utils.Test(
+        'async_sdk_reads_request_results',
+        [_async_sdk_reads_request_results],
+        timeout=5 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

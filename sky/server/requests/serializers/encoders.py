@@ -101,7 +101,7 @@ def encode_status(
     return response
 
 
-@register_encoder('launch', 'exec', 'jobs.launch')
+@register_encoder('launch', 'exec', 'jobs.launch', 'jobs.restart')
 def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:

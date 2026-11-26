@@ -140,9 +140,12 @@ def bootstrap_instances(
 
     # Resolve custom VNet before ARM deployment.
     vpc_name = provider_config.get('vpc_name')
-    custom_vnet = _resolve_custom_vnet(vpc_name, subscription_id,
-                                       resource_group,
-                                       provider_config['location'])
+    custom_vnet = _resolve_custom_vnet(
+        vpc_name,
+        subscription_id,
+        resource_group,
+        provider_config['location'],
+        subnet_id=provider_config.get('subnet_id'))
 
     # load the template file
     current_path = Path(__file__).parent
@@ -305,13 +308,18 @@ def _remove_msi_resources_from_template(template: dict) -> None:
     template.get('outputs', {}).pop('msi', None)
 
 
-def _resolve_custom_vnet(vpc_name: Optional[str], subscription_id: str,
-                         resource_group: str,
-                         location: str) -> Optional[Tuple[str, Optional[str]]]:
+def _resolve_custom_vnet(
+        vpc_name: Optional[str],
+        subscription_id: str,
+        resource_group: str,
+        location: str,
+        subnet_id: Optional[str] = None) -> Optional[Tuple[str, Optional[str]]]:
     """Resolve a custom VNet name to subnet and NSG resource IDs.
 
-    Looks up the VNet by name in the resource group, finds the first
-    subnet, and returns its NSG if one is associated.
+    Looks up the VNet by name and selects the subnet matching subnet_id
+    (case-insensitively), or the first subnet if subnet_id is not specified.
+    Returns its NSG if one is associated. An explicit subnet_id requires
+    vpc_name and must identify exactly one subnet in that VNet.
 
     Returns:
         A (subnet_id, nsg_id) tuple, or None if vpc_name is not specified.
@@ -322,6 +330,10 @@ def _resolve_custom_vnet(vpc_name: Optional[str], subscription_id: str,
             cannot be found.
     """
     if vpc_name is None:
+        if subnet_id is not None:
+            message = 'An explicit Azure subnet_id requires vpc_name.'
+            logger.error(message)
+            raise exceptions.ResourcesUnavailableError(message)
         return None
 
     network_client = azure.get_client('network', subscription_id)
@@ -355,8 +367,21 @@ def _resolve_custom_vnet(vpc_name: Optional[str], subscription_id: str,
             f'VNet {vpc_name!r} has no subnets. Please create at least '
             f'one subnet in the VNet.')
 
-    # Use the first subnet.
-    subnet = vnet.subnets[0]
+    if subnet_id is None:
+        subnet = vnet.subnets[0]
+    else:
+        matches = [
+            s for s in vnet.subnets
+            if s.id is not None and s.id.casefold() == subnet_id.casefold()
+        ]
+        if len(matches) != 1:
+            available = ', '.join(repr(s.name) for s in vnet.subnets)
+            message = (f'Azure subnet_id {subnet_id!r} does not identify '
+                       f'exactly one subnet in VNet {vpc_name!r}. Available '
+                       f'subnets: {available}.')
+            logger.error(message)
+            raise exceptions.ResourcesUnavailableError(message)
+        subnet = matches[0]
     subnet_id = subnet.id
     nsg_id = subnet.network_security_group.id if (
         subnet.network_security_group) else None

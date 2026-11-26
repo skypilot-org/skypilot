@@ -1,4 +1,7 @@
 """Unit tests for sky.utils.annotations."""
+import sys
+import threading
+import time
 
 from sky.adaptors import kubernetes
 from sky.utils import annotations
@@ -125,3 +128,48 @@ class TestKeepIfOnSyncRefresh:
         annotations.clear_request_level_cache()
         assert keep_calls == []
         assert call_all() == ['a', 'b', 'plain']
+
+
+class TestTtlCacheConcurrency:
+    """TTL caches are shared by the threads of a process."""
+
+    def test_concurrent_misses_and_clears_do_not_raise(self):
+
+        # Global scope: a request-scoped cache would stay registered, and a
+        # cache broken by this test would fail every later request-level clear.
+        @annotations.ttl_cache(scope='global',
+                               maxsize=1,
+                               ttl=0.001,
+                               timer=time.time)
+        def cached(x):
+            return x
+
+        errors = []
+        deadline = time.time() + 1
+
+        def request(i):
+            n = 0
+            while time.time() < deadline:
+                try:
+                    cached((i + n) % 4)
+                    if n % 7 == 0:
+                        # What each request start does to a request-scoped
+                        # cache.
+                        cached.cache_clear()
+                except Exception as e:  # pylint: disable=broad-except
+                    errors.append(repr(e))
+                n += 1
+
+        threads = [
+            threading.Thread(target=request, args=(i,)) for i in range(16)
+        ]
+        switch_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            sys.setswitchinterval(switch_interval)
+        assert not errors, errors[:3]

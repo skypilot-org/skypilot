@@ -44,6 +44,69 @@ def test_jobs_launch_num_jobs_allowed_without_pool():
     assert args[3] == 2  # num_jobs
 
 
+def _invoke_jobs_restart(args):
+    """Runs `sky jobs launch --restart ...`; returns (result, restart mock)."""
+    runner = cli_testing.CliRunner()
+    with mock.patch.object(command.managed_jobs, 'restart') as mock_restart, \
+            mock.patch.object(command.managed_jobs, 'launch') as mock_launch, \
+            mock.patch.object(command, '_async_call_or_wait') as mock_wait:
+        mock_wait.return_value = (7, None)
+        result = runner.invoke(command.jobs_launch,
+                               ['--restart', '5', '-y', '-d'] + args)
+    mock_launch.assert_not_called()
+    return result, mock_restart
+
+
+def test_jobs_launch_restart_passes_overrides():
+    result, mock_restart = _invoke_jobs_restart([
+        '--gpus', 'H100:8', '--infra', 'aws', '--env', 'LR=1e-4', '--secret',
+        'HF_TOKEN=x', '--num-nodes', '2', '-n', 'retry', '--pool', 'p'
+    ])
+    assert result.exit_code == 0, result.output
+    args, kwargs = mock_restart.call_args
+    assert args == ('5',)
+    assert kwargs['name'] == 'retry'
+    assert kwargs['pool'] == 'p'
+    assert kwargs['num_nodes'] == 2
+    assert kwargs['env_overrides'] == [('LR', '1e-4')]
+    assert kwargs['secrets_overrides'] == [('HF_TOKEN', 'x')]
+    override = kwargs['resources_override']
+    assert override['accelerators'] == 'H100:8'
+    assert str(override['cloud']) == 'AWS'
+
+
+def test_jobs_launch_restart_without_overrides():
+    result, mock_restart = _invoke_jobs_restart([])
+    assert result.exit_code == 0, result.output
+    assert mock_restart.call_args.kwargs == {
+        'name': None,
+        'pool': None,
+        'resources_override': None,
+        'env_overrides': None,
+        'secrets_overrides': None,
+        'num_nodes': None,
+    }
+
+
+def test_jobs_launch_restart_rejects_an_entrypoint():
+    result, mock_restart = _invoke_jobs_restart(['task.yaml'])
+    assert result.exit_code != 0
+    assert 'takes no ENTRYPOINT' in result.output
+    mock_restart.assert_not_called()
+
+
+def test_jobs_launch_restart_rejects_code_and_attachment_flags():
+    for flag in (['--workdir', '.'], ['--git-url',
+                                      'https://x/y.git'], ['--git-ref', 'main'],
+                 ['--num-jobs',
+                  '2'], ['--job-group',
+                         '3'], ['--no-job-group'], ['--depends-on', '4']):
+        result, mock_restart = _invoke_jobs_restart(flag)
+        assert result.exit_code != 0, flag
+        assert f'--restart cannot be used with {flag[0]}' in result.output
+        mock_restart.assert_not_called()
+
+
 def test_jobs_launch_multi_job_output_without_pool_has_no_pool_hints():
     # A multi-job launch without a pool must not emit pool-specific hints:
     # no `value=None` dashboard filter, and no `sky jobs cancel --pool None`.

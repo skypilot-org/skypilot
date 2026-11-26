@@ -443,9 +443,7 @@ class TestHfMountCommands:
 class TestStorageIntegration:
     """Tests for public Storage/Task integration paths."""
 
-    @mock.patch(
-        'sky.data.storage.global_user_state.get_handle_from_storage_name',
-        return_value=None)
+    @mock.patch('sky.data.storage._get_accessible_handle', return_value=None)
     @mock.patch('sky.data.storage.huggingface.huggingface_hub.load_module')
     @mock.patch('sky.data.storage.huggingface.get_token', return_value=None)
     @mock.patch('sky.data.storage.huggingface.api')
@@ -470,9 +468,7 @@ class TestStorageIntegration:
             revision=None,
             token=None)
 
-    @mock.patch(
-        'sky.data.storage.global_user_state.get_handle_from_storage_name',
-        return_value=None)
+    @mock.patch('sky.data.storage._get_accessible_handle', return_value=None)
     @mock.patch('sky.data.storage._is_storage_cloud_enabled', return_value=True)
     @mock.patch('sky.data.storage.huggingface.get_token', return_value='token')
     @mock.patch('sky.data.storage.huggingface.api')

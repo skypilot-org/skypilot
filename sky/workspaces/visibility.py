@@ -18,7 +18,6 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.users import permission
-from sky.users import rbac
 from sky.utils import common_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
@@ -74,11 +73,8 @@ def _workspace_targets(workspace: str, cloud: str) -> Set[str]:
         return set()
 
 
-def visible_for_workspaces(workspaces: Iterable[str], cloud: str) -> Set[str]:
-    """The union of ``cloud``'s allowed targets over ``workspaces``.
-
-    Pure: no auth and no config refresh, so the executor can use it too.
-    """
+def _representatives(workspaces: Iterable[str], cloud: str) -> List[str]:
+    """One workspace per distinct ``cloud`` setting among ``workspaces``."""
     key = _ALLOWED_KEYS[cloud]
     configs = skypilot_config.get_nested(('workspaces',), default_value={})
     # The result depends only on a workspace's own value and `disabled`, so
@@ -94,20 +90,27 @@ def visible_for_workspaces(workspaces: Iterable[str], cloud: str) -> Set[str]:
                            sort_keys=True,
                            default=str)
         representatives.setdefault(group, workspace)
+    return list(representatives.values())
+
+
+def visible_for_workspaces(workspaces: Iterable[str], cloud: str) -> Set[str]:
+    """The union of ``cloud``'s allowed targets over ``workspaces``.
+
+    Pure: no auth and no config refresh, so the executor can use it too.
+    """
     targets: Set[str] = set()
-    for workspace in representatives.values():
+    for workspace in _representatives(workspaces, cloud):
         targets |= _workspace_targets(workspace, cloud)
     return targets
 
 
-def _is_admin(user_id: str) -> bool:
-    try:
-        roles = permission.permission_service.get_user_roles(user_id)
-    except Exception as e:  # pylint: disable=broad-except
-        # Fail closed: a role lookup error scopes the user, never widens.
-        logger.warning(f'Failed to look up roles of {user_id}; scoping: {e}')
-        return False
-    return roles == [rbac.RoleName.ADMIN.value]
+def workspace_allowing(workspaces: Iterable[str], cloud: str,
+                       target: str) -> Optional[str]:
+    """A workspace among ``workspaces`` that allows ``target``, or None."""
+    for workspace in _representatives(workspaces, cloud):
+        if target in _workspace_targets(workspace, cloud):
+            return workspace
+    return None
 
 
 def scope_for(auth_user: Optional[models.User],
@@ -124,7 +127,7 @@ def scope_for(auth_user: Optional[models.User],
     # This process does not get the executor's per-request config reload;
     # without it a revoked target stays visible.
     server_common.refresh_workspace_state_for_sync_handler()
-    if _is_admin(auth_user.id):
+    if permission.is_admin(auth_user.id):
         return UNSCOPED
     workspaces = list(workspaces_core.workspaces_for_user(auth_user.id))
     kubernetes: FrozenSet[str] = frozenset()

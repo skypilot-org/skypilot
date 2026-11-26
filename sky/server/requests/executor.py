@@ -27,13 +27,14 @@ import functools
 import inspect
 import multiprocessing
 import os
+import queue as queue_lib
 import signal
 import sys
 import threading
 import time
 import typing
-from typing import (Any, Awaitable, Callable, Dict, Generator, List, Optional,
-                    Set, TextIO, Tuple)
+from typing import (Any, Awaitable, Callable, ContextManager, Dict, Generator,
+                    List, Optional, Set, TextIO, Tuple)
 
 import psutil
 import setproctitle
@@ -45,6 +46,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.server import caller_usage
 from sky.server import clean_env as clean_env_module
 from sky.server import common as server_common
 from sky.server import config as server_config
@@ -55,6 +57,7 @@ from sky.server import plugins
 from sky.server import versions
 from sky.server.auth import loopback
 from sky.server.requests import event_loop
+from sky.server.requests import heavy_requests
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -72,6 +75,7 @@ from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
@@ -111,10 +115,24 @@ _REQUEST_THREADS_LIMIT = 128
 # point where the sheer number of threads in one process starts slowing its
 # request handling down.
 _AUTH_THREADS_LIMIT = 32
+# Auth lookups that may wait for a free auth thread; the next one gets a 503.
+_AUTH_QUEUED_LIMIT = 4 * _AUTH_THREADS_LIMIT
+# Threads each executor starts when the server process starts; the rest start
+# on demand and are kept for reuse.
+_REQUEST_THREADS_WARM = 16
+_AUTH_THREADS_WARM = 8
 
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
+
+# How long a request worker waits before polling its empty queue again.
+_IDLE_POLL_SECONDS = 0.1
+# Heavy requests take seconds to minutes, so their queue is polled less often.
+_HEAVY_IDLE_POLL_SECONDS = 1.0
+# How long the heavy worker waits after requeueing a request whose user already
+# runs a heavy request of the same name.
+_HEAVY_USER_BUSY_BACKOFF_SECONDS = 1.0
 
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
@@ -184,6 +202,26 @@ def set_execution_policy(policy: Optional[ExecutionPolicy]) -> None:
     _execution_policy = policy
 
 
+_sync_call_max_limit: Optional[int] = None
+
+
+def set_sync_calls(max_limit: Optional[int]) -> None:
+    """Advertises in /api/health that this process answers sync calls.
+
+    Clients then send server_constants.SYNC_CALL_HEADER, and a request with a
+    `limit` argument is answered in the response only when the limit is at most
+    max_limit. None stops advertising. Must be called in every API server
+    process that answers sync calls, e.g. from a plugin's install().
+    """
+    global _sync_call_max_limit
+    _sync_call_max_limit = max_limit
+
+
+def get_sync_call_max_limit() -> Optional[int]:
+    """The max_limit set by set_sync_calls, or None."""
+    return _sync_call_max_limit
+
+
 def run_request_inline(
         request: RequestToSchedule,
         executor: concurrent.futures.Executor) -> 'asyncio.Task[Any]':
@@ -208,6 +246,8 @@ async def _run_request_inline(request: RequestToSchedule,
         return await context_utils.to_thread_with_executor(
             executor, _execute_with_config_override, request.func,
             request.request_body, request.request_id, request.request_name,
+            _caller_of(request.user_id,
+                       request.request_body), caller_usage.KIND_SYNC,
             **request.request_body.to_kwargs())
     finally:
         ctx.cancel()
@@ -253,9 +293,11 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     """Lazy init and return the auth thread executor for current process.
 
     For short, latency-sensitive work on the request hot path -- primarily the
-    DB lookups done by authentication middleware. Do not submit long-running or
-    streaming work here; that belongs in ``get_request_thread_executor()``,
-    whose exhaustion must not be able to lock users out.
+    DB lookups done by authentication middleware. A lookup that finds every
+    thread busy waits for one, up to _AUTH_QUEUED_LIMIT of them; callers bound
+    the wait with a deadline. Do not
+    submit long-running or streaming work here; that belongs in
+    ``get_request_thread_executor()``.
     """
     global _AUTH_THREAD_EXECUTOR
     if _AUTH_THREAD_EXECUTOR is not None:
@@ -263,8 +305,19 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     with _AUTH_THREAD_EXECUTOR_LOCK:
         if _AUTH_THREAD_EXECUTOR is None:
             _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
-                name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
+                name='auth_thread_executor',
+                max_workers=_AUTH_THREADS_LIMIT,
+                max_queued=_AUTH_QUEUED_LIMIT)
         return _AUTH_THREAD_EXECUTOR
+
+
+def warm_thread_executors() -> None:
+    """Starts the warm threads of the request and auth executors.
+
+    Thread start waits for the GIL, so call this off the event loop.
+    """
+    get_request_thread_executor().prestart(_REQUEST_THREADS_WARM)
+    get_auth_thread_executor().prestart(_AUTH_THREADS_WARM)
 
 
 class RequestQueue:
@@ -454,6 +507,10 @@ class RequestWorker:
             config.num_db_connections_per_worker)
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
+        # Locks of heavy requests that finished. A lock is released by the
+        # thread that acquired it, since file locks are held per thread.
+        self._finished_user_locks: queue_lib.SimpleQueue = (
+            queue_lib.SimpleQueue())
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
@@ -471,18 +528,76 @@ class RequestWorker:
             self._cancel_event.set()
             self._thread.join()
 
+    def _executors_gauge(self) -> Any:
+        if self.schedule_type == api_requests.ScheduleType.LONG:
+            return metrics_utils.SKY_APISERVER_LONG_EXECUTORS
+        if self.schedule_type == api_requests.ScheduleType.SHORT:
+            return metrics_utils.SKY_APISERVER_SHORT_EXECUTORS
+        return metrics_utils.SKY_APISERVER_HEAVY_EXECUTORS
+
+    def _release_user_lock(self, lock: locks.DistributedLock) -> None:
+        try:
+            lock.release()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'[{self}] Failed to release {lock.lock_id}: '
+                         f'{common_utils.format_exception(e)}')
+
+    def _release_finished_user_locks(self) -> None:
+        while True:
+            try:
+                lock = self._finished_user_locks.get_nowait()
+            except queue_lib.Empty:
+                return
+            self._release_user_lock(lock)
+
+    def _lock_user(
+            self, user_id: str,
+            request_name: str) -> Tuple[bool, Optional[locks.DistributedLock]]:
+        """Locks the user's heavy requests of a name.
+
+        Returns:
+            Whether the request may run, and the lock it holds. A request runs
+            without the lock when the lock fails for another reason than
+            being held: the pool still bounds it, and requeueing it would
+            retry for as long as the failure lasts.
+        """
+        lock_id = heavy_requests.user_lock_id(user_id, request_name)
+        try:
+            lock = locks.get_lock(lock_id)
+            lock.acquire(blocking=False)
+        except locks.LockTimeout:
+            return False, None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'[{self}] Running without lock {lock_id}: '
+                           f'{common_utils.format_exception(e)}')
+            return True, None
+        return True, lock
+
     def process_request(self, executor: process.BurstableExecutor,
                         queue: RequestQueue) -> None:
+        heavy = self.schedule_type == api_requests.ScheduleType.HEAVY
+        if heavy:
+            self._release_finished_user_locks()
+        user_lock: Optional[locks.DistributedLock] = None
         try:
             request_element = queue.get()
             if request_element is None:
-                time.sleep(0.1)
+                time.sleep(
+                    _HEAVY_IDLE_POLL_SECONDS if heavy else _IDLE_POLL_SECONDS)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id, fields=['status'])
+            fields = ['status', 'user_id', 'name'] if heavy else ['status']
+            request = api_requests.get_request(request_id, fields=fields)
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
+            if heavy:
+                may_run, user_lock = self._lock_user(request.user_id,
+                                                     request.name)
+                if not may_run:
+                    queue.put(request_element)
+                    time.sleep(_HEAVY_USER_BUSY_BACKOFF_SECONDS)
+                    return
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
@@ -496,14 +611,11 @@ class RequestWorker:
                 self.num_db_connections_per_worker)
             # Decrement the free executor count when a request starts
             if metrics_utils.METRICS_ENABLED:
-                if self.schedule_type == api_requests.ScheduleType.LONG:
-                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.dec()
-                elif self.schedule_type == api_requests.ScheduleType.SHORT:
-                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
+                self._executors_gauge().dec()
             # Monitor the result of the request execution.
             try:
                 threading.Thread(target=self.handle_task_result,
-                                 args=(fut, request_element),
+                                 args=(fut, request_element, user_lock),
                                  daemon=True).start()
             except Exception:  # pylint: disable=broad-except
                 # handle_task_result owns the matching increment, so a thread
@@ -511,6 +623,8 @@ class RequestWorker:
                 # the process.
                 self._mark_executor_free()
                 raise
+            # handle_task_result hands the lock back once the request ends.
+            user_lock = None
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -519,6 +633,9 @@ class RequestWorker:
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+        finally:
+            if user_lock is not None:
+                self._release_user_lock(user_lock)
 
     def _mark_executor_free(self) -> None:
         """Increment the free-executor gauge for this worker's schedule type.
@@ -529,13 +646,13 @@ class RequestWorker:
         """
         if not metrics_utils.METRICS_ENABLED:
             return
-        if self.schedule_type == api_requests.ScheduleType.LONG:
-            metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
-        elif self.schedule_type == api_requests.ScheduleType.SHORT:
-            metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
+        self._executors_gauge().inc()
 
-    def handle_task_result(self, fut: concurrent.futures.Future,
-                           request_element: Tuple[str, bool, bool]) -> None:
+    def handle_task_result(
+            self,
+            fut: concurrent.futures.Future,
+            request_element: Tuple[str, bool, bool],
+            user_lock: Optional[locks.DistributedLock] = None) -> None:
         try:
             try:
                 fut.result()
@@ -546,12 +663,14 @@ class RequestWorker:
                 # during the wait, instead of staying decremented until the
                 # request finishes or reschedules.
                 self._mark_executor_free()
+                if user_lock is not None:
+                    self._finished_user_locks.put(user_lock)
         except concurrent.futures.process.BrokenProcessPool as e:
             # Happens when the worker process dies unexpectedly, e.g. OOM
             # killed.
             request_id, _, retryable = request_element
-            # Ensure the request status.
-            api_requests.set_request_failed(request_id, e)
+            # Ensure the request status; a cancelled request stays cancelled.
+            api_requests.set_request_failed_if_active(request_id, e)
             logger.error(
                 f'Request {request_id} failed to get processed '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -693,12 +812,7 @@ class RequestWorker:
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)
             if metrics_utils.METRICS_ENABLED:
-                if self.schedule_type == api_requests.ScheduleType.LONG:
-                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.set(
-                        total_executors)
-                elif self.schedule_type == api_requests.ScheduleType.SHORT:
-                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.set(
-                        total_executors)
+                self._executors_gauge().set(total_executors)
             while not self._cancel_event.is_set():
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
@@ -738,6 +852,18 @@ _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG = {
     request_names.RequestName.CLUSTER_LAUNCH.value,
     server_constants.REQUEST_NAME_PREFIX +
     request_names.RequestName.JOBS_LAUNCH.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_RESTART.value,
+}
+
+# Reads that prepare a write (`sky launch`, `sky volumes apply`, ...). A user
+# who has not chosen among several workspaces is told so here, not after
+# confirming a plan made for a workspace they did not choose. Other reads use
+# the first workspace by name.
+_LAUNCH_PREP_REQUEST_NAMES = {
+    request_names.AdminPolicyRequestName.VALIDATE.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.OPTIMIZE.value,
 }
 
 # Sources we DON'T announce, even on a resource-creating request:
@@ -954,6 +1080,8 @@ def override_request_env_and_config(
             sync_refresh=sync_refresh)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
+        # A new request: forget any workspace left on this (reused) thread.
+        skypilot_config.clear_active_workspace()
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path,
@@ -1000,7 +1128,10 @@ def override_request_env_and_config(
                         # The resolver reads the preferred workspace.
                         user = global_user_state.get_user(user.id) or user
                     resolution = workspaces_core.resolve_workspace_for_user(
-                        user, action=ws_action)
+                        user,
+                        action=ws_action,
+                        pick_for_read=(request_name
+                                       not in _LAUNCH_PREP_REQUEST_NAMES))
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
                     ws_label = skypilot_config.workspace_label(
@@ -1190,6 +1321,8 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
+    # A heavy request runs in a process of its own, which exits afterwards.
+    one_request_process = False
     # Set _in_request_execution inside the try so `finally` always clears it,
     # even if a SIGTERM lands before any wrapper code runs.
     global _in_request_execution  # pylint: disable=global-statement
@@ -1214,6 +1347,8 @@ def _request_execution_wrapper(request_id: str,
             request_task.status_msg = None
             func = request_task.entrypoint
             request_name = request_task.name
+            one_request_process = (
+                request_task.schedule_type == api_requests.ScheduleType.HEAVY)
 
         # Store copies of the original stdout and stderr file descriptors
         # We do this in two steps because we should make sure to restore the
@@ -1244,8 +1379,12 @@ def _request_execution_wrapper(request_id: str,
                                  f'{config_utils.dump_redacted_yaml(config)}')
                 (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
                  labels(request=request_name, pid=pid).inc())
+                caller = _caller_of(request_task.user_id,
+                                    request_task.request_body)
                 with metrics_utils.time_it(name=request_name,
-                                           group='request_execution'):
+                                           group='request_execution'), \
+                    _caller_execution(request_id, caller, request_name,
+                                      request_task.schedule_type.value):
                     return_value = func(**request_task.request_body.to_kwargs())
                 f.flush()
     except KeyboardInterrupt:
@@ -1279,8 +1418,9 @@ def _request_execution_wrapper(request_id: str,
         return
     else:
         try:
-            api_requests.set_request_succeeded(
+            stored = api_requests.set_request_succeeded(
                 request_id, return_value if not ignore_return_value else None)
+            caller_usage.record_stored_bytes(caller, request_name, stored)
         except Exception as e:  # pylint: disable=broad-except
             # A database error can hold the whole result as a statement
             # parameter, so only the driver's message is recorded.
@@ -1312,9 +1452,11 @@ def _request_execution_wrapper(request_id: str,
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
-            _maybe_release_memory(proc)
+            if not one_request_process:
+                _maybe_release_memory(proc)
             if request_name is not None:
-                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss,
+                                       one_request_process)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to record memory metrics: '
                          f'{common_utils.format_exception(e)}')
@@ -1358,9 +1500,20 @@ def _maybe_release_memory(proc: psutil.Process) -> None:
 _first_request = True
 
 
-def _record_memory_metrics(request_name: str, proc: psutil.Process,
-                           rss_begin: int, peak_rss: int) -> None:
-    """Record the memory metrics for a request."""
+def _record_memory_metrics(request_name: str,
+                           proc: psutil.Process,
+                           rss_begin: int,
+                           peak_rss: int,
+                           one_request_process: bool = False) -> None:
+    """Record the memory metrics for a request.
+
+    A process that runs one request records its peak, which includes loading
+    the sky core modules, and no RSS increment, which it returns on exit.
+    """
+    if one_request_process:
+        metrics_utils.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+            name=request_name).observe(max(peak_rss - rss_begin, 0))
+        return
     # Do not record full memory delta for the first request as it
     # will loads the sky core modules and make the memory usage
     # estimation inaccurate.
@@ -1425,6 +1578,7 @@ def execute_request_in_coroutine(
 def _execute_with_config_override(func: Callable,
                                   request_body: payloads.RequestBody,
                                   request_id: str, request_name: str,
+                                  caller: caller_usage.Caller, kind: str,
                                   **kwargs) -> Any:
     """Execute a function with env and config override inside a thread."""
     # Override the environment and config within this thread's context,
@@ -1434,8 +1588,27 @@ def _execute_with_config_override(func: Callable,
                                          request_name,
                                          sync_refresh=True):
         with metrics_utils.time_it(name=request_name,
-                                   group='request_execution'):
+                                   group='request_execution'), \
+            _caller_execution(request_id, caller, request_name, kind):
             return func(**kwargs)
+
+
+def _caller_of(user_id: str,
+               request_body: payloads.RequestBody) -> caller_usage.Caller:
+    impersonator_id = getattr(request_body, 'impersonator_id', None)
+    if impersonator_id:
+        return caller_usage.caller_of(impersonator_id,
+                                      request_body.impersonator_name)
+    return caller_usage.caller_of(
+        user_id, request_body.env_vars.get(constants.USER_ENV_VAR))
+
+
+def _caller_execution(request_id: str, caller: caller_usage.Caller,
+                      request_name: str, kind: str) -> ContextManager[None]:
+    # A daemon request runs for the life of the server.
+    if daemons.is_daemon_request_id(request_id):
+        return contextlib.nullcontext()
+    return caller_usage.executing(caller, request_name, kind)
 
 
 async def _execute_request_coroutine(
@@ -1480,13 +1653,15 @@ async def _execute_request_coroutine(
     logger.info(f'Executing request {request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    caller = _caller_of(request.user_id, request_body)
     _maybe_observe_request_pending(request)
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
     try:
         fut: asyncio.Future = context_utils.to_thread_with_executor(
             get_request_thread_executor(), _execute_with_config_override, func,
-            request_body, request_id, request.name, **request_body.to_kwargs())
+            request_body, request_id, request.name, caller,
+            request.schedule_type.value, **request_body.to_kwargs())
     except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
         if (on_executor_exhausted is not None and
@@ -1518,8 +1693,9 @@ async def _execute_request_coroutine(
                 return
         try:
             result = await fut
-            await api_requests.set_request_succeeded_async(
-                request_id, None if ignore_return_value else result)
+            stored = await api_requests.set_request_succeeded_async(
+                request, None if ignore_return_value else result)
+            caller_usage.record_stored_bytes(caller, request.name, stored)
         except asyncio.CancelledError:
             # The task is cancelled by ctx.cancel(), where the status
             # should already be set to CANCELLED.
@@ -1604,6 +1780,13 @@ def stamp_request_body(request_body: payloads.RequestBody,
     # Same again for whether the request came from loopback; it decides which
     # client env vars and config overrides the worker honors.
     request_body.from_loopback = loopback.get_request_from_loopback()
+    impersonator = caller_usage.impersonator()
+    request_body.impersonator_id = impersonator.id if impersonator else None
+    request_body.impersonator_name = impersonator.name if impersonator else None
+    # Persist only the env the worker will apply: the row is kept in the DB
+    # and may hold the server's own env (bodies built on the server).
+    request_body.env_vars = _sanitize_request_env_vars(
+        request_body.env_vars, request_body.from_loopback)
     return user_id
 
 
@@ -1618,6 +1801,7 @@ async def prepare_request_async(
     auth_user: Optional[models.User] = None,
 ) -> api_requests.Request:
     """Prepare a request for execution."""
+    caller_usage.mark_request_scheduled()
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
     return await _create_request_async(request_id, request_name, request_body,
                                        func, request_cluster_name,
@@ -1689,7 +1873,12 @@ async def schedule_request_async(
             The precondition is waited asynchronously and does not block the
             caller.
     """
+    caller_usage.mark_request_scheduled()
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
+    if (schedule_type == api_requests.ScheduleType.SHORT and
+            heavy_requests.enabled() and
+            heavy_requests.is_heavy(request_name, request_body)):
+        schedule_type = api_requests.ScheduleType.HEAVY
     mode = ExecutionMode.QUEUE
     if (_execution_policy is not None and precondition is None and
             not retryable):
@@ -1850,4 +2039,15 @@ def start(
                                  config=config.short_worker_config)
     short_worker.run_in_background()
     workers.append(short_worker)
+
+    # Start a worker for heavy requests. With the heavy pool disabled it still
+    # runs one process at a time, for requests queued while it was enabled.
+    heavy_config = dataclasses.replace(
+        config.heavy_worker_config,
+        burstable_parallelism=max(
+            1, config.heavy_worker_config.burstable_parallelism))
+    heavy_worker = RequestWorker(schedule_type=api_requests.ScheduleType.HEAVY,
+                                 config=heavy_config)
+    heavy_worker.run_in_background()
+    workers.append(heavy_worker)
     return queue_server, workers
