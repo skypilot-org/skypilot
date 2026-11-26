@@ -593,7 +593,10 @@ def _credentials_per_hop_middleware(
             jar_as_sent = _cookie_jar_of_sync_client_request(jar_as_sent)
             _add_response_cookies(jar_as_sent, policy_url, response.headers)
         redirect_url = None
-        location = response.headers.get('Location')
+        # aiohttp takes the target of a redirect from Location, or else from
+        # the URI header.
+        location = (response.headers.get('Location') or
+                    response.headers.get('URI'))
         if response.status in _REDIRECT_STATUSES and location:
             try:
                 redirect_url = urllib.parse.urljoin(policy_url, location)

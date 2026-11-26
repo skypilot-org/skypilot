@@ -19,6 +19,11 @@ from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Set, Tuple
 import aiohttp
 from aiohttp import abc as aiohttp_abc
 from aiohttp import web
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509 import oid
 import multidict
 import pytest
 import requests
@@ -141,15 +146,8 @@ async def _servers():
 
 def _self_signed_ssl_context(tmp_path, host: str) -> ssl.SSLContext:
     """A server-side TLS context with a throwaway self-signed certificate."""
-    # pylint: disable=import-outside-toplevel
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import NameOID
-
     key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)])
+    name = x509.Name([x509.NameAttribute(oid.NameOID.COMMON_NAME, host)])
     now = datetime.datetime.now(datetime.timezone.utc)
     certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(
         name).public_key(key.public_key()).serial_number(
@@ -983,6 +981,33 @@ async def test_middleware_starts_over_when_the_request_is_sent_again():
                                               {'Cookie': 'mine=1'})
     assert set(landing['Cookie'].split('; ')) == {
         'landing-cookie=for-landing', 'host-cookie=for-host'
+    }
+
+
+@pytest.mark.asyncio
+async def test_middleware_follows_a_redirect_named_by_a_uri_header():
+    """aiohttp follows a redirect that has a URI header and no Location.
+
+    When it points back at the same URL, the next request is a hop of that
+    redirect, not the request sent again: it gets the cookie the response
+    set, and a Cookie header of the caller is not kept for it.
+    """
+    first_url = 'http://api.test/api/get'
+    middleware = common._credentials_per_hop_middleware(
+        first_url, _jar(_scoped_cookies()), keep_first_cookie_header=True)
+
+    assert await _headers_after_middleware(
+        middleware, first_url, {'Cookie': 'mine=1'},
+        _FakeResponse(307, {
+            'URI': '/api/get',
+            'Set-Cookie': 'route=one; Path=/'
+        })) == {
+            'Cookie': 'mine=1'
+        }
+    again = await _headers_after_middleware(middleware, first_url,
+                                            {'Cookie': 'mine=1'})
+    assert set(again['Cookie'].split('; ')) == {
+        'api-cookie=for-api', 'host-cookie=for-host', 'route=one'
     }
 
 
