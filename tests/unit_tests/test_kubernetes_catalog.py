@@ -274,3 +274,34 @@ def test_list_accelerators_all_regions_keeps_per_context_entries(monkeypatch):
                                                   all_regions=True)
 
     assert _regions(result, 'A100-80GB') == {_CONTEXT_A, _CONTEXT_B}
+
+
+@pytest.mark.usefixtures('checked_contexts')
+@pytest.mark.parametrize('all_regions', [False, True])
+def test_list_accelerators_same_gpu_in_contexts_is_not_merged(
+        monkeypatch, all_regions):
+    """Contexts offering the same GPU and quantity each keep their entries.
+
+    The issue's own scenario (#9267): several clusters with one L4 each must
+    all be listed by the default ``-o json`` (all_regions=False), not merged
+    into the first context's entry.
+    """
+    nodes_by_context = {
+        _CONTEXT_A: [_gpu_node('node-a1', 'l4', 1)],
+        _CONTEXT_B: [_gpu_node('node-b1', 'l4', 1)],
+    }
+    monkeypatch.setattr(
+        kubernetes_utils,
+        'get_kubernetes_nodes',
+        lambda context=None: list(nodes_by_context.get(context, [])))
+
+    result, capacity, _ = kubernetes_catalog.list_accelerators_realtime(
+        gpus_only=True,
+        name_filter=None,
+        region_filter=None,
+        quantity_filter=None,
+        all_regions=all_regions)
+
+    assert sorted(
+        item.region for item in result['L4']) == [_CONTEXT_A, _CONTEXT_B]
+    assert capacity == {'L4': 2}

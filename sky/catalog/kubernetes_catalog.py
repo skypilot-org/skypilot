@@ -220,10 +220,22 @@ def _list_accelerators(
                           'MemoryGiB', 'Price', 'SpotPrice', 'Region'
                       ])
     df['GpuInfo'] = True
-    qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
-                                             name_filter, region_filter,
-                                             quantity_filter, case_sensitive,
-                                             all_regions)
+    # Always keep one entry per context (the Region column): with
+    # all_regions=False, list_accelerators_impl drops entries that differ only
+    # in region, which would collapse contexts offering the same GPU and
+    # quantity into one and hide the others (#9267). Unlike a cloud's regions,
+    # each context is a separate pool of GPUs, so each entry is reported, like
+    # the table output does. With a region filter only one context is queried,
+    # so this makes no difference there.
+    del all_regions  # Every context is listed regardless.
+    qtys_map = common.list_accelerators_impl('Kubernetes',
+                                             df,
+                                             gpus_only,
+                                             name_filter,
+                                             region_filter,
+                                             quantity_filter,
+                                             case_sensitive,
+                                             all_regions=True)
     return qtys_map, total_accelerators_capacity, total_accelerators_available
 
 
