@@ -51,6 +51,8 @@ REASON_NO_SOURCE = 'no_source'
 # context=None, which the API client resolves in-cluster first; a source
 # serves named contexts only.
 REASON_UNNAMED_CONTEXT = 'unnamed_context'
+# A subresource, e.g. a Deployment's status; a source serves objects only.
+REASON_SUBRESOURCE = 'subresource'
 
 
 @dataclasses.dataclass(frozen=True)
@@ -253,7 +255,7 @@ def list_objects(
         exceptions.KubernetesResourceNotServedError: The API server does not
             serve the resource, which is not in the core group.
     """
-    return _read(context, resource, namespace, None, label_selector,
+    return _read(context, resource, namespace, None, None, label_selector,
                  field_selector, consistency, convert, attempts, timeout, limit)
 
 
@@ -267,6 +269,7 @@ def get_object(
     convert: Optional[Callable[[Dict[str, Any]], Any]] = None,
     attempts: Optional[int] = None,
     timeout: Optional[Timeout] = None,
+    subresource: Optional[str] = None,
 ) -> ReadResult:
     """Get one object; its items hold the object, or nothing if it is absent.
 
@@ -285,6 +288,9 @@ def get_object(
             default retries.
         timeout: Timeout of each request to the API server; None for
             kubernetes.API_TIMEOUT.
+        subresource: Get this subresource of the object instead, e.g.
+            'status', which RBAC authorizes on its own. It is always read
+            from the API server.
 
     Raises:
         exceptions.KubeAPIUnreachableError: The API server was needed and is
@@ -293,8 +299,8 @@ def get_object(
     """
     if resource.namespaced and namespace is None:
         raise ValueError(f'Getting a {resource.label} needs a namespace.')
-    return _read(context, resource, namespace, name, None, None, consistency,
-                 convert, attempts, timeout, None)
+    return _read(context, resource, namespace, name, subresource, None, None,
+                 consistency, convert, attempts, timeout, None)
 
 
 def http_status(error: BaseException) -> Optional[int]:
@@ -314,16 +320,18 @@ def http_status(error: BaseException) -> Optional[int]:
 
 
 def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
-          name: Optional[str], label_selector: Optional[str],
-          field_selector: Optional[str], consistency: Consistency,
-          convert: Optional[Callable[[Dict[str, Any]],
-                                     Any]], attempts: Optional[int],
-          timeout: Optional[Timeout], limit: Optional[int]) -> ReadResult:
+          name: Optional[str], subresource: Optional[str],
+          label_selector: Optional[str], field_selector: Optional[str],
+          consistency: Consistency, convert: Optional[Callable[[Dict[str, Any]],
+                                                               Any]],
+          attempts: Optional[int], timeout: Optional[Timeout],
+          limit: Optional[int]) -> ReadResult:
     if namespace is not None and not resource.namespaced:
         raise ValueError(f'{resource.label} is cluster-scoped; got namespace '
                          f'{namespace!r}.')
     served = None
-    if isinstance(consistency, Cached) and context is not None:
+    if (isinstance(consistency, Cached) and context is not None and
+            subresource is None):
         object_query = plugin_extensions.ObjectQuery(
             context=context,
             group=resource.group,
@@ -359,6 +367,8 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                      f'API server: {served.reason} {served.message}')
     elif isinstance(consistency, Fresh):
         reason = REASON_FRESH
+    elif subresource is not None:
+        reason = REASON_SUBRESOURCE
     elif context is None:
         reason = REASON_UNNAMED_CONTEXT
     else:
@@ -367,6 +377,8 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                                   reason)
 
     path = resource.path(namespace, name)
+    if subresource is not None:
+        path += f'/{parse.quote(subresource, safe="")}'
     query = tuple(
         (key, value)
         for key, value in (('labelSelector', label_selector), ('fieldSelector',

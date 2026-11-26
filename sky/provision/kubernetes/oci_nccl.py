@@ -258,7 +258,8 @@ def _read_configmap(context: Optional[str], namespaces: List[str],
                                      reads.CONFIG_MAPS,
                                      name,
                                      namespace=namespace,
-                                     attempts=1).items
+                                     attempts=1,
+                                     consistency=reads.FRESH).items
         except Exception as e:  # pylint: disable=broad-except
             if reads.http_status(e) == 403:
                 continue

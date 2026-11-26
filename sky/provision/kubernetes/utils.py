@@ -4506,7 +4506,8 @@ def read_cluster_uid(context: Optional[str], timeout: float) -> Optional[str]:
                                   reads.NAMESPACES,
                                   CLUSTER_IDENTITY_NAMESPACE,
                                   attempts=1,
-                                  timeout=timeout).items
+                                  timeout=timeout,
+                                  consistency=reads.FRESH).items
     if not namespaces:
         return None
     return namespaces[0].get('metadata', {}).get('uid')
@@ -5431,9 +5432,10 @@ def merge_custom_metadata(
 def check_nvidia_runtime_class(*, context: Optional[str] = None) -> bool:
     """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
     try:
-        runtime_classes = reads.list_objects(
-            context, reads.RUNTIME_CLASSES,
-            timeout=reads.LONG_READ_TIMEOUT).items
+        runtime_classes = reads.list_objects(context,
+                                             reads.RUNTIME_CLASSES,
+                                             timeout=reads.LONG_READ_TIMEOUT,
+                                             consistency=reads.FRESH).items
     except exceptions.KubernetesResourceNotServedError:
         return False
     return any(rc['metadata']['name'] == 'nvidia' for rc in runtime_classes)

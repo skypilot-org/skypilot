@@ -126,7 +126,7 @@ def test_autostop_event_reads_the_namespace_events(monkeypatch):
     assert kwargs['namespace'] == 'sky-ns'
     assert kwargs['field_selector'] == (
         f'reason={k8s_instance.AUTOSTOP_EVENT_REASON}')
-    assert kwargs['consistency'] == reads.CACHED
+    assert kwargs['consistency'] == reads.FRESH
 
 
 def test_autostop_event_returns_latest(monkeypatch):

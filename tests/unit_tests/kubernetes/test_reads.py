@@ -595,6 +595,23 @@ def test_http_status_of_a_known_unreachable_context(api):
     assert reads.http_status(raised.value) is None
 
 
+def test_subresource_is_read_from_the_api_server(api, metrics):
+    client = api({'metadata': {'name': 'd', 'resourceVersion': '3'}})
+    queries = []
+    plugin_extensions.ClusterStateSource.register(queries.append)
+
+    result = reads.get_object('ctx',
+                              reads.DEPLOYMENTS,
+                              'd',
+                              namespace='ns',
+                              subresource='status')
+
+    assert result.reason == reads.REASON_SUBRESOURCE
+    assert not queries
+    path, _, _ = client.calls[0]
+    assert path == '/apis/apps/v1/namespaces/ns/deployments/d/status'
+
+
 def test_object_converter_rejects_an_unknown_model():
     with pytest.raises(ValueError, match='V1Event'):
         kubernetes_utils.k8s_object_converter('V1Event')

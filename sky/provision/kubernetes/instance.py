@@ -2376,7 +2376,8 @@ def _wait_for_deployment_pod(context,
             consistency=reads.FRESH,
             convert=kubernetes_utils.k8s_object_converter('V1Deployment'),
             attempts=1,
-            timeout=reads.LONG_READ_TIMEOUT).items
+            timeout=reads.LONG_READ_TIMEOUT,
+            subresource='status').items
         if not deployments:
             raise config_lib.KubernetesError(
                 f'Deployment {deployment_name!r} no longer exists in '
@@ -4555,7 +4556,7 @@ def get_cluster_autostop_event(
             reads.EVENTS,
             namespace=namespace,
             field_selector=f'reason={AUTOSTOP_EVENT_REASON}',
-            consistency=reads.CACHED,
+            consistency=reads.FRESH,
             convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
             attempts=1).items
     except Exception as e:  # pylint: disable=broad-except

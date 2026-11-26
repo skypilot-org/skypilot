@@ -121,10 +121,6 @@ def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
 _is_rbac_permission_error = api_errors.is_rbac_denial
 
 
-def _pvc_from_dict(pvc: Dict[str, Any]) -> Any:
-    return kubernetes_utils.dict_to_k8s_object(pvc, 'V1PersistentVolumeClaim')
-
-
 def _is_rbac_denied_read(e: Exception) -> bool:
     """Whether a failed read was a 401/403 denial.
 
@@ -231,7 +227,8 @@ def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
                                   pvc_name,
                                   namespace=namespace,
                                   consistency=reads.FRESH,
-                                  convert=_pvc_from_dict,
+                                  convert=kubernetes_utils.k8s_object_converter(
+                                      'V1PersistentVolumeClaim'),
                                   attempts=1)
         if not result.items:
             raise config_lib.KubernetesError(
@@ -888,13 +885,15 @@ def get_all_volumes_state(
     for (context, namespace), configs_by_pvc in configs_by_location.items():
         try:
             # List all PVCs in the namespace with the skypilot label
-            pvcs = reads.list_objects(context,
-                                      reads.PERSISTENT_VOLUME_CLAIMS,
-                                      namespace=namespace,
-                                      label_selector='parent=skypilot',
-                                      consistency=reads.CACHED,
-                                      convert=_pvc_from_dict,
-                                      attempts=1)
+            pvcs = reads.list_objects(
+                context,
+                reads.PERSISTENT_VOLUME_CLAIMS,
+                namespace=namespace,
+                label_selector='parent=skypilot',
+                consistency=reads.CACHED,
+                convert=kubernetes_utils.k8s_object_converter(
+                    'V1PersistentVolumeClaim'),
+                attempts=1)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get PVCs in namespace {namespace} '
                          f'in context {context}: {e}')
@@ -921,13 +920,15 @@ def get_all_volumes_state(
             if pvc_name in seen_pvc_names:
                 continue
             try:
-                result = reads.get_object(context,
-                                          reads.PERSISTENT_VOLUME_CLAIMS,
-                                          pvc_name,
-                                          namespace=namespace,
-                                          consistency=reads.CACHED,
-                                          convert=_pvc_from_dict,
-                                          attempts=1)
+                result = reads.get_object(
+                    context,
+                    reads.PERSISTENT_VOLUME_CLAIMS,
+                    pvc_name,
+                    namespace=namespace,
+                    consistency=reads.FRESH,
+                    convert=kubernetes_utils.k8s_object_converter(
+                        'V1PersistentVolumeClaim'),
+                    attempts=1)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to read PVC {pvc_name} in namespace '
                              f'{namespace} in context {context}: {e}')
@@ -1245,7 +1246,8 @@ def _find_pvc_by_name_or_label(context: Optional[str], namespace: str,
                               volume_name,
                               namespace=namespace,
                               consistency=reads.FRESH,
-                              convert=_pvc_from_dict,
+                              convert=kubernetes_utils.k8s_object_converter(
+                                  'V1PersistentVolumeClaim'),
                               attempts=1)
     if result.items:
         return result.items[0]
@@ -1257,7 +1259,8 @@ def _find_pvc_by_name_or_label(context: Optional[str], namespace: str,
                                   namespace=namespace,
                                   label_selector=f'skypilot-name={volume_name}',
                                   consistency=reads.FRESH,
-                                  convert=_pvc_from_dict,
+                                  convert=kubernetes_utils.k8s_object_converter(
+                                      'V1PersistentVolumeClaim'),
                                   attempts=1)
         if pvcs.items:
             if len(pvcs.items) > 1:
@@ -1320,7 +1323,8 @@ def create_persistent_volume_claim(
                               pvc_name,
                               namespace=namespace,
                               consistency=reads.FRESH,
-                              convert=_pvc_from_dict,
+                              convert=kubernetes_utils.k8s_object_converter(
+                                  'V1PersistentVolumeClaim'),
                               attempts=1)
     if result.items:
         if config is not None:

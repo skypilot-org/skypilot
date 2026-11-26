@@ -232,7 +232,8 @@ def ingress_controller_exists(context: Optional[str],
     try:
         ingress_classes = reads.list_objects(context,
                                              reads.INGRESS_CLASSES,
-                                             attempts=1).items
+                                             attempts=1,
+                                             consistency=reads.FRESH).items
     except exceptions.KubernetesResourceNotServedError:
         return False
     return any(item['metadata']['name'] == ingress_class_name
@@ -324,7 +325,8 @@ def get_pod_ip(context: Optional[str], namespace: str,
                             reads.PODS,
                             pod_name,
                             namespace=namespace,
-                            attempts=1).items
+                            attempts=1,
+                            consistency=reads.FRESH).items
     if not pods:
         return None
     return (pods[0].get('status') or {}).get('podIP')
