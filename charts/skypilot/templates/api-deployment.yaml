@@ -488,10 +488,16 @@ spec:
         # Warn if logrotate is missing in the image and keep the sidecar running
         args:
         - |
+          # The shell is PID 1, which ignores SIGTERM without a handler, so
+          # without this trap every pod shutdown waits out
+          # terminationGracePeriodSeconds. Each command runs in the background
+          # so `wait` returns as soon as the signal arrives. An interrupted
+          # copytruncate leaves server.log intact; only server.log.1 is partial.
+          trap 'exit 0' TERM INT
           if ! command -v logrotate >/dev/null 2>&1; then
             echo "warning: logrotate not found; skipping log retention" >&2
             while true; do
-              sleep 3600
+              sleep 3600 & wait $!
             done
           fi
           set -x
@@ -505,8 +511,8 @@ spec:
           }
           EOF
           while true; do
-            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf
-            sleep 60;
+            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf & wait $!
+            sleep 60 & wait $!
           done
         volumeMounts:
         {{- if and $statePersist (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}

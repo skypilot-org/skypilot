@@ -1076,6 +1076,24 @@ tests:
           content:
             name: logrotate
 
+  - it: should exit the logrotate sidecar on SIGTERM instead of waiting out the grace period
+    set:
+      apiService.serveServerLog: true
+      apiService.logs.retention.enabled: true
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "trap 'exit 0' TERM INT"
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "sleep 60 & wait \\$!"
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "logrotate\\.conf & wait \\$!"
+      - notMatchRegex:
+          path: spec.template.spec.containers[?(@.name == "logrotate")].args[0]
+          pattern: "sleep [0-9]+;?\\n"
+
   - it: should not include logrotate sidecar when serveServerLog is false
     set:
       apiService.serveServerLog: false
