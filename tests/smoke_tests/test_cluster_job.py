@@ -1252,6 +1252,31 @@ def test_escaped_output_holder(generic_cloud: str, exit_code: int,
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support multi-node
+def test_torchrun_one_rank_crash(generic_cloud: str):
+    """A crash on one rank of a multi-node torchrun job fails the job.
+
+    The crashed rank's multiprocessing helpers keep the job's output open,
+    and the other node's ranks wait for it forever. Without the escaped
+    writer reaper the job stays RUNNING until the test times out.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'torchrun_one_rank_crash',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/torchrun_one_rank_crash.yaml || [ $? -eq 100 ]',
+            f'sky logs {name} 1 --status | grep -w FAILED',
+            f'sky logs {name} 1 | grep "Terminating process"',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- EFA. ----------
 @pytest.mark.aws
 def test_efa():

@@ -1,0 +1,42 @@
+# One rank of a 2-node torchrun job crashes. Its multiprocessing helpers
+# (forkserver, resource tracker) outlive it and hold the job's output open,
+# while the other node's ranks wait at a barrier that, like a stuck NCCL
+# collective, does not notice the dead peer. The job must still fail promptly.
+num_nodes: 2
+
+setup: |
+  python -m pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+
+run: |
+  cat > /tmp/one_rank_crash.py <<'EOF'
+  import datetime
+  import os
+  import signal
+  import time
+
+  import torch.distributed as dist
+  from torch.utils.data import DataLoader
+
+  def main():
+      dist.init_process_group('gloo', timeout=datetime.timedelta(hours=2))
+      rank, world = dist.get_rank(), dist.get_world_size()
+      store = dist.distributed_c10d._get_default_store()
+      loader = DataLoader(range(1000), batch_size=4, num_workers=2,
+                          persistent_workers=True,
+                          multiprocessing_context='forkserver')
+      for step, _ in enumerate(loader):
+          if rank == world - 1 and step == 5:
+              os.kill(os.getpid(), signal.SIGSEGV)
+          if store.add(f'step-{step}', 1) == world:
+              store.set(f'done-{step}', b'1')
+          store.wait([f'done-{step}'], datetime.timedelta(hours=2))
+          time.sleep(0.2)
+
+
+  if __name__ == '__main__':
+      main()
+  EOF
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  python -m torch.distributed.run --nnodes=$SKYPILOT_NUM_NODES \
+    --nproc_per_node=2 --node_rank=$SKYPILOT_NODE_RANK \
+    --master_addr=$MASTER_ADDR --master_port=8008 /tmp/one_rank_crash.py
