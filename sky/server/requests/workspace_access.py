@@ -21,8 +21,10 @@ The level is derived from the **endpoint**, in two ordered rules:
 1. Otherwise: an endpoint declared read-only for the strictly-read-only
    ``viewer`` role (`sky/users/rbac.py::_DEFAULT_VIEWER_ALLOWLIST`,
    ``BasePlugin.viewer_allowlist``, and the operator's
-   ``rbac.roles.viewer.permissions.allowlist``) needs only ``read``; anything
-   else needs ``write``.
+   ``rbac.roles.viewer.permissions.allowlist``), or a plugin endpoint declared
+   in ``BasePlugin.workspace_read_endpoints`` (needs only read on the active
+   workspace, but stays closed to viewers), needs only ``read``; anything else
+   needs ``write``.
 
 Mutating an *existing* resource is deliberately not what this classifies:
 that must be gated on the resource's own workspace (see

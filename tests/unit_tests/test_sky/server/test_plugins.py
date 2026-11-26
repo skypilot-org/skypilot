@@ -392,6 +392,76 @@ def test_load_plugin_viewer_allowlist_default_empty(monkeypatch, tmp_path):
     assert not result
 
 
+def test_load_plugin_workspace_read_endpoints(monkeypatch, tmp_path):
+    """The loader reads `workspace_read_endpoints`; a plugin that does not
+    override it, one whose declaration raises and one not loaded in the API
+    server contribute nothing, and none touches the viewer list."""
+    module_name = 'sky_test_workspace_read_plugin'
+
+    class InfraPlugin(plugins.BasePlugin):
+
+        @property
+        def workspace_read_endpoints(self):
+            return [
+                plugins.RBACRule(path='/plugins/api/infra/:name/action',
+                                 method='POST'),
+            ]
+
+        def install(self, extension_context):
+            pass
+
+    class PlainPlugin(plugins.BasePlugin):
+
+        def install(self, extension_context):
+            pass
+
+    class BrokenPlugin(plugins.BasePlugin):
+
+        @property
+        def workspace_read_endpoints(self):
+            raise RuntimeError('broken declaration')
+
+        def install(self, extension_context):
+            pass
+
+    class ElsewherePlugin(plugins.BasePlugin):
+        """Loaded in neither API server process, so it is not consulted."""
+        load_contexts = frozenset()
+
+        @property
+        def workspace_read_endpoints(self):
+            return [plugins.RBACRule(path='/plugins/api/other', method='POST')]
+
+        def install(self, extension_context):
+            pass
+
+    classes = (BrokenPlugin, InfraPlugin, PlainPlugin, ElsewherePlugin)
+    module = types.ModuleType(module_name)
+    for cls in classes:
+        cls.__module__ = module_name
+        setattr(module, cls.__name__, cls)
+    monkeypatch.setitem(sys.modules, module_name, module)
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(
+        yaml.safe_dump({
+            'plugins': [{
+                'class': f'{module_name}.{cls.__name__}'
+            } for cls in classes]
+        }))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    monkeypatch.setattr(plugins, '_PLUGIN_WORKSPACE_READ_ENDPOINTS', [])
+    monkeypatch.setattr(plugins, '_PLUGIN_VIEWER_ALLOWLIST', [])
+
+    result = plugins.load_plugin_workspace_read_endpoints()
+
+    assert result == [{
+        'path': '/plugins/api/infra/:name/action',
+        'method': 'POST'
+    }]
+    assert plugins.get_plugin_workspace_read_endpoints() == result
+    assert not plugins.load_plugin_viewer_allowlist()
+
+
 def test_install_late_runs_after_every_install(monkeypatch, tmp_path):
     """The late pass is what lets a plugin's middleware be innermost.
 

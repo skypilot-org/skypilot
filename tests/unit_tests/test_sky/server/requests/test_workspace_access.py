@@ -22,6 +22,7 @@ from unittest import mock
 import pytest
 
 import sky
+from sky.server import plugins
 from sky.server.requests import request_names
 from sky.server.requests import workspace_access
 from sky.users import permission
@@ -319,13 +320,14 @@ def declaration(monkeypatch):
     outcome.
     """
 
-    def install(plugin_allowlist=None):
+    def install(plugin_allowlist=None, plugin_workspace_read=None):
         monkeypatch.setattr(rbac.skypilot_config,
                             'get_nested',
                             lambda keys, default_value=None: default_value)
         entries = [(rule['path'], rule['method'])
                    for rule in rbac.get_read_only_endpoints(
-                       plugin_allowlist=plugin_allowlist)]
+                       plugin_allowlist=plugin_allowlist,
+                       plugin_workspace_read=plugin_workspace_read)]
         monkeypatch.setattr(
             permission.permission_service, 'is_read_only_endpoint',
             lambda path, method: permission.PermissionService._matches_endpoint(
@@ -430,6 +432,156 @@ class TestPluginEndpointsAreCovered:
         workspace_access.set_request_endpoint('/plugins/api/kueue/queues',
                                               'POST')
         assert workspace_access.for_current_request() == READ
+
+
+class TestPluginWorkspaceReadEndpoints:
+    """`BasePlugin.workspace_read_endpoints`: read on the active workspace,
+    without opening the endpoint to viewers."""
+
+    _ROUTE = {'path': '/plugins/api/infra/:name/action', 'method': 'POST'}
+
+    def test_declared_endpoint_needs_only_read(self, declaration):
+        declaration(plugin_workspace_read=[self._ROUTE])
+        workspace_access.set_request_endpoint('/plugins/api/infra/n1/action',
+                                              'POST')
+        assert workspace_access.for_current_request() == READ
+
+    def test_other_methods_and_routes_still_need_write(self, declaration):
+        declaration(plugin_workspace_read=[self._ROUTE])
+        workspace_access.set_request_endpoint('/plugins/api/infra/n1/action',
+                                              'DELETE')
+        assert workspace_access.for_current_request() == WRITE
+        workspace_access.set_request_endpoint('/plugins/api/infra/n1/other',
+                                              'POST')
+        assert workspace_access.for_current_request() == WRITE
+
+    def test_not_added_to_the_viewer_allowlist(self, monkeypatch):
+        monkeypatch.setattr(rbac.skypilot_config,
+                            'get_nested',
+                            lambda keys, default_value=None: default_value)
+        assert self._ROUTE in rbac.get_read_only_endpoints(
+            plugin_workspace_read=[self._ROUTE])
+        assert self._ROUTE not in rbac.get_viewer_allowlist()
+
+    def test_service_classifies_it_read_but_keeps_viewers_out(
+            self, monkeypatch):
+        monkeypatch.setattr(rbac.skypilot_config,
+                            'get_nested',
+                            lambda keys, default_value=None: default_value)
+        service = permission.PermissionService()
+        monkeypatch.setattr(service, '_get_plugin_viewer_allowlist', lambda: [])
+        monkeypatch.setattr(service, '_get_plugin_workspace_read_endpoints',
+                            lambda: [self._ROUTE])
+        monkeypatch.setattr(service, '_lazy_initialize', lambda: None)
+        service._build_viewer_allowlist_no_lock()  # pylint: disable=protected-access
+        assert service.is_read_only_endpoint('/plugins/api/infra/n1/action',
+                                             'POST')
+        assert not service._is_viewer_allowed(  # pylint: disable=protected-access
+            '/plugins/api/infra/n1/action', 'POST')
+
+    def _service(self, monkeypatch, declared):
+        """A permission service built from `declared` workspace-read rules,
+        classifying through the real `is_read_only_endpoint`."""
+        monkeypatch.setattr(rbac.skypilot_config,
+                            'get_nested',
+                            lambda keys, default_value=None: default_value)
+        service = permission.PermissionService()
+        monkeypatch.setattr(service, '_get_plugin_viewer_allowlist', lambda: [])
+        monkeypatch.setattr(service, '_get_plugin_workspace_read_endpoints',
+                            lambda: declared)
+        monkeypatch.setattr(service, '_lazy_initialize', lambda: None)
+        service._build_viewer_allowlist_no_lock()  # pylint: disable=protected-access
+        return service
+
+    @pytest.mark.parametrize(
+        'path',
+        [
+            # Outside /plugins/.
+            '/users/update',
+            '/launch',
+            # keyMatch2 builds a regex without escaping: alternation or
+            # groups would match outside /plugins/.
+            '/plugins/x|/users/update',
+            '/plugins/x|/launch',
+            '/plugins/(x|/users/update)',
+            '/plugins/x|.*',
+            '/plugins/x/.*',
+        ])
+    def test_cannot_relax_a_core_endpoint(self, monkeypatch, path):
+        service = self._service(monkeypatch, [{'path': path, 'method': 'POST'}])
+        assert not service.is_read_only_endpoint('/users/update', 'POST')
+        assert not service.is_read_only_endpoint('/launch', 'POST')
+
+    @pytest.mark.parametrize('path', [
+        '/plugins/*',
+        '/plugins/api/*',
+        '/plugins/:name/*',
+        '/plugins/api/:name',
+        '/plugins/api/:name/*',
+    ])
+    def test_cannot_cover_other_plugins_routes(self, monkeypatch, path):
+        """A declaration cannot relax another plugin's create route."""
+        service = self._service(monkeypatch, [{'path': path, 'method': 'POST'}])
+        assert not service.is_read_only_endpoint('/plugins/api/other/create',
+                                                 'POST')
+
+    @pytest.mark.parametrize('rule', [
+        {
+            'path': None,
+            'method': 'POST'
+        },
+        {
+            'path': 123,
+            'method': 'POST'
+        },
+        {
+            'path': '/plugins/api/infra/:name/action',
+            'method': None
+        },
+        {
+            'method': 'POST'
+        },
+        'not-a-rule',
+    ])
+    def test_malformed_rule_is_skipped_and_others_still_apply(
+            self, monkeypatch, rule):
+        service = self._service(monkeypatch, [rule, self._ROUTE])
+        assert service.is_read_only_endpoint('/plugins/api/infra/n1/action',
+                                             'POST')
+        # Core read endpoints are unaffected by the bad entry.
+        assert service.is_read_only_endpoint('/api/plugins', 'GET')
+
+    def test_method_is_case_insensitive(self, monkeypatch):
+        service = self._service(monkeypatch, [{
+            'path': self._ROUTE['path'],
+            'method': 'post'
+        }])
+        assert service.is_read_only_endpoint('/plugins/api/infra/n1/action',
+                                             'POST')
+
+    def test_loads_lazily_when_cache_is_empty(self, monkeypatch):
+        """Uvicorn workers start with an empty cache and must still see the
+        declarations."""
+        service = permission.PermissionService()
+        monkeypatch.setattr(plugins, 'get_plugin_workspace_read_endpoints',
+                            lambda: [])
+        monkeypatch.setattr(plugins, 'load_plugin_workspace_read_endpoints',
+                            lambda: [self._ROUTE])
+        assert service._get_plugin_workspace_read_endpoints() == [  # pylint: disable=protected-access
+            self._ROUTE
+        ]
+
+    def test_lookup_failure_contributes_nothing(self, monkeypatch):
+        service = permission.PermissionService()
+
+        def boom():
+            raise RuntimeError('broken plugin config')
+
+        monkeypatch.setattr(plugins, 'get_plugin_workspace_read_endpoints',
+                            lambda: [])
+        monkeypatch.setattr(plugins, 'load_plugin_workspace_read_endpoints',
+                            boom)
+        assert service._get_plugin_workspace_read_endpoints() == []  # pylint: disable=protected-access
 
 
 class TestReadOnlyEndpointDeclaration:

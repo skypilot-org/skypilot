@@ -571,6 +571,27 @@ class PermissionService:
             logger.warning(f'Failed to get plugin viewer allowlist: {e}')
             return []
 
+    def _get_plugin_workspace_read_endpoints(self) -> List[dict]:
+        """Get `workspace_read_endpoints` entries from loaded plugins.
+
+        Same lazy population as `_get_plugin_viewer_allowlist`: uvicorn
+        workers re-import `sky.server.plugins` and start with an empty cache.
+        """
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky.server import plugins as server_plugins
+            cached = server_plugins.get_plugin_workspace_read_endpoints()
+            if cached:
+                return cached
+            return server_plugins.load_plugin_workspace_read_endpoints()
+        except (ImportError, AttributeError):
+            # No plugins outside the server, or an older plugins module.
+            return []
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get plugin workspace-read endpoints: '
+                           f'{e}')
+            return []
+
     def _build_viewer_allowlist_no_lock(self) -> None:
         """Build the endpoint allowlists from defaults + plugin entries.
 
@@ -586,9 +607,13 @@ class PermissionService:
         self._viewer_allowlist = [(rule['path'], rule['method'])
                                   for rule in rbac.get_viewer_allowlist(
                                       plugin_allowlist=plugin_viewer_allow)]
-        self._read_only_endpoints = [(rule['path'], rule['method'])
-                                     for rule in rbac.get_read_only_endpoints(
-                                         plugin_allowlist=plugin_viewer_allow)]
+        self._read_only_endpoints = [
+            (rule['path'], rule['method'])
+            for rule in rbac.get_read_only_endpoints(
+                plugin_allowlist=plugin_viewer_allow,
+                plugin_workspace_read=self._get_plugin_workspace_read_endpoints(
+                ))
+        ]
         self._read_only_endpoint_cache = {}
         logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
                      f'entries, read-only endpoints '
@@ -1345,8 +1370,8 @@ class PermissionService:
         Consumed by `sky.server.requests.workspace_access` to decide whether a
         request needs read or write access to the caller's active workspace.
         Derived from `rbac.get_read_only_endpoints`, so plugin endpoints are
-        classified by the declaration plugins already maintain for the viewer
-        role.
+        classified by what plugins declare: `viewer_allowlist`, and
+        `workspace_read_endpoints` for endpoints that stay closed to viewers.
 
         First checks `rbac.is_always_write_endpoint`: an always-write (create)
         endpoint returns False here regardless of the read-only declaration —
