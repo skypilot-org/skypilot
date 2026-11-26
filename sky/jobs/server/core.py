@@ -2346,7 +2346,8 @@ def restart(
     # new job goes to. Checked before the spec, with its envs, is read.
     original_workspace = (records[0].workspace or
                           skylet_constants.SKYPILOT_DEFAULT_WORKSPACE)
-    if original_workspace != skypilot_config.get_active_workspace():
+    if (original_workspace != skypilot_config.get_active_workspace() and
+            not _client_set_workspace()):
         label = workspaces_core.workspace_label_for_caller(original_workspace)
         try:
             workspaces_core.check_workspace_permission(
