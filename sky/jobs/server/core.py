@@ -580,6 +580,8 @@ def _maybe_submit_job_locally(
         pool_hash = serve_state.get_service_hash(pool)
         if pool_hash is None:  # Taken down since _launch checked it.
             _raise_pool_refused(pool, False, None)
+    submission_request_id = (common_utils.get_current_request_id()
+                             if common_utils.is_in_request_context() else None)
     for _ in range(num_jobs):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
@@ -618,7 +620,8 @@ def _maybe_submit_job_locally(
                 parent_job_id=parent_job_id,
                 parent_task_id=parent_task_id,
                 root_job_id=root_job_id,
-                dynamic_task_index=dynamic_task_index))
+                dynamic_task_index=dynamic_task_index,
+                submission_request_id=submission_request_id))
         if depends_on:
             managed_job_state.set_job_dependencies(consolidation_mode_job_id,
                                                    depends_on)
