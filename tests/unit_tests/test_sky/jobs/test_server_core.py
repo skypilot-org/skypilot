@@ -1,5 +1,6 @@
 """Tests for sky.jobs.server.core."""
 import contextlib
+import os
 import re
 import traceback
 from types import SimpleNamespace
@@ -15,11 +16,15 @@ from sky import backends
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
+from sky import skypilot_config
 from sky import task as task_lib
+from sky.data import storage as storage_lib
 from sky.jobs import state as managed_job_state
 from sky.jobs.server import core as jobs_core
 from sky.jobs.state import ManagedJobStatus
 from sky.schemas.generated import managed_jobsv1_pb2
+from sky.skylet import constants as skylet_constants
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 
 
@@ -1034,36 +1039,74 @@ class _Submitted(Exception):
 _BLOB_ID = 'b' * 64
 
 
-def _stage_to_bucket(dag):
-    """Stands in for ``_upload_files_to_controller`` with ``jobs.bucket``."""
-    for task in dag.tasks:
-        task.workdir = None
-        task.update_file_mounts({'/data/file': 's3://bucket/file-0'})
-    return {}
+def _upload_to_gcs(task):
+    """Stands in for ``Task.sync_storage_mounts``: attaches the GCS store that
+    ``Storage.construct`` would, without the cloud upload."""
+    for storage in task.storage_mounts.values():
+        store = mock.Mock(spec=storage_lib.GcsStore)
+        store.is_sky_managed = False
+        storage.stores = {storage_lib.StoreType.GCS: store}
 
 
-def _keep_local_sources(dag):
-    """Stands in for ``_upload_files_to_controller`` in consolidation mode
-    without a bucket: the sources stay inside the blob."""
-    del dag
-    return {}
+@contextlib.contextmanager
+def _skypilot_config(path, content):
+    """Load ``content`` as the whole SkyPilot config, so ~/.sky is not read."""
+    path.write_text(content)
+    try:
+        with mock.patch.dict(
+                os.environ,
+            {skypilot_config.ENV_VAR_SKYPILOT_CONFIG: str(path)}):
+            skypilot_config.reload_config()
+            yield
+    finally:
+        skypilot_config.reload_config()
 
 
-def _submit_and_get_job_id(tmp_path, stage, blob_id):
-    """Run ``_launch`` in consolidation mode through the local submission and
-    return the id of the job it recorded."""
-    workdir = tmp_path / 'blob' / 'workdir'
-    workdir.mkdir(parents=True)
-    task = sky.Task(name='t', run='echo', workdir=str(workdir))
+def _submit(tmp_path, blob_id, bucket):
+    """Run ``_launch`` in consolidation mode through the real staging and the
+    local submission, with a workdir, a directory and a file mount.
+
+    Args:
+        tmp_path: Test directory.
+        blob_id: Blob id of the submit request.
+        bucket: ``jobs.bucket`` to configure; ``None`` for no bucket.
+
+    Returns:
+        The id of the job recorded, and the DAG as submitted.
+    """
+    blob = tmp_path / 'blob'
+    (blob / 'workdir').mkdir(parents=True)
+    (blob / 'folder').mkdir()
+    (blob / 'one.txt').write_text('one\n')
+    task = sky.Task(name='t',
+                    run='echo',
+                    workdir=str(blob / 'workdir'),
+                    file_mounts={
+                        '/data/folder': str(blob / 'folder'),
+                        '/data/one.txt': str(blob / 'one.txt'),
+                    })
     real_submit = jobs_core._maybe_submit_job_locally
-    submitted = []
+    submitted = {}
 
-    def _submit(prefix, *args, **kwargs):
+    def _submit_locally(prefix, dag, *args, **kwargs):
         del prefix
-        submitted.extend(real_submit(str(tmp_path / 'yamls'), *args, **kwargs))
+        submitted['job_ids'] = real_submit(str(tmp_path / 'yamls'), dag, *args,
+                                           **kwargs)
+        submitted['dag'] = dag
         raise _Submitted
 
-    with mock.patch.object(jobs_core.managed_job_utils,
+    file_mounts_tmp = mock.Mock()
+    file_mounts_tmp.file_mounts_tmp_dir.return_value = str(tmp_path / 'fm-tmp')
+    config = f'jobs:\n  bucket: {bucket}\n' if bucket else '{}\n'
+    with _skypilot_config(tmp_path / 'config.yaml', config), \
+         mock.patch.object(storage_lib,
+                           'get_cached_enabled_storage_cloud_names_or_refresh',
+                           return_value=['GCP']), \
+         mock.patch.object(controller_utils.bs, 'get_blob_storage',
+                           return_value=file_mounts_tmp), \
+         mock.patch.object(task_lib.Task, 'sync_storage_mounts',
+                           autospec=True, side_effect=_upload_to_gcs), \
+         mock.patch.object(jobs_core.managed_job_utils,
                            'is_consolidation_mode', return_value=True), \
          mock.patch.object(jobs_core.global_user_state,
                            'cluster_with_name_exists', return_value=False), \
@@ -1074,10 +1117,8 @@ def _submit_and_get_job_id(tmp_path, stage, blob_id):
          mock.patch.object(jobs_core.controller_utils,
                            'get_controller_resources', return_value=[]), \
          mock.patch.object(jobs_core, '_warn_file_mounts_rolling_update'), \
-         mock.patch.object(jobs_core, '_upload_files_to_controller',
-                           side_effect=stage), \
          mock.patch.object(jobs_core, '_maybe_submit_job_locally',
-                           side_effect=_submit):
+                           side_effect=_submit_locally):
         with pytest.raises(_Submitted):
             jobs_core._launch(task,
                               name='j',
@@ -1089,24 +1130,35 @@ def _submit_and_get_job_id(tmp_path, stage, blob_id):
                               parent_task_id=None,
                               root_job_id=None,
                               depends_on=[])
-    assert len(submitted) == 1
-    return submitted[0]
+    assert len(submitted['job_ids']) == 1
+    return submitted['job_ids'][0], submitted['dag']
 
 
 def test_job_staged_to_a_bucket_does_not_pin_its_blob(tmp_path, _jobs_db):
     """Recovery reads the bucket, so the job must not keep the blob from GC."""
-    job_id = _submit_and_get_job_id(tmp_path, _stage_to_bucket, _BLOB_ID)
+    job_id, dag = _submit(tmp_path, _BLOB_ID, 'gs://jobs-bucket')
+    config = dag.tasks[0].to_yaml_config()
+    assert 'workdir' not in config
+    sources = {
+        dst: src['source'] if isinstance(src, dict) else src
+        for dst, src in config['file_mounts'].items()
+    }
+    assert {
+        skylet_constants.SKY_REMOTE_WORKDIR, '/data/folder', '/data/one.txt'
+    } <= sources.keys()
+    assert all(src.startswith('gs://jobs-bucket') for src in sources.values())
     assert managed_job_state.get_file_mounts_blob_id(job_id) is None
     assert _BLOB_ID not in managed_job_state.get_active_file_mounts_blob_ids()
 
 
 def test_job_with_local_sources_pins_its_blob(tmp_path, _jobs_db):
     """Without a bucket the controller relaunches from the blob."""
-    job_id = _submit_and_get_job_id(tmp_path, _keep_local_sources, _BLOB_ID)
+    job_id, dag = _submit(tmp_path, _BLOB_ID, None)
+    assert dag.tasks[0].workdir == str(tmp_path / 'blob' / 'workdir')
     assert managed_job_state.get_file_mounts_blob_id(job_id) == _BLOB_ID
     assert managed_job_state.get_active_file_mounts_blob_ids() == {_BLOB_ID}
 
 
 def test_job_without_a_blob_records_none(tmp_path, _jobs_db):
-    job_id = _submit_and_get_job_id(tmp_path, _keep_local_sources, None)
+    job_id, _ = _submit(tmp_path, None, None)
     assert managed_job_state.get_file_mounts_blob_id(job_id) is None
