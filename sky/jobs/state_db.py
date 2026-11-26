@@ -372,6 +372,11 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('dynamic_task_count',
                       sqlalchemy.Integer,
                       server_default=None),
+    # The API server request that created the job and is submitting it to the
+    # scheduler. NULL when the job was not created by a launch request.
+    sqlalchemy.Column('submission_request_id',
+                      sqlalchemy.Text,
+                      server_default=None),
     sqlalchemy.Index('ux_job_info_root_dynamic_task_index',
                      'root_job_id',
                      'dynamic_task_index',
