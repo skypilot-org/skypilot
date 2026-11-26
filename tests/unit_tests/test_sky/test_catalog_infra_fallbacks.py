@@ -98,10 +98,14 @@ def test_threads_use_the_active_workspace(queried):
     assert queried['use_default_catalog'] == [True, True]
 
 
-def test_fallback_takes_the_first_allowed_context_in_config_order(queried):
+def test_every_allowed_context_is_queried(queried):
+    # The contexts are queried in parallel, so the order the credential
+    # checks see them in is not deterministic: compare as sets.
     with skypilot_config.local_active_workspace_ctx('ws-o'):
         _list_without_region()
-    assert queried['kubernetes'] == ['ctx-b']
+    # ws-o allows ctx-b and ctx-a; the current-context (ctx-c) is not among
+    # them. All of ws-o's allowed contexts are listed, not just the first.
+    assert sorted(queried['kubernetes']) == ['ctx-a', 'ctx-b']
 
 
 def test_threads_use_the_request_config(queried):
