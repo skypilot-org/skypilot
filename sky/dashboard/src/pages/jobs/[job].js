@@ -75,6 +75,7 @@ import {
 } from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
+import { dynamicTaskUrl } from '@/utils/jobUrls';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -107,10 +108,10 @@ function JobDetails({
     const row = jobData?.jobs?.find((j) => String(j.id) === String(jobId));
     if (row && row.root_job_id != null && row.dynamic_task_index != null) {
       router.replace(
-        `/jobs/${row.root_job_id}/${row.dynamic_task_index}${tab ? `?tab=${tab}` : ''}`
+        dynamicTaskUrl(row.root_job_id, row.dynamic_task_index, router.query)
       );
     }
-  }, [jobData, jobId, taskContext, overrideJobId, router, tab]);
+  }, [jobData, jobId, taskContext, overrideJobId, router]);
   // Jobs launched from inside this job (dynamic job group members), one
   // entry per job with its rows, in submission order.
   const launchedJobs = useMemo(() => {

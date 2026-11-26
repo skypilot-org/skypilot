@@ -89,6 +89,9 @@ def k8s(monkeypatch):
     mocks.autostop_event.return_value = None
     mocks.termination_cause.return_value = None
     mocks.latest_events.return_value = {}
+    mocks.terminal_events.return_value = []
+    monkeypatch.setattr(global_user_state, 'get_cluster_events',
+                        mocks.terminal_events)
     monkeypatch.setattr(backend_utils.global_user_state,
                         'get_cluster_yaml_dict', lambda _: _RAY_CONFIG)
     monkeypatch.setattr(backend_utils.k8s_instance,
@@ -111,12 +114,31 @@ def _reason(handle=None, failures=None, **record_kwargs):
 
 class TestTerminatedClusterReason:
 
+    @pytest.mark.parametrize(('age_at_event', 'expected'), [
+        (60, 'Pod evicted.'),
+        (-30, 'Pod evicted.'),
+        (-300, 'Nodes disappeared; no cause found.'),
+    ])
+    def test_persisted_terminal_cause(self, k8s, age_at_event, expected):
+        k8s.terminal_events.return_value = [{
+            'transitioned_at': int(_LAUNCHED_AT + age_at_event),
+            'reason': 'Pod evicted.',
+        }]
+        assert _reason() == f'{expected} {_SUFFIX}'
+        k8s.terminal_events.assert_called_once_with(
+            cluster_name=None,
+            cluster_hash='hash-1',
+            event_type=global_user_state.ClusterEventType.TERMINAL,
+            include_timestamps=True,
+            limit=1)
+
     def test_kubernetes_cause_leads(self, k8s):
         k8s.termination_cause.return_value = (
             'Pods evicted by Kubernetes: NoExecute taint t=x on node node-1.')
         assert _reason() == (
             'Pods evicted by Kubernetes: NoExecute taint t=x on node node-1. '
             f'{_SUFFIX}')
+        k8s.terminal_events.assert_not_called()
         args, kwargs = k8s.termination_cause.call_args
         assert args == ({
             'context': 'ctx'
