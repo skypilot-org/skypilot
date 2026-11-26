@@ -12,7 +12,7 @@ import shlex
 import subprocess
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 import urllib.parse
 
 import httpx
@@ -198,6 +198,15 @@ SKY_APISERVER_BLOB_CHECK_SIZE_BYTES = prom.Histogram(
     buckets=[2**exponent for exponent in range(10, 37, 2)],
 )
 
+SKY_APISERVER_STORED_RESULTS_TOTAL = prom.Counter(
+    'sky_apiserver_stored_results_total',
+    'Request results stored outside the requests table', ['name'])
+
+SKY_APISERVER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_stored_result_bytes_total',
+    'Bytes of request results stored outside the requests table, as encoded '
+    'and as compressed on disk', ['name', 'form'])
+
 # Total number of API server requests per user.
 # This is a separate metric to avoid high cardinality in the primary metric.
 SKY_APISERVER_REQUESTS_BY_USER_TOTAL = prom.Counter(
@@ -226,6 +235,50 @@ SKY_APISERVER_REQUEST_GET_DURATION_SECONDS = prom.Histogram(
     'Time spent in /api/get fetching a request result, by request name',
     ['name', 'status'],
     buckets=_LATENCY_BUCKETS,
+)
+
+# Usage by caller, recorded through sky/server/caller_usage.py, which bounds
+# the distinct (caller, name) pairs per process. `name` is the request name
+# (sky.jobs.queue_v2) or, for a route handler that schedules no request, the
+# method and route path. `kind` is long/short (request executed from the queue
+# or in-process), sync (request executed inline for a synchronous call) or
+# handler (route handler).
+_CALLER_LABELS = ['caller', 'caller_id', 'caller_type', 'name']
+
+SKY_APISERVER_CALLER_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_calls_total',
+    'Requests executed and route handler calls, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_EXECUTION_SECONDS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_execution_seconds_total',
+    'Seconds spent executing requests and route handlers, by caller',
+    _CALLER_LABELS + ['kind'],
+)
+
+SKY_APISERVER_CALLER_STORED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_stored_result_bytes_total',
+    'Encoded request result bytes written to the request store, by caller',
+    _CALLER_LABELS,
+)
+
+SKY_APISERVER_CALLER_RETURNED_RESULT_BYTES_TOTAL = prom.Counter(
+    'sky_apiserver_caller_returned_result_bytes_total',
+    'Response body bytes returned with a request result or by a route '
+    'handler, by caller',
+    _CALLER_LABELS,
+)
+
+# HTTP calls by caller and client: X-SkyPilot-Client-Type, User-Agent family
+# and the declared X-SkyPilot-API-Version ('none' when absent).
+SKY_APISERVER_CALLER_CLIENT_CALLS_TOTAL = prom.Counter(
+    'sky_apiserver_caller_client_calls_total',
+    'API server HTTP calls, by caller and client',
+    [
+        'caller', 'caller_id', 'caller_type', 'client_type', 'ua_family',
+        'api_version'
+    ],
 )
 
 # Aggregated across all worker processes — the prometheus_client multiprocess
@@ -406,6 +459,11 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
     'RSS increment after requests', ['name'],
     buckets=_MEM_BUCKETS)
 
+SKY_APISERVER_MEMORY_RELEASES_TOTAL = prom.Counter(
+    'sky_apiserver_memory_releases_total',
+    'Memory releases after requests in executor processes, by result '
+    '(released or skipped)', ['result'])
+
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
     # NOT keystroke latency. Read the whole string before alerting on it.
@@ -513,6 +571,12 @@ SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     multiprocess_mode='livesum',
 )
 
+SKY_APISERVER_HEAVY_EXECUTORS = prom.Gauge(
+    'sky_apiserver_heavy_executors',
+    'Number of free heavy request executors in the API server',
+    multiprocess_mode='livesum',
+)
+
 # Active threads in on-demand thread executors. Each process has its own
 # executor with a per-process max_workers limit, so per-pid series are kept:
 # exhaustion is a per-process condition and a sum across processes can exceed
@@ -547,6 +611,14 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     'sky_apiserver_threads_exhausted_total',
     'Number of tasks rejected because an on-demand thread executor was full',
     ['name'],
+)
+
+# Thread start waits for the GIL, so a start on the event loop stalls it
+# under contention; on_loop="true" should stay flat once a process is warm.
+SKY_APISERVER_THREADS_STARTED_TOTAL = prom.Counter(
+    'sky_apiserver_threads_started_total',
+    'Number of threads started in API server processes',
+    ['on_loop'],
 )
 
 # Auth-path work that ended in a timeout instead of a result. This is the
@@ -603,6 +675,31 @@ SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
     ['schedule_type'],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
              120.0, 300.0, 600.0, float('inf')),
+)
+
+# Reads made through sky.provision.kubernetes.reads. reason is '' for a read
+# served from the cluster state source.
+SKY_APISERVER_KUBE_READS_TOTAL = prom.Counter(
+    'sky_apiserver_kube_reads_total',
+    'Kubernetes object reads by context, resource, the source that served '
+    'them, and why a read went to the API server',
+    ['context', 'resource', 'source', 'reason'],
+)
+
+# One sample per GET call to an API server, retries included.
+SKY_APISERVER_KUBE_READ_API_CALL_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_api_call_seconds',
+    'Duration of the Kubernetes API calls made by object reads, by resource '
+    'and outcome',
+    ['resource', 'outcome'],
+    buckets=_LATENCY_BUCKETS,
+)
+
+SKY_APISERVER_KUBE_READ_STALENESS_SECONDS = prom.Histogram(
+    'sky_apiserver_kube_read_staleness_seconds',
+    'How long the watch behind a cached object read had been failing',
+    ['resource'],
+    buckets=(0, 1, 5, 15, 30, 60, 120, 300, 600, float('inf')),
 )
 
 # --- ~/sky_logs retention ---
@@ -740,6 +837,44 @@ def observe_launch_phase(phase: str, attempt: str, workspace: str,
                                                      max(0.0, duration_seconds))
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to observe launch phase metric: {e}')
+
+
+def count_kube_read(context: str, resource: str, source: str,
+                    reason: str) -> None:
+    """Record one Kubernetes object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READS_TOTAL.labels(context=context,
+                                              resource=resource,
+                                              source=source,
+                                              reason=reason).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count Kubernetes read: {e}')
+
+
+def observe_kube_read_api_call(resource: str, outcome: str,
+                               duration_seconds: float) -> None:
+    """Record one Kubernetes API call made by an object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_API_CALL_SECONDS.labels(
+            resource=resource, outcome=outcome).observe(duration_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes API call: {e}')
+
+
+def observe_kube_read_staleness(resource: str,
+                                staleness_seconds: float) -> None:
+    """Record the staleness of one cached object read."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_KUBE_READ_STALENESS_SECONDS.labels(
+            resource=resource).observe(staleness_seconds)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe Kubernetes read staleness: {e}')
 
 
 def count_launch_phase_dropped(phase: str, reason: str) -> None:
@@ -2039,15 +2174,47 @@ async def add_cluster_name_label(metrics_text: str,
                                    replace_existing)
 
 
+# node-exporter's InfiniBand / RoCE series, one per RDMA device port. Per node
+# (no pod label): the GPU dashboard's node network panel joins them to DCGM's
+# series on (cluster, node).
+_NODE_RDMA_METRICS = (
+    # tx/rx bytes: the GPU dashboard's node network panel.
+    'node_infiniband_port_data_transmitted_bytes_total',
+    'node_infiniband_port_data_received_bytes_total',
+    # Work-completion errors. A NIC can fail every multi-node job while its
+    # link stays up at full rate with no link errors; these are what rise then.
+    'node_infiniband_req_cqes_errors_total',
+    'node_infiniband_req_cqes_flush_errors_total',
+    'node_infiniband_resp_cqes_errors_total',
+    'node_infiniband_resp_cqes_flush_errors_total',
+    'node_infiniband_req_remote_invalid_request_errors_total',
+    # Link drops, recoveries and physical-layer errors.
+    'node_infiniband_link_downed_total',
+    'node_infiniband_link_error_recovery_total',
+    'node_infiniband_symbol_error_total',
+    'node_infiniband_port_errors_received_total',
+    'node_infiniband_local_link_integrity_errors_total',
+    # RoCE transport retransmits and ack timeouts.
+    'node_infiniband_roce_adp_retransmits_total',
+    'node_infiniband_local_ack_timeout_errors_total',
+    # Negotiated link rate: a port that trained below its rated speed.
+    'node_infiniband_rate_bytes_per_second',
+)
+
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
-# CPU/memory, kube_pod_labels, and cAdvisor container metrics (per-pod
-# CPU/Memory in the Telemetry section joins on (pod, namespace) with
-# kube_pod_labels — same join shape the GPU panels use to filter by SkyPilot
-# cluster name).
+# CPU/memory, node RDMA throughput, errors and link changes, kube_pod_labels,
+# and cAdvisor container metrics (per-pod CPU/Memory in the Telemetry section
+# joins on (pod, namespace) with kube_pod_labels — same join shape the GPU
+# panels use to filter by SkyPilot cluster name).
 GPU_METRICS_MATCH_PATTERNS = [
     '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
     'kube_pod_labels',
     'node_cpu_seconds_total{mode="idle"}',
+    '{__name__=~"' + '|'.join(_NODE_RDMA_METRICS) + '"}',
+    # Link drops of the RDMA network interfaces (rdma* for RoCE, ib* for
+    # InfiniBand), one per drop. A flapping RoCE port leaves
+    # node_infiniband_link_downed_total at 0; this is what rises.
+    'node_network_carrier_down_changes_total{device=~"rdma.*|ib.*"}',
     'container_cpu_usage_seconds_total{container!="",container!="POD"}',
     'container_memory_working_set_bytes{container!="",container!="POD"}',
     # GPU allocation metrics — pod requests + node capacity for nvidia/amd
@@ -2177,7 +2344,9 @@ def get_slurm_prometheus_filters(cluster_name: str) -> Dict[str, str]:
     return filters
 
 
-def slurm_federate_matchers(cluster_name: str) -> List[str]:
+def slurm_federate_matchers(
+        cluster_name: str,
+        federated: Optional[Iterable[str]] = None) -> List[str]:
     """Label matchers appended to this cluster's /federate selectors.
 
     Two sources, both aimed at the same problem: one Prometheus that
@@ -2198,6 +2367,9 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
        is logged instead of silently double-counting. A label this
        cluster already constrains is left alone, since its own filter is
        the more specific statement.
+
+    ``federated`` is the list of clusters being federated; when omitted it
+    is enumerated with get_slurm_metrics_clusters().
     """
     own = get_slurm_prometheus_filters(cluster_name)
     matchers = [
@@ -2226,10 +2398,11 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
     if not candidates:
         return matchers
 
-    # Narrowed to clusters actually federated: a cluster excluded by
-    # slurm.allowed_clusters claims nothing, so subtracting its slice here
-    # would drop series no cluster goes on to collect.
-    federated = set(get_slurm_metrics_clusters())
+    # Narrowed to clusters actually federated: a cluster no workspace allows
+    # claims nothing, so subtracting its slice here would drop series no
+    # cluster goes on to collect.
+    federated = set(
+        get_slurm_metrics_clusters() if federated is None else federated)
     for sibling in candidates:
         if sibling not in federated:
             continue
@@ -2273,9 +2446,9 @@ def _with_label_matchers(pattern: str, matchers: List[str]) -> str:
 def get_slurm_metrics_clusters() -> List[str]:
     """Slurm clusters opted into GPU metrics federation.
 
-    A cluster participates when it is allowed by ``slurm.allowed_clusters``
-    (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
-    in ``~/.slurm/config``) *and*
+    A cluster participates when some workspace allows it (the server's
+    ``slurm.allowed_clusters`` or a workspace's override, as with Kubernetes
+    contexts; defaults to every cluster in ``~/.slurm/config``) *and*
     ``slurm.cluster_configs.<name>.prometheus.url`` is set: the URL of a
     Prometheus reachable *from a login node* — the cluster's own, or the
     ``prometheus.via`` cluster's — that scrapes the cluster's node/DCGM
@@ -2285,21 +2458,28 @@ def get_slurm_metrics_clusters() -> List[str]:
     try:
         # pylint: disable=import-outside-toplevel
         from sky import clouds
+        # In-function: visibility imports global_user_state (through
+        # workspaces.core), which imports this module.
+        from sky.workspaces import visibility
 
-        # Scope federation to the same clusters the rest of SkyPilot uses,
-        # honoring slurm.allowed_clusters (mirrors how the Kubernetes federation
-        # respects allowed_contexts). Defaults to all clusters in
-        # ~/.slurm/config when allowed_clusters is unset.
-        names = clouds.Slurm.existing_allowed_clusters(silent=True)
+        names = set(clouds.Slurm.existing_allowed_clusters(silent=True))
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not enumerate Slurm clusters: {e}')
         return []
-    return [name for name in names if _slurm_prometheus_url(name)]
+    # Clusters only another workspace allows are federated too, as the
+    # Kubernetes federation does with get_every_workspace_contexts().
+    workspaces = set(
+        skypilot_config.get_nested(('workspaces',), default_value={}) or {})
+    workspaces.add(constants.SKYPILOT_DEFAULT_WORKSPACE)
+    names |= visibility.visible_for_workspaces(workspaces, 'slurm')
+    return sorted(name for name in names if _slurm_prometheus_url(name))
 
 
-async def get_metrics_for_slurm_cluster(cluster_name: str,
-                                        stats: Optional[FederationStats] = None,
-                                        timeout: float = 30.0) -> str:
+async def get_metrics_for_slurm_cluster(
+        cluster_name: str,
+        stats: Optional[FederationStats] = None,
+        timeout: float = 30.0,
+        federated: Optional[Iterable[str]] = None) -> str:
     """Federate GPU metrics from a Slurm cluster's own Prometheus.
 
     The /federate request is executed *on* a login node (curl) through
@@ -2328,6 +2508,9 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
         timeout: Budget in seconds for the whole fetch. Must fit within the
             per-context timeout in sky/server/metrics.py
             (_PER_CONTEXT_TIMEOUT_SECONDS).
+        federated: The clusters being federated, passed so the sibling
+            filter does not enumerate them again on the event loop. See
+            slurm_federate_matchers().
 
     Raises:
         Exception: If the login-node curl or the federate request fails.
@@ -2344,7 +2527,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     # Scope the pull when the source Prometheus aggregates several fleets;
     # without this every fleet's series would be stamped with this cluster's
     # context. See slurm_federate_matchers().
-    matchers = slurm_federate_matchers(cluster_name)
+    matchers = slurm_federate_matchers(cluster_name, federated)
     query = '&'.join('match[]=' +
                      urllib.parse.quote(_with_label_matchers(pattern, matchers))
                      for pattern in SLURM_GPU_METRICS_MATCH_PATTERNS)

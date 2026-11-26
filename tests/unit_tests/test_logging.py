@@ -117,6 +117,8 @@ def test_config_reload_skips_the_yaml_dump_nobody_logs(tmp_path: Path,
     # Set, not added: the runner may have attached its capture handlers.
     monkeypatch.setattr(own, 'handlers', [handler])
     monkeypatch.setattr(skypilot_config, 'logger', own)
+    # Unchanged server config is not parsed again; each reload here must parse.
+    monkeypatch.setattr(skypilot_config, '_server_config_cache', None)
 
     # pylint: disable=protected-access
     loaded = skypilot_config._get_loaded_config()
@@ -126,6 +128,7 @@ def test_config_reload_skips_the_yaml_dump_nobody_logs(tmp_path: Path,
         assert dumps == []
         # Control: with a handler at DEBUG the dump still happens.
         handler.setLevel(sky_logging.DEBUG)
+        skypilot_config._server_config_cache = None
         skypilot_config.reload_config()
         assert dumps
     finally:

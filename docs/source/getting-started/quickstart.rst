@@ -4,6 +4,12 @@
 Quickstart
 ==========
 
+Prefer to have an agent walk you through this guide? Simply use this prompt:
+
+.. code-block:: text
+
+   Read https://docs.skypilot.ai/en/latest/getting-started/quickstart.html.md and walk me through the SkyPilot Quickstart.
+
 This guide will walk you through:
 
 - Defining a task in a simple YAML format

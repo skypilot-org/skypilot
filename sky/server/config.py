@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 import functools
+import math
 import os
 from typing import Literal, Optional
 
@@ -31,6 +32,9 @@ from sky.utils import yaml_utils
 LONG_WORKER_MEM_GB = 0.4
 SHORT_WORKER_MEM_GB = 0.3
 SERVER_WORKER_MEM_GB = 0.4
+# Budgeted for each heavy request process; heavy requests read the whole
+# stored history and peak at several GB on large deployments.
+HEAVY_WORKER_MEM_GB = 2.0
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
@@ -86,6 +90,12 @@ class ServerConfig:
     short_worker_config: WorkerConfig
     num_db_connections_per_worker: int
     queue_backend: QueueBackend
+    # Heavy requests run one per process and the process exits afterwards, so
+    # the pool is burst-only. Zero processes run heavy requests as short ones.
+    heavy_worker_config: WorkerConfig = dataclasses.field(
+        default_factory=lambda: WorkerConfig(garanteed_parallelism=0,
+                                             burstable_parallelism=0,
+                                             num_db_connections_per_worker=0))
 
 
 def compute_server_config(
@@ -138,7 +148,8 @@ def compute_server_config(
         # them before, so only the excess comes off the top. In deployment mode
         # the workers are children of a parent process that stays resident too.
         resident = (num_server_workers + 1) if deploy else num_server_workers
-        excess = max(0.0, resident * SERVER_WORKER_MEM_GB - _min_avail_mem_gb())
+        excess = max(0.0,
+                     resident * server_worker_mem_gb() - _min_avail_mem_gb())
         mem_size_gb = max(0.0, mem_size_gb - excess)
         logger.debug(f'Memory size for executor pools: {mem_size_gb}GB')
     # An explicit count wins over the derived one; the derived short count
@@ -148,6 +159,7 @@ def compute_server_config(
         constants.ENV_VAR_SERVER_LONG_WORKERS, minimum=_MIN_LONG_WORKERS)
     explicit_short = explicit_process_count(
         constants.ENV_VAR_SERVER_SHORT_WORKERS, minimum=1)
+    heavy_workers = heavy_worker_count()
     if explicit_long is not None:
         max_parallel_for_long = explicit_long
     else:
@@ -158,7 +170,7 @@ def compute_server_config(
         max_parallel_for_short = explicit_short
     else:
         max_parallel_for_short = _max_short_worker_parallism(
-            mem_size_gb, max_parallel_for_long)
+            mem_size_gb, max_parallel_for_long, heavy_workers)
     queue_backend = QueueBackend.MULTIPROCESSING
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0
@@ -170,7 +182,7 @@ def compute_server_config(
     # +1 for the event loop running the main process
     # and gc daemons in the '__main__' body of sky/server/server.py
     max_parallel_all_workers = (max_parallel_for_long + max_parallel_for_short +
-                                num_server_workers + 1)
+                                heavy_workers + num_server_workers + 1)
 
     if not deploy:
         # For local mode, use local queue backend since we only run 1 uvicorn
@@ -221,7 +233,8 @@ def compute_server_config(
             f'processes with {max_parallel_for_long} background workers for '
             f'long requests ({long_source}) and will allow at max '
             f'{max_parallel_for_short} short requests in parallel '
-            f'({short_source}).')
+            f'({short_source}) and {heavy_workers} heavy requests in '
+            'parallel.')
     return ServerConfig(
         num_server_workers=num_server_workers,
         queue_backend=queue_backend,
@@ -234,7 +247,41 @@ def compute_server_config(
             burstable_parallelism=burstable_parallel_for_short,
             num_db_connections_per_worker=num_db_connections_per_worker),
         num_db_connections_per_worker=num_db_connections_per_worker,
+        heavy_worker_config=WorkerConfig(
+            garanteed_parallelism=0,
+            burstable_parallelism=heavy_workers,
+            num_db_connections_per_worker=num_db_connections_per_worker),
     )
+
+
+def heavy_worker_count() -> int:
+    """Processes per API server that run heavy requests; 0 when disabled.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+    """
+    count = explicit_process_count(constants.ENV_VAR_SERVER_HEAVY_WORKERS,
+                                   minimum=0)
+    return count or 0
+
+
+def server_worker_mem_gb() -> float:
+    """Memory one API server worker process is expected to hold, in GB.
+
+    Raises:
+        ValueError: if the override is set but is not a positive number.
+    """
+    env_var = constants.ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return SERVER_WORKER_MEM_GB
+    try:
+        mem_gb = float(raw)
+    except ValueError:
+        raise ValueError(f'{env_var}={raw!r} is not a number of GB.') from None
+    if not math.isfinite(mem_gb) or mem_gb <= 0:
+        raise ValueError(f'{env_var}={raw!r} must be greater than 0.')
+    return mem_gb
 
 
 def explicit_process_count(env_var: str,
@@ -277,6 +324,7 @@ def validate_explicit_worker_counts() -> None:
                            minimum=_MIN_LONG_WORKERS)
     short = explicit_process_count(constants.ENV_VAR_SERVER_SHORT_WORKERS,
                                    minimum=1)
+    heavy_worker_count()
     if short is not None:
         floor = _min_pinned_short_workers()
         if short < floor:
@@ -335,11 +383,13 @@ def _get_min_short_workers() -> int:
 
 
 def _max_short_worker_parallism(mem_size_gb: float,
-                                long_worker_parallism: int) -> int:
+                                long_worker_parallism: int,
+                                heavy_worker_parallelism: int = 0) -> int:
     """Max parallelism for short workers."""
-    # Reserve memory for long workers and min available memory.
+    # Reserve memory for long and heavy workers and min available memory.
     reserved_mem = (_min_avail_mem_gb() +
-                    (long_worker_parallism * LONG_WORKER_MEM_GB))
+                    (long_worker_parallism * LONG_WORKER_MEM_GB) +
+                    (heavy_worker_parallelism * HEAVY_WORKER_MEM_GB))
     available_mem = max(0, mem_size_gb - reserved_mem)
     n = max(_get_min_short_workers(), int(available_mem / SHORT_WORKER_MEM_GB))
     return n

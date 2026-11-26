@@ -16,6 +16,7 @@ from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
 import psutil
+import starlette.convertors
 import starlette.types
 import uvicorn
 
@@ -26,6 +27,8 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server import caller_usage
 from sky.server import constants as server_constants
 from sky.server import container_memory
 from sky.server import local_disk
@@ -1526,6 +1529,12 @@ class WorkspaceUsageCollector:
             if launched_resources is None:
                 continue
             num_nodes = max(1, int(getattr(handle, 'launched_nodes', 1) or 1))
+            # launched_resources describes one task node; a multi-host TPU
+            # slice on Kubernetes has several cluster nodes (pods) per task
+            # node.
+            num_nodes = max(
+                1, kubernetes_utils.num_task_nodes(num_nodes,
+                                                   launched_resources))
 
             accelerators = (launched_resources.accelerators or {})
             for acc_name, acc_count in accelerators.items():
@@ -1790,11 +1799,16 @@ class _FederationTargets:
         central Prometheus scrapes the local cluster's exporters directly, so
         federating them again would only duplicate the raw series under a
         stamped copy. The dashboard matches the local cluster with cluster=""
-        (see /dashboard_config local_contexts).
+        (see /dashboard_config local_contexts). Contexts known to be
+        unreachable are dropped too, before the local-cluster check probes
+        them.
         """
         skypilot_config.reload_config()
         annotations.clear_request_level_cache()
-        contexts = core.get_all_contexts()
+        contexts = [
+            ctx for ctx in core.get_every_workspace_contexts()
+            if kubernetes_utils.known_unreachable_reason(ctx) is None
+        ]
         _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
         # Slurm clusters federate through their login node; only clusters
         # with a configured prometheus_url participate. Enumeration reads
@@ -1904,9 +1918,9 @@ def gpu_metrics_debug() -> dict:
     default_path = os.path.expanduser('~/.kube/config')
 
     # Check what contexts are visible before and after cache clear
-    pre_clear_contexts = core.get_all_contexts()
+    pre_clear_contexts = core.get_every_workspace_contexts()
     annotations.clear_request_level_cache()
-    post_clear_contexts = core.get_all_contexts()
+    post_clear_contexts = core.get_every_workspace_contexts()
 
     # Check kubeconfig file existence
     if kubeconfig_env != 'NOT_SET':
@@ -2032,7 +2046,10 @@ async def gpu_metrics() -> fastapi.Response:
         asyncio.create_task(
             asyncio.wait_for(
                 metrics_utils.get_metrics_for_slurm_cluster(
-                    name, stats=stats, timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
+                    name,
+                    stats=stats,
+                    timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+                    federated=slurm_clusters),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
             )) for name, stats in zip(slurm_clusters, slurm_stats)
     ]
@@ -2388,18 +2405,23 @@ class PrometheusMiddleware:
         start_time = time.time()
         method = request.method
         recorded = False
+        http_call, http_call_token = caller_usage.begin_http_call()
 
-        def record(status_code: int) -> None:
+        def record(status_code: int, body_bytes: Optional[int]) -> None:
             nonlocal recorded
             recorded = True
             # This layer is outermost, so it sees 100% of responses: a
             # recording fault must not turn a served request into a 500.
             middleware_utils.record_safely('request', self._record, request,
                                            method, status_code, start_time)
+            middleware_utils.record_safely('caller usage', _record_caller_usage,
+                                           request, http_call, start_time,
+                                           body_bytes)
 
         async def send_and_record(message: starlette.types.Message) -> None:
             if message['type'] == 'http.response.start' and not recorded:
-                record(message['status'])
+                record(message['status'],
+                       _content_length(message.get('headers', ())))
             await send(message)
 
         status_code = 0
@@ -2414,7 +2436,8 @@ class PrometheusMiddleware:
             raise
         finally:
             if not recorded:
-                record(status_code)
+                record(status_code, None)
+            caller_usage.end_http_call(http_call_token)
 
     def _path_label(self, request: fastapi.Request, raw_path: str) -> str:
         """`path` label, never raising: a fault must not lose the count.
@@ -2465,6 +2488,62 @@ class PrometheusMiddleware:
         if request_name is not None:
             metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.labels(
                 name=request_name, status=status_code_group).observe(duration)
+
+
+# Route handlers left out of caller usage: /api/get is counted by the request
+# it returns; health probes and dashboard pages are not API usage.
+_CALLER_USAGE_SKIPPED_PATHS = frozenset(
+    {'/api/get', '/api/health', '/dashboard'})
+_CALLER_USAGE_SKIPPED_PREFIXES = ('/dashboard/',)
+
+
+def _content_length(headers) -> Optional[int]:
+    for key, value in headers:
+        if key.lower() == b'content-length':
+            try:
+                return int(value)
+            except ValueError:
+                return None
+    return None
+
+
+def _record_caller_usage(request: fastapi.Request,
+                         http_call: caller_usage.HttpCall, start_time: float,
+                         body_bytes: Optional[int]) -> None:
+    caller = caller_usage.caller_of_user(
+        getattr(request.state, 'impersonator', None) or
+        getattr(request.state, 'auth_user', None))
+    headers = request.headers
+    caller_usage.record_client(caller, headers.get('X-SkyPilot-Client-Type'),
+                               headers.get('User-Agent'),
+                               headers.get(server_constants.API_VERSION_HEADER))
+    # Set by /api/get and by a synchronous call that returned a request's
+    # result: the body is that request's result.
+    request_name = getattr(request.state, 'request_name', None)
+    if request_name is not None:
+        caller_usage.record_returned_bytes(caller, request_name, body_bytes)
+        return
+    if http_call.scheduled_request or not _reached_router(request):
+        return
+    raw_path = request.scope.get('path', '')
+    if (raw_path in _CALLER_USAGE_SKIPPED_PATHS or
+            raw_path.startswith(_CALLER_USAGE_SKIPPED_PREFIXES) or
+            _is_streaming_api(raw_path)):
+        return
+    route = request.scope.get('route')
+    if not isinstance(route, fastapi.routing.APIRoute):
+        return
+    path_params = request.scope.get('path_params') or {}
+    spanning = [
+        str(path_params.get(param, ''))
+        for param, convertor in route.param_convertors.items()
+        if isinstance(convertor, starlette.convertors.PathConvertor)
+    ]
+    name = (f'{request.method} ' +
+            caller_usage.route_template(raw_path, route.path_format, spanning))
+    caller_usage.record_execution(caller, name, caller_usage.KIND_HANDLER,
+                                  time.time() - start_time)
+    caller_usage.record_returned_bytes(caller, name, body_bytes)
 
 
 peak_rss_bytes = 0

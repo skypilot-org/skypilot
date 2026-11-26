@@ -25,16 +25,132 @@ from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
 from sky.skylet import constants
+from sky.utils import annotations
 
 
 # Test for exception on permanent errors like 401 (Unauthorized)
 def test_get_kubernetes_nodes():
-    with patch('sky.provision.kubernetes.utils.kubernetes.core_api'
-              ) as mock_core_api:
-        mock_core_api.return_value.list_node.side_effect = kubernetes.client.rest.ApiException(
+    with patch('sky.provision.kubernetes.utils.kubernetes.api_client'
+              ) as mock_api_client:
+        mock_api_client.return_value.call_api.side_effect = kubernetes.client.rest.ApiException(
             status=401)
         with pytest.raises(exceptions.KubeAPIUnreachableError):
             utils.get_kubernetes_nodes(context='test')
+
+
+@pytest.fixture
+def unreachable_checks(monkeypatch):
+    checks = []
+    monkeypatch.setattr(utils, '_CONTEXT_UNREACHABLE_CHECKS', checks)
+    return checks
+
+
+def _proxy_down(context):
+    return 'proxy is down' if context == 'down' else None
+
+
+def _api_call_recorder():
+    calls = []
+
+    @utils._retry_on_error()
+    def list_things(*, context):
+        calls.append(context)
+        if context == 'flaky' and len(calls) == 1:
+            raise kubernetes.client.rest.ApiException(status=503)
+        return ['thing']
+
+    return list_things, calls
+
+
+def test_known_unreachable_context_fails_at_once(unreachable_checks):
+    utils.register_context_unreachable_check(_proxy_down)
+    list_things, calls = _api_call_recorder()
+    with patch('sky.provision.kubernetes.utils.time.sleep') as mock_sleep:
+        with pytest.raises(exceptions.KubeAPIUnreachableError,
+                           match="'down' is unreachable: proxy is down"):
+            list_things(context='down')
+    assert calls == []
+    mock_sleep.assert_not_called()
+
+
+def test_call_without_context_is_attempted(unreachable_checks, monkeypatch):
+    utils.register_context_unreachable_check(_proxy_down)
+    monkeypatch.setattr(utils, 'get_current_kube_config_context_name',
+                        lambda: 'down')
+    list_things, calls = _api_call_recorder()
+    assert list_things(context=None) == ['thing']
+    assert calls == [None]
+
+
+def test_other_contexts_are_still_retried(unreachable_checks):
+    utils.register_context_unreachable_check(_proxy_down)
+    list_things, calls = _api_call_recorder()
+    with patch('sky.provision.kubernetes.utils.time.sleep') as mock_sleep:
+        assert list_things(context='flaky') == ['thing']
+    assert calls == ['flaky', 'flaky']
+    mock_sleep.assert_called_once()
+
+
+def test_failing_unreachable_check_is_skipped(unreachable_checks):
+
+    def broken_check(context):
+        raise RuntimeError('state unavailable')
+
+    utils.register_context_unreachable_check(broken_check)
+    list_things, calls = _api_call_recorder()
+    assert list_things(context='down') == ['thing']
+    assert calls == ['down']
+
+
+def test_register_context_unreachable_check_is_idempotent(unreachable_checks):
+
+    def check(context):
+        return None
+
+    utils.register_context_unreachable_check(check)
+    utils.register_context_unreachable_check(check)
+    assert unreachable_checks == [check]
+
+
+@pytest.mark.parametrize('status,headers,expected', [
+    (500, None, True),
+    (503, None, True),
+    (429, None, True),
+    (403, {
+        'CF-RAY': '98b8076cfae4058d-IAD'
+    }, True),
+    (401, None, False),
+    (403, None, False),
+    (404, None, False),
+    (400, None, False),
+    (None, None, False),
+])
+def test_is_transient_api_error(status, headers, expected):
+    error = kubernetes.client.rest.ApiException(status=status)
+    error.headers = headers
+    assert utils.is_transient_api_error(error) is expected
+
+
+def test_is_transient_api_error_other_errors():
+    assert utils.is_transient_api_error(kubernetes_adaptor.max_retry_error()(
+        None, '/api/v1/nodes')) is True
+    assert utils.is_transient_api_error(
+        kubernetes_adaptor.config_exception()('invalid kubeconfig')) is False
+    assert utils.is_transient_api_error(None) is False
+    assert utils.is_transient_api_error(TimeoutError('timed out')) is False
+
+
+def test_check_instance_fits_raises_when_unreachable():
+    """An unreachable API is not reported as the GPU being absent."""
+    instance_type = utils.KubernetesInstanceType.from_resources(
+        4, 16, 1, 'H100').name
+    with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+               return_value=[]), \
+            patch('sky.provision.kubernetes.utils.'
+                  'get_accelerator_label_key_values',
+                  side_effect=exceptions.KubeAPIUnreachableError('Timed out')):
+        with pytest.raises(exceptions.KubeAPIUnreachableError):
+            utils.check_instance_fits('ctx', instance_type)
 
 
 def test_get_kubernetes_node_info_capacity_vs_allocatable():
@@ -205,10 +321,10 @@ def test_get_kubernetes_node_info():
                    return_value=(collections.defaultdict(int, {mock_gpu_node_1.metadata.name: 2}), {})):
         node_info = utils.get_kubernetes_node_info()
         assert isinstance(node_info, models.KubernetesNodesInfo)
-        # Multi-host TPU node should be excluded
+        # A VM of a multi-host TPU slice is not listed per node.
         assert len(node_info.node_info_dict) == 1
         assert 'node-3' not in node_info.node_info_dict
-        assert '(Note: Multi-host TPUs are detected' in node_info.hint
+        assert 'multi-host TPU slices are not listed' in node_info.hint
 
     # Test case 4: Empty cluster
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
@@ -488,9 +604,10 @@ def test_kube_context_names_are_parsed_again_only_on_change(
     monkeypatch.setenv('KUBECONFIG', str(first))
     monkeypatch.setattr(utils, 'is_incluster_config_available', lambda: False)
     parses = []
-    real = utils.kubernetes.list_kube_config_contexts
-    monkeypatch.setattr(utils.kubernetes, 'list_kube_config_contexts',
-                        lambda: parses.append(1) or real())
+    config = utils.kubernetes.kubernetes.config
+    real = config.list_kube_config_contexts
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        lambda path: parses.append(1) or real(path))
 
     assert utils.get_all_kube_context_names() == ['ctx-a']
     assert utils.get_all_kube_context_names() == ['ctx-a']
@@ -518,6 +635,160 @@ def test_kube_context_names_are_parsed_again_only_on_change(
     # The caller's list is its own.
     utils.get_all_kube_context_names().append('mutated')
     assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
+
+
+def _kubeconfig_with(*names):
+    return yaml.safe_dump({
+        'apiVersion': 'v1',
+        'kind': 'Config',
+        'current-context': names[0],
+        'clusters': [{
+            'name': 'c',
+            'cluster': {
+                'server': 'https://127.0.0.1:6443'
+            }
+        }],
+        'users': [{
+            'name': 'u',
+            'user': {}
+        }],
+        'contexts': [{
+            'name': n,
+            'context': {
+                'cluster': 'c',
+                'user': 'u'
+            }
+        } for n in names],
+    })
+
+
+def _context_names():
+    contexts, _ = kubernetes_adaptor.list_kube_config_contexts()
+    return [c['name'] for c in contexts]
+
+
+def test_kube_config_contexts_are_copies(tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(_kubeconfig_with('ctx-a'))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    contexts, current = kubernetes_adaptor.list_kube_config_contexts()
+    contexts[0]['context']['user'] = 'mutated'
+    current['name'] = 'mutated'
+    contexts, current = kubernetes_adaptor.list_kube_config_contexts()
+    assert contexts[0]['context']['user'] == 'u'
+    assert current['name'] == 'ctx-a'
+
+
+@pytest.mark.parametrize('kubeconfig', [None, 'no-current-context'])
+def test_unusable_kubeconfig_raises_on_every_call(tmp_path, monkeypatch,
+                                                  kubeconfig):
+    path = tmp_path / 'kubeconfig'
+    if kubeconfig is not None:
+        content = yaml.safe_load(_kubeconfig_with('ctx-a'))
+        content['current-context'] = ''
+        path.write_text(yaml.safe_dump(content))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+    parses = []
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        lambda p: parses.append(1) or real(p))
+    raised = []
+    for _ in range(2):
+        with pytest.raises(config.config_exception.ConfigException) as e:
+            kubernetes_adaptor.list_kube_config_contexts()
+        raised.append(e.value)
+    assert len(parses) == 1
+    # A fresh exception each time, so tracebacks do not pile up on one.
+    assert raised[0] is not raised[1]
+    # The in-cluster fallback depends on the exception.
+    monkeypatch.setattr(utils, 'is_incluster_config_available', lambda: True)
+    monkeypatch.setattr(utils.kubernetes, 'in_cluster_context_name',
+                        lambda: 'in-cluster')
+    assert utils.get_current_kube_config_context_name() == 'in-cluster'
+
+
+def test_current_context_is_not_parsed_per_request(tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(_kubeconfig_with('ctx-a', 'ctx-b'))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+    parses = []
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        lambda p: parses.append(1) or real(p))
+    for _ in range(3):
+        # What a sync handler's config refresh does on every request.
+        annotations.clear_request_level_cache()
+        assert utils.get_current_kube_config_context_name() == 'ctx-a'
+    assert len(parses) == 1
+
+
+def test_cached_config_exception_keeps_nothing_alive(tmp_path, monkeypatch):
+    monkeypatch.setenv('KUBECONFIG', str(tmp_path / 'missing'))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+
+    def parse_while_handling_another_error(path):
+        try:
+            raise ValueError('unrelated')
+        except ValueError:
+            return real(path)
+
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        parse_while_handling_another_error)
+    with pytest.raises(config.config_exception.ConfigException):
+        kubernetes_adaptor.list_kube_config_contexts()
+    # pylint: disable-next=protected-access
+    (cached,) = kubernetes_adaptor._contexts_cache.values()
+    assert cached.__traceback__ is None
+    assert cached.__context__ is None
+
+
+@pytest.mark.parametrize('changed_to', ['a:b', 'a'])
+def test_kubeconfig_env_change_after_fingerprint(tmp_path, monkeypatch,
+                                                 changed_to):
+    a = tmp_path / 'a.yaml'
+    a.write_text(_kubeconfig_with('ctx-a'))
+    b = tmp_path / 'b.yaml'
+    b.write_text(_kubeconfig_with('ctx-b'))
+    paths = {'a': str(a), 'a:b': f'{a}:{b}'}
+    before = 'a' if changed_to == 'a:b' else 'a:b'
+    monkeypatch.setenv('KUBECONFIG', paths[before])
+    real = kubernetes_adaptor._fingerprint  # pylint: disable=protected-access
+
+    def fingerprint_then_change_env(config_file):
+        result = real(config_file)
+        os.environ['KUBECONFIG'] = paths[changed_to]
+        return result
+
+    monkeypatch.setattr(kubernetes_adaptor, '_fingerprint',
+                        fingerprint_then_change_env)
+    _context_names()
+    monkeypatch.setattr(kubernetes_adaptor, '_fingerprint', real)
+    # Whatever was stored, each value of KUBECONFIG gets its own contexts.
+    want = {'a': ['ctx-a'], 'a:b': ['ctx-a', 'ctx-b']}
+    for key in (before, changed_to, before):
+        monkeypatch.setenv('KUBECONFIG', paths[key])
+        assert _context_names() == want[key]
+
+
+def test_kubeconfig_rewritten_during_parse_then_reverted(tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(_kubeconfig_with('ctx-a'))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+
+    def parse_a_rewrite(config_file):
+        path.write_text(_kubeconfig_with('ctx-b'))
+        return real(config_file)
+
+    monkeypatch.setattr(config, 'list_kube_config_contexts', parse_a_rewrite)
+    assert _context_names() == ['ctx-b']
+    monkeypatch.setattr(config, 'list_kube_config_contexts', real)
+    path.write_text(_kubeconfig_with('ctx-a'))
+    assert _context_names() == ['ctx-a']
 
 
 def test_in_cluster_context_name_is_checked_on_every_call(
@@ -570,8 +841,6 @@ def test_get_all_kube_context_names():
     }]
     mock_current_context = {'name': 'context1'}
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -580,8 +849,6 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['context1', 'context2', 'context3']
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -595,8 +862,6 @@ def test_get_all_kube_context_names():
             'context1', 'context2', 'context3', 'in-cluster'
         ]
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
@@ -609,8 +874,6 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['in-cluster']
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
@@ -799,6 +1062,114 @@ def test_gke_autoscaler_node_pool_rtx_pro_6000(accelerator):
                     return_value=(48, 180.0)):
         assert fits(f'4CPU--16GB--{accelerator}:1', node_pool)
         assert not fits(f'4CPU--16GB--{accelerator}:2', node_pool)
+
+
+@pytest.mark.parametrize(
+    'accelerator,count,expected',
+    [
+        # GKE label values carry no count in the name: the request's count
+        # is kept.
+        ('tpu-v6e-slice', 1, ('tpu-v6e-slice', 1)),
+        ('tpu-v6e-slice', 4, ('tpu-v6e-slice', 4)),
+        ('tpu-v6e-slice', 8, ('tpu-v6e-slice', 8)),
+        ('tpu-v5-lite-podslice', 4, ('tpu-v5-lite-podslice', 4)),
+        # GCP TPU names carry the chip count in the name, which wins.
+        ('tpu-v6e-4', 1, ('tpu-v6e-slice', 4)),
+        ('tpu-v6e-8', 1, ('tpu-v6e-slice', 8)),
+        ('tpu-v5litepod-8', 1, ('tpu-v5-lite-podslice', 8)),
+        ('tpu-v6e-8', None, ('tpu-v6e-slice', 8)),
+    ])
+def test_normalize_tpu_accelerator(accelerator, count, expected):
+    assert utils.normalize_tpu_accelerator(accelerator, count) == expected
+
+
+def _gke_tpu_node(name, topology, chips):
+    node = mock.MagicMock()
+    node.metadata.name = name
+    node.metadata.labels = {
+        'cloud.google.com/gke-tpu-accelerator': 'tpu-v6e-slice',
+        'cloud.google.com/gke-tpu-topology': topology,
+        'cloud.google.com/gke-accelerator-count': str(chips),
+    }
+    node.status.allocatable = {
+        'cpu': '100',
+        'memory': '400Gi',
+        'google.com/tpu': str(chips),
+    }
+    node.status.capacity = dict(node.status.allocatable)
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
+    node.spec.taints = []
+    return node
+
+
+@pytest.mark.parametrize('instance_type', [
+    '4CPU--16GB--tpu-v6e-slice:4',
+    '4CPU--16GB--tpu-v6e-4:1',
+])
+def test_check_instance_fits_tpu_chip_count(instance_type):
+    """Both spellings of a 4-chip v6e request fit a 4-chip (2x2) node and
+    not a 1-chip (1x1) one."""
+    label = ('cloud.google.com/gke-tpu-accelerator', ['tpu-v6e-slice'], None,
+             None)
+    for nodes, expected in [
+        ([_gke_tpu_node('n-2x2', '2x2', 4)], True),
+        ([_gke_tpu_node('n-1x1', '1x1', 1)], False),
+    ]:
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=nodes), \
+             mock.patch(
+                 'sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                 return_value=label):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     instance_type)
+        assert fits is expected, (instance_type, nodes[0].metadata.name, reason)
+
+
+@pytest.mark.parametrize('instance_type', [
+    '4CPU--16GB--tpu-v6e-slice:4',
+    '4CPU--16GB--tpu-v6e-4:1',
+])
+def test_check_instance_fits_tpu_real_label_lookup(instance_type):
+    """Without an autoscaler, the label lookup reads the nodes' GKE label
+    (tpu-v6e-slice), so both spellings must match a 4-chip node. Only the
+    cluster reads are mocked; the label lookup itself runs."""
+    nodes = [_gke_tpu_node('n-2x2', '2x2', 4)]
+    node_labels = {
+        n.metadata.name: list(n.metadata.labels.items()) for n in nodes
+    }
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=nodes), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource',
+                    return_value=(True, {'google.com/tpu'})), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+                    return_value=(utils.GKELabelFormatter(), node_labels)), \
+         mock.patch('sky.skypilot_config.get_effective_region_config',
+                    return_value=None):
+        fits, reason = utils.check_instance_fits('test-context', instance_type)
+    assert fits is True, (instance_type, reason)
+
+
+@pytest.mark.parametrize('accelerator', ['tpu-v6e-slice:4', 'tpu-v6e-4:1'])
+def test_gke_autoscaler_node_pool_tpu_chip_count(accelerator):
+    """A single-host 4-chip v6e node pool (ct6e-standard-4t) can create a
+    node for both spellings of a 4-chip request, and not for 8 chips."""
+    node_pool = {
+        'name': 'v6e-2x2',
+        'config': {
+            'machineType': 'ct6e-standard-4t',
+            'resourceLabels': {
+                'goog-gke-tpu-node-pool-type': 'single-host',
+                'goog-gke-accelerator-type': 'tpu-v6e-slice',
+            },
+        }
+    }
+    # pylint: disable=protected-access
+    fits = utils.GKEAutoscaler._check_instance_fits_gke_autoscaler_node_pool
+    with mock.patch('sky.clouds.GCP.get_vcpus_mem_from_instance_type',
+                    return_value=(180, 720.0)):
+        assert fits(f'4CPU--16GB--{accelerator}', node_pool)
+        assert not fits('4CPU--16GB--tpu-v6e-slice:8', node_pool)
 
 
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
@@ -1761,6 +2132,95 @@ def test_combine_pod_config_fields_kubernetes_cloud():
             'node_config']
         assert 'nodeSelector' in node_config['spec']
         assert node_config['spec']['nodeSelector']['gpu'] == 'true'
+
+
+@pytest.fixture
+def pod_config_hooks(monkeypatch):
+    hooks = []
+    monkeypatch.setattr(utils, '_POD_CONFIG_HOOKS', hooks)
+    return hooks
+
+
+def _cluster_yaml_with_pod():
+    return {
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'ray',
+                            'image': 'rayproject/ray:nightly'
+                        }]
+                    }
+                }
+            }
+        }
+    }
+
+
+def _combine_with_user_pod_config(cluster_yaml_obj, cluster_config_overrides,
+                                  context):
+    user_pod_config = {'spec': {'nodeSelector': {'gpu': 'true'}}}
+
+    def _side_effect(cloud, region, keys, default_value):
+        if keys == ('pod_config',):
+            return copy.deepcopy(user_pod_config)
+        return default_value
+
+    with patch('sky.skypilot_config.get_effective_region_config',
+               side_effect=_side_effect):
+        return utils.combine_pod_config_fields(cluster_yaml_obj,
+                                               cluster_config_overrides,
+                                               context=context)
+
+
+def test_pod_config_hook_edits_merged_config(pod_config_hooks):
+    seen = []
+
+    def add_toleration(cluster_yaml_obj, cluster_config_overrides, context):
+        spec = cluster_yaml_obj['available_node_types']['ray_head_default'][
+            'node_config']['spec']
+        # The user's pod_config is merged before hooks run.
+        seen.append(
+            (dict(spec['nodeSelector']), cluster_config_overrides, context))
+        spec.setdefault('tolerations', []).append({
+            'key': 'example.com/taint',
+            'operator': 'Exists'
+        })
+
+    utils.register_pod_config_hook(add_toleration)
+    cluster_yaml_obj = _cluster_yaml_with_pod()
+    overrides = {'kubernetes': {'pod_config': {}}}
+    result = _combine_with_user_pod_config(cluster_yaml_obj, overrides,
+                                           'my-context')
+
+    assert seen == [({'gpu': 'true'}, overrides, 'my-context')]
+    spec = result['available_node_types']['ray_head_default']['node_config'][
+        'spec']
+    assert spec['tolerations'] == [{
+        'key': 'example.com/taint',
+        'operator': 'Exists'
+    }]
+    # The input is left as it was.
+    assert cluster_yaml_obj == _cluster_yaml_with_pod()
+
+
+def test_pod_config_hooks_run_in_registration_order(pod_config_hooks):
+    order = []
+    utils.register_pod_config_hook(lambda *args: order.append('first'))
+    utils.register_pod_config_hook(lambda *args: order.append('second'))
+    _combine_with_user_pod_config(_cluster_yaml_with_pod(), {}, None)
+    assert order == ['first', 'second']
+
+
+def test_register_pod_config_hook_is_idempotent(pod_config_hooks):
+
+    def hook(cluster_yaml_obj, cluster_config_overrides, context):
+        pass
+
+    utils.register_pod_config_hook(hook)
+    utils.register_pod_config_hook(hook)
+    assert pod_config_hooks == [hook]
 
 
 def test_ssh_cloud_uses_ssh_config_for_provision_timeout():
@@ -5318,12 +5778,14 @@ def _make_pod(*,
               container_statuses=None,
               reason=None,
               message=None):
-    return kubernetes.client.V1Pod(status=kubernetes.client.V1PodStatus(
-        phase=phase,
-        conditions=conditions,
-        container_statuses=container_statuses,
-        reason=reason,
-        message=message))
+    return kubernetes.client.V1Pod(
+        metadata=kubernetes.client.V1ObjectMeta(name='mypod'),
+        status=kubernetes.client.V1PodStatus(
+            phase=phase,
+            conditions=conditions,
+            container_statuses=container_statuses,
+            reason=reason,
+            message=message))
 
 
 def test_get_condensed_pod_reason_oomkilled():

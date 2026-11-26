@@ -820,7 +820,7 @@ def test_row_user_filter_chip_and_clearing_it(make_user, seed_job, open_as, uid,
     since = page.recorder.mark()
     user_button.click()
 
-    chip = page.locator('div.bg-blue-100').filter(
+    chip = page.locator('div.bg-blue-tint-strong').filter(
         has_text=re.compile(rf'User\s*:\s*{owner.name}'))
     expect(chip, f'clicking the user must add a User : {owner.name} chip'
           ).to_be_visible()

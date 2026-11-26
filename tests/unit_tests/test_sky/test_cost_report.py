@@ -7,6 +7,7 @@ import weakref
 import pytest
 import sqlalchemy
 
+from sky import clouds as clouds_lib
 from sky import core
 from sky import global_user_state
 from sky import models
@@ -22,6 +23,20 @@ from sky.utils import config_utils
 from sky.utils import status_lib
 from sky.utils.cli_utils import status_utils
 from sky.utils.db import db_utils
+
+
+def _history_record(index, launched):
+    return {
+        'name': f'c{index}',
+        'status': None,
+        'num_nodes': 1,
+        'resources': launched,
+        'duration': 60,
+        'launched_at': 1640995200,
+        'cluster_hash': f'h{index}',
+        'usage_intervals': [(1640995200, 1640995260)],
+        'user_hash': 'u1',
+    }
 
 
 def _history_record(index, launched):
@@ -206,6 +221,61 @@ class TestCostReportCore(unittest.TestCase):
 
         self.assertEqual(len(result), 2 * chunk_size)
         self.assertEqual(first_alive_at_next_chunk, [False])
+
+    def test_cost_report_includes_zone(self):
+        """Records carry the launch resources' zone for infra display."""
+        launched = resources_lib.Resources(cloud=clouds_lib.AWS(),
+                                           instance_type='m5.xlarge',
+                                           region='us-east-1',
+                                           zone='us-east-1a')
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=[_history_record(0, launched)]):
+            result = core.cost_report(days=30)
+
+        self.assertEqual(result[0]['cloud'], 'AWS')
+        self.assertEqual(result[0]['region'], 'us-east-1')
+        self.assertEqual(result[0]['zone'], 'us-east-1a')
+
+    def test_cost_report_summary_response_includes_zone(self):
+        """The abbreviated dashboard payload keeps the zone field."""
+        launched = resources_lib.Resources(cloud=clouds_lib.AWS(),
+                                           instance_type='m5.xlarge',
+                                           region='us-east-1',
+                                           zone='us-east-1a')
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=[_history_record(0, launched)]):
+            result = core.cost_report(dashboard_summary_response=True)
+
+        self.assertEqual(result[0]['cloud'], 'AWS')
+        self.assertEqual(result[0]['zone'], 'us-east-1a')
+        # The abbreviation still drops the heavy fields.
+        self.assertNotIn('resources', result[0])
+        self.assertNotIn('usage_intervals', result[0])
+
+    def test_cost_report_zone_is_none_without_zone(self):
+        """A zone-less cloud (or legacy record) yields zone=None, not a raise."""
+        launched = resources_lib.Resources(cpus='2')
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=[_history_record(0, launched)]):
+            result = core.cost_report(dashboard_summary_response=True)
+
+        self.assertIsNone(result[0]['zone'])
+
+    def test_cost_report_region_only_keeps_region_without_none_zone(self):
+        """A zone-less launch keeps its region and does not stringify None."""
+        launched = resources_lib.Resources(cloud=clouds_lib.GCP(),
+                                           instance_type='n2-standard-8',
+                                           region='us-central1',
+                                           zone=None)
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=[_history_record(0, launched)]):
+            result = core.cost_report(dashboard_summary_response=True)
+
+        self.assertEqual(result[0]['cloud'], 'GCP')
+        self.assertEqual(result[0]['region'], 'us-central1')
+        # Must be None, not the string 'None', so the dashboard renders the
+        # region alone instead of "GCP (None)".
+        self.assertIsNone(result[0]['zone'])
 
 
 class TestCostReportStatusUtils(unittest.TestCase):

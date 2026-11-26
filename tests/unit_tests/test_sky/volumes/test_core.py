@@ -30,6 +30,12 @@ def mock_no_volume_errors(monkeypatch):
 class TestVolumeCore:
     """Test cases for volume core functions."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_any_infra(self, monkeypatch):
+        # These tests use a mock cloud; the infra check has its own tests.
+        monkeypatch.setattr(core, 'check_volume_infra_allowed',
+                            mock.MagicMock())
+
     def test_volume_refresh_success(self, monkeypatch):
         """Test volume_refresh with successful status updates."""
         # Mock volume data
@@ -901,7 +907,10 @@ class TestVolumeCore:
         # Verify calls
         mock_cloud_registry.from_str.assert_called_once_with('aws')
         mock_make_name.assert_called_once_with('test-volume', max_length=63)
-        mock_get_volume_by_name.assert_called_once_with('test-volume')
+        # Looked up before the infra checks, and again under the lock.
+        assert mock_get_volume_by_name.call_args_list == [
+            mock.call('test-volume')
+        ] * 2
         mock_provision_apply.assert_called_once()
         mock_add_volume.assert_called_once()
 
@@ -1165,7 +1174,10 @@ class TestVolumeCore:
 
         # Verify calls
         mock_cloud_registry.from_str.assert_called_once_with('k8s')
-        mock_get_volume_by_name.assert_called_once_with(volume_name)
+        # Looked up before the infra checks, and again under the lock.
+        assert mock_get_volume_by_name.call_args_list == [
+            mock.call(volume_name)
+        ] * 2
         mock_provision_apply.assert_called_once()
         mock_add_volume.assert_called_once()
 
@@ -2044,6 +2056,7 @@ def _mock_volume_apply_deps(monkeypatch):
                         mock.MagicMock())
     mock_add_volume = mock.MagicMock()
     monkeypatch.setattr(global_user_state, 'add_volume', mock_add_volume)
+    monkeypatch.setattr(core, 'check_volume_infra_allowed', mock.MagicMock())
     return mock_add_volume
 
 
@@ -2294,7 +2307,9 @@ class TestVolumeListScopedToNames:
 
         def fake_get_volumes(is_ephemeral=None,
                              workspaces_filter=None,
-                             volume_names=None):
+                             volume_names=None,
+                             limit=None,
+                             after_name=None):
             """Stands in for the database, applying every filter it is given.
 
             Faithful on the point that matters: the filters compose. Dropping
@@ -2302,7 +2317,7 @@ class TestVolumeListScopedToNames:
             caller should not have seen, rather than as an empty result from an
             empty test database.
             """
-            del is_ephemeral
+            del is_ephemeral, limit, after_name
             out = rows
             if workspaces_filter is not None:
                 out = [r for r in out if r['workspace'] in workspaces_filter]

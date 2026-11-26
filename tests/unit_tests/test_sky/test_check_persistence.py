@@ -1,4 +1,5 @@
 """Verify sky.check.check persists cloud2ctx2text into check_results."""
+import contextvars
 import time
 
 import pytest
@@ -16,6 +17,7 @@ import sky.check as sky_check
 from sky.clouds.cloud import CloudCapability
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import context
 from sky.utils.db import db_utils
 
 
@@ -655,6 +657,53 @@ def test_reader_recheck_is_kept_per_config(tmp_path, monkeypatch):
         assert enabled() == {'AWS'}
 
 
+def test_reader_recheck_is_kept_per_request(tmp_path, monkeypatch):
+    """Requests that run concurrently in one process keep their own re-checks.
+
+    A request starting in the process clears the request-level caches, which
+    must not drop what an earlier, still running request re-checked.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'aws', 'gcp'})
+    _probes(monkeypatch, {repr(sky_clouds.AWS()), repr(sky_clouds.GCP())})
+    monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                        lambda *args, **kwargs: [sky_clouds.AWS()])
+    monkeypatch.setattr(
+        'sky.global_user_state.get_allowed_clouds',
+        # pylint: disable-next=protected-access
+        sky_check._get_workspace_allowed_clouds)
+
+    def new_request():
+        request = contextvars.Context()
+        request.run(context.initialize)
+        return request
+
+    def in_request(request, func):
+
+        def run():
+            with skypilot_config.local_active_workspace_ctx('ws-ro'):
+                return func()
+
+        return request.run(run)
+
+    def enabled():
+        return {
+            repr(c) for c in sky_check.get_cached_enabled_clouds_or_refresh(
+                CloudCapability.COMPUTE)
+        }
+
+    rechecking = new_request()
+    other = new_request()
+    in_request(
+        rechecking,
+        lambda: sky_check.recheck_clouds(CloudCapability.COMPUTE, ['GCP']))
+    assert in_request(other, enabled) == {'AWS'}
+    in_request(other,
+               lambda: annotations.clear_request_level_cache(sync_refresh=True))
+    assert in_request(rechecking, enabled) == {'AWS', 'GCP'}
+
+
 def test_writer_reads_add_no_reader_recheck_entries(tmp_path, monkeypatch):
     """Only re-checks add entries, so a writer's reads cannot crowd them out."""
     _fresh_db(tmp_path, monkeypatch)
@@ -729,3 +778,178 @@ def test_no_cloud_hint_matches_who_can_refresh(tmp_path, monkeypatch, workspace,
                 CloudCapability.COMPUTE, raise_if_no_cloud_access=True)
 
     assert f'Cloud access is not set up. {hint}' in str(e.value)
+
+
+def _kubernetes_contexts(monkeypatch, allowed, usable):
+    """Kubernetes allows `allowed`; the contexts in `usable` pass the check.
+
+    Returns the list of contexts the check probed.
+    """
+    probed = []
+    monkeypatch.setattr(sky_clouds.Kubernetes, 'existing_allowed_contexts',
+                        classmethod(lambda cls, silent=False: list(allowed)))
+
+    def check_single_context(cls, context):
+        del cls
+        probed.append(context)
+        if context in usable:
+            return True, 'enabled.'
+        return False, 'disabled. Reason: unreachable'
+
+    monkeypatch.setattr(sky_clouds.Kubernetes, '_check_single_context',
+                        classmethod(check_single_context))
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.check_port_forward_mode_dependencies',
+        lambda *args, **kwargs: None)
+    monkeypatch.setattr(sky_check, '_print_checked_cloud',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(sky_check, '_summary_message',
+                        lambda *args, **kwargs: '')
+    return probed
+
+
+def _cache_kubernetes(leaves):
+    global_user_state.set_check_results(
+        {
+            repr(sky_clouds.Kubernetes()): {
+                ctx: {
+                    'enabled': enabled,
+                    'reason': 'enabled.' if enabled else 'disabled.'
+                } for ctx, enabled in leaves.items()
+            }
+        },
+        workspace='default',
+        is_full_workspace_run=True,
+    )
+
+
+def _run_limited_check(contexts):
+    return sky_check.check_capabilities(quiet=True,
+                                        clouds=('kubernetes',),
+                                        capabilities=[CloudCapability.COMPUTE],
+                                        workspace='default',
+                                        kubernetes_contexts=contexts)
+
+
+def test_kubernetes_contexts_checks_given_and_uncached_contexts(
+        tmp_path, monkeypatch):
+    """Cached contexts outside `kubernetes_contexts` keep their results."""
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'kubernetes'})
+    _cache_kubernetes({'ctx-a': True, 'ctx-b': False, 'ctx-gone': True})
+    probed = _kubernetes_contexts(
+        monkeypatch,
+        allowed=['ctx-a', 'ctx-b', 'ctx-c', 'ctx-new'],
+        usable={'ctx-c', 'ctx-new'})
+
+    _run_limited_check(['ctx-new', 'ctx-not-allowed'])
+
+    assert sorted(probed) == ['ctx-c', 'ctx-new']
+    leaves = global_user_state.get_cached_check_results('default')[repr(
+        sky_clouds.Kubernetes())]
+    assert {ctx: leaf['enabled'] for ctx, leaf in leaves.items()} == {
+        'ctx-a': True,
+        'ctx-b': False,
+        'ctx-gone': True,
+        'ctx-c': True,
+        'ctx-new': True,
+    }
+
+
+def test_kubernetes_contexts_cached_enabled_context_keeps_kubernetes_enabled(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'kubernetes'})
+    _cache_kubernetes({'ctx-a': True})
+    probed = _kubernetes_contexts(monkeypatch,
+                                  allowed=['ctx-a', 'ctx-new'],
+                                  usable=set())
+
+    result = _run_limited_check(['ctx-new'])
+
+    assert probed == ['ctx-new']
+    assert result['default'] == {
+        repr(sky_clouds.Kubernetes()): [CloudCapability.COMPUTE]
+    }
+
+
+def test_kubernetes_contexts_no_enabled_context_disables_kubernetes(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'kubernetes'})
+    # Disallowed contexts do not count, even when cached as enabled.
+    _cache_kubernetes({'ctx-a': False, 'ctx-gone': True})
+    probed = _kubernetes_contexts(monkeypatch,
+                                  allowed=['ctx-a', 'ctx-new'],
+                                  usable=set())
+
+    result = _run_limited_check(['ctx-new'])
+
+    assert probed == ['ctx-new']
+    assert result['default'] == {}
+
+
+def test_kubernetes_contexts_outside_allowed_checks_nothing(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'kubernetes'})
+    _cache_kubernetes({'ctx-a': True})
+    probed = _kubernetes_contexts(monkeypatch,
+                                  allowed=['ctx-a'],
+                                  usable={'ctx-a'})
+
+    result = _run_limited_check(['ctx-not-allowed'])
+
+    assert not probed
+    assert result['default'] == {
+        repr(sky_clouds.Kubernetes()): [CloudCapability.COMPUTE]
+    }
+
+
+def test_kubernetes_details_list_only_checked_contexts(monkeypatch):
+    monkeypatch.setattr(
+        sky_clouds.Kubernetes, 'existing_allowed_contexts',
+        classmethod(lambda cls, silent=False: ['ctx-a', 'ctx-b']))
+
+    # pylint: disable-next=protected-access
+    details = sky_check._format_context_details(sky_clouds.Kubernetes(),
+                                                show_details=True,
+                                                ctx2text={'ctx-b': 'enabled.'})
+
+    assert 'ctx-b: enabled.' in details
+    assert 'ctx-a' not in details
+
+
+def test_kubernetes_contexts_requires_clouds():
+    with pytest.raises(ValueError):
+        sky_check.check_capabilities(quiet=True,
+                                     clouds=None,
+                                     workspace='default',
+                                     kubernetes_contexts=['ctx-new'])
+
+
+def test_kubernetes_contexts_unreadable_cache_checks_every_context(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'kubernetes'})
+    probed = _kubernetes_contexts(monkeypatch,
+                                  allowed=['ctx-a', 'ctx-new'],
+                                  usable={'ctx-a'})
+
+    def unreadable(workspace):
+        raise RuntimeError(f'cannot read {workspace}')
+
+    monkeypatch.setattr(global_user_state, 'get_cached_check_results',
+                        unreadable)
+
+    result = _run_limited_check(['ctx-new'])
+
+    assert sorted(probed) == ['ctx-a', 'ctx-new']
+    assert result['default'] == {
+        repr(sky_clouds.Kubernetes()): [CloudCapability.COMPUTE]
+    }

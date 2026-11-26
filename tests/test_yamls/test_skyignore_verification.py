@@ -29,6 +29,8 @@ if __name__ == '__main__':
         'data.txt',
         'keep_dir/keep.txt',
         'nested/keep_subdir/test.py',
+        'keep.json',
+        '.cfg/keep.json',
     ]
 
     # These files should be excluded
@@ -38,6 +40,12 @@ if __name__ == '__main__':
         'exclude_dir/notes.md',
         'nested/exclude_subdir/test.sh',
     ]
+
+    if os.path.isfile(os.path.join(workdir, '.skyignore')):
+        excluded_files.extend(['other.json', '.cfg/other.yaml'])
+    else:
+        # The .gitignore variant uses only the original exclusion rules.
+        expected_files.extend(['other.json', '.cfg/other.yaml'])
 
     all_files = list_all_files(workdir)
     print('All files:', all_files)

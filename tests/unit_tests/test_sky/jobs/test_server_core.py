@@ -1,10 +1,21 @@
 """Tests for sky.jobs.server.core."""
+import re
+import traceback
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
+import sky
 from sky import backends
+from sky import dag as dag_lib
+from sky import exceptions
+from sky import resources as resources_lib
+from sky import task as task_lib
 from sky.jobs.server import core as jobs_core
+from sky.jobs.state import ManagedJobStatus
+from sky.schemas.generated import managed_jobsv1_pb2
+from sky.utils import dag_utils
 
 
 def _forwarded_tail(tail):
@@ -365,3 +376,625 @@ def test_cancel_names_the_active_workspace():
     message = info.call_args.args[0]
     assert "active workspace 'ml'" in message
     assert 'ws-0123456789ab' not in message
+
+
+# ---------------------------------------------------------------------------
+# jobs restart (`sky jobs launch --restart`)
+# ---------------------------------------------------------------------------
+
+_TOKEN_VAR = jobs_core.skylet_constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR
+
+
+def _dag_yaml(*tasks):
+    """The compiled DAG YAML a jobs controller stores for these tasks."""
+    with dag_lib.Dag() as dag:
+        for task in tasks:
+            dag.add(task)
+        for upstream, downstream in zip(tasks, tasks[1:]):
+            dag.add_edge(upstream, downstream)
+    dag.name = tasks[0].name
+    return dag_utils.dump_chain_dag_to_yaml_str(dag)
+
+
+def _train_task(**kwargs):
+    task = task_lib.Task(name='train',
+                         run='python train.py',
+                         envs={'LR': '1e-3'},
+                         secrets={
+                             'HF_TOKEN': 'hf',
+                             _TOKEN_VAR: 'revoked-token'
+                         },
+                         **kwargs)
+    task.set_resources(resources_lib.Resources(cpus='2+'))
+    return task
+
+
+def _record(status=ManagedJobStatus.FAILED,
+            dag_yaml=None,
+            job_id=5,
+            name='train',
+            pool=None,
+            workspace='default',
+            user_hash='me'):
+    """A stand-in for one task row of responses.ManagedJobRecord.
+
+    `dag_yaml` is not a queue field: it is the spec _get_job_spec() returns
+    for the job, kept here so each test states its job in one place.
+    """
+    return SimpleNamespace(job_id=job_id,
+                           task_id=0,
+                           job_name=name,
+                           status=status,
+                           dag_yaml=(dag_yaml if dag_yaml is not None else
+                                     _dag_yaml(_train_task())),
+                           pool=pool,
+                           workspace=workspace,
+                           user_hash=user_hash)
+
+
+def _restart(records,
+             *,
+             active_workspace='default',
+             caller='me',
+             queue_mock=None,
+             **kwargs):
+    """Runs jobs_core.restart over `records`; returns the launch() mock."""
+    queue_mock = queue_mock or mock.MagicMock()
+    queue_mock.return_value = (records, len(records), {}, 0, [])
+    with mock.patch.object(jobs_core, 'queue_v2_api', queue_mock), \
+         mock.patch.object(jobs_core, '_get_job_spec',
+                           return_value=records[0].dag_yaml if records
+                           else None), \
+         mock.patch.object(jobs_core.common_utils, 'get_user_hash',
+                           return_value=caller), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace',
+                           return_value=active_workspace), \
+         mock.patch.object(jobs_core, 'launch',
+                           return_value=([99], None)) as mock_launch:
+        kwargs.setdefault('job_id', 5)
+        assert jobs_core.restart(**kwargs) == ([99], None)
+    return mock_launch
+
+
+def _launched_dag(mock_launch):
+    mock_launch.assert_called_once()
+    return mock_launch.call_args.args[0]
+
+
+def test_generate_rerun_name_adds_a_random_suffix():
+    first = jobs_core._generate_rerun_name('train')
+    second = jobs_core._generate_rerun_name('train')
+    assert re.fullmatch(r'train-rerun-[0-9a-f]{6}', first)
+    # Concurrent restarts of one job must not share a name.
+    assert first != second
+
+
+def test_generate_rerun_name_does_not_stack_suffixes():
+    name = jobs_core._generate_rerun_name('train-rerun-1a2b3c')
+    assert re.fullmatch(r'train-rerun-[0-9a-f]{6}', name)
+
+
+def test_restart_reruns_the_stored_spec_as_a_new_job():
+    mock_launch = _restart([_record(pool='gpu-pool')])
+    dag = _launched_dag(mock_launch)
+    task = dag.tasks[0]
+    assert task.run == 'python train.py'
+    assert task.envs['LR'] == '1e-3'
+    assert task.secrets['HF_TOKEN'].get_secret_value() == 'hf'
+    # The original job's API token was revoked when it finished; launch()
+    # mints a new one.
+    assert _TOKEN_VAR not in task.secrets
+    assert re.fullmatch(r'train-rerun-[0-9a-f]{6}', dag.name)
+    assert task.name == dag.name
+    assert mock_launch.call_args.kwargs == {
+        'name': dag.name,
+        'pool': 'gpu-pool'
+    }
+
+
+def test_restart_explicit_name_and_pool():
+    mock_launch = _restart([_record(pool='gpu-pool')],
+                           name='my-retry',
+                           pool='other-pool')
+    dag = _launched_dag(mock_launch)
+    assert dag.name == 'my-retry'
+    assert mock_launch.call_args.kwargs == {
+        'name': 'my-retry',
+        'pool': 'other-pool'
+    }
+
+
+def test_restart_applies_overrides():
+    mock_launch = _restart([_record()],
+                           resources_override={
+                               'cloud': 'aws',
+                               'accelerators': 'A100:8',
+                               'ports': ['8080'],
+                           },
+                           env_overrides=[('LR', '1e-4')],
+                           secrets_overrides=[('HF_TOKEN', 'new')],
+                           num_nodes=2)
+    task = _launched_dag(mock_launch).tasks[0]
+    assert task.envs['LR'] == '1e-4'
+    assert task.secrets['HF_TOKEN'].get_secret_value() == 'new'
+    assert task.num_nodes == 2
+    resources = list(task.resources)[0]
+    assert str(resources.cloud) == 'AWS'
+    assert resources.accelerators == {'A100': 8}
+    assert resources.ports == ['8080']
+    # Fields that were not overridden keep their stored value.
+    assert resources.cpus == '2+'
+
+
+def test_restart_multi_task_takes_env_but_not_resource_overrides():
+    second = task_lib.Task(name='eval', run='python eval.py')
+    yaml_str = _dag_yaml(_train_task(), second)
+    records = [_record(dag_yaml=yaml_str), _record(dag_yaml=yaml_str)]
+
+    dag = _launched_dag(_restart(records, env_overrides=[('LR', '1e-4')]))
+    assert [t.envs.get('LR') for t in dag.tasks] == ['1e-4', '1e-4']
+    # Task names are kept; only the job is renamed.
+    assert [t.name for t in dag.tasks] == ['train', 'eval']
+
+    with pytest.raises(ValueError, match='single-task'):
+        _restart(records, resources_override={'accelerators': 'A100:8'})
+    with pytest.raises(ValueError, match='single-task'):
+        _restart(records, num_nodes=2)
+
+
+@pytest.mark.parametrize('status', [ManagedJobStatus.RUNNING, 'PENDING'])
+def test_restart_rejects_a_job_that_has_not_finished(status):
+    with pytest.raises(ValueError, match='Only finished jobs'):
+        _restart([_record(status=status)])
+
+
+def test_restart_rejects_when_any_task_is_unfinished():
+    records = [
+        _record(status=ManagedJobStatus.SUCCEEDED),
+        _record(status=ManagedJobStatus.RUNNING)
+    ]
+    with pytest.raises(ValueError, match='still RUNNING'):
+        _restart(records)
+
+
+def test_restart_accepts_string_status():
+    _launched_dag(_restart([_record(status='FAILED_SETUP')]))
+
+
+def test_restart_job_not_found():
+    with pytest.raises(ValueError, match='not found'):
+        _restart([])
+
+
+def test_restart_needs_exactly_one_of_id_and_name():
+    with pytest.raises(ValueError, match='exactly one'):
+        jobs_core.restart()
+    with pytest.raises(ValueError, match='exactly one'):
+        jobs_core.restart(job_id=5, job_name='train')
+
+
+def test_restart_by_name_uses_the_exact_match():
+    # name_match is a substring match: 'train' also matches 'train-big'.
+    records = [_record(job_id=5), _record(job_id=6, name='train-big')]
+    mock_launch = _restart(records, job_id=None, job_name='train')
+    assert re.fullmatch(r'train-rerun-[0-9a-f]{6}',
+                        mock_launch.call_args.kwargs['name'])
+
+
+def test_restart_by_name_rejects_an_ambiguous_name():
+    records = [_record(job_id=5), _record(job_id=8)]
+    with pytest.raises(ValueError, match=r'IDs: 5, 8'):
+        _restart(records, job_id=None, job_name='train')
+
+
+def test_restart_without_stored_spec():
+    record = _record()
+    record.dag_yaml = None
+    with pytest.raises(exceptions.NotSupportedError, match='not available'):
+        _restart([record])
+
+
+@pytest.mark.parametrize(('persistent', 'allowed'), [(False, False),
+                                                     (True, True)])
+def test_restart_and_temporary_storage(persistent, allowed):
+    # Local files were uploaded to a temporary bucket, deleted when the job
+    # finished; persistent storage is still there.
+    storage = mock.MagicMock(persistent=persistent)
+    dag = dag_utils.load_dag_from_yaml_str(_dag_yaml(_train_task()))
+    dag.tasks[0].storage_mounts = {'/data': storage}
+    with mock.patch.object(jobs_core.dag_utils,
+                           'load_dag_from_yaml_str',
+                           return_value=dag):
+        if allowed:
+            _launched_dag(_restart([_record()]))
+        else:
+            with pytest.raises(exceptions.NotSupportedError,
+                               match='copied for that run only'):
+                _restart([_record()])
+
+
+def _restart_with(mutate):
+    """Restarts a job whose stored DAG has been changed by `mutate`."""
+    dag = dag_utils.load_dag_from_yaml_str(_dag_yaml(_train_task()))
+    mutate(dag.tasks[0])
+    with mock.patch.object(jobs_core.dag_utils,
+                           'load_dag_from_yaml_str',
+                           return_value=dag):
+        return _restart([_record()])
+
+
+@pytest.mark.parametrize(
+    'mutate',
+    [
+        # Two-hop staging on a separate controller (no storage cloud): the
+        # workdir became a file mount from a controller path.
+        lambda t: t.set_file_mounts(
+            {'~/sky_workdir': '~/.sky/tmp/file-mounts-abc/0'}),
+        # Consolidation mode: the workdir stays a local path on the server.
+        lambda t: setattr(t, 'workdir', '/tmp/blobs/abc/workdir'),
+    ],
+    ids=['two_hop_file_mount', 'consolidation_local_workdir'])
+def test_restart_rejects_staged_local_files(mutate):
+    with pytest.raises(exceptions.NotSupportedError,
+                       match='copied for that run only'):
+        _restart_with(mutate)
+
+
+@pytest.mark.parametrize('mutate', [
+    lambda t: t.set_file_mounts({'/data': 's3://my-bucket/data'}),
+    lambda t: setattr(t, 'workdir', {
+        'url': 'https://github.com/org/repo.git',
+        'ref': 'abc123'
+    }),
+],
+                         ids=['bucket_file_mount', 'git_workdir'])
+def test_restart_allows_files_that_outlive_the_job(mutate):
+    _launched_dag(_restart_with(mutate))
+
+
+def test_restart_of_another_users_job_with_secrets_is_refused():
+    # A viewer of the job's workspace must not run with its owner's secrets,
+    # even into a workspace the viewer can write to.
+    # bob may write to team-a; the secrets are still alice's.
+    with mock.patch.object(jobs_core, '_client_set_workspace',
+                           return_value=True), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission'), \
+         mock.patch.object(jobs_core, 'launch') as launch:
+        with pytest.raises(exceptions.PermissionDeniedError,
+                           match='only its owner'):
+            _restart([_record(user_hash='alice', workspace='team-a')],
+                     caller='bob',
+                     active_workspace='bob-ws')
+    launch.assert_not_called()
+
+
+def test_restart_of_another_users_job_without_secrets_is_allowed():
+    # Nothing secret to reuse: the spec is what a viewer can already read.
+    yaml_str = _dag_yaml(task_lib.Task(name='train', run='python train.py'))
+    dag = _launched_dag(
+        _restart([_record(dag_yaml=yaml_str, user_hash='alice')],
+                 caller='bob',
+                 secrets_overrides=[('HF_TOKEN', 'bobs')]))
+    # The caller's own secrets still apply.
+    assert dag.tasks[0].secrets['HF_TOKEN'].get_secret_value() == 'bobs'
+
+
+def test_restart_by_name_only_looks_at_the_callers_jobs():
+    queue = mock.MagicMock()
+    _restart([_record()], job_id=None, job_name='train', queue_mock=queue)
+    assert queue.call_args.kwargs['all_users'] is False
+
+
+def test_restart_runs_in_the_original_workspace():
+    with mock.patch.object(jobs_core, '_client_set_workspace',
+                           return_value=False), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission') as permission, \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'local_active_workspace_ctx') as workspace_ctx:
+        _restart([_record(workspace='team-a')], active_workspace='default')
+    permission.assert_called_once()
+    assert permission.call_args.args[1] == 'team-a'
+    workspace_ctx.assert_called_once_with('team-a')
+
+
+def test_restart_into_a_requested_workspace():
+    # `--workspace` names where the new job goes; the executor authorized it.
+    # The original workspace still needs write access, as for cancel.
+    with mock.patch.object(jobs_core, '_client_set_workspace',
+                           return_value=True), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission') as permission, \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'local_active_workspace_ctx') as workspace_ctx:
+        _restart([_record(workspace='team-a')], active_workspace='team-b')
+    permission.assert_called_once()
+    assert permission.call_args.args[1] == 'team-a'
+    assert permission.call_args.kwargs['action'] == 'write'
+    workspace_ctx.assert_not_called()
+
+
+@pytest.mark.parametrize('client_set_workspace', [True, False],
+                         ids=['requested_workspace', 'original_workspace'])
+def test_restart_needs_write_access_to_the_original_workspace(
+        client_set_workspace):
+    # Like `sky jobs cancel`: read access to the job's workspace lets a user
+    # see the job, not act on it, even when the new job goes elsewhere. The
+    # spec (with the owner's envs) is not even read.
+    spec = mock.MagicMock()
+    with mock.patch.object(jobs_core, '_client_set_workspace',
+                           return_value=client_set_workspace), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission',
+                           side_effect=exceptions.PermissionDeniedError(
+                               'no access to team-a')), \
+         mock.patch.object(jobs_core, '_get_job_spec', spec), \
+         mock.patch.object(jobs_core, 'launch') as launch, \
+         mock.patch.object(jobs_core, 'queue_v2_api',
+                           return_value=([_record(workspace='team-a')], 1, {},
+                                         0, [])), \
+         mock.patch.object(jobs_core.workspaces_core,
+                           'workspace_label_for_caller',
+                           return_value='team-a'), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace',
+                           return_value='team-b'):
+        with pytest.raises(exceptions.PermissionDeniedError,
+                           match='ran in workspace .*write access'):
+            jobs_core.restart(job_id=5)
+    spec.assert_not_called()
+    launch.assert_not_called()
+
+
+def test_restart_in_the_jobs_own_workspace_needs_no_extra_check():
+    # The executor already checked write access to the active workspace.
+    with mock.patch.object(jobs_core.workspaces_core,
+                           'check_workspace_permission') as permission:
+        _restart([_record(workspace='team-a')], active_workspace='team-a')
+    permission.assert_not_called()
+
+
+def test_restart_queries_metadata_only_and_starts_the_controller():
+    # The spec holds secrets: it never goes through the queue. refresh=True
+    # starts a stopped jobs controller, as `sky jobs launch` does.
+    queue = mock.MagicMock()
+    _restart([_record()], queue_mock=queue)
+    assert 'dag_yaml' not in queue.call_args.kwargs['fields']
+    assert queue.call_args.kwargs['refresh'] is True
+
+
+def _handle(grpc_enabled=True):
+    return mock.MagicMock(is_grpc_enabled_with_flag=grpc_enabled)
+
+
+def test_get_job_spec_in_consolidation_mode_reads_the_database():
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=True), \
+         mock.patch.object(jobs_core.file_content_utils,
+                           'get_job_dag_content',
+                           return_value='spec') as read, \
+         mock.patch.object(jobs_core,
+                           '_maybe_restart_controller') as controller:
+        assert jobs_core._get_job_spec(5) == 'spec'
+    read.assert_called_once_with(5)
+    controller.assert_not_called()
+
+
+@pytest.mark.parametrize('has_spec', [True, False])
+def test_get_job_spec_over_grpc(has_spec):
+    response = managed_jobsv1_pb2.GetJobSpecResponse(
+        dag_yaml='spec') if has_spec else (
+            managed_jobsv1_pb2.GetJobSpecResponse())
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=False), \
+         mock.patch.object(jobs_core, '_maybe_restart_controller',
+                           return_value=_handle()) as controller, \
+         mock.patch.object(jobs_core.backend_utils,
+                           'invoke_skylet_with_retries',
+                           return_value=response):
+        assert jobs_core._get_job_spec(5) == ('spec' if has_spec else None)
+    assert controller.call_args.kwargs['refresh'] is True
+
+
+def _codegen_spec(returncode, stdout, grpc_enabled=True):
+    """Reads a spec from a controller without GetJobSpec (older skylet)."""
+    backend = mock.MagicMock(spec=jobs_core.backends.CloudVmRayBackend)
+    backend.run_on_head.return_value = (returncode, stdout, 'boom')
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=False), \
+         mock.patch.object(jobs_core, '_maybe_restart_controller',
+                           return_value=_handle(grpc_enabled)), \
+         mock.patch.object(
+             jobs_core.backend_utils,
+             'invoke_skylet_with_retries',
+             side_effect=exceptions.SkyletMethodNotImplementedError('old')), \
+         mock.patch.object(jobs_core.backend_utils,
+                           'get_backend_from_handle',
+                           return_value=backend):
+        return jobs_core._get_job_spec(5)
+
+
+@pytest.mark.parametrize('grpc_enabled', [True, False])
+def test_get_job_spec_falls_back_to_codegen_on_an_older_controller(
+        grpc_enabled):
+    payload = jobs_core.message_utils.encode_payload('spec')
+    assert _codegen_spec(0, payload, grpc_enabled) == 'spec'
+
+
+def test_get_job_spec_on_a_controller_that_cannot_read_it():
+    with pytest.raises(exceptions.NotSupportedError, match='upgraded'):
+        _codegen_spec(1, '')
+
+
+def test_get_job_spec_codegen_reads_the_stored_spec():
+    code = jobs_core.managed_job_utils.ManagedJobCodeGen.get_job_spec(5)
+    assert 'file_content_utils.get_job_dag_content(5)' in code
+
+
+class _Proceeded(Exception):
+    """Raised by the step after the pool check, to stop there."""
+
+
+def _launch_on_pool(consolidated, refusal):
+    task = sky.Task(run='echo')
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode',
+                           return_value=consolidated), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace', return_value='ws-b'), \
+         mock.patch.object(jobs_core.serve_utils, 'get_pool_refusal',
+                           return_value=refusal) as check, \
+         mock.patch.object(jobs_core, '_raise_pool_refused',
+                           side_effect=ValueError('refused')) as refuse, \
+         mock.patch.object(dag_lib.Dag, 'validate', side_effect=_Proceeded):
+        try:
+            jobs_core._launch(task,
+                              name=None,
+                              pool='p',
+                              num_jobs=None,
+                              stream_logs=False,
+                              file_mounts_blob_id=None,
+                              parent_job_id=None,
+                              parent_task_id=None,
+                              root_job_id=None,
+                              depends_on=[])
+        except (ValueError, _Proceeded) as e:
+            return e, check, refuse
+    raise AssertionError('neither refused nor proceeded')
+
+
+def test_launch_refuses_the_pool_before_validating():
+    """Checked on the server: the client checks only when it confirms."""
+    error, check, refuse = _launch_on_pool(True, (True, 'ws-a'))
+    assert str(error) == 'refused'
+    check.assert_called_once_with('p', 'ws-b')
+    refuse.assert_called_once_with('p', True, 'ws-a')
+
+
+def test_launch_proceeds_on_a_usable_pool():
+    error, check, refuse = _launch_on_pool(True, None)
+    assert isinstance(error, _Proceeded)
+    check.assert_called_once()
+    refuse.assert_not_called()
+
+
+def test_remote_controller_checks_on_submission():
+    # The API server's serve DB holds no pools in this mode.
+    error, check, _ = _launch_on_pool(False, (False, None))
+    assert isinstance(error, _Proceeded)
+    check.assert_not_called()
+
+
+_NAMES = {
+    'ws-a': 'team-a',
+    'ws-b': 'team-b',
+    'ws-r': 'team-r',
+    'ws-x': 'secret-x',
+}
+
+
+def _refusal_message(exists, workspace):
+
+    def _resolve(ref):
+        if ref == 'dup':
+            raise ValueError('More than one workspace is named dup.')
+        return ref
+
+    with mock.patch.object(jobs_core.workspaces_core,
+                           'get_workspace_access_sets',
+                           return_value=({'default', 'ws-a', 'ws-b', 'ws-r'},
+                                         {'default', 'ws-a', 'ws-b'})), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_active_workspace', return_value='ws-b'), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'resolve_workspace_ref', side_effect=_resolve), \
+         mock.patch.object(jobs_core.skypilot_config,
+                           'get_workspace_name', side_effect=_NAMES.get):
+        with pytest.raises(ValueError) as info:
+            try:  # As the remote path raises it.
+                raise exceptions.PoolRefusedError(exists, workspace)
+            except exceptions.PoolRefusedError:
+                jobs_core._raise_pool_refused('p', exists, workspace)
+    # What the API server sends the client as the stacktrace.
+    stacktrace = ''.join(
+        traceback.format_exception(type(info.value), info.value,
+                                   info.value.__traceback__))
+    return str(info.value), stacktrace
+
+
+@pytest.mark.parametrize(('exists', 'workspace'), [
+    (False, None),
+    (True, 'ws-x'),
+    (True, 'dup'),
+])
+def test_refusal_hides_what_the_caller_cannot_read(exists, workspace):
+    message, stacktrace = _refusal_message(exists, workspace)
+    assert message == "Pool 'p' not found."
+    assert 'PoolRefusedError' not in stacktrace
+    if workspace is not None:
+        assert workspace not in stacktrace
+        # Nor in the refusal's own message, should anything chain it.
+        assert workspace not in str(exceptions.PoolRefusedError(
+            True, workspace))
+
+
+def test_refusal_names_a_writable_workspace_to_switch_to():
+    message, stacktrace = _refusal_message(True, 'ws-a')
+    assert 'PoolRefusedError' not in stacktrace
+    assert "Switch to workspace 'team-a'" in message
+    assert "active workspace 'team-b'" in message
+
+
+def test_refusal_of_a_read_only_workspace():
+    message, stacktrace = _refusal_message(True, 'ws-r')
+    assert 'read-only for you' in message
+    assert 'PoolRefusedError' not in stacktrace
+
+
+def test_refusal_of_the_active_workspace_is_not_a_switch():
+    message, stacktrace = _refusal_message(True, 'ws-b')
+    assert 'Re-create the pool' in message
+    assert 'PoolRefusedError' not in stacktrace
+    assert 'Switch' not in message
+
+
+def test_submission_refused_by_the_controller():
+    backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
+    backend.set_job_info_without_job_id.side_effect = (
+        exceptions.PoolRefusedError(True, 'ws-a'))
+    task = sky.Task(name='t', run='echo')
+    with dag_lib.Dag() as dag:
+        task.set_resources(sky.Resources())
+        dag.add(task)
+    dag.name = 'j'
+    with mock.patch.object(jobs_core, '_ensure_controller_up'), \
+         mock.patch.object(jobs_core.backend_utils, 'get_backend_from_handle',
+                           return_value=backend), \
+         mock.patch.object(jobs_core.backend_utils, 'get_task_resources_str',
+                           return_value='r'), \
+         mock.patch.object(jobs_core, '_raise_pool_refused',
+                           side_effect=ValueError('refused')) as refuse:
+        with pytest.raises(ValueError, match='refused'):
+            jobs_core._submit_remotely(mock.Mock(), dag, pool='p')
+    refuse.assert_called_once_with('p', True, 'ws-a')
+
+
+def test_pool_taken_down_after_the_check(tmp_path):
+    task = sky.Task(name='t', run='echo')
+    with dag_lib.Dag() as dag:
+        dag.add(task)
+    dag.pool = 'p'
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode', return_value=True), \
+         mock.patch.object(jobs_core.serve_state, 'get_service_hash',
+                           return_value=None), \
+         mock.patch.object(jobs_core, '_raise_pool_refused',
+                           side_effect=ValueError('refused')) as refuse:
+        with pytest.raises(ValueError, match='refused'):
+            jobs_core._maybe_submit_job_locally(str(tmp_path), dag, 1)
+    refuse.assert_called_once_with('p', False, None)

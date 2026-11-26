@@ -390,6 +390,10 @@ _ALWAYS_WRITE_ENDPOINTS = [
         'method': 'POST'
     },
     {
+        'path': '/jobs/restart',
+        'method': 'POST'
+    },
+    {
         'path': '/jobs/pool_apply',
         'method': 'POST'
     },
@@ -456,6 +460,16 @@ def least_privileged_role(roles: List[str]) -> str:
     if not known:
         return _ROLE_PRECEDENCE[-1]
     return max(known, key=_ROLE_PRECEDENCE.index)
+
+
+def outranks(role: str, other: str) -> bool:
+    """Whether `role` is more privileged than `other`.
+
+    A name we do not know ranks as the most restricted role, as in
+    `least_privileged_role`.
+    """
+    return (_ROLE_PRECEDENCE.index(least_privileged_role([role])) <
+            _ROLE_PRECEDENCE.index(least_privileged_role([other])))
 
 
 def get_default_role() -> str:

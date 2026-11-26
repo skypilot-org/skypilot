@@ -1,4 +1,5 @@
 """Test skypilot_config"""
+import asyncio
 import copy
 import errno
 import json
@@ -7,22 +8,29 @@ import pathlib
 import shutil
 import sys
 import textwrap
+import threading
 from unittest import mock
 
 import pytest
+from sqlalchemy.dialects import sqlite
 
 import sky
 from sky import skypilot_config
 import sky.exceptions
+from sky.server import common as server_common
+from sky.server import config_db
+from sky.server import plugins
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import context
 from sky.utils import env_options
 from sky.utils import schemas
 from sky.utils import yaml_utils
+from sky.utils.db import db_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
@@ -1233,6 +1241,26 @@ def test_client_cannot_override_workspace_read_access(monkeypatch, tmp_path):
             ('workspace_config', 'read_access'), None) is None
 
 
+def test_client_cannot_enable_event_callbacks(monkeypatch, tmp_path):
+    """A client override must not enable managed-job event callbacks."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        jobs:
+            allow_event_callback: false
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'jobs': {
+            'allow_event_callback': True
+        }}):
+        assert skypilot_config.get_nested(
+            ('jobs', 'allow_event_callback'), None) is False
+
+
 def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
     """A client override must not replace the server's admin policy."""
     os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
@@ -1905,6 +1933,72 @@ def test_get_effective_queue_name(monkeypatch, tmp_path) -> None:
         workspace='workspaceA') == 'workspaceA-queue-via-quota'
 
 
+def test_get_effective_kai_value(monkeypatch, tmp_path) -> None:
+    """`kubernetes.kai` resolves workspace > global, context > cloud."""
+    with open(tmp_path / 'kai.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            kai:
+                queue: global-queue
+                preemptibility: preemptible
+            context_configs:
+                contextA:
+                    kai:
+                        queue: contextA-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    kai:
+                        queue: workspaceA-queue
+                    context_configs:
+                        contextA:
+                            kai:
+                                queue: workspaceA-contextA-queue
+            workspaceB:
+                kubernetes:
+                    namespace: workspaceB-namespace
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'kai.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_kai_value(
+        'queue', workspace='default') == 'global-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue', region='contextA', workspace='default') == 'contextA-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue', region='contextB', workspace='default') == 'global-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue', workspace='workspaceA') == 'workspaceA-queue'
+    # Keys resolve independently: the workspace sets no preemptibility.
+    assert skypilot_config.get_effective_kai_value(
+        'preemptibility', workspace='workspaceA') == 'preemptible'
+    task_queue = {'kubernetes': {'kai': {'queue': 'task-queue'}}}
+    assert skypilot_config.get_effective_kai_value(
+        'queue', workspace='workspaceA',
+        override_configs=task_queue) == 'task-queue'
+    # A task cannot override a context's queue, so a workspace that sets
+    # one pins its members to it.
+    assert skypilot_config.get_effective_kai_value(
+        'queue',
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=task_queue) == 'workspaceA-contextA-queue'
+    # A global context's queue beats the task's only while the task's
+    # workspace is not listed: a listed one's scope, which the task overrides,
+    # is resolved before the global config.
+    assert skypilot_config.get_effective_kai_value(
+        'queue',
+        region='contextA',
+        workspace='default',
+        override_configs=task_queue) == 'contextA-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue',
+        region='contextA',
+        workspace='workspaceB',
+        override_configs=task_queue) == 'task-queue'
+
+
 def test_get_effective_queue_name_workspace_override(monkeypatch,
                                                      tmp_path) -> None:
     """Cloud-level `override_configs` must apply inside workspace scope.
@@ -2363,6 +2457,48 @@ class TestRemoveQueueNameFromConfig:
                 ]:
                     assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
                         f'Expected {keys} to be removed')
+
+    def test_removes_kai_config(self):
+        """Controllers stay out of KAI queues, at every scope."""
+        kai = {'queue': 'q', 'preemptibility': 'preemptible'}
+        cfg = _make_config({
+            'kubernetes': {
+                'kai': kai,
+                'context_configs': {
+                    'ctx1': {
+                        'kai': kai,
+                        'namespace': 'ns1'
+                    }
+                }
+            },
+            'workspaces': {
+                'ws1': {
+                    'kubernetes': {
+                        'kai': kai,
+                        'context_configs': {
+                            'ctx2': {
+                                'kai': kai
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                for keys in [
+                    ('kubernetes', 'kai'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'kai'),
+                    ('workspaces', 'ws1', 'kubernetes', 'kai'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'kai'),
+                ]:
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
+                assert current.get_nested(
+                    ('kubernetes', 'context_configs', 'ctx1', 'namespace'),
+                    None) == 'ns1'
 
     def test_noop_when_no_queue_name_set(self):
         """No error when queue name keys are absent."""
@@ -2832,3 +2968,669 @@ def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
         assert got == ('all', ['other-pool'], 'all')
     else:
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_remote_override_ignores_auto_mounts(monkeypatch, tmp_path,
+                                             from_loopback) -> None:
+    """Auto-mounts attach volumes unchecked, so a remote client cannot add
+    them, at the top level or per context; a loopback client still can."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              auto_mounts: [{volume_name: server-vol, mount_paths: [/s]}]
+              context_configs:
+                ctx1:
+                  auto_mounts: [{volume_name: server-ctx-vol, mount_paths: [/s]}]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    client_mounts = [{'volume_name': 'theirs', 'mount_paths': ['/t']}]
+    warn = mock.patch.object(skypilot_config.logger, 'warning')
+    with warn as mock_warning, skypilot_config.override_skypilot_config(
+        {
+            'kubernetes': {
+                'auto_mounts': client_mounts,
+                'provision_timeout': 123,
+                'context_configs': {
+                    'ctx1': {
+                        'auto_mounts': client_mounts
+                    },
+                    'ctx2': {
+                        'auto_mounts': client_mounts,
+                        'provision_timeout': 456
+                    },
+                },
+            }
+        },
+            from_loopback=from_loopback):
+        got = [
+            skypilot_config.get_effective_region_config(cloud='kubernetes',
+                                                        region=region,
+                                                        keys=('auto_mounts',))
+            for region in (None, 'ctx1', 'ctx2')
+        ]
+        assert skypilot_config.get_effective_region_config(
+            cloud='kubernetes', region='ctx2',
+            keys=('provision_timeout',)) == 456
+    warned = ' '.join(str(c) for c in mock_warning.call_args_list)
+    if from_loopback:
+        assert got == [client_mounts] * 3
+        assert 'auto_mounts' not in warned
+    else:
+        # The user is told their entries were ignored.
+        assert 'kubernetes.auto_mounts' in warned
+        assert 'kubernetes.context_configs.ctx1.auto_mounts' in warned
+        server_mounts = [{'volume_name': 'server-vol', 'mount_paths': ['/s']}]
+        assert got == [
+            server_mounts,
+            [{
+                'volume_name': 'server-ctx-vol',
+                'mount_paths': ['/s']
+            }], server_mounts
+        ]
+
+
+@pytest.mark.parametrize(
+    'cloud,quota,error',
+    [
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('kubernetes', {
+            'allowed_queues': ['q']
+        },
+         "Workspace 'team-a' has allowed queues \\['q'\\] but no default queue"
+        ),
+        ('kubernetes', {}, None),
+        ('kubernetes', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        ('slurm', {
+            'queue': 'q',
+            'allowed_queues': ['other']
+        },
+         "Default queue 'q' of workspace 'team-a' is not in its allowed queues"
+        ),
+        # A Slurm QoS can be a comma-separated list; each name must be allowed.
+        ('slurm', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, None),
+        ('slurm', {
+            'queue': 'q,bad',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,bad' of workspace 'team-a' is not in its allowed"),
+        # A Kueue queue is a single name.
+        ('kubernetes', {
+            'queue': 'q,other',
+            'allowed_queues': ['q', 'other']
+        }, "Default queue 'q,other' of workspace 'team-a' is not in its allowed"
+        ),
+        # Names are compared exactly.
+        ('slurm', {
+            'queue': 'q, other',
+            'allowed_queues': ['q', 'other']
+        },
+         "Default queue 'q, other' of workspace 'team-a' is not in its allowed"
+        ),
+        # A queue read back from rendered YAML can be a number.
+        ('kubernetes', {
+            'queue': 123,
+            'allowed_queues': ['123']
+        }, None),
+        ('slurm', {
+            'queue': 123,
+            'allowed_queues': ['other']
+        }, "Default queue '123' of workspace 'team-a' is not in its allowed"),
+    ])
+def test_check_queue_allowed_for_default_queue(cloud, quota, error) -> None:
+    """A workspace's default queue must be in its allowed queues."""
+    workspace_config = {cloud: {'quota': quota}}
+    if error is None:
+        skypilot_config.check_queue_allowed('team-a',
+                                            workspace_config,
+                                            cloud,
+                                            quota.get('queue'),
+                                            is_default=True)
+    else:
+        with pytest.raises(ValueError, match=error):
+            skypilot_config.check_queue_allowed('team-a',
+                                                workspace_config,
+                                                cloud,
+                                                quota.get('queue'),
+                                                is_default=True)
+
+
+def test_update_config_refuses_default_queue_outside_allowed_queues(
+        monkeypatch, tmp_path) -> None:
+    """Saving a default queue that is not allowed leaves the file as it was."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    config_path = tmp_path / 'server_config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            workspaces:
+              team-a:
+                kubernetes:
+                  quota:
+                    queue: team-q
+                    allowed_queues: [team-q]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        str(config_path))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    queue_key = ('workspaces', 'team-a', 'kubernetes', 'quota', 'queue')
+    new_config.set_nested(queue_key, 'other-q')
+    with pytest.raises(ValueError, match="'other-q'"):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+    assert yaml_utils.read_yaml(str(config_path)) == {
+        'workspaces': {
+            'team-a': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'team-q',
+                        'allowed_queues': ['team-q'],
+                    }
+                }
+            }
+        }
+    }
+
+    # Adding the new default to the list lets the save through.
+    new_config.set_nested(
+        ('workspaces', 'team-a', 'kubernetes', 'quota', 'allowed_queues'),
+        ['team-q', 'other-q'])
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert yaml_utils.read_yaml(str(config_path)) == {
+        'workspaces': {
+            'team-a': {
+                'kubernetes': {
+                    'quota': {
+                        'queue': 'other-q',
+                        'allowed_queues': ['team-q', 'other-q'],
+                    }
+                }
+            }
+        }
+    }
+
+
+# --- The server config is reloaded only when its source changed -------------
+
+
+@pytest.fixture
+def server_config_file(monkeypatch, tmp_path):
+    """A server-mode config file, with counts of parses and lock takes."""
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
+    monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+    path = tmp_path / 'config.yaml'
+    path.write_text('aws:\n  labels:\n    k: a\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(path))
+    monkeypatch.setattr(skypilot_config, '_server_config_cache', None)
+    monkeypatch.setattr(skypilot_config, '_global_config_context',
+                        skypilot_config.ConfigContext())
+
+    counts = {'parse': 0, 'lock': 0}
+    real_parse = skypilot_config._parse_and_validate_config
+
+    def counting_parse(*args, **kwargs):
+        counts['parse'] += 1
+        return real_parse(*args, **kwargs)
+
+    def counting_lock(*args, **kwargs):
+        counts['lock'] += 1
+        return _DummyLock()
+
+    monkeypatch.setattr(skypilot_config, '_parse_and_validate_config',
+                        counting_parse)
+    monkeypatch.setattr(skypilot_config, 'get_skypilot_config_lock',
+                        counting_lock)
+    # Set before delenv, so monkeypatch removes the URI a parse of a `db:`
+    # file sets in os.environ itself.
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, '')
+    monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI)
+    yield path, counts
+
+
+def _label() -> str:
+    return skypilot_config.get_nested(('aws', 'labels', 'k'), None)
+
+
+def _sqlite_config_db(monkeypatch, value: str) -> str:
+    """Backs the config_yaml overlay with SQLite; returns a URL to use."""
+    config_db.ensure_config_db_schema()
+    db = db_utils.DatabaseManager('config', config_db._create_table)
+    # Created before the URL is set, so the engine is SQLite.
+    engine = db.get_engine()
+    monkeypatch.setattr(config_db, '_db_manager', db)
+    _set_config_yaml_row(engine, value)
+    return str(engine.url)
+
+
+def _set_config_yaml_row(engine, value: str) -> None:
+    stmt = sqlite.insert(config_db.config_yaml_table).values(
+        key=skypilot_config.API_SERVER_CONFIG_KEY, value=value)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[config_db.config_yaml_table.c.key],
+        set_={config_db.config_yaml_table.c.value: value})
+    with engine.begin() as conn:
+        conn.execute(stmt)
+
+
+def test_server_config_db_value_change_reloads(server_config_file, monkeypatch):
+    """A config_yaml change is reloaded; an unchanged source takes neither the
+    lock nor a parse."""
+    path, counts = server_config_file
+    path.write_text('')
+    url = _sqlite_config_db(monkeypatch, 'aws:\n  labels:\n    k: db-a\n')
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, url)
+
+    skypilot_config.safe_reload_config()
+    assert _label() == 'db-a'
+    assert counts == {'parse': 1, 'lock': 1}
+
+    skypilot_config.safe_reload_config()
+    assert _label() == 'db-a'
+    assert counts == {'parse': 1, 'lock': 1}
+
+    _set_config_yaml_row(config_db.get_engine(),
+                         'aws:\n  labels:\n    k: db-b\n')
+    skypilot_config.safe_reload_config()
+    assert _label() == 'db-b'
+    assert counts == {'parse': 2, 'lock': 2}
+
+
+def test_server_config_same_size_and_mtime_rewrite_reloads(server_config_file):
+    path, counts = server_config_file
+    skypilot_config.reload_config()
+    assert _label() == 'a'
+    st = os.stat(path)
+
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert os.stat(path).st_size == st.st_size
+    assert os.stat(path).st_mtime_ns == st.st_mtime_ns
+
+    skypilot_config.reload_config()
+    assert _label() == 'b'
+    assert counts['parse'] == 2
+
+
+def test_server_config_cache_is_private(server_config_file):
+    """Mutating a loaded config never leaks into the cached one."""
+    _, counts = server_config_file
+    skypilot_config.reload_config()
+    skypilot_config._get_loaded_config().set_nested(('aws', 'labels', 'k'),
+                                                    'mutated-after-slow')
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert _label() == 'a'
+
+    skypilot_config._get_loaded_config().set_nested(('aws', 'labels', 'k'),
+                                                    'mutated-after-fast')
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert _label() == 'a'
+
+
+def _with_event_loop(func):
+    """`func` for a new thread: a SkyPilotContext needs an event loop there on
+    Python 3.9."""
+
+    def run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            func()
+        finally:
+            loop.close()
+
+    return run
+
+
+def _pause_copy_of_label(monkeypatch, label: str):
+    """Pauses the 'reuser' thread when it copies the config with `label`: the
+    reuse path, after it matched the cache and before it swaps."""
+    matched = threading.Event()
+    release = threading.Event()
+    real_deepcopy = copy.deepcopy
+
+    def pausing_deepcopy(value, *args, **kwargs):
+        if (threading.current_thread().name == 'reuser' and
+                isinstance(value, config_utils.Config) and
+                value.get('aws', {}).get('labels', {}).get('k') == label):
+            matched.set()
+            release.wait(10)
+        return real_deepcopy(value, *args, **kwargs)
+
+    monkeypatch.setattr(copy, 'deepcopy', pausing_deepcopy)
+    return matched, release
+
+
+def test_a_reused_config_never_replaces_a_newer_load(server_config_file,
+                                                     monkeypatch):
+    """The reuse path matches its sources without the config lock. A writer
+    and a full load that finish before it swaps must not be undone."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+    matched, release = _pause_copy_of_label(monkeypatch, 'a')
+    reuser = threading.Thread(target=skypilot_config.safe_reload_config,
+                              name='reuser')
+    reuser.start()
+    assert matched.wait(10)
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    skypilot_config.reload_config()
+    release.set()
+    reuser.join(10)
+    assert not reuser.is_alive()
+    assert _label() == 'b'
+
+
+def test_a_load_in_another_context_does_not_skip_this_ones(
+        server_config_file, monkeypatch):
+    """Request contexts hold their own loaded config: a newer load in one
+    context must not stop another from swapping in what it matched."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+
+    @context.contextual
+    def load_in_another_context():
+        skypilot_config.safe_reload_config()
+
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    load_in_another_context()
+    assert _label() == 'a'
+
+    matched, release = _pause_copy_of_label(monkeypatch, 'b')
+    seen = {}
+
+    @context.contextual
+    def reuse():
+        _label()  # This context starts from the global config.
+        skypilot_config.safe_reload_config()
+        seen['label'] = _label()
+
+    reuser = threading.Thread(target=_with_event_loop(reuse), name='reuser')
+    reuser.start()
+    assert matched.wait(10)
+    path.write_text('aws:\n  labels:\n    k: c\n')
+    load_in_another_context()
+    release.set()
+    reuser.join(10)
+    assert not reuser.is_alive()
+    assert seen['label'] == 'b'
+
+
+def test_a_load_that_read_newer_data_is_not_outranked(server_config_file,
+                                                      monkeypatch):
+    """A full load that starts first but reads the source after it changed
+    must win over a reuse that read the old source."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+    started = threading.Event()
+    release = threading.Event()
+    real_resolve = skypilot_config._resolve_server_config_path
+
+    def pausing_resolve():
+        if threading.current_thread().name == 'loader':
+            started.set()
+            release.wait(10)
+        return real_resolve()
+
+    monkeypatch.setattr(skypilot_config, '_resolve_server_config_path',
+                        pausing_resolve)
+    loader = threading.Thread(target=skypilot_config.reload_config,
+                              name='loader')
+    loader.start()
+    assert started.wait(10)
+    skypilot_config.safe_reload_config()
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    release.set()
+    loader.join(10)
+    assert not loader.is_alive()
+    assert _label() == 'b'
+
+
+def test_a_context_created_at_the_swap_starts_from_the_global_one(
+        server_config_file, monkeypatch):
+    """A request context first touched by a stale swap inherits the global
+    config's age, so the stale config does not replace it."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+    matched, release = _pause_copy_of_label(monkeypatch, 'a')
+    seen = {}
+
+    @context.contextual
+    def reuse():
+        skypilot_config.safe_reload_config()
+        seen['label'] = _label()
+
+    reuser = threading.Thread(target=_with_event_loop(reuse), name='reuser')
+    reuser.start()
+    assert matched.wait(10)
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    skypilot_config.reload_config()
+    release.set()
+    reuser.join(10)
+    assert not reuser.is_alive()
+    assert seen['label'] == 'b'
+
+
+def test_sync_handler_refresh_clears_request_caches_when_unchanged(
+        server_config_file):
+    _, counts = server_config_file
+    calls = []
+
+    @annotations.lru_cache(scope='request')
+    def cached():
+        calls.append(None)
+        return len(calls)
+
+    server_common.refresh_workspace_state_for_sync_handler()
+    assert cached() == cached() == 1
+
+    server_common.refresh_workspace_state_for_sync_handler()
+    assert counts['parse'] == 1
+    assert cached() == 2
+
+
+def test_both_reload_entry_points_take_the_fast_path(server_config_file,
+                                                     monkeypatch, tmp_path):
+    path, counts = server_config_file
+    skypilot_config.reload_config()
+    assert counts == {'parse': 1, 'lock': 0}
+
+    skypilot_config.reload_config()
+    skypilot_config.safe_reload_config()
+    assert counts == {'parse': 1, 'lock': 0}
+    assert _label() == 'a'
+    assert skypilot_config.loaded_config_path() == str(path)
+
+    # The internal file wins over the server config and is parsed every time,
+    # through either entry point, even while the server cache would match.
+    internal = tmp_path / 'internal.yaml'
+    internal.write_text('aws:\n  labels:\n    k: internal\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(internal))
+    skypilot_config.reload_config()
+    assert _label() == 'internal'
+    skypilot_config.reload_config()
+    assert counts['parse'] == 3
+    skypilot_config._set_loaded_config(config_utils.Config())
+    skypilot_config.safe_reload_config()
+    assert _label() == 'internal'
+    assert counts == {'parse': 4, 'lock': 1}
+
+
+def test_server_config_db_url_from_file_survives_env_restore(
+        server_config_file, monkeypatch):
+    """Executors restore os.environ after each request; the next request's
+    fast path must still set the URL the file names."""
+    path, counts = server_config_file
+    url = _sqlite_config_db(monkeypatch, 'aws:\n  labels:\n    k: db-a\n')
+    path.write_text(f'db: {url}\n')
+
+    # Request 1: the first parse sets the URL from the file.
+    skypilot_config.reload_config()
+    assert os.environ[constants.ENV_VAR_DB_CONNECTION_URI] == url
+    assert _label() == 'db-a'
+    # The executor restores the environment it had before request 1.
+    del os.environ[constants.ENV_VAR_DB_CONNECTION_URI]
+
+    # Request 2.
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) == url
+    assert _label() == 'db-a'
+
+
+def test_server_config_db_url_from_env_is_left_alone(server_config_file,
+                                                     monkeypatch):
+    """A URL set outside the file is neither cleared nor replaced."""
+    path, counts = server_config_file
+    path.write_text('')
+    url = _sqlite_config_db(monkeypatch, 'aws:\n  labels:\n    k: db-a\n')
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, url)
+
+    skypilot_config.reload_config()
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) == url
+
+    # Another URL set from outside is kept, not swapped back to the cached one.
+    other_url = f'{url}?other'
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, other_url)
+    skypilot_config.reload_config()
+    assert os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) == other_url
+    assert _label() == 'db-a'
+
+
+def test_server_config_fast_path_sets_the_loaded_path(server_config_file,
+                                                      monkeypatch, tmp_path):
+    path, counts = server_config_file
+    skypilot_config.reload_config()
+    internal = tmp_path / 'internal.yaml'
+    internal.write_text('aws:\n  labels:\n    k: internal\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(internal))
+    skypilot_config.reload_config()
+    assert skypilot_config.loaded_config_path() == str(internal)
+
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    skypilot_config.reload_config()
+    assert counts['parse'] == 2
+    assert skypilot_config.loaded_config_path() == str(path)
+    assert _label() == 'a'
+
+
+def test_server_config_db_url_change_without_a_row_reloads(
+        server_config_file, monkeypatch):
+    """A URL set later is part of the source even when the DB has no row:
+    with a URL the file may hold nothing but `db`."""
+    path, _ = server_config_file
+    path.write_text('aws:\n  labels:\n    k: a\ngcp: {}\n')
+    skypilot_config.reload_config()
+    assert _label() == 'a'
+
+    config_db.ensure_config_db_schema()
+    db = db_utils.DatabaseManager('config', config_db._create_table)
+    monkeypatch.setattr(config_db, '_db_manager', db)
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI,
+                       str(db.get_engine().url))
+    with pytest.raises(ValueError, match='no other config is allowed'):
+        skypilot_config.reload_config()
+
+
+def test_server_reload_no_empty_window(server_config_file, monkeypatch):
+    """Server-mode twin of test_reload_config_no_empty_window: mid-reload, a
+    reader still sees the previous config."""
+    path, _ = server_config_file
+    path.write_text('rbac:\n  default_role: user\n')
+    skypilot_config.reload_config()
+    path.write_text('rbac:\n  default_role: viewer\n')
+
+    observed = []
+    counting_parse = skypilot_config._parse_and_validate_config
+
+    def spy_parse(*args, **kwargs):
+        observed.append(
+            skypilot_config.get_nested(('rbac', 'default_role'), 'admin'))
+        return counting_parse(*args, **kwargs)
+
+    monkeypatch.setattr(skypilot_config, '_parse_and_validate_config',
+                        spy_parse)
+    skypilot_config.reload_config()
+
+    assert observed == ['user']
+    assert skypilot_config.get_nested(('rbac', 'default_role'),
+                                      None) == 'viewer'
+
+
+def test_server_config_parsed_before_plugins_load_is_validated_again(
+        server_config_file, monkeypatch):
+    """The import-time parse is lenient; once plugins load, the same file
+    must be validated strictly instead of served from the cache."""
+    path, _ = server_config_file
+    path.write_text('workspaces:\n  default:\n    bogus_ws_key: 3\n')
+    monkeypatch.setattr(plugins, '_plugins_loaded', False)
+    skypilot_config.reload_config()
+    monkeypatch.setattr(plugins, '_plugins_loaded', True)
+    for reload in (skypilot_config.reload_config,
+                   skypilot_config.safe_reload_config):
+        with pytest.raises(sky.exceptions.InvalidSkyPilotConfigError):
+            reload()
+
+
+def test_reload_never_sees_a_partial_config_while_it_is_saved(
+        server_config_file, monkeypatch):
+    """The server config save replaces the file, so an unlocked reload never
+    parses an empty or half-written file."""
+    path, _ = server_config_file
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    monkeypatch.setattr(skypilot_config, '_CONFIG_POST_SAVE_HOOKS', [])
+    monkeypatch.setattr(skypilot_config, '_CONFIG_UPDATE_HOOKS', [])
+    monkeypatch.setattr(skypilot_config.config_map_utils,
+                        'is_running_in_kubernetes', lambda: False)
+    configs = [{
+        'aws': {
+            'labels': {f'key-{i}': f'{tag}-{i}' for i in range(500)}
+        }
+    } for tag in ('a', 'b')]
+    yaml_utils.dump_yaml(str(path), configs[0])
+    stop = threading.Event()
+    saves = []
+
+    def writer():
+        while not stop.is_set():
+            for config in configs:
+                skypilot_config.update_api_server_config_no_lock(
+                    config_utils.Config.from_dict(copy.deepcopy(config)))
+                saves.append(1)
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    bad = []
+    try:
+        for _ in range(300):
+            try:
+                skypilot_config.reload_config()
+                loaded = dict(skypilot_config.to_dict())
+            except Exception as e:  # pylint: disable=broad-except
+                loaded = repr(e)
+            if loaded not in configs:
+                bad.append(loaded)
+    finally:
+        stop.set()
+        thread.join(timeout=30)
+    # A writer that died would make this test vacuous.
+    assert saves and not thread.is_alive()
+    assert not bad, f'{len(bad)} torn reads, e.g. {str(bad[0])[:200]}'

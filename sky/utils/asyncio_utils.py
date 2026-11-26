@@ -6,13 +6,21 @@ import os
 import random
 import shutil
 import subprocess
-from typing import List, Optional, Set
+from typing import Any, Coroutine, List, Optional, Set
 
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
 _background_tasks: Set[asyncio.Task] = set()
+
+
+def run_in_background(coro: Coroutine[Any, Any, Any]) -> None:
+    """Run ``coro`` on the current loop, keeping its task alive until done."""
+    task = asyncio.get_running_loop().create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 # Upper bound on the random delay applied before a periodic housekeeping
 # daemon runs its first pass. See sleep_startup_jitter().
@@ -383,7 +391,8 @@ async def spawn_without_fork(
         # umask. Drop any one of them and this silently reverts to fork(),
         # which is what this function exists to avoid. Python opens its own
         # fds with O_CLOEXEC (PEP 446), so `close_fds=False` passes on stdio
-        # only.
+        # and any fd explicitly made inheritable; keep long-lived fds such as
+        # listening sockets non-inheritable.
         return subprocess.Popen(
             args,
             executable=executable,

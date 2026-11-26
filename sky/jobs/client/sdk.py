@@ -28,6 +28,7 @@ from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
@@ -165,6 +166,7 @@ def _uses_wait_for_scheduling_timeout(dag: 'sky.Dag') -> bool:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
@@ -339,6 +341,7 @@ def launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(18)
+@annotations.client_api
 def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
@@ -487,13 +490,82 @@ def queue_v2(
         # search box uses the same filter).
         name_match=name_match,
     )
-    path = '/jobs/queue/v2'
+    page_size = _queue_page_size(body)
+    if page_size is not None:
+        paged_request_id = _queue_in_pages(body, page_size)
+        if paged_request_id is not None:
+            return paged_request_id
+    return _send_queue_v2(body)
+
+
+def _send_queue_v2(
+    body: payloads.JobsQueueV2Body
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
+        str, int], int]]:
     response = server_common.make_authenticated_request(
         'POST',
-        path,
+        '/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
+        timeout=(5, None),
+        sync_call=True)
     return server_common.get_request_id(response=response)
+
+
+def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
+    """The page size to fetch the queue in, or None to fetch it in one call.
+
+    Pages follow the default order, newest top-level job first. A refresh is
+    not answered as a sync call, so it is not paged.
+    """
+    if (body.refresh or body.include_tree or
+            body.sort_by not in (None, 'job_id', 'id') or
+            body.sort_order == 'asc'):
+        return None
+    return client_common.sync_page_size(
+        body.limit, server_constants.MIN_JOBS_QUEUE_CURSOR_API_VERSION)
+
+
+def _queue_in_pages(
+    body: payloads.JobsQueueV2Body, page_size: int
+) -> Optional[server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                            int, Dict[str, int], int]]]:
+    """Fetches the queue as sync calls of up to page_size top-level jobs.
+
+    The counts in the result come from the last page.
+    """
+    if body.fields and 'root_job_id' not in body.fields:
+        # Rows name their top-level job in root_job_id; the cursor needs it.
+        body = body.model_copy(update={'fields': [*body.fields, 'root_job_id']})
+
+    def send(after_job_id: Optional[int], size: int) -> server_common.RequestId:
+        return _send_queue_v2(
+            body.model_copy(update={
+                'limit': size,
+                'after_job_id': after_job_id
+            }))
+
+    def read_page(
+            value: Any, after_job_id: Optional[int]
+    ) -> Optional[Tuple[List[Any], int, Any]]:
+        if not isinstance(value, dict) or 'jobs' not in value:
+            return None
+        jobs = value['jobs']
+        roots = {
+            job['job_id']
+            if job.get('root_job_id') is None else job['root_job_id']
+            for job in jobs
+        }
+        if (after_job_id is not None and roots and max(roots) >= after_job_id):
+            return None
+        return jobs, len(roots), min(roots) if roots else None
+
+    return client_common.fetch_in_pages(send,
+                                        page_size,
+                                        read_page,
+                                        lambda last_value, jobs: {
+                                            **last_value, 'jobs': jobs
+                                        },
+                                        limit=body.limit)
 
 
 # Deprecated. Please use queue_v2 instead for better performance.
@@ -505,6 +577,7 @@ def queue_v2(
 # TODO(lloyd): Remove version=1 support before 0.13.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def queue(
     refresh: bool,
     skip_finished: bool = False,
@@ -588,6 +661,7 @@ def queue(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def cancel(
     name: Optional[str] = None,
     job_ids: Optional[Sequence[int]] = None,
@@ -660,6 +734,73 @@ def cancel(
     return server_common.get_request_id(response=response)
 
 
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(server_constants.MIN_JOBS_RESTART_API_VERSION)
+def restart(
+    job: Union[int, str],
+    name: Optional[str] = None,
+    pool: Optional[str] = None,
+    resources_override: Optional[Dict[str, Any]] = None,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+    num_nodes: Optional[int] = None,
+) -> server_common.RequestId[Tuple[Optional[List[int]],
+                                   Optional['backends.ResourceHandle']]]:
+    """Launches a finished managed job again, as a new managed job.
+
+    Please refer to sky.cli.jobs_launch (--restart) for documentation.
+
+    Args:
+        job: ID or name of the finished managed job to restart. A name must
+            match exactly one job.
+        name: Name of the new job. Defaults to
+            ``<original-name>-rerun-<random suffix>``.
+        pool: Pool to submit to. Defaults to the original job's pool.
+        resources_override: Resource fields to override, e.g.
+            ``{'accelerators': 'H100:8'}``. Single-task jobs only.
+        env_overrides: Environment variables to set on every task.
+        secrets_overrides: Secrets to set on every task.
+        num_nodes: Number of nodes. Single-task jobs only.
+
+    Returns:
+        The request ID of the restart request.
+
+    Request Returns:
+        job_ids (Optional[List[int]]): Job IDs of the new managed job.
+        controller_handle (Optional[ResourceHandle]): ResourceHandle of the
+          controller.
+
+    Request Raises:
+        ValueError: the job does not exist, is ambiguous, or is not finished.
+        sky.exceptions.NotSupportedError: the job cannot be restarted.
+    """
+    if resources_override and resources_override.get('cloud') is not None:
+        # Cloud objects are not JSON; the server parses the name back.
+        resources_override = dict(resources_override)
+        resources_override['cloud'] = str(resources_override['cloud'])
+    if isinstance(job, int) or (isinstance(job, str) and job.isdigit()):
+        job_id, job_name = int(job), None
+    else:
+        job_id, job_name = None, job
+    body = payloads.JobsRestartBody(
+        job_id=job_id,
+        job_name=job_name,
+        name=name,
+        pool=pool,
+        resources_override=resources_override,
+        env_overrides=env_overrides,
+        secrets_overrides=secrets_overrides,
+        num_nodes=num_nodes,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/restart',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
+
+
 @typing.overload
 def tail_logs(
     name: Optional[str] = None,
@@ -695,6 +836,7 @@ def tail_logs(name: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
+@annotations.client_api
 def tail_logs(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
@@ -789,6 +931,7 @@ def tail_logs(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(45)
+@annotations.client_api
 def wait(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
@@ -844,6 +987,7 @@ def wait(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs_streaming(
     name: Optional[str],
     job_id: Optional[int],
@@ -969,6 +1113,7 @@ def download_logs_streaming(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs(
         name: Optional[str],
         job_id: Optional[int],
@@ -1040,6 +1185,7 @@ spot_tail_logs = common_utils.deprecated_function(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def dashboard() -> None:
     """Starts a dashboard for managed jobs."""
     user_hash = common_utils.get_user_hash()
@@ -1054,6 +1200,7 @@ def dashboard() -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_apply(
     task: Optional[Union['sky.Task', 'sky.Dag']],
     pool_name: str,
@@ -1082,18 +1229,27 @@ def pool_apply(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
 ) -> server_common.RequestId[None]:
-    """Delete a pool."""
+    """Delete a pool.
+
+    Request Raises:
+        sky.exceptions.PermissionDeniedError: if a named pool was created by
+          another user; the caller's own named pools are handed to the
+          controller first. A pattern from a non-admin skips other users'
+          pools instead.
+    """
     return impl.down(pool_names, all, purge, pool=True)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
@@ -1105,6 +1261,7 @@ def pool_status(
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
 @versions.minimal_api_version(16)
+@annotations.client_api
 def pool_tail_logs(pool_name: str,
                    target: Union[str, 'serve_utils.ServiceComponent'],
                    worker_id: Optional[int] = None,
@@ -1125,6 +1282,7 @@ def pool_tail_logs(pool_name: str,
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
 @versions.minimal_api_version(16)
+@annotations.client_api
 def pool_sync_down_logs(pool_name: str,
                         local_dir: str,
                         *,

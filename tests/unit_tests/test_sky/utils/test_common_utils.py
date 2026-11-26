@@ -2,6 +2,7 @@ import asyncio
 import contextvars
 import errno
 import os
+import sys
 import tempfile
 from unittest import mock
 
@@ -352,10 +353,138 @@ class TestGetPrettyEntrypointCmd:
                 '/usr/bin/sky', 'launch', '--secret', 'HF_TOKEN=secret123',
                 'app.yaml'
             ], "sky launch --secret 'HF_TOKEN=<redacted>' app.yaml"),
+            # The token and the endpoint password of `sky api login` are
+            # redacted
+            ([
+                '/usr/bin/sky', 'api', 'login', '-e', 'https://user:pw@host',
+                '--token', 'sky_abc123'
+            ], "sky api login -e 'https://user:<redacted>@host' "
+             "--token '<redacted>'"),
         ])
     def test_entrypoint_quoting(self, argv, expected):
         with mock.patch('sys.argv', argv):
             assert common_utils.get_pretty_entrypoint_cmd() == expected
+
+    def test_redaction_keeps_sys_argv(self):
+        """The command still needs the real values after it is formatted."""
+        argv = [
+            '/usr/bin/sky', 'api', 'login', '-e', 'https://user:pw@host',
+            '--token', 'sky_abc123'
+        ]
+        with mock.patch('sys.argv', argv):
+            common_utils.get_pretty_entrypoint_cmd()
+            assert sys.argv[1:] == [
+                'api', 'login', '-e', 'https://user:pw@host', '--token',
+                'sky_abc123'
+            ]
+
+
+class TestRedactApiLoginCredentials:
+    """Redaction of the token and the endpoint password of `sky api login`."""
+
+    @pytest.mark.parametrize(
+        'args, expected',
+        [
+            # Every spelling of the token option, with the value as the next
+            # argument or attached.
+            (['--token', 'sky_abc'], ['--token', '<redacted>']),
+            (['--token=sky_abc=1='], ['--token=<redacted>']),
+            (['--service-account-token', 'sky_abc'
+             ], ['--service-account-token', '<redacted>']),
+            (['--service-account-token=sky_abc'
+             ], ['--service-account-token=<redacted>']),
+            (['-t', 'sky_abc'], ['-t', '<redacted>']),
+            (['-tsky_abc'], ['-t<redacted>']),
+            # A value that looks like an option is still the value.
+            (['--token', '-e'], ['--token', '<redacted>']),
+            # The password of the endpoint; user name, host and path stay.
+            (['-e', 'https://user:pw@host:8080/path'
+             ], ['-e', 'https://user:<redacted>@host:8080/path']),
+            (['--endpoint=https://user:pw@host'
+             ], ['--endpoint=https://user:<redacted>@host']),
+            (['-ehttps://user:pw@host'], ['-ehttps://user:<redacted>@host']),
+            # The user name is an email address.
+            (['-e', 'https://user@example.com:pw@host'
+             ], ['-e', 'https://user@example.com:<redacted>@host']),
+            # No scheme; unescaped special characters in the password.
+            (['-e', 'user:pw@host:46580'], ['-e', 'user:<redacted>@host:46580']
+            ),
+            (['-e', 'https://user:p/w?#@host'
+             ], ['-e', 'https://user:<redacted>@host']),
+            # Both at once, among other options.
+            (['--relogin', '-e', 'https://user:pw@host', '-t', 'sky_abc'], [
+                '--relogin', '-e', 'https://user:<redacted>@host', '-t',
+                '<redacted>'
+            ]),
+        ])
+    def test_redacted(self, args, expected):
+        argv = ['sky', 'api', 'login'] + args
+        original = list(argv)
+        assert common_utils._redact_api_login_credentials(
+            argv) == ['sky', 'api', 'login'] + expected
+        # The input list is not modified.
+        assert argv == original
+
+    @pytest.mark.parametrize(
+        'argv',
+        [
+            # An endpoint without a password.
+            ['sky', 'api', 'login', '-e', 'https://host:8080'],
+            ['sky', 'api', 'login', '-e', 'https://user@host:8080'],
+            ['sky', 'api', 'login', '-e', 'https://[::1]:8080'],
+            ['sky', 'api', 'login', '--relogin', '--no-browser'],
+            # The option is the last argument: there is no value.
+            ['sky', 'api', 'login', '--token'],
+            # Other commands: -t and -e mean other things there.
+            ['sky', 'launch', '-t', 'm5.large', 'app.yaml'],
+            ['sky', 'launch', '--env', 'URL=https://user:pw@host'],
+            ['sky', 'api', 'info'],
+            ['examples/app.py', '--token', 'abc'],
+            ['sky'],
+        ])
+    def test_not_redacted(self, argv):
+        assert common_utils._redact_api_login_credentials(argv) == argv
+
+    def test_empty_and_none(self):
+        assert common_utils._redact_api_login_credentials([]) == []
+        assert common_utils._redact_api_login_credentials(None) == []
+
+    @mock.patch('sky.utils.common_utils._redact_endpoint_password')
+    def test_error_hides_the_arguments(self, mock_redact):
+        """If redaction fails, no argument is returned, and nothing raises."""
+        mock_redact.side_effect = Exception('Simulated error')
+        argv = ['sky', 'api', 'login', '-e', 'https://user:pw@host']
+        assert common_utils._redact_api_login_credentials(argv) == [
+            'sky', '<redacted>'
+        ]
+
+
+class TestRedactFlagValues:
+    """Per-token redaction of the value of ``--env``-like flags."""
+
+    def test_only_the_named_flags_are_redacted(self):
+        argv = [
+            'sky', 'serve', 'up', '--env', 'A=1', '--env=B=2', '--secret',
+            'S=3', '--name', 'n=4', 'svc.yaml'
+        ]
+        assert common_utils.redact_flag_values(argv, ('--env',)) == [
+            'sky', 'serve', 'up', '--env', 'A=<redacted>', '--env=B=<redacted>',
+            '--secret', 'S=3', '--name', 'n=4', 'svc.yaml'
+        ]
+
+    def test_values_with_spaces_quotes_and_newlines_are_redacted_whole(self):
+        argv = [
+            '--env=HF=a b secret', '--env', "PW=it's-secret", '--env',
+            'ML=line1\nsecret'
+        ]
+        assert common_utils.redact_flag_values(argv, ('--env',)) == [
+            '--env=HF=<redacted>', '--env', 'PW=<redacted>', '--env',
+            'ML=<redacted>'
+        ]
+
+    def test_bare_key_and_trailing_flag_are_kept(self):
+        argv = ['--env', 'HOME', '--env=PATH', '--env']
+        assert common_utils.redact_flag_values(argv, ('--env',)) == argv
 
 
 class TestRedactSecretsValues:

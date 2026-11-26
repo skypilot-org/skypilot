@@ -620,3 +620,21 @@ class TestCheckWorkspacePermission:
     def test_skips_check_when_workspace_is_none(self, mock_check, _):
         sky_check.check(workspace=None)
         mock_check.assert_not_called()
+
+
+def test_ssh_details_list_only_allowed_pools():
+    # A pool this workspace does not allow may belong to a workspace the
+    # caller cannot see, so it is not listed at all.
+    with mock.patch.object(sky_clouds.SSH,
+                           'get_ssh_node_pool_contexts',
+                           return_value=['ssh-a', 'ssh-b', 'ssh-c']), \
+         mock.patch('sky.skypilot_config.get_workspace_cloud',
+                    return_value={'allowed_node_pools': ['a', 'c']}):
+        out = strip_ansi(
+            sky_check._format_context_details(  # pylint: disable=protected-access
+                sky_clouds.SSH(),
+                show_details=True,
+                ctx2text={'ssh-a': 'enabled'}))
+    assert re.findall(r'[├└]── (\w+):', out) == ['a', 'c']
+    assert 'a: enabled' in out
+    assert 'c: disabled. Reason: Not set up.' in out

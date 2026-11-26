@@ -22,8 +22,12 @@ import fastapi
 import pytest
 
 from sky import clouds
+from sky import exceptions
+from sky import models
 from sky.metrics import utils as metrics_utils
+from sky.server import constants as server_constants
 from sky.server import server
+from sky.workspaces import core as workspaces_core
 
 
 def _make_websocket():
@@ -155,6 +159,184 @@ async def test_validate_cluster_for_ssh_proxy_ws_truncates_long_reason():
 
     assert result is None
     websocket.close.assert_awaited_once_with(code=1008, reason='x' * 123)
+
+
+# ---------------------------------------------------------------------------
+# The cluster write check runs before the SSH redirect hook and the lookup.
+# ---------------------------------------------------------------------------
+
+_REDIRECT_VERSION = server_constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION
+
+
+def _handler_websocket(auth_user):
+    websocket = _make_websocket()
+    websocket.accept = mock.AsyncMock()
+    websocket.send_bytes = mock.AsyncMock()
+    websocket.state.auth_user = auth_user
+    return websocket
+
+
+@contextlib.contextmanager
+def _proxy_mocks(check_side_effect=None, hook_result=None, hook=True):
+    """Patches the write check, the redirect hook and the cluster lookup.
+
+    The lookup returns None, so a caller that gets past the hook ends there.
+    """
+    calls = []
+
+    def _check(*args):
+        calls.append('check')
+        if check_side_effect is not None:
+            check_side_effect(*args)
+
+    check = mock.Mock(side_effect=_check)
+
+    async def _hook(websocket, cluster_name):
+        del websocket, cluster_name
+        calls.append('hook')
+        return hook_result
+
+    hook_mock = mock.AsyncMock(side_effect=_hook) if hook else None
+    lookup = mock.AsyncMock(return_value=None)
+    with mock.patch.object(workspaces_core, 'check_cluster_write_permission',
+                           check), \
+            mock.patch.object(server.websocket_utils, 'ssh_redirect_hook',
+                              hook_mock), \
+            mock.patch.object(server, '_get_cluster_and_validate', lookup):
+        yield check, hook_mock, lookup, calls
+
+
+def _denied(*args):
+    del args
+    raise exceptions.PermissionDeniedError(
+        "User bob (bob) does not have permission to access the workspace of "
+        "cluster 'c-a'")
+
+
+def _assert_denied(websocket, lookup):
+    websocket.close.assert_awaited_once()
+    assert websocket.close.await_args.kwargs['code'] == 1008
+    assert 'does not have permission' in websocket.close.await_args.kwargs[
+        'reason']
+    websocket.send_bytes.assert_not_awaited()
+    lookup.assert_not_awaited()
+
+
+_BOB = models.User(id='bob', name='bob')
+
+
+@pytest.mark.asyncio
+async def test_denied_caller_never_reaches_redirect_hook():
+    websocket = _handler_websocket(_BOB)
+    with _proxy_mocks(check_side_effect=_denied,
+                      hook_result={'url': 'ws://agent'}) as (_, hook, lookup,
+                                                             _):
+        await server.kubernetes_pod_ssh_proxy(websocket,
+                                              'c-a',
+                                              client_version=_REDIRECT_VERSION)
+    hook.assert_not_awaited()
+    _assert_denied(websocket, lookup)
+
+
+@pytest.mark.asyncio
+async def test_allowed_caller_is_checked_before_redirect():
+    websocket = _handler_websocket(_BOB)
+    with _proxy_mocks(hook_result={'url': 'ws://agent'}) as (check, _, lookup,
+                                                             calls):
+        await server.kubernetes_pod_ssh_proxy(websocket,
+                                              'c-a',
+                                              client_version=_REDIRECT_VERSION)
+    assert calls == ['check', 'hook']
+    check.assert_called_once_with(_BOB, 'c-a')
+    websocket.send_bytes.assert_awaited_once()
+    frame = websocket.send_bytes.await_args.args[0]
+    assert frame[0] == server.SSHMessageType.REDIRECT
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_local_caller_without_auth_user_is_trusted():
+    websocket = _handler_websocket(None)
+    with _proxy_mocks() as (check, hook, lookup, _):
+        await server.kubernetes_pod_ssh_proxy(websocket,
+                                              'c-a',
+                                              client_version=_REDIRECT_VERSION)
+    check.assert_not_called()
+    hook.assert_awaited_once()
+    lookup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_slurm_denied_caller_skips_lookup():
+    websocket = _handler_websocket(_BOB)
+    with _proxy_mocks(check_side_effect=_denied,
+                      hook=False) as (_, _, lookup, _):
+        await server.slurm_job_ssh_proxy(websocket, 'c-a')
+    _assert_denied(websocket, lookup)
+
+
+@pytest.mark.asyncio
+async def test_denied_caller_with_no_redirect_skips_lookup():
+    websocket = _handler_websocket(_BOB)
+    with _proxy_mocks(check_side_effect=_denied,
+                      hook_result={'url': 'ws://agent'}) as (_, hook, lookup,
+                                                             _):
+        await server.kubernetes_pod_ssh_proxy(websocket,
+                                              'c-a',
+                                              client_version=_REDIRECT_VERSION,
+                                              no_redirect=1)
+    hook.assert_not_awaited()
+    _assert_denied(websocket, lookup)
+
+
+@pytest.mark.asyncio
+async def test_denied_old_client_without_hook_skips_lookup():
+    websocket = _handler_websocket(_BOB)
+    with _proxy_mocks(check_side_effect=_denied,
+                      hook=False) as (_, _, lookup, _):
+        await server.kubernetes_pod_ssh_proxy(websocket,
+                                              'c-a',
+                                              client_version=None)
+    _assert_denied(websocket, lookup)
+
+
+@pytest.mark.asyncio
+async def test_long_denial_reason_is_truncated():
+    websocket = _handler_websocket(_BOB)
+    long_name = 'c' * 200
+
+    def _deny_long(*args):
+        del args
+        raise exceptions.PermissionDeniedError(
+            f'User bob (bob) does not have permission to access the '
+            f'workspace of cluster {long_name!r}')
+
+    with _proxy_mocks(check_side_effect=_deny_long) as (_, _, lookup, _):
+        await server.kubernetes_pod_ssh_proxy(websocket,
+                                              long_name,
+                                              client_version=_REDIRECT_VERSION)
+    reason = websocket.close.await_args.kwargs['reason']
+    assert 0 < len(reason.encode('utf-8')) <= 123
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_check_error_fails_closed():
+    websocket = _handler_websocket(_BOB)
+
+    def _boom(*args):
+        del args
+        raise RuntimeError('db down')
+
+    with _proxy_mocks(check_side_effect=_boom,
+                      hook_result={'url': 'ws://agent'}) as (_, hook, lookup,
+                                                             _):
+        with pytest.raises(RuntimeError):
+            await server.kubernetes_pod_ssh_proxy(
+                websocket, 'c-a', client_version=_REDIRECT_VERSION)
+    hook.assert_not_awaited()
+    websocket.send_bytes.assert_not_awaited()
+    lookup.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +479,8 @@ def _run_handler(loop, fake_kubectl, mode, proxy_stub):
         return_value = [fake_kubectl, 'port-forward', 'pod/x', ':22', mode]
     websocket = _make_websocket()
     websocket.accept = mock.AsyncMock()
+    # Trusted local caller: these tests are about the kubectl child, not authz.
+    websocket.state.auth_user = None
 
     async def stub(websocket,
                    read_from_backend,

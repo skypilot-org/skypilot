@@ -16,6 +16,7 @@ from sky.utils import config_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    from sky.server.auth import impersonation as impersonation_mod
     from sky.server.blob import blob_storage as blob_storage_mod
     from sky.server.requests import log_provider as log_provider_mod
     from sky.server.requests import storage as storage_mod
@@ -108,12 +109,9 @@ class ExtensionContext:
 
     Attributes:
         app: The FastAPI application instance.
-        rbac_rules: List of RBAC rules registered by the plugin.
-        Example:
-        [
-            ('user', RBACRule(path='/plugins/api/xx/*', method='POST')),
-            ('user', RBACRule(path='/plugins/api/xx/*', method='DELETE'))
-        ]
+
+    RBAC rules are declared through ``BasePlugin.rbac_rules``, not here: the
+    server collects them before any plugin is installed.
     """
 
     def __init__(
@@ -124,7 +122,6 @@ class ExtensionContext:
     ):
         self.context = context
         self.app = app
-        self.rbac_rules: List[Tuple[str, RBACRule]] = []
         self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
 
     def register_managed_secrets_provider(
@@ -174,39 +171,26 @@ class ExtensionContext:
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
 
-    def register_rbac_rule(self,
-                           path: str,
-                           method: str,
-                           description: Optional[str] = None,
-                           role: str = 'user') -> None:
-        """Register an RBAC rule for this plugin.
+    def register_impersonation_policy(
+        self,
+        policy: 'impersonation_mod.ImpersonationPolicy',
+    ) -> None:
+        """Register who may act as whom through the impersonation header.
 
-        This method allows plugins to declare which endpoints should be
-        restricted to admin users during the install phase.
-
-        Args:
-            path: The path pattern to restrict (supports wildcards with
-                  keyMatch2).
-                  Example: '/plugins/api/credentials/*'
-            method: The HTTP method to restrict. Example: 'POST', 'DELETE'
-            description: Optional description of what this rule protects.
-            role: The role to add this rule to (default: 'user').
-                  Rules added to 'user' role block regular users but allow
-                  admins.
-
-        Example:
-            def install(self, ctx: ExtensionContext):
-                # Only admin can upload credentials
-                ctx.register_rbac_rule(
-                    path='/plugins/api/credentials/*',
-                    method='POST',
-                    description='Only admin can upload credentials'
-                )
+        Replaces the default policy (admin service accounts, when
+        `rbac.allow_impersonation` is on). The policy is called on a worker
+        thread with the authenticated caller and the resolved target user, and
+        returns None to allow or the reason for refusing. The server still
+        refuses callers that are not service accounts, service accounts and
+        built-in users as targets, targets whose role outranks the caller's,
+        endpoints the caller's own role denies, and changes to users or
+        service account tokens. A plugin endpoint that issues a session or
+        token for the authenticated user must refuse when
+        `request.state.impersonator` is set.
         """
-        rule = RBACRule(path=path, method=method, description=description)
-        self.rbac_rules.append((role, rule))
-        logger.debug(f'Registered RBAC rule for {role}: {method} {path}'
-                     f'{f" - {description}" if description else ""}')
+        # pylint: disable=import-outside-toplevel
+        from sky.server.auth import impersonation
+        impersonation.set_policy(policy)
 
 
 @dataclasses.dataclass
@@ -364,6 +348,10 @@ class BasePlugin(abc.ABC):
         configured plugin order.
 
         Only for that ordering need. Everything else belongs in `install`.
+
+        A middleware that sets `request.state.auth_user` must first ensure the
+        user's row in the users table and its role: requests from an
+        authenticated user run without upserting either.
 
         Raising here aborts the load, exactly as raising from `install` does:
         plugins are infrastructure, and a half-installed one is not something
@@ -603,6 +591,9 @@ def get_plugins() -> List[BasePlugin]:
 
 
 _PLUGIN_RBAC_RULES: Dict[str, List[Dict[str, str]]] = {}
+# True once a load has read the rules of every configured plugin. Until then
+# the collected rules may be missing some.
+_PLUGIN_RBAC_RULES_COMPLETE = False
 
 
 def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
@@ -616,13 +607,15 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
     Returns:
         Dictionary mapping role names to lists of blocklist rules.
     """
-    global _PLUGIN_RBAC_RULES
+    global _PLUGIN_RBAC_RULES, _PLUGIN_RBAC_RULES_COMPLETE
 
     config = _load_plugin_config()
     if not config:
+        _PLUGIN_RBAC_RULES_COMPLETE = True
         return {}
 
     rules_by_role: Dict[str, List[Dict[str, str]]] = {}
+    complete = True
 
     for plugin_config in config.get('plugins', []):
         class_path = plugin_config['class']
@@ -650,9 +643,16 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
                              f'{role} {rule.method} {rule.path}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to load RBAC rules from {class_path}: {e}')
+            complete = False
 
     _PLUGIN_RBAC_RULES = rules_by_role
+    _PLUGIN_RBAC_RULES_COMPLETE = complete
     return rules_by_role
+
+
+def plugin_rbac_rules_complete() -> bool:
+    """Whether the last load read the rules of every configured plugin."""
+    return _PLUGIN_RBAC_RULES_COMPLETE
 
 
 def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:

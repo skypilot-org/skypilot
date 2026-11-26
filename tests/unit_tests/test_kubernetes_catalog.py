@@ -78,19 +78,17 @@ def _patch_cluster_calls(monkeypatch, nodes_by_context) -> list:
                         check_credentials)
     monkeypatch.setattr(kubernetes_utils, 'detect_accelerator_resource',
                         lambda context: (True, {'nvidia.com/gpu'}))
-    monkeypatch.setattr(kubernetes_utils, 'detect_gpu_label_formatter',
-                        lambda context: (SkyPilotLabelFormatter(), {}))
     monkeypatch.setattr(
         kubernetes_utils,
         'get_kubernetes_nodes',
-        lambda context=None: list(nodes_by_context.get(context, [])))
+        lambda context=None, **_: list(nodes_by_context.get(context, [])))
     monkeypatch.setattr(kubernetes_utils,
                         'get_gpu_resource_key',
                         lambda context=None: 'nvidia.com/gpu')
     # The real get_allocated_gpu_qty_by_node returns a defaultdict.
     monkeypatch.setattr(kubernetes_utils,
                         'get_allocated_gpu_qty_by_node',
-                        lambda context=None: collections.defaultdict(int))
+                        lambda context=None, **_: collections.defaultdict(int))
     return checked
 
 
@@ -239,7 +237,7 @@ def test_list_accelerators_realtime_sums_across_contexts(monkeypatch):
     """Realtime capacity and availability add up over the contexts."""
     monkeypatch.setattr(kubernetes_utils,
                         'get_allocated_gpu_qty_by_node',
-                        lambda context=None: collections.defaultdict(
+                        lambda context=None, **_: collections.defaultdict(
                             int, {'node-a1': 3}
                             if context == _CONTEXT_A else {'node-b1': 1}))
 
@@ -265,7 +263,7 @@ def test_list_accelerators_all_regions_keeps_per_context_entries(monkeypatch):
     monkeypatch.setattr(
         kubernetes_utils,
         'get_kubernetes_nodes',
-        lambda context=None: list(nodes_by_context.get(context, [])))
+        lambda context=None, **_: list(nodes_by_context.get(context, [])))
 
     result = kubernetes_catalog.list_accelerators(gpus_only=True,
                                                   name_filter=None,
@@ -293,7 +291,7 @@ def test_list_accelerators_same_gpu_in_contexts_is_not_merged(
     monkeypatch.setattr(
         kubernetes_utils,
         'get_kubernetes_nodes',
-        lambda context=None: list(nodes_by_context.get(context, [])))
+        lambda context=None, **_: list(nodes_by_context.get(context, [])))
 
     result, capacity, _ = kubernetes_catalog.list_accelerators_realtime(
         gpus_only=True,

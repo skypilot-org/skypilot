@@ -958,6 +958,14 @@ export async function handleJobAction(action, jobId, cluster) {
       };
       jobId = 'controller';
       break;
+    case 'rerun':
+      logStarter = 'Re-running';
+      logMiddle = 're-run';
+      apiPath = 'jobs/restart';
+      requestBody = {
+        job_id: jobId,
+      };
+      break;
     default:
       throw new Error(`Invalid action: ${action}`);
   }
@@ -1000,6 +1008,7 @@ export async function handleJobAction(action, jobId, cluster) {
       // Check the status code of the final response
       if (finalResponse.status === 200) {
         showToast(`Job ${jobId} ${logMiddle} successfully.`, 'success');
+        return true;
       } else {
         if (finalResponse.status === 500) {
           try {
@@ -1011,8 +1020,11 @@ export async function handleJobAction(action, jobId, cluster) {
 
                 // Handle specific error types
                 if (error.type && error.type === NOT_SUPPORTED_ERROR) {
+                  // Prefer the server's message (e.g. re-run explaining that a
+                  // job used local files) over a generic notice.
                   showToast(
-                    `${logStarter} job ${jobId} is not supported!`,
+                    error.message ||
+                      `${logStarter} job ${jobId} is not supported!`,
                     'error',
                     10000
                   );

@@ -20,6 +20,7 @@ from sky import models
 from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.backends import cloud_vm_ray_backend
+from sky.server import constants as server_constants
 from sky.server import server
 from sky.skylet import constants
 from sky.users import permission
@@ -27,7 +28,6 @@ from sky.utils import common
 from sky.utils import context
 from sky.utils import locks
 from sky.utils.db import db_utils
-from sky.utils.db import kv_cache
 
 
 def _add_cluster(name: str, workspace: str) -> None:
@@ -45,13 +45,22 @@ def _add_cluster(name: str, workspace: str) -> None:
                                                 ready=True)
 
 
-async def _ssh(user_id: str, cluster_name: str):
-    """Returns the handle, or None with the websocket closed."""
+def _websocket(user_id: str):
     websocket = mock.MagicMock(spec=fastapi.WebSocket)
+    websocket.accept = mock.AsyncMock()
     websocket.close = mock.AsyncMock()
+    websocket.send_bytes = mock.AsyncMock()
     websocket.state = mock.MagicMock()
     websocket.state.auth_user = models.User(id=user_id, name=user_id)
-    # pylint: disable-next=protected-access
+    return websocket
+
+
+async def _ssh(user_id: str, cluster_name: str):
+    """Returns the handle, or None with the websocket closed."""
+    websocket = _websocket(user_id)
+    # pylint: disable=protected-access
+    if not await server._check_ssh_proxy_ws_permission(websocket, cluster_name):
+        return None, websocket.close
     handle = await server._validate_cluster_for_ssh_proxy_ws(
         websocket, cluster_name, clouds.Kubernetes)
     return handle, websocket.close
@@ -78,9 +87,6 @@ async def new_workspace(tmp_path, monkeypatch):
     skypilot_config.reload_config()
     state_db = db_utils.DatabaseManager('state', global_user_state.create_table)
     monkeypatch.setattr(global_user_state, '_db_manager', state_db)
-    monkeypatch.setattr(
-        kv_cache, '_db_manager',
-        db_utils.DatabaseManager('kv_cache', kv_cache.create_table))
     service = permission.PermissionService()
     service.enforcer = casbin.SyncedEnforcer(
         os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
@@ -127,7 +133,31 @@ class TestSSHProxyNewWorkspace:
         assert handle is None
         close.assert_awaited_once()
         assert close.await_args.kwargs['code'] == 1008
-        assert 'not found' not in close.await_args.kwargs['reason']
+        assert 'does not have permission' in close.await_args.kwargs['reason']
+
+    @pytest.mark.asyncio
+    async def test_only_members_reach_redirect_hook(self, monkeypatch):
+        hook = mock.AsyncMock(return_value={'url': 'ws://agent'})
+        monkeypatch.setattr(server.websocket_utils, 'ssh_redirect_hook', hook)
+        version = server_constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION
+
+        alice = _websocket('alice')
+        await server.kubernetes_pod_ssh_proxy(alice,
+                                              'c-new',
+                                              client_version=version)
+        hook.assert_awaited_once()
+        alice.send_bytes.assert_awaited_once()
+
+        bob = _websocket('bob')
+        await server.kubernetes_pod_ssh_proxy(bob,
+                                              'c-new',
+                                              client_version=version)
+        assert hook.await_count == 1, 'bob reached the redirect hook'
+        bob.send_bytes.assert_not_awaited()
+        bob.close.assert_awaited_once()
+        assert bob.close.await_args.kwargs['code'] == 1008
+        assert 'does not have permission' in bob.close.await_args.kwargs[
+            'reason']
 
     @pytest.mark.asyncio
     async def test_missing_cluster_is_not_found(self):

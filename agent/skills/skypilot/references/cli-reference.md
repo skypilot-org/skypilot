@@ -362,6 +362,7 @@ Launch a managed job from a YAML or a command.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
 - `--output`, `-o` — Print only the submitted job IDs, for scripts: `id` prints one per line, `json` prints {"job_ids": [...]}. Everything else goes to stderr. Implies --detach-run.
+- `--restart` — Launch a finished managed job again, by ID or name, as a new job, like running `sky jobs launch` again with its YAML and flags. Resource, --env and --secret flags override it. Takes no ENTRYPOINT. Nee...
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky jobs logs`
@@ -518,6 +519,7 @@ Show statuses of SkyServe services.
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `--verbose`, `-v` — Show all information in full.
+- `--all`, `-a` — Show all replicas.
 - `--endpoint` — Show service endpoint.
 - `SERVICE_NAMES` — text
 
@@ -645,6 +647,7 @@ Delete volumes.
 - `NAMES` — text
 - `--all`, `-a` — Delete all volumes.
 - `--purge`, `-p` — Forcibly delete the volume from the volumes table even if the deletion API fails.
+- `--no-cleanup` — Keep the files of k8s-hostpath volumes registered with cleanup_on_deletion.
 - `--yes`, `-y` — Skip confirmation prompt.
 - `--async`, `--no-async` — Run the command asynchronously.
 

@@ -11,6 +11,7 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import constants
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -115,16 +116,12 @@ def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
     return PvcFailure.UNKNOWN
 
 
-def _is_rbac_permission_error(e: Exception) -> bool:
-    """True if the K8s ApiException is a 401/403 RBAC denial.
-
-    Namespace-constrained users on multi-tenant clusters often lack the
-    cluster-scoped `list`/`get` perms on `storageclasses` that the
-    pre-flight checks require, but they can still create PVCs in their
-    namespace and rely on K8s admission to bind. Don't block them just
-    because we can't validate up front.
-    """
-    return getattr(e, 'status', None) in (401, 403)
+# Namespace-constrained users on multi-tenant clusters often lack the
+# cluster-scoped `list`/`get` perms on `storageclasses` that the pre-flight
+# checks require, but they can still create PVCs in their namespace and rely
+# on K8s admission to bind. Don't block them just because we can't validate up
+# front.
+_is_rbac_permission_error = api_errors.is_rbac_denial
 
 
 def _resolve_context_for_new_volume() -> Optional[str]:
@@ -149,9 +146,16 @@ def _resolve_context_for_new_volume() -> Optional[str]:
     current_context = kubernetes_utils.get_current_kube_config_context_name()
     allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
     if not allowed_contexts:
-        # Nothing to cross-check against: no kubeconfig, or Kubernetes is not
-        # enabled. Fall back to the previous behavior rather than failing
-        # here -- the K8s API call that follows raises a clearer error.
+        if current_context is not None:
+            # The kubeconfig has contexts, but the workspace allows none of
+            # them: no pod in this workspace could ever mount the volume.
+            raise ValueError(
+                'No Kubernetes context is allowed in the active workspace, '
+                'so the volume has nowhere to be created. Use a workspace '
+                'that allows one, or ask an administrator to allow one.')
+        # Nothing to cross-check against: no kubeconfig. Fall back to the
+        # previous behavior rather than failing here -- the K8s API call
+        # that follows raises a clearer error.
         return current_context
     if current_context in allowed_contexts:
         return current_context
