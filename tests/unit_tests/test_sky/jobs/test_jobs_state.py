@@ -2180,7 +2180,7 @@ class TestQueueCursorCodegenCompatibility:
             self._run_branch(code, one_older)
 
     def test_current_version_accepts_the_kwarg(self):
-        assert (jobs_utils.QUEUE_CURSOR_MANAGED_JOBS_VERSION ==
+        assert (jobs_utils.QUEUE_CURSOR_MANAGED_JOBS_VERSION <=
                 managed_job_constants.MANAGED_JOBS_VERSION)
 
 

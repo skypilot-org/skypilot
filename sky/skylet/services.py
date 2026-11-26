@@ -8,6 +8,7 @@ import grpc
 
 from sky import exceptions
 from sky import sky_logging
+from sky.jobs import file_content_utils
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.schemas.generated import autostopv1_pb2
@@ -638,6 +639,16 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             job_ids = managed_job_state.get_all_job_ids_by_name(job_name)
             return managed_jobsv1_pb2.GetAllJobIdsByNameResponse(
                 job_ids=job_ids)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def GetJobSpec(  # type: ignore[return]
+            self, request: managed_jobsv1_pb2.GetJobSpecRequest,
+            context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.GetJobSpecResponse:
+        try:
+            dag_yaml = file_content_utils.get_job_dag_content(request.job_id)
+            return managed_jobsv1_pb2.GetJobSpecResponse(dag_yaml=dag_yaml)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 

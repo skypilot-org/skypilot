@@ -13,6 +13,9 @@ service ManagedJobsService {
   rpc CancelJobs(CancelJobsRequest) returns (CancelJobsResponse);
   // Stream managed job logs.
   rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
+  // Get the stored spec (DAG YAML) of one managed job, used to launch it
+  // again. Added in ManagedJobsService v29.
+  rpc GetJobSpec(GetJobSpecRequest) returns (GetJobSpecResponse);
 }
 
 enum ManagedJobStatus {
@@ -218,6 +221,16 @@ message GetAllJobIdsByNameRequest {
 
 message GetAllJobIdsByNameResponse {
   repeated int64 job_ids = 1;
+}
+
+message GetJobSpecRequest {
+  int64 job_id = 1;
+}
+
+message GetJobSpecResponse {
+  // The DAG YAML the job was submitted with. Unset if the controller has
+  // no stored spec for the job.
+  optional string dag_yaml = 1;
 }
 
 message CancelJobsRequest {

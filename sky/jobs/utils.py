@@ -5317,6 +5317,17 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_job_spec(cls, job_id: int) -> str:
+        """Generate code to print one job's stored spec (DAG YAML)."""
+        code = textwrap.dedent(f"""\
+        from sky.jobs import file_content_utils
+        from sky.utils import message_utils
+        dag_yaml = file_content_utils.get_job_dag_content({job_id!r})
+        print(message_utils.encode_payload(dag_yaml), end="", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
         from sky.utils import message_utils

@@ -390,6 +390,10 @@ _ALWAYS_WRITE_ENDPOINTS = [
         'method': 'POST'
     },
     {
+        'path': '/jobs/restart',
+        'method': 'POST'
+    },
+    {
         'path': '/jobs/pool_apply',
         'method': 'POST'
     },

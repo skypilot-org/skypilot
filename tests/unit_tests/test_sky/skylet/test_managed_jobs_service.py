@@ -182,6 +182,39 @@ class TestGetVersion:
         context_mock.abort.assert_not_called()
 
 
+class TestGetJobSpec:
+    """Test class for GetJobSpec RPC method."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, _seed_test_jobs):
+        self.job_ids = _seed_test_jobs
+        self.service = services.ManagedJobsServiceImpl()
+
+    def test_returns_the_stored_spec(self):
+        job_id = self.job_ids['job_id1']
+        state.set_job_dag_yaml_content(job_id, 'name: a\nrun: echo hi\n')
+        context_mock = mock.Mock()
+        response = self.service.GetJobSpec(
+            managed_jobsv1_pb2.GetJobSpecRequest(job_id=job_id), context_mock)
+        assert response.dag_yaml == 'name: a\nrun: echo hi\n'
+        context_mock.abort.assert_not_called()
+
+    def test_unknown_job_has_no_spec(self):
+        response = self.service.GetJobSpec(
+            managed_jobsv1_pb2.GetJobSpecRequest(job_id=999999), mock.Mock())
+        assert not response.HasField('dag_yaml')
+
+    def test_error_aborts_with_internal(self):
+        with mock.patch('sky.jobs.file_content_utils.get_job_dag_content',
+                        side_effect=Exception('db down')):
+            context_mock = mock.Mock()
+            self.service.GetJobSpec(
+                managed_jobsv1_pb2.GetJobSpecRequest(job_id=1), context_mock)
+        status_code, message = context_mock.abort.call_args[0]
+        assert status_code == grpc.StatusCode.INTERNAL
+        assert 'db down' in message
+
+
 class TestGetAllJobIdsByName:
     """Test class for GetAllJobIdsByName RPC method."""
 
