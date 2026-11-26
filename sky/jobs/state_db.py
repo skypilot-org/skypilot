@@ -325,7 +325,9 @@ job_info_table = sqlalchemy.Table(
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
     # In consolidation mode, managed jobs shares the filemount blob managed
-    # by API server. This id is a reference to the blob.
+    # by API server. This id is a reference to the blob. NULL when the job's
+    # task reads no local sources (e.g. they were staged to jobs.bucket), so
+    # the blob GC does not keep the blob for the job.
     sqlalchemy.Column('file_mounts_blob_id',
                       sqlalchemy.Text,
                       server_default=None),

@@ -1,10 +1,14 @@
 """Tests for sky.jobs.server.core."""
+import contextlib
 import re
 import traceback
 from types import SimpleNamespace
 from unittest import mock
 
+import filelock
 import pytest
+import sqlalchemy
+from sqlalchemy.ext import asyncio as sqlalchemy_asyncio
 
 import sky
 from sky import backends
@@ -12,6 +16,7 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import task as task_lib
+from sky.jobs import state as managed_job_state
 from sky.jobs.server import core as jobs_core
 from sky.jobs.state import ManagedJobStatus
 from sky.schemas.generated import managed_jobsv1_pb2
@@ -998,3 +1003,110 @@ def test_pool_taken_down_after_the_check(tmp_path):
         with pytest.raises(ValueError, match='refused'):
             jobs_core._maybe_submit_job_locally(str(tmp_path), dag, 1)
     refuse.assert_called_once_with('p', False, None)
+
+
+@pytest.fixture
+def _jobs_db(tmp_path, monkeypatch):
+    """An isolated SQLite managed-jobs DB (as in test_state.py)."""
+    db_path = tmp_path / 'managed_jobs_testing.db'
+    engine = sqlalchemy.create_engine(f'sqlite:///{db_path}')
+    async_engine = sqlalchemy_asyncio.create_async_engine(
+        f'sqlite+aiosqlite:///{db_path}', connect_args={'timeout': 30})
+
+    @contextlib.contextmanager
+    def _tmp_db_lock(_section: str):
+        with filelock.FileLock(str(tmp_path / f'.{_section}.lock'), timeout=10):
+            yield
+
+    monkeypatch.setattr(managed_job_state.migration_utils, 'db_lock',
+                        _tmp_db_lock)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine', engine)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine_async',
+                        async_engine)
+    managed_job_state.create_table(engine)
+    yield engine
+
+
+class _Submitted(Exception):
+    """Raised right after the local submission, to stop ``_launch`` there."""
+
+
+_BLOB_ID = 'b' * 64
+
+
+def _stage_to_bucket(dag):
+    """Stands in for ``_upload_files_to_controller`` with ``jobs.bucket``."""
+    for task in dag.tasks:
+        task.workdir = None
+        task.update_file_mounts({'/data/file': 's3://bucket/file-0'})
+    return {}
+
+
+def _keep_local_sources(dag):
+    """Stands in for ``_upload_files_to_controller`` in consolidation mode
+    without a bucket: the sources stay inside the blob."""
+    del dag
+    return {}
+
+
+def _submit_and_get_job_id(tmp_path, stage, blob_id):
+    """Run ``_launch`` in consolidation mode through the local submission and
+    return the id of the job it recorded."""
+    workdir = tmp_path / 'blob' / 'workdir'
+    workdir.mkdir(parents=True)
+    task = sky.Task(name='t', run='echo', workdir=str(workdir))
+    real_submit = jobs_core._maybe_submit_job_locally
+    submitted = []
+
+    def _submit(prefix, *args, **kwargs):
+        del prefix
+        submitted.extend(real_submit(str(tmp_path / 'yamls'), *args, **kwargs))
+        raise _Submitted
+
+    with mock.patch.object(jobs_core.managed_job_utils,
+                           'is_consolidation_mode', return_value=True), \
+         mock.patch.object(jobs_core.global_user_state,
+                           'cluster_with_name_exists', return_value=False), \
+         mock.patch.object(jobs_core.clouds.Kubernetes,
+                           'check_request_keeps_server_identity'), \
+         mock.patch.object(jobs_core.clouds.Kubernetes,
+                           'check_task_keeps_server_identity'), \
+         mock.patch.object(jobs_core.controller_utils,
+                           'get_controller_resources', return_value=[]), \
+         mock.patch.object(jobs_core, '_warn_file_mounts_rolling_update'), \
+         mock.patch.object(jobs_core, '_upload_files_to_controller',
+                           side_effect=stage), \
+         mock.patch.object(jobs_core, '_maybe_submit_job_locally',
+                           side_effect=_submit):
+        with pytest.raises(_Submitted):
+            jobs_core._launch(task,
+                              name='j',
+                              pool=None,
+                              num_jobs=None,
+                              stream_logs=False,
+                              file_mounts_blob_id=blob_id,
+                              parent_job_id=None,
+                              parent_task_id=None,
+                              root_job_id=None,
+                              depends_on=[])
+    assert len(submitted) == 1
+    return submitted[0]
+
+
+def test_job_staged_to_a_bucket_does_not_pin_its_blob(tmp_path, _jobs_db):
+    """Recovery reads the bucket, so the job must not keep the blob from GC."""
+    job_id = _submit_and_get_job_id(tmp_path, _stage_to_bucket, _BLOB_ID)
+    assert managed_job_state.get_file_mounts_blob_id(job_id) is None
+    assert _BLOB_ID not in managed_job_state.get_active_file_mounts_blob_ids()
+
+
+def test_job_with_local_sources_pins_its_blob(tmp_path, _jobs_db):
+    """Without a bucket the controller relaunches from the blob."""
+    job_id = _submit_and_get_job_id(tmp_path, _keep_local_sources, _BLOB_ID)
+    assert managed_job_state.get_file_mounts_blob_id(job_id) == _BLOB_ID
+    assert managed_job_state.get_active_file_mounts_blob_ids() == {_BLOB_ID}
+
+
+def test_job_without_a_blob_records_none(tmp_path, _jobs_db):
+    job_id = _submit_and_get_job_id(tmp_path, _keep_local_sources, None)
+    assert managed_job_state.get_file_mounts_blob_id(job_id) is None

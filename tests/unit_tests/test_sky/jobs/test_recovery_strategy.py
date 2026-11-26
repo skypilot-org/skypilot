@@ -375,6 +375,41 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     executor._cleanup_cluster.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ('recorded_blob_id', 'needs_local', 'launched_blob_id'),
+    [
+        # Staged to a bucket at submit: no blob was recorded.
+        (None, False, None),
+        # No bucket: the sources are inside the blob.
+        ('b' * 64, True, 'b' * 64),
+        # Recorded before submit stopped recording blobs of staged jobs.
+        ('b' * 64, False, None),
+    ])
+@pytest.mark.asyncio
+async def test_launch_passes_the_blob_only_when_sources_are_local(
+        monkeypatch, recorded_blob_id, needs_local, launched_blob_id):
+    executor = _make_launch_executor()
+    executor.file_mounts_blob_id = recorded_blob_id
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.setattr(recovery_strategy.server_common,
+                        'dag_requires_local_file_mounts',
+                        lambda dag: needs_local)
+    resolve_blob_dir = mock.MagicMock()
+    monkeypatch.setattr(recovery_strategy.server_common, 'resolve_blob_dir',
+                        resolve_blob_dir)
+
+    await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert (patches.sdk_launch.call_args.kwargs['_file_mounts_blob_id'] ==
+            launched_blob_id)
+    if launched_blob_id is None:
+        resolve_blob_dir.assert_not_called()
+    else:
+        resolve_blob_dir.assert_called_once()
+        assert resolve_blob_dir.call_args.args[0] == launched_blob_id
+
+
 @pytest.mark.asyncio
 async def test_launch_skips_api_start_inside_api_server(monkeypatch):
     """A consolidation-mode controller (IS_SKYPILOT_SERVER set) must not call
