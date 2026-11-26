@@ -1863,6 +1863,51 @@ def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
                        f'{target_statuses}')
 
 
+def wait_for_managed_job_recovery_count(
+        job_name: str,
+        min_recovery_count: int,
+        timeout: int = 360) -> Generator[str, None, None]:
+    """Wait until a managed job has recovered at least a number of times.
+
+    Prefer this over waiting for the ``RECOVERING`` status when a recovery
+    can be fast: on Kubernetes a job can go ``RECOVERING`` and back to
+    ``RUNNING`` within a few seconds, so the status can come and go between
+    two polls of the queue. The recovery count only goes up, so a poll
+    cannot miss it. It is incremented when a recovery completes.
+
+    Job names are not unique: as in ``wait_for_managed_job_status_sdk``, the
+    newest exactly-matching job is tracked.
+
+    A generator, to be used as a callable test command: it yields one line
+    per poll for the test log, and raises ``TimeoutError`` on timeout.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        jobs_list = sky.get(
+            sky.jobs.queue_v2(
+                refresh=False,
+                fields=['job_id', 'job_name', 'status', 'recovery_count']))[0]
+        matches = [j for j in jobs_list if j['job_name'] == job_name]
+        if matches:
+            newest_job_id = max(j['job_id'] for j in matches)
+            # One record per task: a recovery of any task of the job counts.
+            tasks = [j for j in matches if j['job_id'] == newest_job_id]
+            recovery_count = sum(j.get('recovery_count') or 0 for j in tasks)
+            statuses = [str(j['status']) for j in tasks]
+            if recovery_count >= min_recovery_count:
+                yield (f'Job {job_name} (ID {newest_job_id}) has recovered '
+                       f'{recovery_count} time(s); status: {statuses}')
+                return
+            yield (f'Waiting for job {job_name} (ID {newest_job_id}) to '
+                   f'recover {min_recovery_count} time(s); recovery count: '
+                   f'{recovery_count}, status: {statuses}')
+        else:
+            yield f'Waiting for job {job_name} to appear in the queue'
+        time.sleep(2)
+    raise TimeoutError(f'Timeout after {timeout} seconds waiting for job '
+                       f'{job_name} to recover {min_recovery_count} time(s)')
+
+
 def unprovisionable_storage_class_name(test_name: str) -> str:
     """Name of a per-test storage class that can never provision a volume."""
     return f'{test_name}-noprov'
