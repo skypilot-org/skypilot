@@ -1229,6 +1229,708 @@
       ],
       "title": "Node RDMA Network Throughput (min / median / max)",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Times an RDMA network interface (rdma*, ib*) of a node running this cluster's GPU pods lost its link, per interval. All RDMA interfaces is the total: 0 when no link dropped, and absent where the cluster's Prometheus does not collect the counter.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "axisSoftMax": 1
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short",
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "All RDMA interfaces"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "never"
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (cluster, node, device) (clamp_min(\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - node_network_carrier_down_changes_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - min_over_time(node_network_carrier_down_changes_total{node=~\"$node\"}[$__interval])),\n  0\n))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0",
+          "hide": false,
+          "refId": "A",
+          "instant": false,
+          "legendFormat": "{{node}} {{device}}",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(\nsum by (cluster, node, device) (clamp_min(\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - node_network_carrier_down_changes_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - min_over_time(node_network_carrier_down_changes_total{node=~\"$node\"}[$__interval])),\n  0\n))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "refId": "B",
+          "instant": false,
+          "legendFormat": "All RDMA interfaces",
+          "range": true
+        }
+      ],
+      "title": "RDMA Link Drops",
+      "type": "timeseries",
+      "interval": "5m"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Errors counted by each RDMA NIC of the nodes running this cluster's GPU pods, per interval: failed RDMA operations (completion errors), ack timeouts, remote invalid requests, and RoCE retransmits (recovery from packet loss; occasional ones are normal). NICs are named by RDMA device (mlx5_0); RDMA Link Drops names their network interfaces (rdma0, ib0). All RDMA errors is the total without retransmits: 0 when there were none, and absent where the cluster's Prometheus does not collect the counters.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "axisSoftMax": 1
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short",
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "All RDMA errors"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "never"
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - node_infiniband_req_cqes_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_cqes_errors_total{node=~\"$node\"}[$__interval])),\n  0\n))\n+\nsum by (cluster, node, device) (clamp_min(\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - node_infiniband_resp_cqes_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_resp_cqes_errors_total{node=~\"$node\"}[$__interval])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0",
+          "hide": false,
+          "refId": "A",
+          "instant": false,
+          "legendFormat": "{{node}} {{device}} completion errors",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"}[$__interval])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0",
+          "hide": false,
+          "refId": "B",
+          "instant": false,
+          "legendFormat": "{{node}} {{device}} ack timeouts",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"}[$__interval])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0",
+          "hide": false,
+          "refId": "C",
+          "instant": false,
+          "legendFormat": "{{node}} {{device}} remote invalid requests",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - min_over_time(node_infiniband_roce_adp_retransmits_total{node=~\"$node\"}[$__interval])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0",
+          "hide": false,
+          "refId": "D",
+          "instant": false,
+          "legendFormat": "{{node}} {{device}} RoCE retransmits",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(\n(sum by (cluster, node) (clamp_min(\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - node_infiniband_req_cqes_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_cqes_errors_total{node=~\"$node\"}[$__interval])),\n  0\n))\n+\nsum by (cluster, node) (clamp_min(\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - node_infiniband_resp_cqes_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_resp_cqes_errors_total{node=~\"$node\"}[$__interval])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)\n+\nsum(\n(sum by (cluster, node) (clamp_min(\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"}[$__interval])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)\n+\nsum(\n(sum by (cluster, node) (clamp_min(\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} offset $__interval)\n  or\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"}[$__interval])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n)",
+          "hide": false,
+          "refId": "E",
+          "instant": false,
+          "legendFormat": "All RDMA errors",
+          "range": true
+        }
+      ],
+      "title": "RDMA Errors",
+      "type": "timeseries",
+      "interval": "5m"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "One row per RDMA interface of the nodes running this cluster's GPU pods that lost its link in the selected time range. Since node boot also counts drops from before this cluster ran on the node.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          },
+          "decimals": 0,
+          "noValue": "No link drops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "id": 12,
+      "options": {
+        "showHeader": true
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (cluster, node, device) (clamp_min(\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - node_network_carrier_down_changes_total{node=~\"$node\"} offset $__range)\n  or\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - min_over_time(node_network_carrier_down_changes_total{node=~\"$node\"}[$__range])),\n  0\n))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0",
+          "hide": false,
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (cluster, node, device) (node_network_carrier_down_changes_total{node=~\"$node\"})\nand on(cluster, node, device)\nsum by (cluster, node, device) (clamp_min(\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - node_network_carrier_down_changes_total{node=~\"$node\"} offset $__range)\n  or\n  (node_network_carrier_down_changes_total{node=~\"$node\"} - min_over_time(node_network_carrier_down_changes_total{node=~\"$node\"}[$__range])),\n  0\n))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0",
+          "hide": false,
+          "refId": "B",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "title": "RDMA Interfaces With Link Drops",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "node": 0,
+              "device": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "cluster": 4
+            },
+            "renameByName": {
+              "node": "Node",
+              "device": "Interface",
+              "cluster": "Kubernetes cluster",
+              "Value #A": "Link drops",
+              "Value #B": "Link drops since node boot"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "desc": true,
+                "field": "Link drops"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "One row per RDMA NIC of the nodes running this cluster's GPU pods with RDMA errors in the selected time range, named by RDMA device (mlx5_0).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          },
+          "decimals": 0,
+          "noValue": "No RDMA errors"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "id": 13,
+      "options": {
+        "showHeader": true
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - node_infiniband_req_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n))\n+\nsum by (cluster, node, device) (clamp_min(\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - node_infiniband_resp_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_resp_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n))\nand on(cluster, node, device)\n(\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - node_infiniband_req_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n))\n+\nsum by (cluster, node, device) (clamp_min(\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - node_infiniband_resp_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_resp_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - min_over_time(node_infiniband_roce_adp_retransmits_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\n)",
+          "hide": false,
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n))\nand on(cluster, node, device)\n(\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - node_infiniband_req_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n))\n+\nsum by (cluster, node, device) (clamp_min(\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - node_infiniband_resp_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_resp_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - min_over_time(node_infiniband_roce_adp_retransmits_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\n)",
+          "hide": false,
+          "refId": "B",
+          "format": "table",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n))\nand on(cluster, node, device)\n(\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - node_infiniband_req_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n))\n+\nsum by (cluster, node, device) (clamp_min(\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - node_infiniband_resp_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_resp_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - min_over_time(node_infiniband_roce_adp_retransmits_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\n)",
+          "hide": false,
+          "refId": "C",
+          "format": "table",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - min_over_time(node_infiniband_roce_adp_retransmits_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n))\nand on(cluster, node, device)\n(\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - node_infiniband_req_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n))\n+\nsum by (cluster, node, device) (clamp_min(\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - node_infiniband_resp_cqes_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_resp_cqes_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_resp_cqes_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_local_ack_timeout_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"} - min_over_time(node_infiniband_req_remote_invalid_request_errors_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\nor\n((sum by (cluster, node, device) (clamp_min(\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} offset $__range)\n  or\n  (node_infiniband_roce_adp_retransmits_total{node=~\"$node\"} - min_over_time(node_infiniband_roce_adp_retransmits_total{node=~\"$node\"}[$__range])),\n  0\n)))\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)\n> 0)\n)",
+          "hide": false,
+          "refId": "D",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "title": "RDMA Errors by NIC",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "node": 0,
+              "device": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5,
+              "cluster": 6
+            },
+            "renameByName": {
+              "node": "Node",
+              "cluster": "Kubernetes cluster",
+              "Value #A": "Completion errors",
+              "Value #B": "Ack timeouts",
+              "Value #C": "Remote invalid requests",
+              "Value #D": "RoCE retransmits",
+              "device": "NIC"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "desc": true,
+                "field": "Completion errors"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "RDMA ports of the nodes running this cluster's GPU pods that run slower than the same device on the other nodes of the Kubernetes cluster.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          },
+          "noValue": "All RDMA ports at full speed"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Speed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Same device elsewhere"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bps"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "id": 14,
+      "options": {
+        "showHeader": true
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(\n  max by (cluster, node, device, port) (node_infiniband_rate_bytes_per_second{node=~\"$node\"}) * 8\n  < on(cluster, device) group_left()\n  max by (cluster, device) (node_infiniband_rate_bytes_per_second) * 8\n)\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n)",
+          "hide": false,
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((\n  max by (cluster, node, device, port) (node_infiniband_rate_bytes_per_second{node=~\"$node\"}) * 8\n  < on(cluster, device) group_left()\n  max by (cluster, device) (node_infiniband_rate_bytes_per_second) * 8\n)\n* on(cluster, node) group_left()\ngroup by (cluster, node) (\n  DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}\n  * on(pod, namespace) group_left(label_skypilot_cluster_name)\n  group by (pod, namespace, label_skypilot_cluster_name) (\n    kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n  )\n))\n* 0 + on(cluster, device) group_left()\nmax by (cluster, device) (node_infiniband_rate_bytes_per_second) * 8",
+          "hide": false,
+          "refId": "B",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "title": "Degraded RDMA Ports",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "node": 0,
+              "device": 1,
+              "port": 2,
+              "Value #A": 3,
+              "Value #B": 4,
+              "cluster": 5
+            },
+            "renameByName": {
+              "node": "Node",
+              "device": "Device",
+              "port": "Port",
+              "cluster": "Kubernetes cluster",
+              "Value #A": "Speed",
+              "Value #B": "Same device elsewhere"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "desc": true,
+                "field": "Speed"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
     }
   ],
   "preload": false,
