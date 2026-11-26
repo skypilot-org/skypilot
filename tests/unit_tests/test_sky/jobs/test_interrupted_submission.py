@@ -78,9 +78,8 @@ def _request(status: requests_lib.RequestStatus,
                                 finished_at=finished_at)
 
 
-def _status_and_schedule_state(job_id: int):
-    task = state.get_managed_job_tasks(job_id)[0]
-    return task['status'], task['schedule_state'], task['failure_reason']
+def _job_row(job_id: int):
+    return state.get_managed_job_tasks(job_id)[0]
 
 
 @pytest.mark.parametrize('request_row', [
@@ -100,11 +99,11 @@ def test_ended_submission_fails_the_job(_mock_managed_jobs_db_conn, monkeypatch,
 
     utils.update_managed_jobs_statuses()
 
-    status, schedule_state, failure_reason = _status_and_schedule_state(job_id)
-    assert status == state.ManagedJobStatus.FAILED_CONTROLLER
-    assert schedule_state == state.ManagedJobScheduleState.DONE
-    assert 'req-1' in failure_reason
-    assert 'never submitted' in failure_reason
+    row = _job_row(job_id)
+    assert row['status'] == state.ManagedJobStatus.FAILED_CONTROLLER
+    assert row['schedule_state'] == state.ManagedJobScheduleState.DONE
+    assert 'req-1' in row['failure_reason']
+    assert 'never submitted' in row['failure_reason']
 
 
 @pytest.mark.parametrize(
@@ -121,9 +120,9 @@ def test_live_submission_is_left_alone(_mock_managed_jobs_db_conn, monkeypatch,
 
     utils.update_managed_jobs_statuses()
 
-    status, schedule_state, _ = _status_and_schedule_state(job_id)
-    assert status == state.ManagedJobStatus.PENDING
-    assert schedule_state == state.ManagedJobScheduleState.INACTIVE
+    row = _job_row(job_id)
+    assert row['status'] == state.ManagedJobStatus.PENDING
+    assert row['schedule_state'] == state.ManagedJobScheduleState.INACTIVE
 
 
 def test_job_without_submission_request_is_left_alone(
@@ -133,9 +132,9 @@ def test_job_without_submission_request_is_left_alone(
 
     utils.update_managed_jobs_statuses()
 
-    status, schedule_state, _ = _status_and_schedule_state(job_id)
-    assert status == state.ManagedJobStatus.PENDING
-    assert schedule_state == state.ManagedJobScheduleState.INACTIVE
+    row = _job_row(job_id)
+    assert row['status'] == state.ManagedJobStatus.PENDING
+    assert row['schedule_state'] == state.ManagedJobScheduleState.INACTIVE
     get_request.assert_not_called()
 
 
@@ -147,9 +146,22 @@ def test_cancelled_job_of_ended_submission_is_done(_mock_managed_jobs_db_conn,
 
     utils.update_managed_jobs_statuses()
 
-    status, schedule_state, _ = _status_and_schedule_state(job_id)
-    assert status == state.ManagedJobStatus.CANCELLED
-    assert schedule_state == state.ManagedJobScheduleState.DONE
+    row = _job_row(job_id)
+    assert row['status'] == state.ManagedJobStatus.CANCELLED
+    assert row['schedule_state'] == state.ManagedJobScheduleState.DONE
+
+
+def test_jobs_of_one_launch_share_one_request_lookup(_mock_managed_jobs_db_conn,
+                                                     monkeypatch):
+    job_ids = [_create_inactive_job('req-1') for _ in range(3)]
+    get_request = _stub_request(monkeypatch, None)
+
+    utils.update_managed_jobs_statuses()
+
+    get_request.assert_called_once()
+    for job_id in job_ids:
+        assert (_job_row(job_id)['status'] ==
+                state.ManagedJobStatus.FAILED_CONTROLLER)
 
 
 def test_launch_records_the_submitting_request(_mock_managed_jobs_db_conn,
