@@ -502,6 +502,169 @@ class SeewebNodeProvider:
         raise TimeoutError(f'Servers not stopped within {max_wait} seconds')
 
 
+# --------------------------------------------------------------------------- #
+# Security hardening
+#
+# Seeweb attaches no network firewall to the instance and exposes no
+# security-group API, so every port is reachable from the internet by default.
+# SkyPilot starts Ray with ports that Ray documents as unauthenticated and safe
+# only inside a trusted network (CVE-2023-48022): GCS (6380), the object
+# manager (8076), the dashboard (8266), the Ray Client server (10001), the
+# dashboard agent (52365) and the raylet/worker range (11001-11200). Reachable
+# from the internet they are a remote-code-execution surface - the entry vector
+# of the "ShadowRay" GPU-cryptomining campaigns.
+#
+# Other clouds restrict exactly that set with a security group. Seeweb offers
+# no such API, so we install a host firewall at the end of provisioning, before
+# SkyPilot starts Ray: a dedicated iptables chain that DROPs only those ports.
+# SSH, other services and all outbound traffic keep their current behaviour,
+# and so does any port a task explicitly requests through `resources.ports`
+# (open_ports() punches an ACCEPT for it).
+# --------------------------------------------------------------------------- #
+_RAY_FIREWALL_CHAIN = 'SKYPILOT_SEEWEB_RAY'
+# ACCEPT rules for ports explicitly requested via `resources.ports`, kept in a
+# separate chain so rebuilding the Ray chain (e.g. on `sky start`) cannot drop
+# them. Hooked ahead of the Ray chain, so an explicit request wins.
+_USER_FIREWALL_CHAIN = 'SKYPILOT_SEEWEB_USER'
+# Ports Ray binds on a SkyPilot node. iptables multiport takes at most 15
+# ports/ranges per rule, so the worker range is a single spec.
+_RAY_PORT_SPECS = (
+    '6380',  # Ray GCS (Redis)
+    '8076',  # Ray object manager
+    '8266',  # Ray dashboard (SKY_REMOTE_RAY_DASHBOARD_PORT)
+    '10001',  # Ray Client server
+    '52365',  # Ray dashboard agent (gRPC)
+    '11001:11200',  # raylet node manager + worker ports
+)
+_MAX_MULTIPORT = 15
+
+
+def _iptables_port_spec(port: str) -> str:
+    """Convert a SkyPilot port range ('8000-8100') to an iptables spec."""
+    return port.replace('-', ':')
+
+
+def _run_remote_script(server_ip: str, script: str) -> bool:
+    """Run *script* as root on *server_ip* over the SSH connection."""
+    try:
+        private_key_path, _ = auth_utils.get_or_generate_keys()
+        private_key_path = os.path.expanduser(private_key_path)
+        result = subprocess.run([
+            'ssh', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=no',
+            '-o', f'UserKnownHostsFile={os.devnull}', '-o',
+            f'GlobalKnownHostsFile={os.devnull}', '-o', 'IdentitiesOnly=yes',
+            '-i', private_key_path, f'ecuser@{server_ip}', 'sudo -n bash -s'
+        ],
+                                input=script.encode(),
+                                capture_output=True,
+                                timeout=30,
+                                check=False)
+        if result.returncode != 0:
+            logger.warning('Seeweb firewall command failed on %s: %s',
+                           server_ip,
+                           result.stderr.decode(errors='replace').strip()[:300])
+            return False
+        return True
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Seeweb firewall command failed on %s: %s', server_ip, e)
+        return False
+
+
+def _ray_firewall_script(cluster_ips: List[str]) -> str:
+    """Bash script that blocks the unauthenticated Ray ports on a node."""
+    lines = [
+        f'iptables -N {_RAY_FIREWALL_CHAIN} 2>/dev/null || true',
+        f'iptables -F {_RAY_FIREWALL_CHAIN}',
+        # Never break in-flight connections, loopback or intra-cluster traffic:
+        # a worker talks to the head's GCS/object manager over a new connection
+        # from its own address.
+        f'iptables -A {_RAY_FIREWALL_CHAIN} -m conntrack '
+        '--ctstate ESTABLISHED,RELATED -j RETURN',
+        f'iptables -A {_RAY_FIREWALL_CHAIN} -i lo -j RETURN',
+    ]
+    lines += [
+        f'iptables -A {_RAY_FIREWALL_CHAIN} -s {ip} -j RETURN'
+        for ip in cluster_ips
+    ]
+    lines += [
+        f'iptables -A {_RAY_FIREWALL_CHAIN} -p tcp -m multiport '
+        f'--dports {",".join(_RAY_PORT_SPECS)} -j DROP',
+        # Everything else keeps its current behaviour.
+        f'iptables -A {_RAY_FIREWALL_CHAIN} -j RETURN',
+        # Hook the chain on top of INPUT exactly once (idempotent).
+        f'iptables -C INPUT -j {_RAY_FIREWALL_CHAIN} 2>/dev/null || '
+        f'iptables -I INPUT 1 -j {_RAY_FIREWALL_CHAIN}',
+    ]
+    return 'set -u\n' + '\n'.join(lines) + '\n'
+
+
+def _user_port_script(ports: List[str], add: bool) -> str:
+    """Bash script that (un)blocks the ports a task explicitly requested."""
+    specs = [_iptables_port_spec(port) for port in ports]
+    lines = [
+        f'iptables -N {_USER_FIREWALL_CHAIN} 2>/dev/null || true',
+        f'iptables -F {_USER_FIREWALL_CHAIN}',
+    ]
+    if add:
+        for i in range(0, len(specs), _MAX_MULTIPORT):
+            chunk = ','.join(specs[i:i + _MAX_MULTIPORT])
+            lines.append(f'iptables -A {_USER_FIREWALL_CHAIN} -p tcp '
+                         f'-m multiport --dports {chunk} -j ACCEPT')
+        # Hook ahead of the Ray chain so an explicit request wins.
+        lines.append(f'iptables -C INPUT -j {_USER_FIREWALL_CHAIN} '
+                     '2>/dev/null || '
+                     f'iptables -I INPUT 1 -j {_USER_FIREWALL_CHAIN}')
+    lines.append(f'iptables -A {_USER_FIREWALL_CHAIN} -j RETURN')
+    return 'set -u\n' + '\n'.join(lines) + '\n'
+
+
+def _cluster_ips(cluster_name_on_cloud: str) -> List[str]:
+    """Public IPv4 addresses of the servers belonging to a cluster."""
+    try:
+        client = _get_seeweb_client()
+        return [
+            s.ipv4
+            for s in client.fetch_servers()
+            if s.notes and s.notes.startswith(cluster_name_on_cloud) and s.ipv4
+        ]
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Could not list servers for %s: %s',
+                       cluster_name_on_cloud, e)
+        return []
+
+
+def _apply_to_cluster(cluster_name_on_cloud: str, script: str) -> None:
+    """Run *script* on every SSH-reachable server of a cluster."""
+    for ip in _cluster_ips(cluster_name_on_cloud):
+        _run_remote_script(ip, script)
+
+
+def _harden_cluster_firewall(cluster_nodes) -> None:
+    """Block the unauthenticated Ray ports on every node of the cluster.
+
+    Called at the end of provisioning, before SkyPilot starts Ray, so the
+    ports are never reachable from the internet.
+    """
+    ips = [
+        ip for ip in (getattr(node, 'ipv4', None) for node in cluster_nodes)
+        if ip
+    ]
+    script = _ray_firewall_script(ips)
+    deadline = time.time() + _MAX_BOOT_TIME
+    pending = list(ips)
+    while pending and time.time() < deadline:
+        for ip in list(pending):
+            if (_check_ssh_ready_standalone(ip) and
+                    _run_remote_script(ip, script)):
+                pending.remove(ip)
+        if pending:
+            time.sleep(_POLL_INTERVAL)
+    for ip in pending:
+        logger.warning(
+            'Seeweb Ray-port firewall not applied on %s '
+            '(SSH timeout)', ip)
+
+
 # =============================================================================
 # Standalone functions required by the provisioning interface
 # =============================================================================
@@ -613,6 +776,9 @@ def wait_instances(
             # If all servers are Booted, wait for them to be truly stable
             if seeweb_state == 'Booted':
                 if _wait_for_all_servers_stable_standalone(cluster_nodes):
+                    # Block the unauthenticated Ray ports before SkyPilot
+                    # starts Ray on these nodes.
+                    _harden_cluster_firewall(cluster_nodes)
                     return
                 else:
                     time.sleep(_POLL_INTERVAL)
@@ -797,10 +963,12 @@ def open_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    del provider_config  # Unused
-    logger.debug(f'Seeweb: skipping open_ports for {cluster_name_on_cloud}'
-                 f'ports={ports} all ports are open by default')
-    return
+    del provider_config  # Unused.
+    if not ports:
+        return
+    # Other clouds open the requested ports in their security group. Seeweb has
+    # none, so punch an ACCEPT ahead of the Ray-port DROP.
+    _apply_to_cluster(cluster_name_on_cloud, _user_port_script(ports, add=True))
 
 
 def cleanup_ports(
@@ -808,5 +976,8 @@ def cleanup_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    del cluster_name_on_cloud, ports, provider_config  # Unused.
-    return
+    del provider_config  # Unused.
+    if not ports:
+        return
+    _apply_to_cluster(cluster_name_on_cloud, _user_port_script(ports,
+                                                               add=False))
