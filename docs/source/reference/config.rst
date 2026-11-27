@@ -3537,8 +3537,7 @@ If not specified:
   server's own basic auth) and service accounts created without a role get
   ``user``.
 - Requests that reach the API server without authentication, such as those to
-  a local API server or to one that only uses basic auth on its ingress, run as
-  ``admin``.
+  an API server that only uses basic auth on its ingress, run as ``admin``.
 
 If specified, new users get this role instead. Existing users keep their roles.
 
