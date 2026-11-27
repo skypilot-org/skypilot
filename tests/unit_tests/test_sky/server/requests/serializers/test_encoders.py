@@ -132,6 +132,19 @@ class TestEncodeJobsQueue:
                                                        ]
         assert encoded_job['internal_services'] is None
 
+    def test_encode_jobs_queue_v2_without_counts(self):
+        """A tuple whose counts were skipped still encodes as the dict."""
+        from sky.jobs import state as managed_jobs
+
+        job = responses.ManagedJobRecord(
+            job_id=1, task_id=0, status=managed_jobs.ManagedJobStatus.RUNNING)
+        result = encoders.encode_jobs_queue_v2(([job], None, None, None, None))
+        assert result['jobs'][0]['job_id'] == 1
+        assert [
+            result[k] for k in ('total', 'total_no_filter', 'status_counts',
+                                'infra_options')
+        ] == [None, None, None, None]
+
     def test_encode_jobs_queue_v2_with_network_fields(self):
         """Test that encode_jobs_queue_v2 encodes jobs with network fields."""
         from sky.jobs import state as managed_jobs

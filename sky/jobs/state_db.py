@@ -383,6 +383,28 @@ job_info_table = sqlalchemy.Table(
                      unique=True),
 )
 
+
+def job_info_tree_root() -> 'sqlalchemy.ColumnElement':
+    """The top-level job of a job_info row's tree: root_job_id, else itself.
+
+    Indexed (see TREE_ROOT_INDEXES), so a queue page and its cursor walk an
+    index instead of sorting every job. Queries must use this exact
+    expression for the index to apply.
+    """
+    return sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
+                                    job_info_table.c.spot_job_id)
+
+
+# The tree-root indexes, by name, with their leading columns. Created by
+# migration 032 rather than declared on the table: SQLAlchemy cannot reflect an
+# expression index on SQLite, so a declared one breaks the index checks of the
+# migrations that run after the initial schema.
+TREE_ROOT_INDEXES = {
+    'ix_job_info_tree_root': [],
+    'ix_job_info_user_hash_tree_root': ['user_hash'],
+    'ix_job_info_workspace_tree_root': ['workspace'],
+}
+
 # Separate table for API access token IDs associated with managed jobs.
 # Maps job_id -> token_id for cleanup when the job completes.
 api_access_token_table = sqlalchemy.Table(
@@ -669,6 +691,8 @@ __all__ = [
     'CLAIMED_LIVE_PREDICATE',
     'spot_table',
     'job_info_table',
+    'job_info_tree_root',
+    'TREE_ROOT_INDEXES',
     'api_access_token_table',
     'ha_recovery_script_table',
     'job_events_table',

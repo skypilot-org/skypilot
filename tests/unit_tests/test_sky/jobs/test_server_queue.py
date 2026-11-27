@@ -272,7 +272,8 @@ class TestQueue:
                                submitted_after=None,
                                submitted_before=None,
                                include_tree=False,
-                               after_job_id=None):
+                               after_job_id=None,
+                               include_counts=True):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
@@ -280,6 +281,7 @@ class TestQueue:
                 'job_ids': job_ids,
                 'include_tree': include_tree,
                 'after_job_id': after_job_id,
+                'include_counts': include_counts,
                 'workspace_match': workspace_match,
                 'name_match': name_match,
                 'pool_match': pool_match,
@@ -835,6 +837,45 @@ class TestQueue:
         assert captured['after_job_id'] == 2
         assert captured['page'] == 1 and captured['limit'] == 5
 
+    def test_queue_include_counts_reaches_the_controller(self, monkeypatch):
+        self._patch_backend_and_utils(monkeypatch, [_make_job(1)])
+        captured = {}
+        fake = jobs_core.managed_job_utils.ManagedJobCodeGen.get_job_table
+
+        def capturing(**kwargs):
+            captured.update(kwargs)
+            return fake(**kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_utils.ManagedJobCodeGen,
+                            'get_job_table', capturing)
+        jobs_core.queue_v2(refresh=False, all_users=True)
+        assert captured['include_counts'] is True
+        jobs_core.queue_v2(refresh=False, all_users=True, include_counts=False)
+        assert captured['include_counts'] is False
+
+    def test_queue_drops_the_counts_a_grpc_controller_did_not_compute(
+            self, monkeypatch):
+        self._patch_backend_and_utils(monkeypatch, [_make_job(1)])
+
+        class GrpcHandle:
+            is_grpc_enabled_with_flag = True
+
+            def get_grpc_channel(self):
+                return None
+
+        monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                            lambda *args, **kwargs: GrpcHandle())
+        response = jobs_core.managed_jobsv1_pb2.GetJobTableResponse(
+            total=0, total_no_filter=0)
+        monkeypatch.setattr(jobs_core.backend_utils,
+                            'invoke_skylet_with_retries', lambda fn: response)
+        assert jobs_core.queue_v2(refresh=False,
+                                  all_users=True,
+                                  include_counts=False) == ([], None, None,
+                                                            None, None)
+        assert jobs_core.queue_v2(refresh=False,
+                                  all_users=True) == ([], 0, {}, 0, [])
+
     def test_queue_refuses_a_cursor_it_cannot_apply(self, monkeypatch):
         self._patch_backend_and_utils(monkeypatch, [_make_job(1)])
         with pytest.raises(ValueError, match='requires limit'):
@@ -950,6 +991,11 @@ class TestQueue:
                                                all_users=True,
                                                limit=5)
         assert seen['limit'] == 5 and total == 2
+        # It computes the counts whatever was asked.
+        _, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                               all_users=True,
+                                               include_counts=False)
+        assert total == 2
         with pytest.raises(exceptions.QueueCursorNotSupportedError):
             jobs_core.queue_v2(refresh=False,
                                all_users=True,
@@ -1039,6 +1085,40 @@ class TestGetManagedJobQueueCursor:
         TestGetManagedJobQueueIncludeTree()._patch(monkeypatch, roots=[])
         with pytest.raises(ValueError, match='requires limit'):
             jobs_utils.get_managed_job_queue(after_job_id=9)
+
+
+class TestGetManagedJobQueueCounts:
+
+    def test_skips_every_count_without_include_counts(self, monkeypatch):
+        seen = TestGetManagedJobQueueIncludeTree()._patch(monkeypatch, roots=[])
+
+        def no_total():
+            raise AssertionError('counted every job')
+
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_managed_jobs_total', no_total)
+        result = jobs_utils.get_managed_job_queue(limit=5, include_counts=False)
+        assert 'infra' not in seen and 'status' not in seen
+        assert seen['jobs']['count_total'] is False
+        assert [
+            result[k] for k in ('total', 'total_no_filter', 'status_counts',
+                                'infra_options')
+        ] == [None, None, None, None]
+
+    def test_counts_by_default(self, monkeypatch):
+        seen = TestGetManagedJobQueueIncludeTree()._patch(monkeypatch, roots=[])
+        result = jobs_utils.get_managed_job_queue(limit=5)
+        assert 'infra' in seen and 'status' in seen
+        assert seen['jobs']['count_total'] is True
+        assert result['total'] == 0 and result['status_counts'] == {}
+
+
+def test_queue_v2_body_carries_include_counts():
+    # An old client that never sends the field gets the counts.
+    body = payloads.JobsQueueV2Body(refresh=False)
+    assert body.to_kwargs()['include_counts'] is True
+    body = payloads.JobsQueueV2Body(refresh=False, include_counts=False)
+    assert body.to_kwargs()['include_counts'] is False
 
 
 def test_queue_v2_body_carries_include_tree():

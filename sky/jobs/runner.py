@@ -57,9 +57,11 @@ class ManagedJobRunner(Protocol):
         sort_order: Optional[str],
         submitted_after: Optional[float],
         submitted_before: Optional[float],
-    ) -> Tuple[List[Dict[str, Any]], int,
-               'managed_job_utils.ManagedJobQueueResultType', int, Dict[
-                   str, int], List[str]]:
+        # Default so a caller on the previous protocol still works.
+        include_counts: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], Optional[int],
+               'managed_job_utils.ManagedJobQueueResultType', Optional[int],
+               Optional[Dict[str, int]], Optional[List[str]]]:
         ...
 
     def cancel_managed_jobs(

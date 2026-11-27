@@ -2184,6 +2184,33 @@ class TestQueueCursorCodegenCompatibility:
                 managed_job_constants.MANAGED_JOBS_VERSION)
 
 
+class TestQueueCountsCodegenCompatibility:
+    """The generated queue code against a controller that predates
+    `include_counts`: it is not handed the kwarg and computes the counts,
+    which is still a correct answer."""
+
+    def _run_branch(self, built: str, version: int):
+        return TestInfraFilterCodegenCompatibility._run_branch(
+            self, built, version)
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(include_counts=False)
+        one_older = jobs_utils.QUEUE_COUNTS_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'include_counts' not in kwargs
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        version = jobs_utils.QUEUE_COUNTS_MANAGED_JOBS_VERSION
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(include_counts=False)
+        assert self._run_branch(code, version)['include_counts'] is False
+        code = jobs_utils.ManagedJobCodeGen.get_job_table()
+        assert self._run_branch(code, version)['include_counts'] is True
+
+    def test_current_version_accepts_the_kwarg(self):
+        assert (jobs_utils.QUEUE_COUNTS_MANAGED_JOBS_VERSION <=
+                managed_job_constants.MANAGED_JOBS_VERSION)
+
+
 class TestTreeRootIds:
     """`tree_root_ids`: every row of the trees rooted at those ids. The ids
     come from `get_tree_root_ids`; `utils.get_managed_job_queue` resolves the
@@ -2380,6 +2407,17 @@ class TestPaginationByCursor:
         # The member rides along with its root.
         assert self._ids(after=plain) == {root, member}
         assert self._ids(after=root) == set()
+
+    def test_a_page_without_the_count(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        member = new_job('member', parent_job_id=root)
+        newest = new_job('newest')
+        rows, total = state.get_managed_jobs_with_filters(page=1,
+                                                          limit=2,
+                                                          count_total=False)
+        assert total is None
+        assert {j['job_id'] for j in rows} == {newest, root, member}
 
     def test_total_ignores_the_cursor(self, _mock_managed_jobs_db_conn):
         new_job = TestParentJobLinks._new_job

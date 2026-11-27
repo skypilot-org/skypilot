@@ -86,7 +86,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 29  # GetJobSpec: read one job's stored spec
+MANAGED_JOBS_VERSION = 30  # GetJobTable: include_counts
 
 # Emergency recovery: when the job controller hits an unexpected internal
 # error (e.g. external mutation of the job state, or an unhandled exception

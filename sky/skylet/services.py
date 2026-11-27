@@ -520,6 +520,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 limit=request.limit if request.HasField('limit') else None,
                 after_job_id=request.after_job_id
                 if request.HasField('after_job_id') else None,
+                include_counts=request.include_counts
+                if request.HasField('include_counts') else True,
                 sort_by=request.sort_by
                 if request.HasField('sort_by') else None,
                 sort_order=request.sort_order
@@ -609,16 +611,17 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     dynamic_task_index=job.get('dynamic_task_index'))
                 jobs_info.append(job_info)
 
+            # Without include_counts these are None; the caller drops them.
             return managed_jobsv1_pb2.GetJobTableResponse(
                 jobs=jobs_info,
-                total=total,
-                total_no_filter=total_no_filter,
-                status_counts=status_counts,
+                total=total or 0,
+                total_no_filter=total_no_filter or 0,
+                status_counts=status_counts or {},
                 # Tell the caller the infra filter was honoured. A server that
                 # predates the field leaves it false, which is how the caller
                 # tells an empty result apart from an unfiltered one.
                 infra_match_applied=True,
-                infra_options=infra_options,
+                infra_options=infra_options or [],
                 # Same for include_tree: the caller cannot otherwise tell a
                 # tree answer from a root-only one.
                 include_tree_applied=True,

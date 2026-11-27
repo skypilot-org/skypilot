@@ -112,6 +112,10 @@ message GetJobTableRequest {
   // ignores this field and returns the first page, so the response reports
   // whether the field was applied.
   optional int64 after_job_id = 19;
+  // Whether to compute total, total_no_filter, status_counts and
+  // infra_options; unset means true. Added in ManagedJobsService v30. A server
+  // that predates it computes them anyway, which is still a correct answer.
+  optional bool include_counts = 20;
 }
 
 message ManagedJobInfo {

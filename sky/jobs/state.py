@@ -91,6 +91,8 @@ if sqlalchemy_deps.sqlalchemy_available():
     CLAIMED_LIVE_PREDICATE = _jobs_db.CLAIMED_LIVE_PREDICATE
     spot_table = _jobs_db.spot_table
     job_info_table = _jobs_db.job_info_table
+    job_info_tree_root = _jobs_db.job_info_tree_root
+    TREE_ROOT_INDEXES = _jobs_db.TREE_ROOT_INDEXES
     api_access_token_table = _jobs_db.api_access_token_table
     ha_recovery_script_table = _jobs_db.ha_recovery_script_table
     job_events_table = _jobs_db.job_events_table
@@ -1811,8 +1813,13 @@ def build_managed_jobs_with_filters_no_status_query(
     status_count: bool = False,
     infra_options: bool = False,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    page_roots: bool = False,
 ) -> sqlalchemy.Select:
     """Build a query to get managed jobs from the database with filters.
+
+    page_roots selects each matching row's tree root (``job_info_tree_root``)
+    from job_info joined to spot, so a page can walk the tree-root indexes.
+    A spot row without a job_info row predates job_info and is not listed.
 
     status_expr is an optional SQLAlchemy expression used in place of the raw
     ``spot.status`` column whenever a user-facing status is needed (the
@@ -1859,6 +1866,8 @@ def build_managed_jobs_with_filters_no_status_query(
     elif infra_options:
         query = sqlalchemy.select(job_info_table.c.cloud,
                                   job_info_table.c.region).distinct()
+    elif page_roots:
+        query = sqlalchemy.select(job_info_tree_root().label('tree_root'))
     else:
         query = sqlalchemy.select(
             spot_table,
@@ -1867,10 +1876,17 @@ def build_managed_jobs_with_filters_no_status_query(
             _batch_progress_subquery.c.batch_total_batches,
             _batch_progress_subquery.c.batch_completed_batches,
         )
-    query = query.select_from(
-        spot_table.outerjoin(
-            job_info_table,
-            spot_table.c.spot_job_id == job_info_table.c.spot_job_id).outerjoin(
+    if page_roots:
+        query = query.select_from(
+            job_info_table.join(
+                spot_table,
+                spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+    else:
+        query = query.select_from(
+            spot_table.outerjoin(
+                job_info_table,
+                spot_table.c.spot_job_id == job_info_table.c.spot_job_id).
+            outerjoin(
                 _batch_progress_subquery,
                 spot_table.c.spot_job_id == _batch_progress_subquery.c.job_id))
     if skip_finished:
@@ -1890,7 +1906,8 @@ def build_managed_jobs_with_filters_no_status_query(
                 )).distinct())
         query = query.where(
             spot_table.c.spot_job_id.in_(non_terminal_job_ids_subquery))
-    if not count_only and not status_count and not infra_options and fields:
+    if (not count_only and not status_count and not infra_options and
+            not page_roots and fields):
         # Resolve requested field names to explicit ColumnElements from
         # the joined tables.
         selected_columns = [_map_response_field_to_db_column(f) for f in fields]
@@ -1961,12 +1978,14 @@ def build_managed_jobs_with_filters_query(
     count_only: bool = False,
     count_unique_jobs: bool = False,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    page_roots: bool = False,
 ) -> sqlalchemy.Select:
     """Build a query to get managed jobs from the database with filters.
 
     See build_managed_jobs_with_filters_no_status_query for the meaning of
-    status_expr; here it is also used to match the ``statuses`` filter against
-    the refined status instead of the raw ``spot.status`` column.
+    page_roots and status_expr; status_expr is also used here to match the
+    ``statuses`` filter against the refined status instead of the raw
+    ``spot.status`` column.
     """
     query = build_managed_jobs_with_filters_no_status_query(
         fields=fields,
@@ -1984,6 +2003,7 @@ def build_managed_jobs_with_filters_query(
         count_only=count_only,
         count_unique_jobs=count_unique_jobs,
         status_expr=status_expr,
+        page_roots=page_roots,
     )
     if statuses is not None:
         status_col = (status_expr
@@ -2376,7 +2396,8 @@ def get_managed_jobs_with_filters(
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
     tree_root_ids: Optional[List[int]] = None,
     after_job_id: Optional[int] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
+    count_total: bool = True,
+) -> Tuple[List[Dict[str, Any]], Optional[int]]:
     """Get managed jobs from the database with filters.
 
     status_expr, when provided, is used to match the ``statuses`` filter
@@ -2408,36 +2429,41 @@ def get_managed_jobs_with_filters(
         after_job_id: With pagination, only the trees whose root comes after
             this job id in job id order. The total ignores it. The caller
             sorts by job id (see ``utils.check_queue_cursor``).
+        count_total: Whether to count the matching top-level jobs. The count
+            reads every matching row.
 
     Returns:
         A tuple containing
          - the list of managed jobs (all tasks for the paginated jobs)
-         - the total number of unique jobs (not tasks)
+         - the total number of unique jobs (not tasks), or None without
+           count_total
     """
     sort_field_map = _sort_field_map(status_expr)
 
     engine = _db_manager.get_engine()
 
-    # Count unique top-level jobs (tree roots), not tasks
-    count_query = build_managed_jobs_with_filters_query(
-        fields=None,
-        job_ids=job_ids,
-        tree_root_ids=tree_root_ids,
-        accessible_workspaces=accessible_workspaces,
-        workspace_match=workspace_match,
-        name_match=name_match,
-        pool_match=pool_match,
-        infra_match=infra_match,
-        user_hashes=user_hashes,
-        statuses=statuses,
-        skip_finished=skip_finished,
-        submitted_after=submitted_after,
-        submitted_before=submitted_before,
-        count_unique_jobs=True,
-        status_expr=status_expr,
-    )
-    with orm.Session(engine) as session:
-        total = session.execute(count_query).fetchone()[0]
+    total: Optional[int] = None
+    if count_total:
+        # Count unique top-level jobs (tree roots), not tasks
+        count_query = build_managed_jobs_with_filters_query(
+            fields=None,
+            job_ids=job_ids,
+            tree_root_ids=tree_root_ids,
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            infra_match=infra_match,
+            user_hashes=user_hashes,
+            statuses=statuses,
+            skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
+            count_unique_jobs=True,
+            status_expr=status_expr,
+        )
+        with orm.Session(engine) as session:
+            total = session.execute(count_query).fetchone()[0]
 
     # Pagination pages by tree so a group and its dynamic tasks share a page.
     # Two queries: the roots of the trees with a matching row, sorted and
@@ -2447,9 +2473,10 @@ def get_managed_jobs_with_filters(
         # Use GROUP BY instead of DISTINCT to allow ORDER BY on different
         # columns (PostgreSQL requires ORDER BY columns to be in SELECT list
         # when using DISTINCT).
-        # The builder gives task rows. Keep only each row's tree root, group
-        # so each tree is one unit, sort, slice: the page is a slice of trees.
-        tree_root = _tree_root_expr()
+        # Each matching row's tree root, grouped so each tree is one unit,
+        # sorted and sliced: the page is a slice of trees. In the default id
+        # order the slice and the cursor walk a tree-root index.
+        tree_root = job_info_tree_root()
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
             job_ids=job_ids,
@@ -2465,7 +2492,8 @@ def get_managed_jobs_with_filters(
             submitted_after=submitted_after,
             submitted_before=submitted_before,
             status_expr=status_expr,
-        ).with_only_columns(tree_root.label('tree_root')).group_by(tree_root)
+            page_roots=True,
+        ).group_by(tree_root)
 
         # Apply sorting to pagination query - this determines which trees
         # appear on each page. Use MAX aggregate for columns not in GROUP BY
@@ -2508,13 +2536,12 @@ def get_managed_jobs_with_filters(
         if not paginated_root_ids:
             return [], total
 
-        # Now get every row in those trees
+        # Now get every row in those trees. The page's roots were chosen from
+        # the caller's scope above, so this is the only tree constraint the
+        # final query needs, and the tree-root index serves it.
         query = build_managed_jobs_with_filters_query(
             fields=fields,
             job_ids=job_ids,
-            # The page's roots were chosen from the caller's scope above, so
-            # this is the only tree constraint the final query needs.
-            tree_root_ids=paginated_root_ids,
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,
@@ -2526,7 +2553,7 @@ def get_managed_jobs_with_filters(
             submitted_after=submitted_after,
             submitted_before=submitted_before,
             status_expr=status_expr,
-        )
+        ).where(job_info_tree_root().in_(paginated_root_ids))
     else:
         # No pagination - get all jobs
         query = build_managed_jobs_with_filters_query(
