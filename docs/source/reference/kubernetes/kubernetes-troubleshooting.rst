@@ -332,12 +332,14 @@ AppArmor profile only allows signals between processes labeled exactly
 container is denied. The rsync process that syncs your task files into the
 pod waits forever for a signal that never arrives. Job cancellation is
 affected the same way. Verify on the node named in the launch error (pin the
-probe pod to it, or a mixed cluster may schedule it on a healthy node):
+probe pod to that exact node — a mixed cluster may otherwise schedule it on a
+healthy node, and the hostname label does not always match the reported node
+name):
 
 .. code-block:: bash
 
     $ kubectl run probe --image=alpine:3.20 --restart=Never \
-        --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"<node>"}}}' \
+        --overrides='{"spec":{"nodeName":"<node>"}}' \
         -- sleep infinity
     $ kubectl exec probe -- sh -c 'sleep 60 >/dev/null 2>&1 & kill $!'
 

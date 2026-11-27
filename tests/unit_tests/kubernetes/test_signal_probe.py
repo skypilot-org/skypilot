@@ -159,17 +159,42 @@ def test_install_command_looks_up_parser_under_sudo():
 def test_install_command_never_overwrites_a_custom_profile():
     """An existing profile file that differs from ours is an admin override:
     it must be left in place with a warning, not overwritten. One that
-    already carries the stacked-peer rule (ours from a previous run, or an
-    admin's own fix) is left alone silently."""
+    already carries the stacked-peer signal rule (an admin's own fix) is
+    left alone silently."""
     cmd = apparmor.install_profile_cmd('')
-    # The exists-then-decide branch precedes any write.
-    exists_check = cmd.index(f'[ -f {apparmor.PROFILE_PATH} ]')
-    write = cmd.index(f'sudo -A tee {apparmor.PROFILE_PATH}')
-    assert exists_check < write
+    # The compare-then-decide branch precedes any write to the real path.
+    cmp_check = cmd.index(f'cmp -s "$tmp" {apparmor.PROFILE_PATH}')
+    install = cmd.index(f'cp "$tmp" {apparmor.PROFILE_PATH}')
+    assert cmp_check < install
     # Already-fixed profile: silent no-op before any write.
-    assert cmd.index('grep -qF') < write
+    assert cmd.index('grep -qF') < install
     # Custom profile: skipped with a marker, still no write on that path.
     assert apparmor.SKIPPED_MARKER in cmd
-    # `grep -F`: the rule contains no regex metacharacters today, but -F
-    # keeps the match literal if that ever changes.
-    assert 'grep -qF' in cmd
+
+
+def test_install_command_reloads_our_own_profile():
+    """A profile byte-identical to ours (previous `sky ssh up`) must be
+    reloaded, not trusted from disk: AppArmor enforces the kernel's loaded
+    profile, so a previous run whose `apparmor_parser -r` failed must retry
+    the load on the next `sky ssh up`, or the node stays broken while the
+    file looks fixed."""
+    cmd = apparmor.install_profile_cmd('')
+    install = cmd.index(f'cp "$tmp" {apparmor.PROFILE_PATH}')
+    reload_ = cmd.index(f'apparmor_parser -r {apparmor.PROFILE_PATH}')
+    # The reload is unconditional after the cp: identical files flow through
+    # cp + apparmor_parser -r again.
+    assert reload_ > install
+    assert f'cp "$tmp" {apparmor.PROFILE_PATH}' in cmd
+
+
+def test_install_command_matches_the_signal_rule_not_ptrace():
+    """The already-fixed check must match the full signal rule: the bare
+    stacked peer string also appears in the ptrace rule and in comments,
+    and neither of those permits signals."""
+    assert apparmor.STACKED_PEER_SIGNAL_RULE.startswith('signal (send,receive)')
+    # A profile carrying only the ptrace rule (signal rule removed) must
+    # not satisfy the check.
+    without_signal = apparmor.PROFILE.replace(
+        apparmor.STACKED_PEER_SIGNAL_RULE + ',', '', 1)
+    assert apparmor.STACKED_PEER_SIGNAL_RULE not in without_signal
+    assert '//&unconfined' in without_signal  # the ptrace rule is still there

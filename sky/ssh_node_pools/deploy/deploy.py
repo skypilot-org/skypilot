@@ -1269,7 +1269,7 @@ def install_apparmor_profile(node,
             f'{apparmor.PROFILE_PATH} on node ({node}) that differs from '
             f'SkyPilot\'s; leaving it in place. If the node denies '
             f'in-container signals, add the `'
-            f'{apparmor.STACKED_PEER_RULE}` rule to it.{RESET_ALL}')
+            f'{apparmor.STACKED_PEER_SIGNAL_RULE}` rule to it.{RESET_ALL}')
     elif apparmor.INSTALLED_MARKER in result:
         logger.info(
             f'{colorama.Style.DIM}Installed the containerd AppArmor fix '
