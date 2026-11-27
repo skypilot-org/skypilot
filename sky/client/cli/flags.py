@@ -29,6 +29,9 @@ def _parse_dotenv_file(path: str) -> Dict[str, Optional[str]]:
         raise click.UsageError(
             f'Dotenv file does not exist: {path}. Provide a path to an '
             'existing file, or remove the flag.') from None
+    except OSError as e:
+        raise click.UsageError(
+            f'Cannot inspect dotenv path: {path}: {e.strerror or e}.') from None
     if stat.S_ISDIR(st.st_mode):
         raise click.UsageError(
             f'Dotenv path is a directory: {path}. Provide a path to a file.')
