@@ -73,6 +73,60 @@ def test_unhealthy_server(mock_get_status):
         common.check_server_healthy()
 
 
+def _non_json_health_response(*urls: str) -> mock.Mock:
+    """A 200 non-JSON /api/health response that went through `urls`."""
+    hops = [mock.Mock(url=url) for url in urls]
+    response = hops[-1]
+    response.status_code = 200
+    response.history = hops[:-1]
+    response.json.side_effect = requests.JSONDecodeError(
+        'Expecting value', '', 0)
+    return response
+
+
+@pytest.mark.parametrize(
+    'chain, expected',
+    [
+        # Auth proxy that redirects straight to its login page (e.g. Cloudflare
+        # Access): the login URL is only the final URL.
+        (('https://sky.example.com/api/health',
+          'https://team.cloudflareaccess.com/cdn-cgi/access/login/'
+          'sky.example.com?meta=secret'), ApiServerStatus.NEEDS_AUTH),
+        # Login URL in the middle of the chain (e.g. oauth2-proxy).
+        (('https://sky.example.com/api/health',
+          'https://sky.example.com/oauth2/start',
+          'https://idp.example.com/authorize'), ApiServerStatus.NEEDS_AUTH),
+        # Redirected, but not to anything that looks like a login page.
+        (('http://sky.example.com/api/health',
+          'https://sky.example.com/api/health'), ApiServerStatus.UNHEALTHY),
+        # A keyword only in the final URL's query is not a login page.
+        (('https://sky.example.com/api/health',
+          'https://sky.example.com/maintenance?component=login'),
+         ApiServerStatus.UNHEALTHY),
+        # No redirect: the endpoint's own URL must not count as a login page.
+        (('https://login.example.com/api/health',), ApiServerStatus.UNHEALTHY),
+    ])
+def test_get_api_server_status_detects_login_redirect(chain, expected):
+    response = _non_json_health_response(*chain)
+    with mock.patch('sky.server.common.get_api_server_status_response',
+                    return_value=response):
+        assert common.get_api_server_status(chain[0]).status == expected
+
+
+def test_get_api_server_status_login_redirect_logs_no_credentials():
+    response = _non_json_health_response(
+        'https://sky.example.com/api/health?token=hop-secret',
+        'https://user:pass-secret@idp.example.com/login?meta=jwt-secret#frag')
+    with mock.patch('sky.server.common.get_api_server_status_response',
+                    return_value=response), \
+            mock.patch.object(common.logger, 'debug') as mock_debug:
+        status = common.get_api_server_status('https://sky.example.com').status
+    assert status == ApiServerStatus.NEEDS_AUTH
+    logged = ' '.join(str(call) for call in mock_debug.call_args_list)
+    assert 'idp.example.com/login' in logged
+    assert 'secret' not in logged and 'frag' not in logged
+
+
 @mock.patch('sky.server.common._start_api_server')
 @mock.patch('sky.server.common.set_api_cookie_jar')
 @mock.patch('sky.server.common.versions.check_compatibility_at_client')

@@ -980,13 +980,26 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         set_api_cookie_jar(cookies, create_if_not_exists=True)
         return server_info
     except (requests.JSONDecodeError, AttributeError) as e:
-        # Try to check if we got redirected to a login page.
-        for prev_response in response.history:
-            logger.debug(f'Previous response: {prev_response.url}')
+        # Try to check if we got redirected to a login page. The final URL
+        # counts too: an auth proxy that redirects straight to its login page
+        # (e.g. Cloudflare Access) only shows the login URL there.
+        def _without_query(url: str) -> str:
+            return url.split('?', 1)[0].split('#', 1)[0]
+
+        redirect_chain = [r.url for r in response.history]
+        if redirect_chain:
+            # Only the host and path of the final URL: unlike a hop, it is an
+            # arbitrary page whose query says nothing about auth.
+            redirect_chain.append(_without_query(response.url))
+        for url in redirect_chain:
+            # Queries, fragments and userinfo may carry credentials; keep them
+            # out of the logs.
+            safe_url = redact_url_password(_without_query(url))
+            logger.debug(f'Redirect chain URL: {safe_url}')
             # Heuristic: check if the url looks like a login page or
             # oauth flow.
-            if any(key in prev_response.url for key in ['login', 'oauth2']):
-                logger.debug(f'URL {prev_response.url} looks like '
+            if any(key in url for key in ['login', 'oauth2']):
+                logger.debug(f'URL {safe_url} looks like '
                              'a login page or oauth flow, so try to '
                              'get the cookie.')
                 return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
