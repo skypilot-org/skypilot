@@ -1,7 +1,8 @@
 """Flags for the CLI."""
 
 import os
-from typing import Dict, Optional, Tuple
+import stat
+from typing import Any, Dict, Optional, Tuple
 
 import click
 import dotenv
@@ -13,17 +14,54 @@ from sky.utils import resources_utils
 
 
 def _parse_dotenv_file(path: str) -> Dict[str, Optional[str]]:
-    """Parse a dotenv file, erroring if the path does not exist.
+    """Parse a dotenv file, erroring if the path is not a file or FIFO.
 
     The raw `dotenv.dotenv_values` accepts a non-existent path and returns
     an empty dict, which means a typo in `--env-file` silently produces
     an empty environment. Validate up-front so the user learns early.
+
+    Named pipes are accepted, so a dotenv file served by a secret manager
+    or by process substitution (`<(...)`) works.
     """
-    if not os.path.isfile(path):
+    try:
+        st = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
         raise click.UsageError(
             f'Dotenv file does not exist: {path}. Provide a path to an '
-            'existing file, or remove the flag.')
-    return dotenv.dotenv_values(path)
+            'existing file, or remove the flag.') from None
+    except OSError as e:
+        raise click.UsageError(
+            f'Cannot inspect dotenv path: {path}: {e.strerror or e}.') from None
+    if stat.S_ISDIR(st.st_mode):
+        raise click.UsageError(
+            f'Dotenv path is a directory: {path}. Provide a path to a file.')
+    if not (stat.S_ISREG(st.st_mode) or stat.S_ISFIFO(st.st_mode)):
+        raise click.UsageError(
+            f'Dotenv path must be a regular file or named pipe: {path}.')
+    with open(path, encoding='utf-8') as f:
+        return dotenv.dotenv_values(stream=f)
+
+
+class _DotenvFileParamType(click.ParamType):
+    """Click ParamType for dotenv files that skips I/O during completion."""
+
+    name = 'PATH'
+
+    def convert(
+        self,
+        value: Any,
+        param: Optional[click.Parameter],
+        ctx: Optional[click.Context],
+    ) -> Optional[Dict[str, Optional[str]]]:
+        del param  # Unused.
+        if value is None or isinstance(value, dict):
+            return value
+        if ctx is not None and ctx.resilient_parsing:
+            return None
+        return _parse_dotenv_file(value)
+
+
+_DOTENV_FILE_TYPE = _DotenvFileParamType()
 
 
 def _parse_env_var(env_var: str) -> Tuple[str, str]:
@@ -179,7 +217,7 @@ TASK_OPTIONS = [
                        'Passing "none" resets the config.')),
     click.option('--env-file',
                  required=False,
-                 type=_parse_dotenv_file,
+                 type=_DOTENV_FILE_TYPE,
                  help="""\
         Path to a dotenv file with environment variables to set on the remote
         node.
@@ -213,7 +251,7 @@ TASK_OPTIONS = [
     click.option(
         '--secret-file',
         required=False,
-        type=_parse_dotenv_file,
+        type=_DOTENV_FILE_TYPE,
         help="""\
         Path to a dotenv file with secret variables to set on the remote node.
 
