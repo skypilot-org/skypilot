@@ -1386,6 +1386,8 @@ exit 1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task={math.ceil(float(resources["cpus"]))}
+# Use the compute node's resource limits, not the login node's.
+#SBATCH --propagate=NONE
 {mem_directive}{gres_directive}{extra_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.

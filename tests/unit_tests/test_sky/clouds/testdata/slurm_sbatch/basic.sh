@@ -7,6 +7,8 @@
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=2
+# Use the compute node's resource limits, not the login node's.
+#SBATCH --propagate=NONE
 #SBATCH --mem=8192M
 
 #SBATCH --time=7-00:00:00
