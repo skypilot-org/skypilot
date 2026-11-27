@@ -165,9 +165,9 @@ def test_install_command_never_overwrites_a_custom_profile():
     already carries the stacked-peer signal rule (an admin's own fix) is
     left alone silently."""
     cmd = apparmor.install_profile_cmd('')
-    # The compare-then-decide branch precedes any write to the real path.
+    # The compare-then-decide branch precedes any write.
     cmp_check = cmd.index(f'cmp -s "$tmp" {apparmor.PROFILE_PATH}')
-    install = cmd.index(f'cp "$tmp" {apparmor.PROFILE_PATH}')
+    install = cmd.index(f'cp "$tmp" {apparmor.STAGING_PATH}')
     assert cmp_check < install
     # Already-fixed profile: silent no-op before any write.
     assert cmd.index('grep -qF') < install
@@ -182,12 +182,16 @@ def test_install_command_reloads_our_own_profile():
     the load on the next `sky ssh up`, or the node stays broken while the
     file looks fixed."""
     cmd = apparmor.install_profile_cmd('')
-    install = cmd.index(f'cp "$tmp" {apparmor.PROFILE_PATH}')
-    reload_ = cmd.index(f'apparmor_parser -r {apparmor.PROFILE_PATH}')
-    # The reload is unconditional after the cp: identical files flow through
-    # cp + apparmor_parser -r again.
+    install = cmd.index(f'cp "$tmp" {apparmor.STAGING_PATH}')
+    # Last occurrence: the final reload after the staged install (an earlier
+    # one exists on the config-managed symlink branch).
+    reload_ = cmd.rindex(f'apparmor_parser -r {apparmor.PROFILE_PATH}')
+    # The reload is unconditional after the install: identical files flow
+    # through cp + apparmor_parser -r again.
     assert reload_ > install
-    assert f'cp "$tmp" {apparmor.PROFILE_PATH}' in cmd
+    # And a config-managed symlink is detected before any write, so the
+    # link is reloaded through, never replaced.
+    assert cmd.index(f'[ -L {apparmor.PROFILE_PATH} ]') < install
 
 
 def test_install_command_matches_the_signal_rule_not_ptrace():
@@ -208,14 +212,16 @@ def test_install_command_branch_decisions():
 
     Guards (sysctl, parser lookup) read host state and would no-op the
     command in CI, so the test strips them and executes the body with
-    stubbed ``sudo`` and ``apparmor_parser``. Pins the four outcomes:
-    install, reload-ours, leave an admin fix alone, warn on custom."""
+    stubbed ``sudo`` and ``apparmor_parser``. Pins the outcomes: install,
+    reload-ours, leave an admin fix alone, warn on custom, never break a
+    config-managed symlink, and clean up staging leftovers."""
     cmd = apparmor.install_profile_cmd('')
     # Body after the guard `if ...; then`, before its closing `fi`.
     body = cmd.split('then', 1)[1].rsplit('fi', 1)[0]
 
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, apparmor.PROFILE_NAME)
+        staging = os.path.join(d, f'.{apparmor.PROFILE_NAME}.skypilot-new')
         # sudo shim: drop the -A and exec the rest.
         with open(os.path.join(d, 'sudo'), 'w') as f:
             f.write('#!/bin/bash\n[ "$1" = "-A" ] && shift\nexec "$@"\n')
@@ -228,27 +234,34 @@ def test_install_command_branch_decisions():
         parser_marker = os.path.join(d, 'parser-ran')
         env = dict(os.environ, PATH=f'{d}:/usr/bin:/bin')
 
-        def run(existing):
+        script = body.replace(apparmor.PROFILE_PATH,
+                              path).replace(apparmor.STAGING_PATH, staging)
+
+        def run(existing, preexisting_staging=False):
+            for stale in (path, staging, parser_marker):
+                if os.path.lexists(stale):
+                    os.unlink(stale)
+            if preexisting_staging:
+                with open(staging, 'w') as f:
+                    f.write('leftover from a killed run')
             if existing is not None:
                 with open(path, 'w') as f:
                     f.write(existing)
-            for stale in (path + '.skypilot-new', parser_marker):
-                if os.path.exists(stale):
-                    os.unlink(stale)
-            r = subprocess.run(
-                ['bash', '-c',
-                 body.replace(apparmor.PROFILE_PATH, path)],
-                env=env,
-                capture_output=True,
-                text=True,
-                check=True)
-            return (r.stdout.strip(), os.path.exists(path + '.skypilot-new'),
+            r = subprocess.run(['bash', '-c', script],
+                               env=env,
+                               capture_output=True,
+                               text=True,
+                               check=True)
+            return (r.stdout.strip(), os.path.exists(staging),
                     os.path.exists(parser_marker))
 
-        out, leftover, parsed = run(None)
+        # Missing profile: install, load, and a leftover staging file from a
+        # killed earlier run must not survive the new one.
+        out, leftover, parsed = run(None, preexisting_staging=True)
         assert (apparmor.INSTALLED_MARKER, False,
                 True) == (out, leftover,
-                          parsed), 'missing profile must install and load'
+                          parsed), ('missing profile must install and load, '
+                                    'and consume the staging leftover')
         with open(path) as f:
             assert f.read() == apparmor.PROFILE
 
@@ -268,3 +281,22 @@ def test_install_command_branch_decisions():
         out, _, parsed = run(ptrace_only)
         assert (apparmor.SKIPPED_MARKER in out, False) == (True, parsed), (
             'profile without the signal rule must be skipped with a warning')
+
+        # A config-managed symlink is never replaced by the install, even
+        # when its target is byte-identical to ours: the reload goes through
+        # the link, and the link itself must survive.
+        target = os.path.join(d, 'managed-profile')
+        with open(target, 'w') as f:
+            f.write(apparmor.PROFILE)
+        for stale in (path, staging, parser_marker):
+            if os.path.lexists(stale):
+                os.unlink(stale)
+        os.symlink(target, path)
+        r = subprocess.run(['bash', '-c', script],
+                           env=env,
+                           capture_output=True,
+                           text=True,
+                           check=True)
+        assert apparmor.INSTALLED_MARKER in r.stdout
+        assert os.path.islink(path), 'symlink must not be replaced'
+        assert os.path.exists(parser_marker), 'reload must go through the link'

@@ -23,6 +23,11 @@ changes to it.
 
 PROFILE_NAME = 'cri-containerd.apparmor.d'
 PROFILE_PATH = f'/etc/apparmor.d/{PROFILE_NAME}'
+# Hidden sibling used to stage an atomic install: dotfiles are skipped both
+# by apparmor_parser's directory load (is_blacklisted) and by the boot
+# loader's shell glob, so a staging file left behind by a killed run is
+# never parsed as a profile.
+STAGING_PATH = f'/etc/apparmor.d/.{PROFILE_NAME}.skypilot-new'
 
 # containerd's default profile template (contrib/apparmor/template.go on
 # release/2.3, which includes the fix) as rendered on Ubuntu: abi/3.0,
@@ -112,6 +117,16 @@ def install_profile_cmd(askpass_block: str) -> str:
       (or a future containerd) — left completely alone.
     - different, without the rule: a deliberate admin override — never
       overwritten, only reported, with the rule to add.
+    - a symlink: config-managed — never replaced (a rename over a symlink
+      would swap it for a regular file and silently detach the admin's
+      source of truth), same content checks through the link.
+
+    The install is staged to a hidden sibling of the profile and
+    renamed into place: the rename is atomic on the same filesystem, and
+    both AppArmor's boot loader and ``apparmor_parser`` skip dotfiles when
+    loading a profile directory, so a staging file left behind by a killed
+    run is never parsed. It is also removed up front, so one leftover
+    cannot outlive the next run.
 
     The parser is looked up via ``sudo``: it usually lives in /usr/sbin,
     which a non-login SSH session's PATH can omit.
@@ -121,6 +136,8 @@ def install_profile_cmd(askpass_block: str) -> str:
         if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined 2>/dev/null)" = "1" ] &&
            [ -d /sys/kernel/security/apparmor ] &&
            sudo -A sh -c 'command -v apparmor_parser >/dev/null 2>&1'; then
+            # Remove any staging file a killed earlier run left behind.
+            sudo -A rm -f {STAGING_PATH}
             tmp=$(sudo -A mktemp)
             if ! sudo -A tee "$tmp" >/dev/null <<'SKYPILOT_APPARMOR_EOF'
 {PROFILE}SKYPILOT_APPARMOR_EOF
@@ -128,22 +145,27 @@ def install_profile_cmd(askpass_block: str) -> str:
                 sudo -A rm -f "$tmp"
                 exit 1
             fi
-            if [ -f {PROFILE_PATH} ] && ! sudo -A cmp -s "$tmp" {PROFILE_PATH}; then
-                sudo -A rm -f "$tmp"
-                if sudo -A grep -qF {STACKED_PEER_SIGNAL_RULE!r} {PROFILE_PATH}; then
+            if [ -e {PROFILE_PATH} ] || [ -L {PROFILE_PATH} ]; then
+                if ! sudo -A cmp -s "$tmp" {PROFILE_PATH} 2>/dev/null; then
+                    sudo -A rm -f "$tmp"
+                    if sudo -A grep -qF {STACKED_PEER_SIGNAL_RULE!r} {PROFILE_PATH}; then
+                        exit 0
+                    fi
+                    echo {SKIPPED_MARKER}
                     exit 0
                 fi
-                echo {SKIPPED_MARKER}
-                exit 0
+                if [ -L {PROFILE_PATH} ]; then
+                    # Identical through the link, but config-managed: reload
+                    # what the link resolves to, never replace the link.
+                    sudo -A rm -f "$tmp"
+                    sudo -A apparmor_parser -r {PROFILE_PATH} &&
+                    echo {INSTALLED_MARKER}
+                    exit $?
+                fi
             fi
-            # Copy within the destination directory, then rename into place:
-            # the rename is atomic on the same filesystem, so a failed or
-            # truncated copy can never leave a half-written profile behind
-            # (a later run would treat that as a custom profile and never
-            # repair it).
-            sudo -A cp "$tmp" {PROFILE_PATH}.skypilot-new &&
+            sudo -A cp "$tmp" {STAGING_PATH} &&
             sudo -A rm -f "$tmp" &&
-            sudo -A mv -f {PROFILE_PATH}.skypilot-new {PROFILE_PATH} &&
+            sudo -A mv -f {STAGING_PATH} {PROFILE_PATH} &&
             sudo -A apparmor_parser -r {PROFILE_PATH} &&
             echo {INSTALLED_MARKER}
         fi
