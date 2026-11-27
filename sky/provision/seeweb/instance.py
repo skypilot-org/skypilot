@@ -403,12 +403,10 @@ class SeewebNodeProvider:
                                                             ),  # remote key
         }
 
-        # Optional GPU
-        if 'gpu' in self.config.node_config:
-            payload.update({
-                'gpu': self.config.node_config.get('gpu'),
-                'gpu_label': self.config.node_config.get('gpu_label', ''),
-            })
+        # NOTE: Do NOT send 'gpu'/'gpu_label' here. The Seeweb ECS v2 API
+        # infers the GPU from the plan, and passing those extra fields makes
+        # POST /servers fail with a misleading 400:
+        #   "region <region> not available for plan <plan>"
 
         # Add user_customize if present (Seeweb Cloud Script)
         if 'user_customize' in self.config.node_config:
