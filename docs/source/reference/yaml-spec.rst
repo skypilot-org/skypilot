@@ -951,6 +951,7 @@ Implementation differs by cloud provider:
 - AWS: Labels are mapped to instance tags
 - GCP: Labels are mapped to instance labels
 - Kubernetes: Labels are mapped to pod labels
+- Nebius: Labels are mapped to the labels of the instance and its boot disk
 - Other: Labels are not supported and will be ignored
 
 Note: Labels are applied only on the first launch of the cluster. They are not updated on subsequent launches.
