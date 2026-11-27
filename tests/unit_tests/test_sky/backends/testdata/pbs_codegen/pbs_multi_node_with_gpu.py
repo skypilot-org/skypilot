@@ -501,8 +501,8 @@ signal.signal(signal.SIGTERM, _pbs_cleanup_handler)
 
 autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(2, job_lib.JobStatus.PENDING)
-plural = 's' if 1 > 1 else ''
-node_str = f'1 node{plural}'
+plural = 's' if 2 > 1 else ''
+node_str = f'2 node{plural}'
 message = ('[2m├── [0m[2m'
            'Waiting for task resources on '
            f'{node_str}.[0m')
@@ -518,13 +518,13 @@ if script or True:
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
     os.makedirs(SKY_TASK_STATE_DIR, exist_ok=True)
     node_targets = _read_node_targets()
-    cluster_ips = ['node1']
+    cluster_ips = ['node1', 'node2']
 
     # Reserve this job's CPUs and GPU ids on its nodes; waits for
     # the jobs ahead of it to finish with theirs.
     resource_slot = pbs_executor.TaskResourceSlot(
         job_id=2,
-        num_nodes=1,
+        num_nodes=2,
         cpus_per_node=4.0,
         gpus_per_node=1,
         node_capacity={'CPU': 8.0, 'GPU': 2.0})
@@ -654,7 +654,7 @@ if script or True:
         # is not submitted yet, and skip the scheduling step.
         job_lib.scheduler.schedule_step()
         setup_returncodes = run_on_nodes(
-            1, 'pip install torch', '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
+            2, 'pip install torch', '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '2'},
             is_setup=True,
             gpu_ids_per_node=(gpu_ids_per_node if 1 > 0 else None))
         if sum(setup_returncodes) != 0:
@@ -674,7 +674,7 @@ if script or True:
 
     try:
         returncodes = run_on_nodes(
-            1, script, '/sky/logs/tasks', sky_env_vars_dict,
+            2, script, '/sky/logs/tasks', sky_env_vars_dict,
             task_name='train_task',
             gpu_ids_per_node=(gpu_ids_per_node if 1 > 0 else None))
     finally:

@@ -176,14 +176,12 @@ class TestParsers:
         assert node1.gpu_type == 'A100'
         assert node1.gpu_type_resource == 'gpu_type'
         assert node1.queue is None
-        assert node1.jobs == []
         assert node1.qlist == 'gpuq,workq'
         assert cpu1.qlist is None
         assert node2.state == 'job-busy'
         assert node2.queue == 'gpuq'
         assert node2.assigned_cpus == 64
         assert node2.assigned_gpus == 8
-        assert node2.jobs == ['101.pbs', '102.pbs']
         assert cpu1.gpus == 0
         assert cpu1.gpu_type is None
         assert not pbs.is_node_available(cpu1.state)
@@ -199,12 +197,13 @@ class TestParsers:
         assert node.gpu_type_resource == 'gputype'
 
     def test_parse_queues_output(self):
-        queues = pbs.parse_queues_output(_QSTAT_Q_OUTPUT, 'workq')
+        # Login-shell noise before the output is not a queue.
+        queues = pbs.parse_queues_output('Welcome!\n' + _QSTAT_B_OUTPUT +
+                                         _QSTAT_Q_OUTPUT)
         assert [q.name for q in queues] == ['workq', 'gpuq', 'route']
         workq, gpuq, route = queues
         assert workq.is_default
         assert workq.max_walltime == '24:00:00'
-        assert workq.default_walltime == '01:00:00'
         assert workq.enabled and workq.started
         assert not gpuq.started
         assert gpuq.max_walltime is None
@@ -224,7 +223,6 @@ class TestParsers:
         assert running.name == 'sky-abc-user'
         assert running.state == 'R'
         assert running.exec_hosts == ['node1', 'node2']
-        assert running.owner == 'alice@login'
         assert running.run_count == 2
         assert queued.run_count == 0
         assert queued.state == 'Q'
@@ -263,37 +261,13 @@ class TestPbsClient:
         client.info()
         assert calls[0].startswith('export PATH="$PATH:/opt/pbs/bin"; ')
 
-    def test_get_queues_uses_default_queue_first(self):
+    def test_get_queues_info_flags_default_queue(self):
         client, _ = _client_with_runner({
-            'qstat -B -f': (0, (f'\n{pbs._BATCH_BEGIN}\n{_QSTAT_B_OUTPUT}\n'
-                                f'{pbs._BATCH_END} 0\n'
-                                f'\n{pbs._BATCH_BEGIN}\n{_QSTAT_Q_OUTPUT}\n'
-                                f'{pbs._BATCH_END} 0\n'), '')
+            'qstat -B -f; qstat -Q -f':
+                (0, _QSTAT_B_OUTPUT + _QSTAT_Q_OUTPUT, '')
         })
-        # Execution queues only, enabled or not (the utils layer filters
-        # on enabled/started).
-        assert client.get_queues() == ['workq', 'gpuq']
-
-    def test_batched_commands_skip_login_banner(self):
-        client, _ = _client_with_runner({
-            'pbsnodes -a': (0, (f'Welcome to the cluster!\n\n{pbs._BATCH_BEGIN}'
-                                f'\n{_PBSNODES_OUTPUT}\n{pbs._BATCH_END} 0\n'
-                                f'\n{pbs._BATCH_BEGIN}\n{_QSTAT_B_OUTPUT}\n'
-                                f'{pbs._BATCH_END} 0\n'
-                                f'\n{pbs._BATCH_BEGIN}\n{_QSTAT_Q_OUTPUT}\n'
-                                f'{pbs._BATCH_END} 0\n'), '')
-        })
-        snapshot = client.get_inventory_snapshot('ngpus', ('gpu_type',))
-        assert [n.node for n in snapshot.nodes] == ['node1', 'node2', 'cpu1']
-        assert snapshot.queues is not None
-        assert next(q for q in snapshot.queues if q.is_default).name == 'workq'
-
-    def test_run_command_returns_framed_output(self):
-        client, _ = _client_with_runner({
-            'echo hi': (0, (f'banner\n\n{pbs._BATCH_BEGIN}\nhi\n'
-                            f'{pbs._BATCH_END} 3\n'), 'err')
-        })
-        assert client.run_command('echo hi') == (3, 'hi', 'err')
+        queues = client.get_queues_info()
+        assert [q.name for q in queues if q.is_default] == ['workq']
 
     def test_info_nodes_without_nodes(self):
         client, _ = _client_with_runner(
@@ -307,14 +281,11 @@ class TestPbsClient:
         assert [j.job_id for j in jobs] == ['123.pbs', '124.pbs']
         assert '-u "$(id -un)"' in calls[0]
         assert '-x' not in calls[0]
-        assert client.query_jobs('sky-abc-user', ['Q']) == ['124.pbs']
-        assert client.query_jobs('sky-abc-user',
-                                 ['R', 'Q']) == ['123.pbs', '124.pbs']
 
-    def test_query_jobs_includes_history_for_terminal_states(self):
+    def test_list_jobs_by_name_includes_history(self):
         client, calls = _client_with_runner(
             {'qselect': (0, _QSTAT_F_OUTPUT, '')})
-        client.query_jobs('other', ['F'])
+        client.list_jobs_by_name('other', include_finished=True)
         assert 'qselect -N other -u "$(id -un)" -x' in calls[0]
         assert 'qstat -x -f' in calls[0]
 
@@ -334,19 +305,6 @@ class TestPbsClient:
         client, _ = _client_with_runner(
             {'qstat -x -f 999.pbs': (153, '', 'qstat: Unknown Job Id 999.pbs')})
         assert client.get_job('999.pbs') is None
-        assert client.get_job_state('999.pbs') is None
-
-    def test_get_job_nodes(self):
-        client, _ = _client_with_runner({
-            'qstat -x -f 123.pbs': (0, _QSTAT_F_OUTPUT, ''),
-        })
-        assert client.get_job_nodes('123.pbs') == ['node1', 'node2']
-        client, _ = _client_with_runner({
-            'qstat -x -f 124.pbs': (0, _QSTAT_F_OUTPUT.split('Job Id: 124')[0] +
-                                    'Job Id: 124.pbs\n    job_state = Q\n', ''),
-        })
-        with pytest.raises(RuntimeError, match='not be running'):
-            client.get_job_nodes('124.pbs')
 
     def test_submit_job(self):
         client, calls = _client_with_runner(
@@ -369,16 +327,6 @@ class TestPbsClient:
         client.delete_job('123.pbs')
         client.delete_job('123.pbs', force=True)
         assert calls[1].endswith('qdel -W force 123.pbs')
-
-    def test_cancel_jobs_by_name_skips_finished(self):
-        client, calls = _client_with_runner({
-            'qselect': (0, _QSTAT_F_OUTPUT, ''),
-            'qdel': (0, '', ''),
-        })
-        client.cancel_jobs_by_name('sky-abc-user')
-        deleted = [c for c in calls if 'qdel' in c]
-        assert len(deleted) == 2
-        assert all('125.pbs' not in c for c in deleted)
 
     def test_get_pending_job_count(self):
         client, _ = _client_with_runner(

@@ -173,8 +173,8 @@ in a resource such as ``gpu_type`` (``pbsnodes`` shows it under
 spelling and adds ``:gpu_type=<model>`` to the chunk, so ``--gpus A100:1`` and
 ``--gpus L40S:1`` land on the right nodes. See :ref:`gpu_resource and
 gpu_type_resource <config-yaml-pbs-gpu-resource>` to change the resource
-names, and :ref:`gpu_queue_map <config-yaml-pbs-gpu-queue-map>` for clusters
-that select GPU models by queue instead.
+names. On clusters that select the GPU model by queue instead, pick the queue
+with ``--infra pbs/<cluster>/<queue>``.
 
 ``sky show-gpus --infra pbs`` lists the GPUs of your PBS clusters, with the
 free count per model.
@@ -192,8 +192,7 @@ task YAML's ``config`` block:
    pbs:
      qsub_options:
        walltime: "8:00:00"   # quoted: YAML reads 8:00:00 as a base-60 number
-     quota:
-       project: my-project   # qsub -P
+       P: my-project         # qsub -P
      cluster_configs:
        mycluster:
          workdir: /scratch/$USER          # shared filesystem for cluster state

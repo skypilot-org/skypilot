@@ -1710,23 +1710,6 @@ _PBS_PLACE_SCHEMA = {
     'pattern': r'^[^\n]+$',
 }
 
-# `quota.account` is submitted as `qsub -A` and `quota.project` as `qsub -P`.
-_PBS_QUOTA_SCHEMA = {
-    'type': 'object',
-    'required': [],
-    'additionalProperties': True,
-    'properties': {
-        'account': {
-            'type': 'string',
-            'minLength': 1,
-        },
-        'project': {
-            'type': 'string',
-            'minLength': 1,
-        },
-    },
-}
-
 _GPU_PARTITION_MAP_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -2587,7 +2570,6 @@ def get_config_schema():
                 'qsub_options': _QSUB_OPTIONS_SCHEMA,
                 'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,
                 'place': _PBS_PLACE_SCHEMA,
-                'quota': _PBS_QUOTA_SCHEMA,
                 # The PBS resource counting GPUs (default: ngpus).
                 'gpu_resource': {
                     'type': 'string',
@@ -2598,10 +2580,6 @@ def get_config_schema():
                 'gpu_type_resource': {
                     'type': 'string',
                     'minLength': 1,
-                },
-                'gpu_queue_map': _GPU_PARTITION_MAP_SCHEMA,
-                'cpu_queue': {
-                    'type': 'string',
                 },
                 'cluster_configs': {
                     'type': 'object',
@@ -2622,7 +2600,6 @@ def get_config_schema():
                             'qsub_options': _QSUB_OPTIONS_SCHEMA,
                             'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,
                             'place': _PBS_PLACE_SCHEMA,
-                            'quota': _PBS_QUOTA_SCHEMA,
                             'gpu_resource': {
                                 'type': 'string',
                                 'minLength': 1,
@@ -2630,10 +2607,6 @@ def get_config_schema():
                             'gpu_type_resource': {
                                 'type': 'string',
                                 'minLength': 1,
-                            },
-                            'gpu_queue_map': _GPU_PARTITION_MAP_SCHEMA,
-                            'cpu_queue': {
-                                'type': 'string',
                             },
                             'queue_configs': {
                                 'type': 'object',
@@ -2648,7 +2621,6 @@ def get_config_schema():
                                         'qsub_options': _QSUB_OPTIONS_SCHEMA,
                                         'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,  # pylint: disable=line-too-long
                                         'place': _PBS_PLACE_SCHEMA,
-                                        'quota': _PBS_QUOTA_SCHEMA,
                                     },
                                 },
                             },
@@ -3207,7 +3179,6 @@ def get_config_schema():
                         'qsub_options': _QSUB_OPTIONS_SCHEMA,
                         'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,
                         'place': _PBS_PLACE_SCHEMA,
-                        'quota': _PBS_QUOTA_SCHEMA,
                         'cluster_configs': {
                             'type': 'object',
                             'required': [],
@@ -3220,7 +3191,6 @@ def get_config_schema():
                                     'qsub_options': _QSUB_OPTIONS_SCHEMA,
                                     'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,  # pylint: disable=line-too-long
                                     'place': _PBS_PLACE_SCHEMA,
-                                    'quota': _PBS_QUOTA_SCHEMA,
                                     'queue_configs': {
                                         'type': 'object',
                                         'required': [],
@@ -3233,7 +3203,6 @@ def get_config_schema():
                                                 'qsub_options': _QSUB_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
                                                 'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,  # pylint: disable=line-too-long
                                                 'place': _PBS_PLACE_SCHEMA,
-                                                'quota': _PBS_QUOTA_SCHEMA,
                                             },
                                         },
                                     },

@@ -3,14 +3,12 @@ import json
 import math
 import os
 import re
-import subprocess
 import time
 from typing import (Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple,
                     Union)
 
 from paramiko.config import SSHConfig
 
-from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -20,7 +18,6 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import gpu_names
-from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
@@ -59,15 +56,6 @@ DEFAULT_GPU_TYPE_RESOURCES = ('gpu_type', 'gputype', 'gpu_model',
 # Inventory caches: nodes are unlikely to change often; FUSE never does.
 _PBS_NODES_INFO_CACHE_TTL = 30 * 60
 _PBS_FUSE_CHECK_CACHE_TTL = 24 * 60 * 60
-
-# qsub -l walltime accepts [[hours:]minutes:]seconds.
-_WALLTIME_PATTERN = re.compile(r'^\d+(?::\d{1,2}){0,2}$')
-
-
-class PbsClusterInventory(NamedTuple):
-    """Cluster-wide node and queue inventory."""
-    nodes: List[Dict[str, Any]]
-    default_queue: Optional[str]
 
 
 def expand_path_vars(path: str, env: Dict[str, str]) -> str:
@@ -385,45 +373,6 @@ def get_queues(cluster_name: str) -> List[str]:
     return default + sorted(others)
 
 
-def get_queue_info(cluster_name: str,
-                   queue_name: str) -> Optional[pbs.PbsQueue]:
-    return get_queue_infos(cluster_name).get(queue_name)
-
-
-def get_cluster_default_queue(cluster_name: str) -> Optional[str]:
-    for queue in get_queue_infos(cluster_name).values():
-        if queue.is_default:
-            return queue.name
-    return None
-
-
-def lookup_gpu_queue_map(cluster: str, acc_type: str) -> Optional[List[str]]:
-    """Queues configured for a GPU type under ``gpu_queue_map``.
-
-    Global and per-cluster maps are merged (per-cluster wins); the lookup
-    is case-insensitive. None when the type is not mapped.
-    """
-    gpu_queue_map = skypilot_config.get_effective_region_config(
-        cloud='pbs', keys=('gpu_queue_map',), region=cluster, merge_dicts=True)
-    if gpu_queue_map is None:
-        return None
-    acc_type_lower = acc_type.lower()
-    for map_gpu, map_queues in gpu_queue_map.items():
-        if map_gpu.lower() == acc_type_lower:
-            if isinstance(map_queues, str):
-                return [map_queues]
-            return list(map_queues)
-    return None
-
-
-def lookup_cpu_queue(cluster: str) -> Optional[str]:
-    """The queue configured for CPU-only tasks, if any."""
-    return skypilot_config.get_effective_region_config(cloud='pbs',
-                                                       keys=('cpu_queue',),
-                                                       region=cluster,
-                                                       default_value=None)
-
-
 def nodes_for_queue(nodes: Sequence[pbs.NodeInfo],
                     queue: Optional[str],
                     is_routing_queue: bool = False,
@@ -456,7 +405,7 @@ def _is_routing_queue(cluster: str, queue: Optional[str]) -> bool:
     if queue is None:
         return False
     try:
-        info = get_queue_info(cluster, queue)
+        info = get_queue_infos(cluster).get(queue)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to get queue info for {cluster}/{queue}: {e}')
         return False
@@ -593,15 +542,11 @@ def check_instance_fits(
     not_fit_reason_prefix = (
         f'No nodes found with enough {req_str}{queue_suffix}. ')
     if acc_type is not None:
-        if lookup_gpu_queue_map(cluster, acc_type) is not None:
-            # Mapped types are requested by count only.
-            resolved_type = None
-        else:
-            try:
-                resolved_type = resolve_gpu_type(cluster, acc_type, acc_count,
-                                                 queue)
-            except exceptions.ResourcesUnavailableError as e:
-                return False, str(e)
+        try:
+            resolved_type = resolve_gpu_type(cluster, acc_type, acc_count,
+                                             queue)
+        except exceptions.ResourcesUnavailableError as e:
+            return False, str(e)
         candidate_nodes = [
             node for node in nodes if node.gpus >= acc_count and
             (resolved_type is None or node.gpu_type == resolved_type)
@@ -650,64 +595,16 @@ def _build_pbs_node_info_list(
     return node_infos
 
 
-def get_pbs_cluster_inventory(pbs_cluster_name: str) -> PbsClusterInventory:
-    """Nodes and the default queue of a cluster, in one SSH call."""
-    client = make_client(pbs_cluster_name)
-    snapshot = client.get_inventory_snapshot(
-        get_gpu_resource(pbs_cluster_name),
-        get_gpu_type_resources(pbs_cluster_name))
-    default_queue = None
-    if snapshot.queues is not None:
-        default_queue = next(
-            (queue.name for queue in snapshot.queues if queue.is_default), None)
-    return PbsClusterInventory(nodes=_build_pbs_node_info_list(
-        pbs_cluster_name, snapshot.nodes),
-                               default_queue=default_queue)
-
-
-def pbs_cluster_names() -> List[str]:
-    """Configured and allowed PBS clusters; no login node is contacted."""
-    return clouds.PBS.existing_allowed_clusters()
-
-
-def pbs_node_info(
-        pbs_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Node inventory of one cluster, or of every allowed cluster.
-
-    Raises:
-        exceptions.CommandError: If a single cluster is requested and
-            querying it fails. Aggregating over clusters never raises, so an
-            unreachable cluster does not hide the others.
-    """
-    if pbs_cluster_name is not None:
-        try:
-            return _build_pbs_node_info_list(
-                pbs_cluster_name, get_pbs_nodes_info(pbs_cluster_name))
-        except (FileNotFoundError, RuntimeError, subprocess.TimeoutExpired,
-                exceptions.NotSupportedError) as e:
-            logger.debug(f'Could not retrieve PBS node info: {e}')
-            return []
-
-    clusters_to_query = clouds.PBS.existing_allowed_clusters()
-    if not clusters_to_query:
+def pbs_node_info(pbs_cluster_name: str) -> List[Dict[str, Any]]:
+    """Node inventory of a cluster; empty if it cannot be queried."""
+    try:
+        return _build_pbs_node_info_list(pbs_cluster_name,
+                                         get_pbs_nodes_info(pbs_cluster_name))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Skipping PBS cluster {pbs_cluster_name!r} while '
+                       'collecting node info: '
+                       f'{common_utils.format_exception(e)}')
         return []
-
-    def _query_cluster(cluster_name: str) -> List[Dict[str, Any]]:
-        try:
-            return _build_pbs_node_info_list(cluster_name,
-                                             get_pbs_nodes_info(cluster_name))
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(
-                f'Skipping PBS cluster {cluster_name!r} while collecting '
-                f'node info: {common_utils.format_exception(e)}')
-            return []
-
-    node_info_lists = subprocess_utils.run_in_parallel(_query_cluster,
-                                                       clusters_to_query)
-    return [
-        node_info for node_info_list in node_info_lists
-        for node_info in node_info_list
-    ]
 
 
 def is_inside_pbs_cluster() -> bool:
@@ -717,31 +614,6 @@ def is_inside_pbs_cluster() -> bool:
                                                         PBS_MARKER_FILE)))
 
 
-def read_inside_cluster_job_id() -> Optional[str]:
-    """The PBS job id recorded in the runtime marker, if any."""
-    try:
-        with open(runtime_utils.get_runtime_dir_path(
-                os.path.join('.sky', PBS_MARKER_FILE)),
-                  'r',
-                  encoding='utf-8') as f:
-            job_id = f.read().strip()
-    except OSError:
-        return None
-    return job_id or None
-
-
-def validate_walltime(value: str) -> None:
-    """Reject a malformed qsub walltime before submission.
-
-    Raises:
-        ValueError: If the value is not [[hours:]minutes:]seconds.
-    """
-    if not _WALLTIME_PATTERN.fullmatch(value):
-        raise ValueError(
-            f'Invalid pbs.qsub_options.walltime {value!r}. Accepted formats: '
-            'seconds, minutes:seconds, hours:minutes:seconds.')
-
-
 def sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     """Shared home directory of a SkyPilot cluster on the PBS cluster."""
     return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
@@ -749,11 +621,6 @@ def sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
 
 def sshd_dir(cluster_home_dir: str) -> str:
     return f'{cluster_home_dir}/{SSHD_DIRECTORY_NAME}'
-
-
-def node_port_file(cluster_home_dir: str, rank: int) -> str:
-    return (f'{sshd_dir(cluster_home_dir)}/{NODE_PORT_FILE_PREFIX}{rank}'
-            f'{NODE_PORT_FILE_SUFFIX}')
 
 
 class NodeEndpoint(NamedTuple):

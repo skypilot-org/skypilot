@@ -376,17 +376,10 @@ def _pbs_codegen(num_nodes: int, setup_cmd=None) -> str:
     return codegen.build()
 
 
-def test_pbs_single_node_with_gpu():
-    """Single-node GPU job with setup commands on PBS."""
-    result = _pbs_codegen(1, setup_cmd='pip install torch')
-    assert_codegen_matches_snapshot('pbs_single_node_with_gpu',
-                                    result,
-                                    testdata_dir=PBS_TESTDATA_DIR)
-
-
-def test_pbs_multi_node():
-    result = _pbs_codegen(2)
-    assert_codegen_matches_snapshot('pbs_multi_node',
+def test_pbs_multi_node_with_gpu():
+    """Multi-node GPU job with setup commands on PBS."""
+    result = _pbs_codegen(2, setup_cmd='pip install torch')
+    assert_codegen_matches_snapshot('pbs_multi_node_with_gpu',
                                     result,
                                     testdata_dir=PBS_TESTDATA_DIR)
 

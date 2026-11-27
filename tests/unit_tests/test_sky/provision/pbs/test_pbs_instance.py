@@ -29,7 +29,7 @@ _PROVIDER_CONFIG = {
     },
 }
 _QUEUE = pbs_adaptor.PbsQueue('workq', True, 'Execution', True, True,
-                              '48:00:00', '01:00:00')
+                              '48:00:00')
 
 
 def _job(job_id='77.pbs',
@@ -44,75 +44,55 @@ def _job(job_id='77.pbs',
                                exec_hosts=list(hosts),
                                comment=comment,
                                exit_status=None,
-                               owner='alice@login',
                                run_count=run_count)
 
 
 class TestQsubDirectives:
 
-    def test_empty(self):
-        assert instance._build_custom_qsub_directives({}) == []
-
     def test_values(self):
-        lines = instance._build_custom_qsub_directives({
-            'A': 'proj',
-            'W': ['group_list=lab', 'umask=022'],
-            'm': 'n',
-            'V': True,
-            'v': None,
-            'nice': False,
-            'priority': 10,
-            'walltime': '04:00:00',
-            'l': ['storage=gdata/x', 'select=5:ncpus=1', 'walltime=1:00:00'],
-            '-P': 'p1',
-        })
-        assert lines == [
+        text = instance._build_qsub_directives(
+            {
+                'A': 'proj',
+                'W': ['group_list=lab', 'umask=022'],
+                'm': 'n',
+                'V': True,
+                'v': None,
+                'nice': False,
+                'priority': 10,
+                'l': ['storage=gdata/x', 'select=5:ncpus=1', 'place=pack'],
+                '-P': 'p1',
+                # Managed by SkyPilot.
+                'N': 'x',
+                'q': 'other',
+            },
+            None)
+        assert text.splitlines() == [
             '#PBS -A proj',
             '#PBS -P p1',
             '#PBS -V',
             '#PBS -W group_list=lab',
             '#PBS -W umask=022',
             '#PBS -l storage=gdata/x',
-            '#PBS -l walltime=1:00:00',
             '#PBS -m n',
             '#PBS -priority 10',
-            '#PBS -l walltime=04:00:00',
         ]
-
-    def test_protected_dropped(self):
-        lines = instance._build_custom_qsub_directives({
-            'N': 'x',
-            'q': 'other',
-            'o': '/dev/null',
-            'A': 'proj',
-        })
-        assert lines == ['#PBS -A proj']
 
     def test_newline_rejected(self):
         with pytest.raises(ValueError, match='Newline'):
-            instance._build_custom_qsub_directives({'A': 'proj\nqdel'})
+            instance._build_qsub_directives({'A': 'proj\nqdel'}, None)
 
-    def test_bad_walltime_rejected(self):
-        with pytest.raises(ValueError, match='walltime'):
-            instance._build_custom_qsub_directives({'walltime': '1 day'})
-        with pytest.raises(ValueError, match='walltime'):
-            instance._build_custom_qsub_directives({'l': 'walltime=abc'})
-
-    def test_auto_walltime(self):
-        assert instance._compute_walltime_directive(
-            {}, _QUEUE, 'workq') == ('#PBS -l walltime=48:00:00')
-        # User value wins, in either spelling.
-        assert instance._compute_walltime_directive({'walltime': '1:00:00'},
-                                                    _QUEUE, 'workq') is None
-        assert instance._compute_walltime_directive({'l': ['walltime=1:00']},
-                                                    _QUEUE, 'workq') is None
-        no_max = _QUEUE._replace(max_walltime=None)
-        assert instance._compute_walltime_directive({}, no_max, 'workq') is None
-        assert instance._compute_walltime_directive({}, None, 'workq') is None
-
-    def test_build_qsub_directives(self):
-        text = instance._build_qsub_directives({'A': 'proj'}, _QUEUE, 'workq')
-        assert text == '#PBS -l walltime=48:00:00\n#PBS -A proj'
+    def test_walltime(self):
+        build = instance._build_qsub_directives
+        # The queue's maximum by default.
+        assert build({'A': 'proj'},
+                     _QUEUE) == ('#PBS -l walltime=48:00:00\n#PBS -A proj')
+        assert build({}, _QUEUE._replace(max_walltime=None)) == ''
+        assert build({}, None) == ''
+        # A user value wins, in either spelling.
+        assert build({'walltime': '1:00:00'},
+                     _QUEUE) == '#PBS -l walltime=1:00:00'
+        assert build({'l': ['walltime=1:00']},
+                     _QUEUE) == '#PBS -l walltime=1:00'
 
 
 class TestProvisionScript:
@@ -348,7 +328,6 @@ class TestTerminate:
             return []
 
         client.list_jobs_by_name.side_effect = _list
-        client.get_jobs_state_by_name.return_value = ['F']
         runner = mock.MagicMock()
         runner.run.return_value = (0, '', '')
         with mock.patch.object(instance, '_make_pbs_client',
@@ -364,9 +343,10 @@ class TestTerminate:
 
     def test_terminate_escalates_to_force(self):
         client = mock.MagicMock()
-        client.list_jobs_by_name.return_value = [_job()]
-        states = iter([['R'], ['F']])
-        client.get_jobs_state_by_name.side_effect = lambda _: next(states)
+        # Still running after qdel; gone after the forced one.
+        jobs = iter([[_job()], [_job()]])
+        client.list_jobs_by_name.side_effect = (
+            lambda *_, **__: next(jobs, [_job(state='F')]))
         runner = mock.MagicMock()
         runner.run.return_value = (0, '', '')
         with mock.patch.object(instance, '_make_pbs_client',
@@ -395,7 +375,7 @@ class TestTerminate:
             instance.terminate_instances(_CLUSTER, _PROVIDER_CONFIG)
         client_cls.assert_called_once_with(is_inside_pbs_cluster=True)
         client.delete_job.assert_called_once_with('77.pbs')
-        client.get_jobs_state_by_name.assert_not_called()
+        client.list_jobs_by_name.assert_called_once()
 
     def test_stop_not_supported(self):
         with pytest.raises(exceptions.NotSupportedError):
@@ -465,10 +445,9 @@ class TestCreateVirtualInstance:
 
     def test_submits_and_waits(self, tmp_path):
         client = mock.MagicMock()
-        client.query_jobs.return_value = []
+        client.list_jobs_by_name.return_value = []
         client.submit_job.return_value = '77.pbs'
         client.get_job.return_value = _job()
-        client.get_job_state.return_value = 'R'
         login_runner = mock.MagicMock()
         port_listing = ('rank0.port node1 23456 /tmp/x\n'
                         'rank1.port node2 23457 /tmp/x\n')
@@ -497,8 +476,8 @@ class TestCreateVirtualInstance:
                                return_value=login_runner), \
              mock.patch.object(instance, 'get_command_runners',
                                return_value=[node_runner, node_runner]), \
-             mock.patch.object(instance.pbs_utils, 'get_queue_info',
-                               return_value=_QUEUE), \
+             mock.patch.object(instance.pbs_utils, 'get_queue_infos',
+                               return_value={'workq': _QUEUE}), \
              mock.patch.object(instance.global_user_state,
                                'add_cluster_event'), \
              mock.patch.object(instance.time, 'sleep'):
@@ -527,11 +506,10 @@ class TestCreateVirtualInstance:
         # The job first runs on node9, fails to start there and is rerun on
         # node1 and node2, where the node agents come up.
         client = mock.MagicMock()
-        client.query_jobs.return_value = []
+        client.list_jobs_by_name.return_value = []
         client.submit_job.return_value = '77.pbs'
         jobs = iter([_job(hosts=('node9', 'node2'))])
         client.get_job.side_effect = lambda _: next(jobs, _job())
-        client.get_job_state.return_value = 'R'
         login_runner = mock.MagicMock()
         login_runner.run.return_value = (
             0, 'rank0.port node1 23456 /tmp/x\nrank1.port node2 23457 /tmp/x\n',
@@ -545,8 +523,8 @@ class TestCreateVirtualInstance:
              mock.patch.object(instance, 'get_command_runners',
                                return_value=[node_runner, node_runner]
                               ) as get_runners, \
-             mock.patch.object(instance.pbs_utils, 'get_queue_info',
-                               return_value=_QUEUE), \
+             mock.patch.object(instance.pbs_utils, 'get_queue_infos',
+                               return_value={'workq': _QUEUE}), \
              mock.patch.object(instance.global_user_state,
                                'add_cluster_event'), \
              mock.patch.object(instance.time, 'sleep'):
@@ -563,9 +541,8 @@ class TestCreateVirtualInstance:
 
     def test_reuses_existing_job(self):
         client = mock.MagicMock()
-        client.query_jobs.return_value = ['77.pbs']
+        client.list_jobs_by_name.return_value = [_job()]
         client.get_job.return_value = _job()
-        client.get_job_state.return_value = 'R'
         login_runner = mock.MagicMock()
         login_runner.run.return_value = (
             0, 'rank0.port node1 23456 /tmp/x\nrank1.port node2 23457 /tmp/x\n',
@@ -600,7 +577,7 @@ class TestCreateVirtualInstance:
     def test_job_fails_before_ready_shows_log(self, failed_job, error):
         # The job runs, then fails while the node agents are starting.
         client = mock.MagicMock()
-        client.query_jobs.return_value = []
+        client.list_jobs_by_name.return_value = []
         client.submit_job.return_value = '77.pbs'
         jobs = iter([_job()])
         client.get_job.side_effect = lambda _: next(jobs, failed_job)
@@ -620,8 +597,8 @@ class TestCreateVirtualInstance:
                                return_value=client), \
              mock.patch.object(instance, '_make_login_node_runner',
                                return_value=login_runner), \
-             mock.patch.object(instance.pbs_utils, 'get_queue_info',
-                               return_value=_QUEUE), \
+             mock.patch.object(instance.pbs_utils, 'get_queue_infos',
+                               return_value={'workq': _QUEUE}), \
              mock.patch.object(instance.global_user_state,
                                'add_cluster_event'), \
              mock.patch.object(instance.time, 'sleep'), \

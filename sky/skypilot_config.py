@@ -1260,14 +1260,6 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
 _SLURM_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [('quota', 'queue')]
 _SLURM_ACCOUNT_KEYS: List[Tuple[str, ...]] = [('quota', 'account')]
 
-# Clouds whose per-cluster config lives under ``cluster_configs`` with one
-# more level below it, keyed by that level's name: Slurm partitions, PBS
-# queues.
-_CLUSTER_SCOPED_CLOUDS: Dict[str, str] = {
-    'slurm': 'partition_configs',
-    'pbs': 'queue_configs',
-}
-
 _NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
 
 _QUEUE_ADMISSION_TIMEOUT_KEYS: List[Tuple[str, ...]] = [
@@ -1385,15 +1377,15 @@ def _region_scope_prefixes(
     """Key prefixes for one cloud's config subtree, most specific first.
 
     Kubernetes and SSH scope per-context values under ``context_configs``;
-    Slurm and PBS scope per-cluster values under ``cluster_configs`` with a
-    further ``partition_configs`` / ``queue_configs`` level below it.
+    Slurm scopes per-cluster values under ``cluster_configs`` with a further
+    ``partition_configs`` level below it.
     """
     prefixes: List[Tuple[str, ...]] = []
     if region is not None:
-        if cloud in _CLUSTER_SCOPED_CLOUDS:
+        if cloud == 'slurm':
             if partition is not None:
                 prefixes.append((cloud, 'cluster_configs', region,
-                                 _CLUSTER_SCOPED_CLOUDS[cloud], partition))
+                                 'partition_configs', partition))
             prefixes.append((cloud, 'cluster_configs', region))
         else:
             prefixes.append((cloud, 'context_configs', region))
@@ -1802,23 +1794,3 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 logger.warning(
                     f'Config post-save hook {post_save_hook!r} raised: {e}',
                     exc_info=True)
-
-
-def get_effective_pbs_quota_value(
-        key: str,
-        cluster: Optional[str] = None,
-        queue: Optional[str] = None,
-        workspace: Optional[str] = None,
-        override_configs: Optional[Dict[str, Any]] = None) -> Any:
-    """Returns a ``pbs.quota.<key>`` value, scope-resolved.
-
-    ``account`` and ``project`` are submitted as ``qsub -A`` and ``qsub -P``.
-    Resolved workspace > global and, within each, queue > cluster > cloud;
-    see :func:`get_effective_slurm_quota_value` for the Slurm counterpart.
-    """
-    return _get_effective_scoped_config_value(cloud='pbs',
-                                              property_keys=[('quota', key)],
-                                              region=cluster,
-                                              workspace=workspace,
-                                              override_configs=override_configs,
-                                              partition=queue)

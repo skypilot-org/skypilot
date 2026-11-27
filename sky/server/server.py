@@ -4050,11 +4050,19 @@ def _build_slurm_job_ssh_command(
 
 
 @app.websocket('/slurm-job-ssh-proxy')
+@app.websocket('/pbs-job-ssh-proxy')
 async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                               cluster_name: str,
                               worker: int = 0,
                               client_version: Optional[int] = None) -> None:
-    """Proxies SSH to the Slurm job via sshd inside srun."""
+    """Proxies SSH to a Slurm or PBS job through its login node.
+
+    Slurm: via sshd inside srun. PBS: ``ssh -W`` to the user-level sshd the
+    allocation runs on the node (see sky/provision/pbs/instance.py).
+    """
+    is_pbs = websocket.url.path.endswith('/pbs-job-ssh-proxy')
+    ssh_path = (websocket_utils.SSH_PATH_PBS
+                if is_pbs else websocket_utils.SSH_PATH_SLURM)
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: '
                 f'{cluster_name}')
@@ -4063,8 +4071,8 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
 
-    handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
-                                                      clouds.Slurm)
+    handle = await _validate_cluster_for_ssh_proxy_ws(
+        websocket, cluster_name, clouds.PBS if is_pbs else clouds.Slurm)
     if handle is None:
         return
 
@@ -4079,13 +4087,17 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     login_node_proxy_command = login_node_ssh_config.get('proxycommand', None)
     login_node_proxy_jump = login_node_ssh_config.get('proxyjump', None)
 
-    login_node_runner = command_runner.SSHCommandRunner(
-        (login_node_host, login_node_port),
-        login_node_user,
-        login_node_key,
-        ssh_proxy_command=login_node_proxy_command,
-        ssh_proxy_jump=login_node_proxy_jump,
-    )
+    if is_pbs:
+        login_node_runner = pbs_utils.make_login_node_runner(
+            login_node_ssh_config)
+    else:
+        login_node_runner = command_runner.SSHCommandRunner(
+            (login_node_host, login_node_port),
+            login_node_user,
+            login_node_key,
+            ssh_proxy_command=login_node_proxy_command,
+            ssh_proxy_jump=login_node_proxy_jump,
+        )
 
     ssh_cmd = login_node_runner.ssh_base_command(
         ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
@@ -4107,20 +4119,28 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             f'Cluster has {len(node_hostnames)} nodes.')
     target_node = node_hostnames[worker]
 
-    # Run sshd inside the Slurm job "container" via srun, such that it inherits
-    # the resource constraints of the Slurm job.
-    is_container_image = handle.launched_resources.extract_docker_image(
-    ) is not None
-    ssh_cmd += [
-        shlex.quote(
-            _build_slurm_job_ssh_command(
-                provider_config,
-                job_id,
-                target_node,
-                handle.cluster_name_on_cloud,
-                is_container_image,
-            ))
-    ]
+    if is_pbs:
+        # `-W` goes before the destination that ssh_base_command appended.
+        target_port = list(instances.values())[worker][0].ssh_port
+        ssh_cmd = ssh_cmd[:-1] + [
+            '-W',
+            shlex.quote(f'{target_node}:{target_port}'), ssh_cmd[-1]
+        ]
+    else:
+        # Run sshd inside the Slurm job "container" via srun, such that it
+        # inherits the resource constraints of the Slurm job.
+        is_container_image = handle.launched_resources.extract_docker_image(
+        ) is not None
+        ssh_cmd += [
+            shlex.quote(
+                _build_slurm_job_ssh_command(
+                    provider_config,
+                    job_id,
+                    target_node,
+                    handle.cluster_name_on_cloud,
+                    is_container_image,
+                ))
+        ]
 
     loop = asyncio.get_running_loop()
     # `/bin/sh -c` is what `asyncio.create_subprocess_shell` would run, minus
@@ -4162,7 +4182,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     try:
         conn_gauge.inc()
         metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
-            path=websocket_utils.SSH_PATH_SLURM).inc()
+            path=ssh_path).inc()
 
         async def write_and_drain(data: bytes) -> None:
             await stdin.write(data)
@@ -4182,7 +4202,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             timestamps_supported=timestamps_supported,
             # srun's stdio, not a port-forward: keep the two out of one
             # histogram, their latency profiles have nothing in common.
-            path=websocket_utils.SSH_PATH_SLURM,
+            path=ssh_path,
         )
 
     finally:
@@ -4229,131 +4249,6 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
         # Counted once per session. The early-exit branch used to increment
         # here as well as on its own, so one failed session reported two
         # closures.
-        metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-            pid=os.getpid(), reason=reason).inc()
-
-
-@app.websocket('/pbs-job-ssh-proxy')
-async def pbs_job_ssh_proxy(websocket: fastapi.WebSocket,
-                            cluster_name: str,
-                            worker: int = 0,
-                            client_version: Optional[int] = None) -> None:
-    """Proxies SSH to a node of a PBS allocation through its login node.
-
-    The allocation runs a user-level sshd on every node (see
-    sky/provision/pbs/instance.py); ``ssh -W`` on the login node turns that
-    sshd's TCP port into the byte stream the client's ssh speaks to.
-    """
-    await websocket.accept()
-    logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
-
-    timestamps_supported = client_version is not None and client_version > 21
-
-    handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
-                                                      clouds.PBS)
-    if handle is None:
-        return
-
-    assert handle.cached_cluster_info is not None, 'Cached cluster info is None'
-    provider_config = handle.cached_cluster_info.provider_config
-    assert provider_config is not None, 'Provider config is None'
-    login_node_runner = pbs_utils.make_login_node_runner(provider_config['ssh'])
-    ssh_cmd = login_node_runner.ssh_base_command(
-        ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
-        port_forward=None,
-        connect_timeout=None)
-
-    # Instances are ordered: head first, then workers.
-    instances = list(handle.cached_cluster_info.instances.values())
-    if worker >= len(instances):
-        await websocket.close(
-            code=1008,
-            reason=(f'Worker index {worker} out of range. Cluster has '
-                    f'{len(instances)} nodes.'))
-        return
-    target = instances[worker][0]
-    target_node = target.tags['node']
-    target_port = target.ssh_port
-    # `-W` goes before the destination that ssh_base_command appended.
-    ssh_cmd = ssh_cmd[:-1] + [
-        '-W', shlex.quote(f'{target_node}:{target_port}'), ssh_cmd[-1]
-    ]
-
-    loop = asyncio.get_running_loop()
-    proc = await asyncio_utils.spawn_without_fork(
-        ['/bin/sh', '-c', ' '.join(ssh_cmd)],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    assert proc.stdin is not None
-    assert proc.stdout is not None
-    assert proc.stderr is not None
-
-    stdin = asyncio_utils.NonOwningPipeWriter(loop, proc.stdin.fileno())
-    stdout = asyncio_utils.NonOwningPipeReader(loop, proc.stdout.fileno())
-    stderr = asyncio_utils.NonOwningPipeReader(loop, proc.stderr.fileno())
-    stdin.start()
-    stdout.start()
-    stderr.start()
-
-    async def log_stderr():
-        while True:
-            line = await stderr.readline()
-            if not line:
-                break
-            logger.debug(f'ssh -W stderr: {line.decode().rstrip()}')
-
-    stderr_task = asyncio.create_task(log_stderr())
-    conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
-        pid=os.getpid())
-    ssh_failed = False
-    try:
-        conn_gauge.inc()
-        metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
-            path=websocket_utils.SSH_PATH_PBS).inc()
-
-        async def write_and_drain(data: bytes) -> None:
-            await stdin.write(data)
-
-        async def close_stdin() -> None:
-            stdin.close()
-            assert proc.stdin is not None
-            proc.stdin.close()
-
-        ssh_failed = await websocket_utils.run_websocket_proxy(
-            websocket,
-            read_from_backend=lambda: stdout.read(4096),
-            write_to_backend=write_and_drain,
-            close_backend=close_stdin,
-            timestamps_supported=timestamps_supported,
-            path=websocket_utils.SSH_PATH_PBS,
-        )
-    finally:
-        # Nothing in this block may `await`; see slurm_job_ssh_proxy.
-        conn_gauge.dec()
-        ssh_exited = proc.poll() is not None
-        if not ssh_exited:
-            proc.terminate()
-        stderr_task.cancel()
-        leftover = stdout.drain() if ssh_exited else b''
-        stdin.close()
-        stdout.stop()
-        stderr.stop()
-        for pipe in (proc.stdin, proc.stdout, proc.stderr):
-            if pipe is not None:
-                pipe.close()
-        loop.run_in_executor(None, _reap_srun, proc)
-        if ssh_exited:
-            logger.error('ssh -W process exited with returncode '
-                         f'{proc.returncode} before the ssh websocket '
-                         'connection was closed; its stderr is in the debug '
-                         f'log. Remaining output: {str(leftover)}')
-            reason = 'SshTunnelProcessExit'
-        elif ssh_failed:
-            reason = 'SSHToPbsJobDisconnected'
-        else:
-            reason = 'ClientClosed'
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
 

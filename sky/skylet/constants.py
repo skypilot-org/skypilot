@@ -715,8 +715,6 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('pbs', 'qsub_options'),
     ('pbs', 'select_resources'),
     ('pbs', 'place'),
-    ('pbs', 'quota'),
-    ('pbs', 'cpu_queue'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,

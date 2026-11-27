@@ -259,61 +259,15 @@ class PBS(clouds.Cloud):
 
         regions_to_return = []
         for r in regions:
-            cluster = r.name
-            queues_to_check = [z.name for z in r.zones] if r.zones else []
             valid_zones = []
-            try:
-                pit = pbs_utils.PbsInstanceType.from_instance_type(
-                    instance_type)
-            except ValueError:
-                pass
-            else:
-                if pit.accelerator_type is not None:
-                    mapped = pbs_utils.lookup_gpu_queue_map(
-                        cluster, pit.accelerator_type)
-                    if mapped is not None:
-                        available = set(queues_to_check)
-                        queues_to_check = [q for q in mapped if q in available]
-                        if not queues_to_check:
-                            zone_msg = (f' for the requested queue {zone!r}'
-                                        if zone else '')
-                            logger.warning(
-                                f'{colorama.Fore.YELLOW}gpu_queue_map maps '
-                                f'{pit.accelerator_type!r} to queue(s) '
-                                f'{mapped}, but none of them is available on '
-                                f'cluster {cluster!r}{zone_msg}.'
-                                f'{colorama.Style.RESET_ALL}')
-                else:
-                    cpu_queue = None
-                    if resources is not None:
-                        get_override = (
-                            config_utils.get_cloud_config_value_from_dict)
-                        cpu_queue = get_override(
-                            dict_config=resources.cluster_config_overrides,
-                            cloud='pbs',
-                            region=cluster,
-                            keys=('cpu_queue',))
-                    if cpu_queue is None:
-                        cpu_queue = pbs_utils.lookup_cpu_queue(cluster)
-                    if cpu_queue is not None:
-                        if cpu_queue in set(queues_to_check):
-                            queues_to_check = [cpu_queue]
-                        else:
-                            queues_to_check = []
-                            logger.warning(
-                                f'{colorama.Fore.YELLOW}cpu_queue is set to '
-                                f'{cpu_queue!r}, but it does not exist on '
-                                f'cluster {cluster!r}. Please double-check '
-                                f'the queue name.{colorama.Style.RESET_ALL}')
-
-            for queue in queues_to_check:
+            for z in r.zones or []:
                 fits, reason = pbs_utils.check_instance_fits(
-                    cluster, instance_type, queue)
+                    r.name, instance_type, z.name)
                 if fits:
-                    valid_zones.append(clouds.Zone(queue))
+                    valid_zones.append(z)
                 else:
                     logger.debug(f'Instance type {instance_type} does not fit '
-                                 f'in {cluster}/{queue}: {reason}')
+                                 f'in {r.name}/{z.name}: {reason}')
             if valid_zones:
                 r.set_zones(valid_zones)
                 regions_to_return.append(r)
@@ -418,25 +372,17 @@ class PBS(clouds.Cloud):
 
         gpu_type_resource: Optional[str] = None
         if acc_type is not None:
-            if pbs_utils.lookup_gpu_queue_map(cluster, acc_type) is not None:
-                # The queue selects the GPU type; request GPUs by count.
+            try:
+                acc_type = pbs_utils.resolve_gpu_type(cluster, acc_type,
+                                                      acc_count, queue)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to determine the GPU type resource on PBS '
+                    f'cluster {cluster!r}; requesting GPUs by count only. '
+                    f'Error: {common_utils.format_exception(e)}')
                 acc_type = None
-            else:
-                try:
-                    raw_type = pbs_utils.resolve_gpu_type(
-                        cluster, acc_type, acc_count, queue)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(
-                        f'Failed to determine the GPU type resource on PBS '
-                        f'cluster {cluster!r}; requesting GPUs by count only. '
-                        f'Error: {common_utils.format_exception(e)}')
-                    raw_type = None
-                if raw_type is None:
-                    acc_type = None
-                else:
-                    acc_type = raw_type
-                    gpu_type_resource = _detect_gpu_type_resource(
-                        cluster, raw_type)
+            if acc_type is not None:
+                gpu_type_resource = _detect_gpu_type_resource(cluster, acc_type)
 
         provision_timeout = skypilot_config.get_effective_region_config(
             cloud='pbs',
@@ -491,22 +437,6 @@ class PBS(clouds.Cloud):
                 place = pbs_config.get_nested(config_keys, default_value=None)
                 if place is not None:
                     break
-        # quota.account / quota.project outrank the qsub_options spelling.
-        account = skypilot_config.get_effective_pbs_quota_value(
-            'account',
-            cluster=cluster,
-            queue=queue,
-            override_configs=resources.cluster_config_overrides)
-        if account is not None:
-            qsub_options['A'] = account
-        project = skypilot_config.get_effective_pbs_quota_value(
-            'project',
-            cluster=cluster,
-            queue=queue,
-            override_configs=resources.cluster_config_overrides)
-        if project is not None:
-            qsub_options['P'] = project
-
         client = pbs_utils.make_client_from_ssh_config(ssh_config_dict)
         sky_base_dir = pbs_utils.resolve_sky_base_dir(cluster, client)
         tmpdir = skypilot_config.get_effective_region_config(cloud='pbs',

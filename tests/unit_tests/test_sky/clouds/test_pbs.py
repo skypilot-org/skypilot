@@ -41,7 +41,7 @@ def _node(name, cpus=32, mem=256.0, gpus=4, gpu_type='A100', queue=None):
         queue=queue,
         assigned_cpus=0,
         assigned_gpus=0,
-        jobs=[])
+    )
 
 
 class TestRegistration:
@@ -59,7 +59,6 @@ class TestRegistration:
     def test_config_keys_registered(self):
         assert ('pbs',
                 'qsub_options') in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK
-        assert ('pbs', 'quota') in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK
         assert ('pbs',
                 'cluster_configs') in constants.SKIPPED_CLIENT_OVERRIDE_KEYS
 
@@ -91,7 +90,7 @@ class TestExistingAllowedClusters:
 
 class TestRegionsWithOffering:
 
-    def _patch(self, nodes, queues, queue_map=None, cpu_queue=None):
+    def _patch(self, nodes, queues):
         return [
             mock.patch.object(clouds.PBS,
                               'existing_allowed_clusters',
@@ -103,12 +102,6 @@ class TestRegionsWithOffering:
             mock.patch.object(pbs_utils,
                               '_is_routing_queue',
                               return_value=False),
-            mock.patch.object(pbs_utils,
-                              'lookup_gpu_queue_map',
-                              return_value=queue_map),
-            mock.patch.object(pbs_utils,
-                              'lookup_cpu_queue',
-                              return_value=cpu_queue),
         ]
 
     def test_queues_are_zones(self):
@@ -130,31 +123,6 @@ class TestRegionsWithOffering:
             regions = clouds.PBS.regions_with_offering('8CPU--32GB', None,
                                                        False, 'other', None)
             assert regions == []
-        finally:
-            for p in patches:
-                p.stop()
-
-    def test_gpu_queue_map_narrows_queues(self):
-        patches = self._patch([_node('n1', gpu_type=None)], ['workq', 'gpuq'],
-                              queue_map=['gpuq'])
-        for p in patches:
-            p.start()
-        try:
-            regions = clouds.PBS.regions_with_offering('8CPU--32GB--H100:2',
-                                                       None, False, None, None)
-            assert [z.name for z in regions[0].zones] == ['gpuq']
-        finally:
-            for p in patches:
-                p.stop()
-
-    def test_cpu_queue(self):
-        patches = self._patch([_node('n1')], ['workq', 'cpu'], cpu_queue='cpu')
-        for p in patches:
-            p.start()
-        try:
-            regions = clouds.PBS.regions_with_offering('8CPU--32GB', None,
-                                                       False, None, None)
-            assert [z.name for z in regions[0].zones] == ['cpu']
         finally:
             for p in patches:
                 p.stop()
@@ -356,28 +324,6 @@ class TestMakeDeployResourcesVariables:
         assert deploy_vars['select_resources'] == {'tmp_size': '400gb'}
         assert deploy_vars['place'] == 'scatter:excl'
 
-    def test_quota_wins_over_qsub_options(self, tmp_path):
-        config = {
-            'pbs': {
-                'qsub_options': {
-                    'A': 'from-options'
-                },
-                'quota': {
-                    'account': 'acct',
-                    'project': 'proj'
-                },
-            }
-        }
-        deploy_vars = self._deploy_vars(tmp_path, config)
-        assert deploy_vars['qsub_options'] == {'A': 'acct', 'P': 'proj'}
-
-    def test_gpu_queue_map_requests_untyped_gpus(self, tmp_path):
-        config = {'pbs': {'gpu_queue_map': {'A100': 'gpuq'}}}
-        deploy_vars = self._deploy_vars(tmp_path, config)
-        assert deploy_vars['accelerator_type'] is None
-        assert deploy_vars['gpu_type_resource'] is None
-        assert deploy_vars['accelerator_count'] == '2'
-
     def test_unpinned_queue_short_timeout(self, tmp_path):
         deploy_vars = self._deploy_vars(tmp_path, {}, zone=None)
         assert deploy_vars['provision_timeout'] == 120
@@ -472,8 +418,8 @@ class TestSchema:
                 'ws': {
                     'pbs': {
                         'allowed_clusters': ['c1'],
-                        'quota': {
-                            'project': 'p'
+                        'qsub_options': {
+                            'P': 'p'
                         },
                         'cluster_configs': {
                             'c1': {
@@ -503,7 +449,7 @@ class TestSchema:
         {
             'pbs': {
                 'quota': {
-                    'account': ''
+                    'account': 'a'
                 }
             }
         },
@@ -532,83 +478,6 @@ class TestSchema:
     def test_rejected(self, bad):
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, schemas.get_config_schema())
-
-    def test_effective_quota_value(self, tmp_path):
-        config_path = tmp_path / 'config.yaml'
-        config_path.write_text(
-            yaml_utils.dump_yaml_str({
-                'pbs': {
-                    'quota': {
-                        'account': 'global'
-                    },
-                    'cluster_configs': {
-                        'c1': {
-                            'quota': {
-                                'account': 'cluster'
-                            },
-                            'queue_configs': {
-                                'q': {
-                                    'quota': {
-                                        'account': 'queue'
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }))
-        saved = (skypilot_config._GLOBAL_CONFIG_PATH,
-                 skypilot_config._PROJECT_CONFIG_PATH,
-                 skypilot_config._global_config_context)
-        env = mock.patch.dict(os.environ)
-        env.start()
-        os.environ.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
-        try:
-            skypilot_config._GLOBAL_CONFIG_PATH = str(config_path)
-            skypilot_config._PROJECT_CONFIG_PATH = str(tmp_path / 'none.yaml')
-            skypilot_config._global_config_context = (
-                skypilot_config.ConfigContext())
-            skypilot_config.reload_config()
-            get = skypilot_config.get_effective_pbs_quota_value
-            assert get('account') == 'global'
-            assert get('account', cluster='c1') == 'cluster'
-            assert get('account', cluster='c1', queue='q') == 'queue'
-            assert get('account', cluster='c1', queue='other') == 'cluster'
-            assert get('project', cluster='c1', queue='q') is None
-            # A task override applies at the scope it is written at: the
-            # queue-level server value still outranks a cloud-level one.
-            assert get('account',
-                       cluster='c1',
-                       queue='q',
-                       override_configs={'pbs': {
-                           'quota': {
-                               'account': 'task'
-                           }
-                       }}) == 'queue'
-            assert get('account',
-                       cluster='c1',
-                       queue='q',
-                       override_configs={
-                           'pbs': {
-                               'cluster_configs': {
-                                   'c1': {
-                                       'queue_configs': {
-                                           'q': {
-                                               'quota': {
-                                                   'account': 'task'
-                                               }
-                                           }
-                                       }
-                                   }
-                               }
-                           }
-                       }) == 'task'
-        finally:
-            (skypilot_config._GLOBAL_CONFIG_PATH,
-             skypilot_config._PROJECT_CONFIG_PATH,
-             skypilot_config._global_config_context) = saved
-            env.stop()
-            skypilot_config.reload_config()
 
 
 class TestInfraDisplay:

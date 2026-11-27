@@ -187,17 +187,12 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`provision_timeout <config-yaml-pbs-provision-timeout>`: 120
     :ref:`qsub_options <config-yaml-pbs-qsub-options>`:
       walltime: "8:00:00"
+      A: my-account   # qsub -A
     :ref:`select_resources <config-yaml-pbs-select-resources>`:
       tmp_size: 400gb
     :ref:`place <config-yaml-pbs-place>`: scatter
-    :ref:`quota <config-yaml-pbs-quota>`:
-      account: my-account   # qsub -A
-      project: my-project   # qsub -P
     :ref:`gpu_resource <config-yaml-pbs-gpu-resource>`: ngpus
     :ref:`gpu_type_resource <config-yaml-pbs-gpu-resource>`: gpu_type
-    :ref:`gpu_queue_map <config-yaml-pbs-gpu-queue-map>`:
-      H100: h100q
-    :ref:`cpu_queue <config-yaml-pbs-cpu-queue>`: cpuq
     :ref:`pricing <config-yaml-pbs-pricing>`:
       accelerators:
         A100: 3.50
@@ -209,8 +204,8 @@ Below is the configuration syntax and some example values. See detailed explanat
           walltime: "24:00:00"
         queue_configs:
           gpuq:
-            quota:
-              project: gpu-project
+            qsub_options:
+              P: gpu-project
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
@@ -3072,20 +3067,6 @@ The ``-l place=`` value of the job (optional). Default: ``scatter`` (one node
 per chunk). Use ``scatter:excl`` to reserve whole nodes. The most specific scope
 wins; also settable per task.
 
-.. _config-yaml-pbs-quota:
-
-``pbs.quota``
-~~~~~~~~~~~~~
-
-The account and project a PBS job is submitted with (optional).
-
-- ``account``: submitted as ``qsub -A``.
-- ``project``: submitted as ``qsub -P``.
-
-Resolved workspace > global and, within each, queue > cluster > cloud; a task
-``config`` value applies at the scope it is written at. Set at any scope, they
-take precedence over the ``qsub_options.A`` / ``qsub_options.P`` spelling.
-
 .. _config-yaml-pbs-gpu-resource:
 
 ``pbs.gpu_resource`` and ``pbs.gpu_type_resource``
@@ -3102,33 +3083,6 @@ The PBS resources SkyPilot reads and requests GPUs with (optional).
   ``select=1:...:ngpus=1:gpu_type=<the cluster's spelling of A100>``.
 
 Can be set per cluster under :ref:`cluster_configs <config-yaml-pbs-cluster-configs>`.
-
-.. _config-yaml-pbs-gpu-queue-map:
-
-``pbs.gpu_queue_map``
-~~~~~~~~~~~~~~~~~~~~~
-
-Mapping of GPU types to queue names (optional), for clusters that select the
-GPU model by queue rather than by a node resource. For a mapped GPU type,
-SkyPilot only considers the mapped queues and requests GPUs by count only
-(``ngpus=N`` without a model). Keys are case-insensitive; values are a queue
-name or a list of queue names.
-
-.. code-block:: yaml
-
-  pbs:
-    gpu_queue_map:
-      H100: h100q
-      A100: [a100-train, a100-dev]
-
-.. _config-yaml-pbs-cpu-queue:
-
-``pbs.cpu_queue``
-~~~~~~~~~~~~~~~~~
-
-The queue to use for tasks that request no GPUs (optional). Default: the
-cluster's default queue, then the others. Also settable per cluster and per
-task.
 
 .. _config-yaml-pbs-pricing:
 
@@ -3153,11 +3107,11 @@ Per-cluster and per-queue configuration (optional). Supported fields:
 - ``tmpdir``: Node-local base directory for the SkyPilot runtime (its Python
   environment and job database), expanded on each node. Defaults to the job's
   ``$TMPDIR`` when PBS sets one, else ``/tmp``.
-- ``qsub_options``, ``select_resources``, ``place``, ``quota``, ``pricing``,
-  ``gpu_resource``, ``gpu_type_resource``, ``gpu_queue_map``, ``cpu_queue``:
-  overrides of the fields above at the cluster level.
+- ``qsub_options``, ``select_resources``, ``place``, ``pricing``,
+  ``gpu_resource``, ``gpu_type_resource``: overrides of the fields above at
+  the cluster level.
 - ``queue_configs``: per-queue overrides of ``qsub_options``,
-  ``select_resources``, ``place``, ``quota`` and ``pricing``.
+  ``select_resources``, ``place`` and ``pricing``.
 
 Example:
 
@@ -3173,8 +3127,8 @@ Example:
           walltime: "8:00:00"
         queue_configs:
           gpuq:
-            quota:
-              project: gpu-project
+            qsub_options:
+              P: gpu-project
             place: scatter:excl
 
 .. _config-yaml-oci:

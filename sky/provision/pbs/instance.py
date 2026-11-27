@@ -71,12 +71,7 @@ _QSUB_PROTECTED_OPTIONS = frozenset({
     'h',
     'S',
     'z',
-    'select',
-    'place',
 })
-# Keys of qsub_options that map to `-l <key>=<value>` instead of `-<key>`.
-_QSUB_RESOURCE_KEYS = frozenset({'walltime'})
-
 _TERMINAL_JOB_STATES = pbs.TERMINAL_JOB_STATES
 
 
@@ -102,13 +97,6 @@ def _provision_script_path(base_dir: str, cluster_name_on_cloud: str) -> str:
                         f'{cluster_name_on_cloud}.sh')
 
 
-def _skypilot_runtime_dir(tmpdir: Optional[str],
-                          cluster_name_on_cloud: str) -> str:
-    """Node-local directory for the SkyPilot runtime (venv, sqlite)."""
-    tmp = tmpdir if tmpdir is not None else '/tmp'
-    return os.path.join(tmp, cluster_name_on_cloud)
-
-
 def _preferred_sshd_port(cluster_name_on_cloud: str) -> int:
     digest = hashlib.sha256(cluster_name_on_cloud.encode()).hexdigest()
     return _SSHD_PORT_RANGE_START + int(digest[:8], 16) % _SSHD_PORT_RANGE_SIZE
@@ -122,104 +110,43 @@ def _validate_directive_value(key: str, value: str) -> None:
                          f'{key!r}={value!r}')
 
 
-def _build_custom_qsub_directives(qsub_options: Dict[str, Any]) -> List[str]:
-    """``#PBS`` lines for user-supplied ``qsub_options``.
+def _build_qsub_directives(qsub_options: Dict[str, Any],
+                           queue_info: Optional[pbs.PbsQueue]) -> str:
+    """``#PBS`` lines for ``qsub_options``, newline-joined.
 
     Keys are qsub flags without the dash (``A``, ``P``, ``W``, ``l``, ...).
-    A string or number value gives ``#PBS -<key> <value>``; ``true`` gives a
-    bare ``#PBS -<key>``; a list gives one line per element; ``null`` and
-    ``false`` give nothing. ``walltime`` is a shorthand for
-    ``-l walltime=...``. ``select`` and ``place`` entries of ``l`` and the
-    flags SkyPilot manages are dropped with a warning.
+    A string or number gives ``#PBS -<key> <value>``, ``true`` a bare
+    ``#PBS -<key>``, a list one line per element, ``null``/``false`` nothing.
+    ``walltime`` is a shorthand for ``-l walltime=...``, so that scopes can
+    override it without replacing the other ``l`` resources.
+    Flags SkyPilot manages are dropped with a warning, and so are the
+    ``select`` and ``place`` entries of ``l``. Without a user walltime, the
+    queue's maximum is requested so the allocation lives as long as allowed.
     """
-    lines: List[str] = []
-    if not qsub_options:
-        return lines
     normalized = {str(k).lstrip('-'): v for k, v in qsub_options.items()}
-    conflicting = sorted(set(normalized) & _QSUB_PROTECTED_OPTIONS)
-    if conflicting:
-        logger.warning(f'{colorama.Fore.YELLOW}Ignoring protected qsub options '
-                       f'managed by SkyPilot: {conflicting}. Remove them from '
-                       f'pbs.qsub_options in ~/.sky/config.yaml.'
-                       f'{colorama.Style.RESET_ALL}')
-        for key in conflicting:
-            del normalized[key]
+    lines: List[str] = []
+    has_walltime = False
     for key in sorted(normalized):
-        value = normalized[key]
-        if value is None or value is False:
-            continue
-        values = value if isinstance(value, list) else [value]
-        for item in values:
-            if item is None or item is False:
+        values = normalized[key]
+        for value in values if isinstance(values, list) else [values]:
+            if value is None or value is False:
                 continue
-            if key in _QSUB_RESOURCE_KEYS:
-                str_value = str(item)
-                _validate_directive_value(key, str_value)
-                if key == 'walltime':
-                    pbs_utils.validate_walltime(str_value)
-                lines.append(f'#PBS -l {key}={str_value}')
+            if key == 'walltime':
+                key, value = 'l', f'walltime={value}'
+            resource = str(value).split('=', 1)[0].strip() if key == 'l' else ''
+            if key in _QSUB_PROTECTED_OPTIONS or resource in ('select',
+                                                              'place'):
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Ignoring pbs.qsub_options '
+                    f'{key!r}: {value!r}; it is managed by SkyPilot.'
+                    f'{colorama.Style.RESET_ALL}')
                 continue
-            if item is True:
-                _validate_directive_value(key, '')
-                lines.append(f'#PBS -{key}')
-                continue
-            str_value = str(item)
-            _validate_directive_value(key, str_value)
-            if key == 'l':
-                resource = str_value.split('=', 1)[0].strip()
-                if resource in ('select', 'place'):
-                    logger.warning(
-                        f'{colorama.Fore.YELLOW}Ignoring qsub resource '
-                        f'{str_value!r}: select and place are managed by '
-                        f'SkyPilot.{colorama.Style.RESET_ALL}')
-                    continue
-                if resource == 'walltime':
-                    pbs_utils.validate_walltime(str_value.split('=', 1)[1])
-            lines.append(f'#PBS -{key} {str_value}')
-    return lines
-
-
-def _user_supplied_walltime(qsub_options: Dict[str, Any]) -> bool:
-    if qsub_options.get('walltime') not in (None, False):
-        return True
-    resources = qsub_options.get('l')
-    if resources is None or resources is False:
-        return False
-    if not isinstance(resources, list):
-        resources = [resources]
-    return any(str(r).split('=', 1)[0].strip() == 'walltime' for r in resources)
-
-
-def _compute_walltime_directive(qsub_options: Dict[str, Any],
-                                queue_info: Optional[pbs.PbsQueue],
-                                queue: str) -> Optional[str]:
-    """The auto-generated ``#PBS -l walltime=...`` line, if any.
-
-    A user value wins. Otherwise the queue's ``resources_max.walltime`` is
-    requested, so the allocation lives as long as the queue permits. With
-    no limit, the directive is omitted and the queue or server default
-    applies (unlimited when there is none).
-    """
-    if _user_supplied_walltime(qsub_options):
-        return None
-    if queue_info is not None and queue_info.max_walltime:
-        return f'#PBS -l walltime={queue_info.max_walltime}'
-    if queue_info is not None and queue_info.default_walltime:
-        return None
-    logger.debug(f'Queue {queue!r} sets no walltime limit or default; '
-                 'submitting without walltime.')
-    return None
-
-
-def _build_qsub_directives(qsub_options: Dict[str, Any],
-                           queue_info: Optional[pbs.PbsQueue],
-                           queue: str) -> str:
-    """Auto-generated plus user-supplied ``#PBS`` lines, newline-joined."""
-    lines = []
-    walltime = _compute_walltime_directive(qsub_options, queue_info, queue)
-    if walltime is not None:
-        lines.append(walltime)
-    lines.extend(_build_custom_qsub_directives(qsub_options))
+            has_walltime = has_walltime or resource == 'walltime'
+            line = f'#PBS -{key}' if value is True else f'#PBS -{key} {value}'
+            _validate_directive_value(key, line)
+            lines.append(line)
+    if not has_walltime and queue_info is not None and queue_info.max_walltime:
+        lines.insert(0, f'#PBS -l walltime={queue_info.max_walltime}')
     return '\n'.join(lines)
 
 
@@ -270,56 +197,18 @@ def _wait_for_job_nodes(
                        f'{timeout} seconds. Last state: {last_state}')
 
 
-def _record_pending_reason(cluster_name: str, reason: Optional[str],
-                           queue: Optional[str]) -> None:
-    """Persist the scheduler comment as a launch-progress cluster event."""
-    if not reason:
-        return
-    detail = f'pending: {reason}'
-    if queue:
-        detail += f'; queue: {queue}'
+def _record_event(cluster_name: str, reason: str, debug: bool = False) -> None:
+    """Persist a launch-progress cluster event; never fails the launch."""
+    event_type = (global_user_state.ClusterEventType.DEBUG if debug else
+                  global_user_state.ClusterEventType.LAUNCH_PROGRESS)
     try:
-        global_user_state.add_cluster_event(
-            cluster_name,
-            new_status=None,
-            reason=f'Launching ({detail})',
-            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
-            nop_if_duplicate=True,
-        )
+        global_user_state.add_cluster_event(cluster_name,
+                                            new_status=None,
+                                            reason=reason,
+                                            event_type=event_type,
+                                            nop_if_duplicate=True)
     except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to record pending reason for {cluster_name}: '
-                     f'{e}')
-
-
-def _record_allocation(cluster_name: str, pbs_cluster: str,
-                       job_id: str) -> None:
-    """Persist which PBS job backs this cluster; survives teardown."""
-    try:
-        global_user_state.add_cluster_event(
-            cluster_name,
-            new_status=None,
-            reason=f'PBS job {job_id} on {pbs_cluster}',
-            event_type=global_user_state.ClusterEventType.DEBUG,
-            nop_if_duplicate=True,
-        )
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to record the PBS job of {cluster_name}: {e}')
-
-
-def _record_nodes_allocated(cluster_name: str, pbs_cluster: str,
-                            job_id: str) -> None:
-    try:
-        global_user_state.add_cluster_event(
-            cluster_name,
-            new_status=None,
-            reason=(f'Launching (nodes allocated; PBS job {job_id} '
-                    f'on {pbs_cluster})'),
-            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
-            nop_if_duplicate=True,
-        )
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to record the node allocation of '
-                     f'{cluster_name}: {e}')
+        logger.debug(f'Failed to record {reason!r} for {cluster_name}: {e}')
 
 
 def _make_pending_callback(
@@ -345,9 +234,11 @@ def _make_pending_callback(
         if status_msg != last_status_msg:
             rich_utils.force_update_status(status_msg)
             last_status_msg = status_msg
-        if reason != last_recorded_reason:
-            _record_pending_reason(cluster_name, reason, queue)
-            last_recorded_reason = reason
+        if reason and reason != last_recorded_reason:
+            _record_event(
+                cluster_name, f'Launching (pending: {reason}' +
+                (f'; queue: {queue})' if queue else ')'))
+        last_recorded_reason = reason
 
     return _on_pending
 
@@ -432,17 +323,6 @@ def _resolve_sky_base_dir(client: 'pbs.PbsClient',
         return sky_base_dir
     pbs_cluster = pbs_utils.get_pbs_cluster_from_config(provider_config)
     return pbs_utils.resolve_sky_base_dir(pbs_cluster, client)
-
-
-def _inside_cluster_runtime_dir() -> str:
-    """The runtime directory of the node this code runs on (skylet)."""
-    runtime_dir = os.environ.get(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY)
-    if runtime_dir is None:
-        raise RuntimeError(
-            f'{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY} is not set; '
-            'cannot resolve the SkyPilot runtime directory from inside the '
-            'cluster.')
-    return runtime_dir
 
 
 def _node_agent_script(cluster_name_on_cloud: str, sky_cluster_home_dir: str,
@@ -800,10 +680,15 @@ def _create_virtual_instance(
     on_pending = _make_pending_callback(cluster_name, queue)
 
     def _finish(job_id: str, created: bool) -> common.ProvisionRecord:
-        _record_allocation(cluster_name, pbs_cluster, job_id)
+        # Which PBS job backs this cluster; survives teardown.
+        _record_event(cluster_name,
+                      f'PBS job {job_id} on {pbs_cluster}',
+                      debug=True)
         job = _wait_for_job_nodes(client, job_id, provision_timeout, queue,
                                   on_pending)
-        _record_nodes_allocated(cluster_name, pbs_cluster, job_id)
+        _record_event(
+            cluster_name, f'Launching (nodes allocated; PBS job {job_id} on '
+            f'{pbs_cluster})')
         rich_utils.force_update_status(
             ux_utils.spinner_message('Launching', cluster_name=cluster_name))
         pbs_log = _pbs_log_path(sky_base_dir, job_id)
@@ -855,9 +740,11 @@ def _create_virtual_instance(
             resumed_instance_ids=[],
             created_instance_ids=instance_ids if created else [])
 
-    existing_jobs = client.query_jobs(
-        cluster_name_on_cloud,
-        list(pbs.PENDING_JOB_STATES) + list(pbs.RUNNING_JOB_STATES))
+    existing_jobs = [
+        job.job_id
+        for job in client.list_jobs_by_name(cluster_name_on_cloud)
+        if job.state.upper() not in _TERMINAL_JOB_STATES
+    ]
     if existing_jobs:
         if len(existing_jobs) > 1:
             raise RuntimeError(
@@ -888,9 +775,9 @@ def _create_virtual_instance(
         raise RuntimeError('The cluster config carries no SSH public key for '
                            'the PBS allocation.')
 
-    queue_info = pbs_utils.get_queue_info(pbs_cluster, queue)
-    qsub_options = resources.get('qsub_options', {}) or {}
-    directives = _build_qsub_directives(qsub_options, queue_info, queue)
+    directives = _build_qsub_directives(
+        resources.get('qsub_options') or {},
+        pbs_utils.get_queue_infos(pbs_cluster).get(queue))
     # Memory in MB so fractional GB values work; PBS's mb is MiB.
     mem_in_mb = int(float(resources.get('memory', 0)) * 1024)
     cpus = max(1, int(float(resources['cpus']) + 0.999999))
@@ -1053,8 +940,11 @@ def _wait_for_job_gone(client: 'pbs.PbsClient', job_name: str,
     deadline = time.time() + timeout
     while True:
         try:
-            states: Optional[List[str]] = client.get_jobs_state_by_name(
-                job_name)
+            states: Optional[List[str]] = [
+                job.state
+                for job in client.list_jobs_by_name(job_name,
+                                                    include_finished=True)
+            ]
         except exceptions.CommandError as e:
             logger.debug(f'Failed to query the state of job {job_name}, '
                          f'retrying: {e}')

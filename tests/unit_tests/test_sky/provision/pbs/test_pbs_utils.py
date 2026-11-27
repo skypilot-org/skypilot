@@ -32,7 +32,6 @@ def _node(name,
         queue=queue,
         assigned_cpus=assigned_cpus,
         assigned_gpus=assigned_gpus,
-        jobs=[],
         qlist=qlist)
 
 
@@ -85,17 +84,6 @@ class TestConfigLookups:
                                side_effect=_config):
             assert utils.get_gpu_type_resources('c') == ('gpumodel',)
 
-    def test_lookup_gpu_queue_map(self):
-        with mock.patch.object(utils.skypilot_config,
-                               'get_effective_region_config',
-                               return_value={
-                                   'h100': 'gpuq',
-                                   'A100': ['a', 'b']
-                               }):
-            assert utils.lookup_gpu_queue_map('c', 'H100') == ['gpuq']
-            assert utils.lookup_gpu_queue_map('c', 'a100') == ['a', 'b']
-            assert utils.lookup_gpu_queue_map('c', 'T4') is None
-
     def test_expand_path_vars(self):
         env = {'USER': 'alice', 'SCRATCH': '/scratch'}
         assert utils.expand_path_vars('$SCRATCH/${USER}/x',
@@ -107,14 +95,14 @@ class TestQueues:
 
     def test_get_queues_orders_default_first_and_skips_stopped(self):
         queues = {
-            'b': pbs_adaptor.PbsQueue('b', False, 'Execution', True, True, None,
+            'b': pbs_adaptor.PbsQueue('b', False, 'Execution', True, True,
                                       None),
             'workq': pbs_adaptor.PbsQueue('workq', True, 'Route', True, True,
-                                          None, None),
-            'a': pbs_adaptor.PbsQueue('a', False, 'Execution', True, True, None,
+                                          None),
+            'a': pbs_adaptor.PbsQueue('a', False, 'Execution', True, True,
                                       None),
             'off': pbs_adaptor.PbsQueue('off', False, 'Execution', True, False,
-                                        None, None),
+                                        None),
             # Only reachable through a routing queue; qsub -q rejects it.
             'routed': pbs_adaptor.PbsQueue('routed',
                                            False,
@@ -122,12 +110,10 @@ class TestQueues:
                                            True,
                                            True,
                                            None,
-                                           None,
                                            from_route_only=True),
         }
         with mock.patch.object(utils, 'get_queue_infos', return_value=queues):
             assert utils.get_queues('c') == ['workq', 'a', 'b']
-            assert utils.get_cluster_default_queue('c') == 'workq'
 
     def test_nodes_for_queue(self):
         nodes = [
@@ -172,7 +158,6 @@ class TestQueues:
                                         queue_type,
                                         True,
                                         True,
-                                        None,
                                         None,
                                         qlist=qlist,
                                         route_destinations=dests)
@@ -239,9 +224,7 @@ class TestFitAndResolve:
         with mock.patch.object(utils, 'get_pbs_nodes_info',
                                return_value=nodes), \
              mock.patch.object(utils, '_is_routing_queue',
-                               return_value=False), \
-             mock.patch.object(utils, 'lookup_gpu_queue_map',
-                               return_value=None):
+                               return_value=False):
             assert utils.check_instance_fits('c', '8CPU--32GB')[0]
             fits, reason = utils.check_instance_fits('c', '64CPU--32GB')
             assert not fits and 'Max found: 32 CPUs' in reason
@@ -255,17 +238,6 @@ class TestFitAndResolve:
             assert not fits and 'No GPU nodes matching' in reason
             fits, reason = utils.check_instance_fits('c', '8CPU--32GB--A100:8')
             assert not fits
-
-    def test_check_instance_fits_with_queue_map_ignores_type(self):
-        nodes = [_node('gpu', cpus=32, mem=256, gpus=4, queue='gpuq')]
-        with mock.patch.object(utils, 'get_pbs_nodes_info',
-                               return_value=nodes), \
-             mock.patch.object(utils, '_is_routing_queue',
-                               return_value=False), \
-             mock.patch.object(utils, 'lookup_gpu_queue_map',
-                               return_value=['gpuq']):
-            assert utils.check_instance_fits('c', '8CPU--32GB--H100:2',
-                                             'gpuq')[0]
 
     def test_check_instance_fits_unreachable(self):
         with mock.patch.object(utils,
@@ -325,21 +297,8 @@ class TestNodePortFiles:
         home = utils.sky_cluster_home_dir('/base', 'sky-x')
         assert home == '/base/.sky_clusters/sky-x'
         assert utils.sshd_dir(home) == '/base/.sky_clusters/sky-x/.sky_sshd'
-        assert utils.node_port_file(home, 2).endswith('/.sky_sshd/rank2.port')
         cmd = utils.list_node_port_files_command(home)
         assert '/base/.sky_clusters/sky-x/.sky_sshd/rank*.port' in cmd
-
-
-class TestValidateWalltime:
-
-    @pytest.mark.parametrize('value', ['30', '10:00', '04:00:00', '240:00:00'])
-    def test_valid(self, value):
-        utils.validate_walltime(value)
-
-    @pytest.mark.parametrize('value', ['1d', '1-00:00:00', '4:00:00:00', ''])
-    def test_invalid(self, value):
-        with pytest.raises(ValueError):
-            utils.validate_walltime(value)
 
 
 class TestLoginNodeProxyCommand:

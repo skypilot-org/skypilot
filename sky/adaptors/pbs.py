@@ -10,13 +10,11 @@ values.
 import logging
 import re
 import shlex
-import subprocess
-from typing import (Any, Dict, FrozenSet, List, NamedTuple, Optional, Sequence,
+from typing import (Dict, FrozenSet, List, NamedTuple, Optional, Sequence,
                     Tuple, Union)
 
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
-from sky.utils import timeline
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +41,6 @@ NODE_UNAVAILABLE_STATES = frozenset({
 # PBS client binaries are not always on the non-login PATH of SSH sessions
 # (e.g. inside the job's own sshd), so always try the default install root.
 _PBS_PATH_PREFIX = 'export PATH="$PATH:/opt/pbs/bin"; '
-
-_BATCH_BEGIN = 'SKYPILOT_PBS_BATCH_BEGIN'
-_BATCH_END = 'SKYPILOT_PBS_BATCH_END'
-_BATCH_END_REGEX = re.compile(rf'^{_BATCH_END} (\d+)$', re.MULTILINE)
 
 # qstat/qselect messages for a job the server no longer knows about.
 _JOB_NOT_FOUND_REGEX = re.compile(
@@ -84,10 +78,8 @@ class PbsQueue(NamedTuple):
     queue_type: str
     enabled: bool
     started: bool
-    # Raw ``resources_max.walltime`` / ``resources_default.walltime`` values
-    # (e.g. '24:00:00'), None when unset.
+    # Raw ``resources_max.walltime`` (e.g. '24:00:00'), None when unset.
     max_walltime: Optional[str]
-    default_walltime: Optional[str]
     # Accepts jobs only from a routing queue, never from qsub directly.
     from_route_only: bool = False
     # ``default_chunk.Qlist``: sites that tie nodes to queues with a Qlist
@@ -113,8 +105,6 @@ class NodeInfo(NamedTuple):
     queue: Optional[str]
     assigned_cpus: int
     assigned_gpus: int
-    # Job ids running on the node.
-    jobs: List[str]
     # Raw ``resources_available.Qlist``: comma separated queue tags the
     # node serves, on sites that use one; None otherwise.
     qlist: Optional[str] = None
@@ -132,16 +122,9 @@ class JobInfo(NamedTuple):
     # The scheduler's comment, e.g. why the job is not running yet.
     comment: Optional[str]
     exit_status: Optional[int]
-    owner: Optional[str]
     # How many times PBS has started the job; it reruns a job that fails to
     # start on a node, and holds it after too many attempts.
     run_count: int = 0
-
-
-class PbsInventorySnapshot(NamedTuple):
-    """Cluster-wide inventory collected in one remote invocation."""
-    nodes: List[NodeInfo]
-    queues: Optional[List[PbsQueue]]
 
 
 def parse_size_to_gb(value: Optional[str]) -> float:
@@ -217,9 +200,10 @@ def parse_attribute_blocks(text: str) -> List[Tuple[str, Dict[str, str]]]:
 
 
 def _header_value(header: str, prefix: str) -> str:
+    """The name after ``prefix``; empty for any other line (shell noise)."""
     if header.startswith(prefix):
         return header[len(prefix):].strip()
-    return header
+    return ''
 
 
 def _parse_int(value: Optional[str], default: int = 0) -> int:
@@ -252,15 +236,6 @@ def parse_nodes_output(stdout: str, gpu_resource: str,
                 gpu_type_resource = resource
                 break
         queue = attrs.get('queue') or None
-        jobs_str = attrs.get('jobs', '')
-        jobs: List[str] = []
-        for entry in jobs_str.split(','):
-            entry = entry.strip()
-            if not entry:
-                continue
-            job_id = entry.split('/', 1)[0]
-            if job_id not in jobs:
-                jobs.append(job_id)
         try:
             memory_gb = parse_size_to_gb(attrs.get(available_prefix + 'mem'))
         except ValueError:
@@ -278,17 +253,19 @@ def parse_nodes_output(stdout: str, gpu_resource: str,
                 assigned_cpus=_parse_int(attrs.get(assigned_prefix + 'ncpus')),
                 assigned_gpus=_parse_int(
                     attrs.get(assigned_prefix + gpu_resource)),
-                jobs=jobs,
                 qlist=attrs.get('resources_available.Qlist') or None,
             ))
     return nodes
 
 
-def parse_queues_output(stdout: str,
-                        default_queue: Optional[str]) -> List[PbsQueue]:
-    """Parse ``qstat -Q -f`` output."""
+def parse_queues_output(stdout: str) -> List[PbsQueue]:
+    """Parse ``qstat -B -f; qstat -Q -f`` output; flags the default queue."""
+    blocks = parse_attribute_blocks(stdout)
+    default_queue = next((attrs.get('default_queue')
+                          for header, attrs in blocks
+                          if header.startswith('Server:')), None)
     queues = []
-    for header, attrs in parse_attribute_blocks(stdout):
+    for header, attrs in blocks:
         name = _header_value(header, 'Queue:')
         if not name:
             continue
@@ -300,7 +277,6 @@ def parse_queues_output(stdout: str,
                 enabled=_parse_bool(attrs.get('enabled', 'True')),
                 started=_parse_bool(attrs.get('started', 'True')),
                 max_walltime=attrs.get('resources_max.walltime'),
-                default_walltime=attrs.get('resources_default.walltime'),
                 from_route_only=_parse_bool(
                     attrs.get('from_route_only', 'False')),
                 qlist=(attrs.get('default_chunk.Qlist') or
@@ -332,7 +308,6 @@ def parse_jobs_output(stdout: str) -> List[JobInfo]:
                 comment=comment if comment else None,
                 exit_status=(_parse_int(exit_status)
                              if exit_status is not None else None),
-                owner=attrs.get('Job_Owner'),
                 run_count=_parse_int(attrs.get('run_count', '0')),
             ))
     return jobs
@@ -404,18 +379,16 @@ class PbsClient:
 
     def _run_cmd(self,
                  cmd: Union[str, List[str]],
-                 timeout: Optional[int] = None) -> Tuple[int, str, str]:
+                 timeout: Optional[int] = None,
+                 error_msg: Optional[str] = None) -> Tuple[int, str, str]:
+        """Run a command on the login node; raise on failure if error_msg."""
         if isinstance(cmd, list):
             cmd = shlex.join(cmd)
-        cmd = _PBS_PATH_PREFIX + cmd
-        kwargs: Dict[str, Any] = {}
-        if timeout is not None:
-            kwargs['timeout'] = timeout
-        rc, stdout, stderr = self._runner.run(cmd,
+        rc, stdout, stderr = self._runner.run(_PBS_PATH_PREFIX + cmd,
                                               require_outputs=True,
                                               separate_stderr=True,
                                               stream_logs=False,
-                                              **kwargs)
+                                              timeout=timeout)
         if rc == 255 and self.ssh_control_path is not None:
             # Login nodes with a user-managed ControlPath are usually
             # password-only; the master connection has to be opened by hand.
@@ -423,83 +396,13 @@ class PbsClient:
                       'without a password. Open a shared connection first '
                       f'with: ssh -F ~/.pbs/config -fN <cluster>  (ControlPath '
                       f'{self.ssh_control_path})')
+        if error_msg is not None:
+            subprocess_utils.handle_returncode(rc,
+                                               cmd,
+                                               error_msg,
+                                               stderr=f'{stdout}\n{stderr}',
+                                               stream_logs=False)
         return rc, stdout, stderr
-
-    def _run_cmds(self,
-                  commands: Sequence[str],
-                  timeout: Optional[int] = None) -> List[Tuple[int, str]]:
-        """Run several commands in one remote invocation.
-
-        Each command's stdout is framed between marker lines so that
-        anything the login shell prints before the first command (MOTD,
-        module notices) cannot be mistaken for command output. stderr of all
-        commands is folded into the raised error on transport failure only.
-        """
-        if not commands:
-            return []
-        script_lines = []
-        for command in commands:
-            script_lines.append(
-                f'printf \'\\n%s\\n\' {_BATCH_BEGIN}; ( {command} ); '
-                f'printf \'\\n%s %s\\n\' {_BATCH_END} "$?"')
-        script = '\n'.join(script_lines)
-        rc, stdout, stderr = self._run_cmd(script, timeout=timeout)
-        subprocess_utils.handle_returncode(rc,
-                                           'batched PBS commands',
-                                           'Failed to run PBS commands.',
-                                           stderr=f'{stdout}\n{stderr}',
-                                           stream_logs=False)
-        results: List[Tuple[int, str]] = []
-        cursor = 0
-        for _ in commands:
-            begin = stdout.find(_BATCH_BEGIN, cursor)
-            if begin == -1:
-                raise RuntimeError('Unexpected output from batched PBS '
-                                   f'commands: missing frame: {stdout!r}')
-            begin += len(_BATCH_BEGIN)
-            end_match = _BATCH_END_REGEX.search(stdout, begin)
-            if end_match is None:
-                raise RuntimeError('Unexpected output from batched PBS '
-                                   f'commands: unterminated frame: {stdout!r}')
-            frame = stdout[begin:end_match.start()]
-            results.append((int(end_match.group(1)), frame.strip('\n')))
-            cursor = end_match.end()
-        return results
-
-    def run_command(self,
-                    cmd: str,
-                    timeout: Optional[int] = None) -> Tuple[int, str, str]:
-        """Runs one shell command on the login node and returns its output.
-
-        Returns:
-            (returncode, stdout, stderr). stdout is the command's own
-            output, with whatever the login shell printed before it removed.
-        """
-        rc, stdout, stderr = self._run_cmd(
-            f'printf \'\\n%s\\n\' {_BATCH_BEGIN}; ( {cmd} ); '
-            f'printf \'\\n%s %s\\n\' {_BATCH_END} "$?"',
-            timeout=timeout)
-        subprocess_utils.handle_returncode(rc,
-                                           cmd,
-                                           'Failed to run PBS command.',
-                                           stderr=f'{stdout}\n{stderr}',
-                                           stream_logs=False)
-        results = self._parse_single_frame(stdout)
-        return results[0], results[1], stderr
-
-    @staticmethod
-    def _parse_single_frame(stdout: str) -> Tuple[int, str]:
-        begin = stdout.find(_BATCH_BEGIN)
-        if begin == -1:
-            raise RuntimeError(
-                f'Unexpected output from PBS command: {stdout!r}')
-        begin += len(_BATCH_BEGIN)
-        end_match = _BATCH_END_REGEX.search(stdout, begin)
-        if end_match is None:
-            raise RuntimeError(
-                f'Unexpected output from PBS command: {stdout!r}')
-        return int(
-            end_match.group(1)), stdout[begin:end_match.start()].strip('\n')
 
     # ------------------------------------------------------------------
     # Server / queue / node inventory
@@ -507,62 +410,16 @@ class PbsClient:
 
     def info(self) -> str:
         """Returns ``qstat -B`` output; raises if the server is unreachable."""
-        cmd = 'qstat -B'
-        rc, stdout, stderr = self._run_cmd(cmd)
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd,
-            'Failed to get PBS server information.',
-            stderr=f'{stdout}\n{stderr}',
-            stream_logs=False)
-        return stdout
-
-    def get_server_attributes(self) -> Dict[str, str]:
-        """Attributes of the PBS server (``qstat -B -f``)."""
-        cmd = 'qstat -B -f'
-        rc, stdout, stderr = self._run_cmd(cmd)
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd,
-            'Failed to get PBS server attributes.',
-            stderr=f'{stdout}\n{stderr}',
-            stream_logs=False)
-        blocks = parse_attribute_blocks(stdout)
-        return blocks[0][1] if blocks else {}
-
-    def get_default_queue(self) -> Optional[str]:
-        return self.get_server_attributes().get('default_queue') or None
+        return self._run_cmd(
+            'qstat -B', error_msg='Failed to get PBS server information.')[1]
 
     def get_queues_info(self) -> List[PbsQueue]:
         """Queues of the PBS server; the default queue is flagged."""
-        outputs = self._run_cmds(['qstat -B -f', 'qstat -Q -f'],
-                                 timeout=_INVENTORY_TIMEOUT_SECONDS)
-        server_rc, server_stdout = outputs[0]
-        queues_rc, queues_stdout = outputs[1]
-        subprocess_utils.handle_returncode(queues_rc,
-                                           'qstat -Q -f',
-                                           'Failed to get PBS queues.',
-                                           stderr=queues_stdout,
-                                           stream_logs=False)
-        default_queue = None
-        if server_rc == 0:
-            blocks = parse_attribute_blocks(server_stdout)
-            if blocks:
-                default_queue = blocks[0][1].get('default_queue') or None
-        return parse_queues_output(queues_stdout, default_queue)
-
-    def get_queues(self) -> List[str]:
-        """Execution queue names; the default queue comes first."""
-        default = []
-        others = []
-        for queue in self.get_queues_info():
-            if queue.queue_type.lower() != 'execution':
-                continue
-            if queue.is_default:
-                default.append(queue.name)
-            else:
-                others.append(queue.name)
-        return default + sorted(others)
+        # One SSH call; the server block only supplies the default queue.
+        _, stdout, _ = self._run_cmd('qstat -B -f; qstat -Q -f',
+                                     timeout=_INVENTORY_TIMEOUT_SECONDS,
+                                     error_msg='Failed to get PBS queues.')
+        return parse_queues_output(stdout)
 
     def info_nodes(self, gpu_resource: str,
                    gpu_type_resources: Sequence[str]) -> List[NodeInfo]:
@@ -579,42 +436,6 @@ class PbsClient:
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
         return parse_nodes_output(stdout, gpu_resource, gpu_type_resources)
-
-    def get_inventory_snapshot(
-            self, gpu_resource: str,
-            gpu_type_resources: Sequence[str]) -> PbsInventorySnapshot:
-        """Nodes and queues in one SSH call; queues are best-effort."""
-        outputs = self._run_cmds(['pbsnodes -a', 'qstat -B -f', 'qstat -Q -f'],
-                                 timeout=_INVENTORY_TIMEOUT_SECONDS)
-        nodes_rc, nodes_stdout = outputs[0]
-        server_rc, server_stdout = outputs[1]
-        queues_rc, queues_stdout = outputs[2]
-        nodes: List[NodeInfo] = []
-        if nodes_rc != 0 and _NO_NODES_REGEX.search(nodes_stdout):
-            nodes = []
-        else:
-            subprocess_utils.handle_returncode(
-                nodes_rc,
-                'pbsnodes -a',
-                'Failed to get PBS node information.',
-                stderr=nodes_stdout,
-                stream_logs=False)
-            nodes = parse_nodes_output(nodes_stdout, gpu_resource,
-                                       gpu_type_resources)
-        queues = None
-        if queues_rc != 0:
-            logger.debug('Failed to get PBS queues: %s', queues_stdout)
-        else:
-            default_queue = None
-            if server_rc == 0:
-                blocks = parse_attribute_blocks(server_stdout)
-                if blocks:
-                    default_queue = blocks[0][1].get('default_queue') or None
-            try:
-                queues = parse_queues_output(queues_stdout, default_queue)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug('Failed to parse PBS queues: %s', e)
-        return PbsInventorySnapshot(nodes=nodes, queues=queues)
 
     # ------------------------------------------------------------------
     # Jobs
@@ -652,29 +473,6 @@ class PbsClient:
             job for job in parse_jobs_output(stdout) if job.name == job_name
         ]
 
-    def query_jobs(
-        self,
-        job_name: str,
-        state_filters: Optional[Sequence[str]] = None,
-    ) -> List[str]:
-        """Ids of the current user's jobs named ``job_name`` in the states.
-
-        Args:
-            job_name: Job name to match exactly.
-            state_filters: PBS state letters, e.g. ['Q', 'R']. None matches
-                every state, finished ones included.
-        """
-        states = (frozenset(s.upper() for s in state_filters)
-                  if state_filters is not None else None)
-        include_finished = states is None or bool(states & TERMINAL_JOB_STATES)
-        jobs = self.list_jobs_by_name(job_name,
-                                      include_finished=include_finished)
-        return [
-            job.job_id
-            for job in jobs
-            if states is None or job.state.upper() in states
-        ]
-
     def get_job(self, job_id: str) -> Optional[JobInfo]:
         """The job, or None if the server no longer knows it."""
         cmd = ['qstat', '-x', '-f', job_id]
@@ -694,26 +492,6 @@ class PbsClient:
                 return job
         return jobs[0] if jobs else None
 
-    def get_job_state(self, job_id: str) -> Optional[str]:
-        """Single letter state of the job, or None if it is unknown."""
-        job = self.get_job(job_id)
-        return job.state if job is not None and job.state else None
-
-    def get_jobs_state_by_name(self, job_name: str) -> List[str]:
-        """States of every job (finished included) named ``job_name``."""
-        return [
-            job.state
-            for job in self.list_jobs_by_name(job_name, include_finished=True)
-        ]
-
-    @timeline.event
-    def get_job_reason(self, job_id: str) -> Optional[str]:
-        """The scheduler's comment on the job, e.g. why it is still queued."""
-        job = self.get_job(job_id)
-        if job is None:
-            return None
-        return job.comment
-
     def get_pending_job_count(self,
                               queue: str,
                               exclude_job_id: Optional[str] = None) -> int:
@@ -727,36 +505,12 @@ class PbsClient:
             job_ids = [j for j in job_ids if j != exclude_job_id]
         return len(job_ids)
 
-    def check_job_has_nodes(self, job_id: str) -> bool:
-        job = self.get_job(job_id)
-        return job is not None and bool(job.exec_hosts)
-
-    @timeline.event
-    def get_job_nodes(self, job_id: str) -> List[str]:
-        """Execution hosts of a job, in exec_host order (head first).
-
-        Hostnames rather than addresses: they are what the login node and
-        the nodes resolve, and some sites' nodes are IPv6-only.
-        """
-        job = self.get_job(job_id)
-        if job is None:
-            raise RuntimeError(f'PBS job {job_id} not found.')
-        if not job.exec_hosts:
-            raise RuntimeError(f'No nodes found for PBS job {job_id}. The job '
-                               f'may not be running (state {job.state!r}).')
-        return job.exec_hosts
-
     def submit_job(self, queue: str, job_name: str, script_path: str,
                    workdir: str) -> str:
         """Submit a job script with qsub and return its job id."""
         cmd = (f'cd {shlex.quote(workdir)} && ' + shlex.join(
             ['qsub', '-q', queue, '-N', job_name, '-r', 'n', script_path]))
-        rc, stdout, stderr = self._run_cmd(cmd)
-        subprocess_utils.handle_returncode(rc,
-                                           cmd,
-                                           'Failed to submit PBS job.',
-                                           stderr=f'{stdout}\n{stderr}',
-                                           stream_logs=False)
+        _, stdout, _ = self._run_cmd(cmd, error_msg='Failed to submit PBS job.')
         # qsub prints the job id (e.g. 1234.pbsserver) and nothing else, but
         # a login shell may add noise before it: take the last token.
         lines = [line.strip() for line in stdout.splitlines() if line.strip()]
@@ -782,23 +536,6 @@ class PbsClient:
             rc,
             shlex.join(cmd),
             f'Failed to delete PBS job {job_id}.',
-            stderr=f'{stdout}\n{stderr}',
-            stream_logs=False)
-
-    def cancel_jobs_by_name(self, job_name: str, force: bool = False) -> None:
-        """Delete every non-finished job named ``job_name``."""
-        for job in self.list_jobs_by_name(job_name):
-            if job.state.upper() in TERMINAL_JOB_STATES:
-                continue
-            self.delete_job(job.job_id, force=force)
-
-    def signal_job(self, job_id: str, signal: str) -> None:
-        cmd = ['qsig', '-s', signal, job_id]
-        rc, stdout, stderr = self._run_cmd(cmd)
-        subprocess_utils.handle_returncode(
-            rc,
-            shlex.join(cmd),
-            f'Failed to signal PBS job {job_id}.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
 
@@ -853,8 +590,3 @@ class PbsClient:
         rc, _, _ = self._run_cmd(
             'command -v sshd >/dev/null 2>&1 || test -x /usr/sbin/sshd')
         return rc == 0
-
-
-# Re-exported so callers do not need to import subprocess for the
-# TimeoutExpired raised by the inventory calls.
-TimeoutExpired = subprocess.TimeoutExpired
