@@ -20,6 +20,7 @@ from sky import check as sky_check
 from sky import cloud_stores
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -57,10 +58,15 @@ def _clear_request_level_cache():
     # Process-wide, but holds per-config state the same way.
     # pylint: disable-next=protected-access
     sky_check._unstored_enabled_cloud_names.cache_clear()
+    # Kubeconfig contexts parsed by an earlier test (often mocked).
+    # pylint: disable-next=protected-access
+    kubernetes_adaptor._contexts_cache.clear()
     yield
     annotations.clear_request_level_cache()
     # pylint: disable-next=protected-access
     sky_check._unstored_enabled_cloud_names.cache_clear()
+    # pylint: disable-next=protected-access
+    kubernetes_adaptor._contexts_cache.clear()
 
 
 # Usage: use
@@ -108,6 +114,7 @@ all_clouds_in_smoke_tests = [
     'slurm',
     'pbs',
     'mithril',
+    'modal',
     'verda',
 ]
 default_clouds_to_run = ['aws', 'azure']
@@ -143,6 +150,7 @@ cloud_to_pytest_keyword = {
     'slurm': 'slurm',
     'pbs': 'pbs',
     'mithril': 'mithril',
+    'modal': 'modal',
     'verda': 'verda',
 }
 

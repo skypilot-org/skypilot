@@ -21,6 +21,7 @@
 #
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_managed_job.py --generic-cloud aws
+import hashlib
 import io
 import os
 import pathlib
@@ -31,6 +32,7 @@ import tempfile
 import textwrap
 import time
 from typing import Dict, List, Optional
+import uuid
 
 import jinja2
 import pytest
@@ -375,6 +377,262 @@ def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_restart(generic_cloud: str):
+    """`sky jobs launch --restart` runs a finished job again as a new job.
+
+    A failed job is restarted twice: as is, and with --env and --name
+    overrides. Each restart must be a new job that runs the stored spec (the
+    original's env value, or the override), while the original job stays as
+    it was.
+
+    The first restart happens after the jobs controller has stopped (it is
+    given a one-minute autostop), as when restarting a job from yesterday:
+    like `sky jobs launch`, the restart must start the controller again.
+    Without a separate controller (consolidation mode), or on Kubernetes and
+    RunPod, where the controller does not autostop, that step is a no-op.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    orig = f'{name}-orig'
+    override = f'{name}-ovr'
+    # Fails on purpose: restarting failed jobs is the main use case.
+    run = 'echo "restart-msg=$MSG"; exit 1'
+
+    def id_file(label):
+        return f'/tmp/{name}-{label}.id'
+
+    def job_id(label):
+        # Smoke runs print debug log lines to stdout too; keep the ID line.
+        return f'$(grep -E "^[0-9]+$" {id_file(label)} | tail -1)'
+
+    def submit(label, args):
+        return (f'sky jobs launch {args} -y -o id > {id_file(label)}; '
+                f'echo "{label} job: {job_id(label)}"; '
+                f'[ -n "{job_id(label)}" ]')
+
+    def row(label):
+        # -r: the controller may have autostopped since the last step.
+        return f'sky jobs queue -r | grep -E "^{job_id(label)}[[:space:]]"'
+
+    def wait_failed(label):
+        return (f'for i in $(seq 1 60); do r=$({row(label)}); echo "$r"; '
+                'echo "$r" | grep -qw FAILED && exit 0; sleep 10; done; '
+                'echo "Timed out waiting for FAILED"; exit 1')
+
+    def logs_contain(label, text):
+        return (f's=$(sky jobs logs -r {job_id(label)} --no-follow); '
+                f'echo "$s"; echo "$s" | grep "{text}"')
+
+    # A shared remote API server's controller serves other tests too.
+    wait_controller_stopped = 'echo "Shared API server: controller left up"'
+    controller_cloud = (smoke_tests_utils.pytest_controller_cloud() or
+                        generic_cloud).lower()
+    if controller_cloud in ('kubernetes', 'runpod'):
+        wait_controller_stopped = (
+            f'echo "Controller on {controller_cloud} does not autostop"')
+    elif not smoke_tests_utils.is_non_docker_remote_api_server():
+        wait_controller_stopped = (
+            'c=$(sky status -u | awk \'/^sky-jobs-controller-/ '
+            '{print $1; exit}\'); '
+            'if [ -z "$c" ]; then echo "No jobs controller"; exit 0; fi; '
+            'for i in $(seq 1 60); do '
+            's=$(sky status -r "$c" | grep "^$c"); echo "$s"; '
+            'echo "$s" | grep -qw STOPPED && exit 0; sleep 20; done; '
+            'echo "Timed out waiting for the controller to stop"; exit 1')
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_restart',
+        [
+            submit(
+                'orig', f'-n {orig} --infra {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MSG=first '
+                f'\'{run}\''),
+            wait_failed('orig'),
+            wait_controller_stopped,
+            # Restart as is: a new job, named <name>-rerun-<suffix>, runs the
+            # stored spec, env included. The controller is started again.
+            submit('rerun', f'--restart {job_id("orig")}'),
+            f'r=$({row("rerun")}); echo "$r"; '
+            f'echo "$r" | grep -E "[[:space:]]{orig}-rerun-[0-9a-f]{{6}}[[:space:]]"',
+            wait_failed('rerun'),
+            logs_contain('rerun', 'restart-msg=first'),
+            # Restart with overrides.
+            submit(
+                'ovr',
+                f'--restart {job_id("orig")} -n {override} --env MSG=second'),
+            f'r=$({row("ovr")}); echo "$r"; echo "$r" | grep -w "{override}"',
+            wait_failed('ovr'),
+            logs_contain('ovr', 'restart-msg=second'),
+            # The original job is untouched.
+            f'r=$({row("orig")}); echo "$r"; '
+            f'echo "$r" | grep -w "{orig}" | grep -w FAILED',
+        ],
+        f'sky jobs cancel -y -n {orig}; sky jobs cancel -y -n {override}; '
+        f'rm -f /tmp/{name}-*.id',
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG:
+                ('tests/test_yamls/'
+                 'low_resource_controller_autostop_sky_config.yaml'),
+        },
+        timeout=45 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # Restarts the API server.
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_restart_needs_write_access_like_cancel(
+        generic_cloud: str):
+    """Restarting a job needs the same workspace access as cancelling it.
+
+    An owner runs two jobs in a private workspace that a viewer can only read
+    (``read_access: all``). The viewer sees both jobs but can act on neither:
+
+    * cancel: in their own workspace the controller skips a job from another
+      workspace; with that workspace selected the request is refused.
+    * restart: refused, also with ``--workspace`` naming a workspace the
+      viewer can write to (the new job would go there, but acting on the job
+      still needs write access to the workspace it ran in).
+
+    The owner can restart it. Needs a local API server it can restart with a
+    multi-user config; users are identified as in
+    test_workspace_private_access_pre_login_user.
+    """
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Needs a local API server it can restart.')
+    name = smoke_tests_utils.get_cluster_name()
+    suffix = uuid.uuid4().hex[:8]
+    ws = f'restart-ws-{suffix}'
+    base_url = smoke_tests_utils.ENDPOINT.rsplit('/api/health', 1)[0]
+
+    def as_user(user):
+        user_hash = hashlib.md5(
+            user.encode(),
+            usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
+        return (f'export {constants.USER_ID_ENV_VAR}="{user_hash}"; '
+                f'export {constants.USER_ENV_VAR}="{user}"; ')
+
+    owner = f'owner-{suffix}@example.com'
+    viewer = f'viewer-{suffix}@example.com'
+    as_owner, as_viewer = as_user(owner), as_user(viewer)
+    in_ws = f'--config active_workspace={ws}'
+
+    # Keep the lane's jobs mode across the server restart.
+    consolidation = ('consolidation_mode: true'
+                     if smoke_tests_utils.server_side_is_consolidation_mode()
+                     else '')
+    server_config = textwrap.dedent(f"""\
+        rbac:
+          default_role: user
+        jobs:
+          controller:
+            {consolidation}
+            resources:
+              cpus: 4+
+              memory: 16+
+        workspaces:
+          default: {{}}
+          {ws}:
+            private: true
+            read_access: all
+            allowed_users:
+              - {owner}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config)
+        server_config_path = f.name
+
+    def id_file(label):
+        return f'/tmp/{name}-{label}.id'
+
+    def job_id(label):
+        return f'$(grep -E "^[0-9]+$" {id_file(label)} | tail -1)'
+
+    def submit(user, label, args):
+        return (f'{user}sky jobs launch {args} -y -d -o id > {id_file(label)}; '
+                f'echo "{label} job: {job_id(label)}"; '
+                f'[ -n "{job_id(label)}" ]')
+
+    def row(label):
+        return (f'{as_owner}sky jobs queue {in_ws} | '
+                f'grep -E "^{job_id(label)}[[:space:]]"')
+
+    def wait_status(label, status):
+        return (f'for i in $(seq 1 90); do r=$({row(label)}); echo "$r"; '
+                f'echo "$r" | grep -qw {status} && exit 0; sleep 10; done; '
+                f'echo "Timed out waiting for {status}"; exit 1')
+
+    def refused(user, cmd, text):
+        # The command must fail, and for the expected reason.
+        return (f'{user}s=$({cmd} 2>&1); rc=$?; echo "$s"; '
+                f'[ $rc -ne 0 ] && echo "$s" | grep -i "{text}"')
+
+    task = (f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG}')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_restart_needs_write_access_like_cancel',
+        [
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+            # First contact creates both users (see the test named above).
+            f'curl -sS -H "X-Auth-Request-Email: {owner}" '
+            f'{base_url}/users/me/workspace',
+            f'curl -sS -H "X-Auth-Request-Email: {viewer}" '
+            f'{base_url}/users/me/workspace',
+            f'{as_owner}sky check {in_ws} {generic_cloud}',
+            f'{as_viewer}sky check {generic_cloud}',
+            submit(as_owner, 'done', f'{in_ws} -n {name}-done {task} '
+                   '\'echo restart-msg-ok\''),
+            submit(as_owner, 'long',
+                   f'{in_ws} -n {name}-long {task} \'sleep 3600\''),
+            wait_status('done', 'SUCCEEDED'),
+            wait_status('long', 'RUNNING'),
+            # The viewer can see both jobs: the refusals below are about
+            # write access, not visibility.
+            f'{as_viewer}s=$(sky jobs queue -u); echo "$s"; '
+            f'echo "$s" | grep -E "^{job_id("done")}[[:space:]]" && '
+            f'echo "$s" | grep -E "^{job_id("long")}[[:space:]]"',
+            # Cancel from the viewer's own workspace: the job is skipped.
+            f'{as_viewer}s=$(sky jobs cancel -y {job_id("long")} 2>&1); '
+            'echo "$s"; echo "$s" | grep -i "workspace"',
+            # Cancel with the job's workspace selected: refused.
+            refused(as_viewer, f'sky jobs cancel -y {in_ws} {job_id("long")}',
+                    'permission'),
+            wait_status('long', 'RUNNING'),
+            # Restart: refused into the job's workspace and into one the
+            # viewer can write to.
+            refused(as_viewer, f'sky jobs launch -y -d --restart '
+                    f'{job_id("done")}', 'write access'),
+            refused(
+                as_viewer, f'sky jobs launch -y -d --restart '
+                f'{job_id("done")} --workspace default', 'write access'),
+            f'{as_viewer}s=$(sky jobs queue -u); echo "$s"; '
+            f'! echo "$s" | grep "{name}-done-rerun"',
+            # The owner can restart it.
+            submit(as_owner, 'rerun', f'{in_ws} --restart {job_id("done")}'),
+            wait_status('rerun', 'SUCCEEDED'),
+            f'{as_owner}s=$(sky jobs logs {in_ws} --no-follow '
+            f'{job_id("rerun")}); echo "$s"; echo "$s" | grep restart-msg-ok',
+        ],
+        teardown=(f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+                  f'{server_config_path}; {as_owner}'
+                  f'sky jobs cancel -y {in_ws} -n {name}-long || true; '
+                  f'rm -f /tmp/{name}-*.id; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=45 * 60,
+    )
+    # The default `sky status -u` preamble runs as the ambient user.
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
+    os.unlink(server_config_path)
 
 
 @pytest.mark.managed_jobs
@@ -2073,6 +2331,80 @@ def test_managed_jobs_remote_identity_none(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60)
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # Restarts the API server.
+def test_managed_jobs_admin_local_credentials_default_role_user():
+    """An admin's managed job may set remote_identity: LOCAL_CREDENTIALS
+    while rbac.default_role is user.
+
+    The controller's own API server seeds the job's user with the default
+    role, so it must not re-check the admin-only setting there; that was done
+    at submit. Otherwise the job retries forever and never starts. The new
+    user is seeded as admin on this server before the restart.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    user_name = f'lc-admin-{uuid.uuid4().hex[:8]}'
+    user_hash = uuid.uuid4().hex[:common_utils.USER_HASH_LENGTH]
+    as_user = (f'export {constants.USER_ID_ENV_VAR}="{user_hash}"; '
+               f'export {constants.USER_ENV_VAR}="{user_name}"; ')
+    low_resource_config = smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV[
+        skypilot_config.ENV_VAR_GLOBAL_CONFIG]
+    server_config = yaml_utils.read_yaml(low_resource_config)
+    server_config['rbac'] = {'default_role': 'user'}
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     suffix='.yaml',
+                                     delete=False,
+                                     mode='w') as f:
+        server_config_path = f.name
+    yaml_utils.dump_yaml(server_config_path, server_config)
+    # Only the controller's decision is under test, not what gets uploaded.
+    with tempfile.NamedTemporaryFile(prefix='task_',
+                                     suffix='.yaml',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(
+            textwrap.dedent("""\
+                config:
+                  kubernetes:
+                    remote_identity: LOCAL_CREDENTIALS
+                run: echo ok
+                """))
+        task_yaml = f.name
+    wait_succeeded = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=600))
+    test = smoke_tests_utils.Test(
+        'managed_jobs_admin_local_credentials_default_role_user',
+        [
+            # Seeded with the default role, which is admin until the restart.
+            smoke_tests_utils.restart_api_server_with_config(
+                low_resource_config) + f' && {as_user}sky status',
+            smoke_tests_utils.restart_api_server_with_config(
+                server_config_path),
+            f'{as_user}sky jobs launch -n {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            # On failure, show why: a refusal is only in the controller log.
+            # A subshell, since the wait exits on its timeout.
+            f'{as_user}( {wait_succeeded} ) || '
+            f'{{ sky jobs logs --controller -n {name} --no-follow | tail -40; '
+            'false; }',
+        ],
+        (f'{as_user}sky jobs cancel -y -n {name}; '
+         f'{smoke_tests_utils.RESTORE_API_SERVER_CONFIG}'),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60)
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        os.unlink(server_config_path)
+        os.unlink(task_yaml)
 
 
 # Only run this test on Kubernetes since this test relies on
@@ -3992,8 +4324,10 @@ def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
                                 text=True,
                                 timeout=60,
                                 check=False)
+        # Match the table row: with SKYPILOT_DEBUG=1, the config dump can
+        # print 'sky-jobs-controller-' on stdout before the table.
         for line in result.stdout.splitlines():
-            if 'sky-jobs-controller-' in line:
+            if line.startswith('sky-jobs-controller-'):
                 return line.split()[0]
         raise RuntimeError('No jobs controller found in sky status.')
 
@@ -5301,8 +5635,10 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
                                     text=True,
                                     timeout=60,
                                     check=False).stdout
+        # Match the table row: with SKYPILOT_DEBUG=1, the config dump can
+        # print 'sky-jobs-controller-' on stdout before the table.
         for line in status_out.splitlines():
-            if 'sky-jobs-controller-' in line:
+            if line.startswith('sky-jobs-controller-'):
                 controller = line.split()[0]
                 break
         if controller is None:

@@ -389,7 +389,7 @@ def merge_k8s_configs(
                 patch_merge_key = _PATCH_MERGE_KEYS[key]
                 if patch_merge_key is None:
                     # Atomic list field (e.g., args, command) - replace entirely
-                    base_config[key] = value
+                    base_config[key] = copy.deepcopy(value)
                 else:
                     for override_item in value:
                         override_item_name = override_item.get(patch_merge_key)
@@ -400,10 +400,14 @@ def merge_k8s_configs(
                                  if v.get(patch_merge_key) == override_item_name
                                 ), None)
                             if existing_base_item is not None:
+                                if key == 'env':
+                                    _drop_replaced_env_source(
+                                        existing_base_item, override_item)
                                 merge_k8s_configs(existing_base_item,
                                                   override_item)
                             else:
-                                base_config[key].append(override_item)
+                                base_config[key].append(
+                                    copy.deepcopy(override_item))
                         elif key == 'containers' and base_config[key]:
                             # Backward compatibility for containers: if no name
                             # is specified, merge into the first container
@@ -412,11 +416,41 @@ def merge_k8s_configs(
                                               next_allowed_override_keys,
                                               next_disallowed_override_keys)
                         else:
-                            base_config[key].append(override_item)
+                            base_config[key].append(
+                                copy.deepcopy(override_item))
             else:
-                base_config[key].extend(value)
+                base_config[key].extend(copy.deepcopy(value))
         else:
-            base_config[key] = value
+            # Copies keep a later layer's merge (which may drop keys) from
+            # changing the caller's override in place.
+            base_config[key] = copy.deepcopy(value)
+
+
+def _drop_replaced_env_source(base_item: Dict[str, Any],
+                              override_item: Dict[str, Any]) -> None:
+    """Drops the base env var's source when the override sets another one.
+
+    An env var takes exactly one source, so merging a literal over a
+    valueFrom (or a fieldRef over a configMapKeyRef) would yield one that
+    Kubernetes rejects. A valueFrom of the same kind still deep-merges, e.g.
+    adding `optional: true` to an existing secretKeyRef.
+    """
+    override_value = override_item.get('value')
+    override_from = override_item.get('valueFrom')
+    # Malformed or empty sources fall through to the plain merge, which
+    # rejects a non-dict valueFrom and treats {} as a no-op, as before.
+    sets_value = (override_value is not None and
+                  not isinstance(override_value, (dict, list)))
+    sets_from = isinstance(override_from, dict) and bool(override_from)
+    if not (sets_value or sets_from):
+        return
+    base_item.pop('value', None)
+    base_from = base_item.get('valueFrom')
+    same_kind = (not sets_value and isinstance(base_from, dict) and
+                 isinstance(override_from, dict) and
+                 set(base_from) == set(override_from))
+    if not same_kind:
+        base_item.pop('valueFrom', None)
 
 
 def get_cloud_config_value_from_dict(dict_config: Dict[str, Any],

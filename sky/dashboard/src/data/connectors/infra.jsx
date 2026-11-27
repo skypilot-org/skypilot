@@ -1,11 +1,19 @@
-import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
+import {
+  CLOUDS_LIST,
+  COMMON_GPUS,
+  canonicalizeCloudName,
+} from '@/data/connectors/constants';
 
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
+import { fetchResult } from '@/data/connectors/syncCalls';
 import { getErrorMessageFromResponse } from '@/data/utils';
 import dashboardCache from '@/lib/cache';
 import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
+
+// GKE TPU names: tpu-v6e-slice, tpu-v5p-slice, tpu7x (Ironwood).
+const isTpuName = (name) => /^tpu[-0-9]/.test(name);
 
 /**
  * Returns true iff `nodeData` (a `KubernetesNodeInfo`-shaped object from
@@ -160,7 +168,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
     // Count clusters per cloud
     clusters.forEach((cluster) => {
       if (cluster.cloud) {
-        const cloudName = cluster.cloud;
+        const cloudName = canonicalizeCloudName(cluster.cloud);
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].clusters += 1;
           // If we have clusters in a cloud, it must be enabled
@@ -172,7 +180,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
     // Count jobs per cloud
     jobs.forEach((job) => {
       if (job.cloud) {
-        const cloudName = job.cloud;
+        const cloudName = canonicalizeCloudName(job.cloud);
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].jobs += 1;
           // If we have jobs in a cloud, it must be enabled
@@ -761,19 +769,12 @@ async function getKubernetesGPUsFromContexts(contextNames) {
 
 async function getKubernetesPerNodeGPUs(context) {
   try {
-    const response = await apiClient.post(`/kubernetes_node_info`, {
-      context: context,
-    });
-    if (!response.ok) {
-      const msg = `Failed to get kubernetes node info for context ${context} with status ${response.status}, error: ${response.statusText}`;
-      throw new Error(msg);
-    }
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    if (!id) {
-      const msg = 'No request ID received from server for kubernetes node info';
-      throw new Error(msg);
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    const body = { context: context };
+    const fetchedData = await fetchResult(
+      '/kubernetes_node_info',
+      (headers) => apiClient.post(`/kubernetes_node_info`, body, { headers }),
+      apiClient.get
+    );
     if (!fetchedData.ok) {
       const errorMessage = await getErrorMessageFromResponse(fetchedData);
       const msg = `Failed to get kubernetes node info result for context ${context} with status ${fetchedData.status}, error: ${errorMessage}`;
@@ -872,14 +873,14 @@ export async function getCloudGPUs() {
       }))
       .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
     const tpus = Object.keys(allGPUs)
-      .filter((gpu) => gpu.startsWith('tpu-'))
+      .filter((gpu) => isTpuName(gpu))
       .map((gpu) => ({
         gpu_name: gpu,
         gpu_quantities: allGPUs[gpu].join(', '),
       }))
       .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
     const otherGPUs = Object.keys(allGPUs)
-      .filter((gpu) => !COMMON_GPUS.includes(gpu) && !gpu.startsWith('tpu-'))
+      .filter((gpu) => !COMMON_GPUS.includes(gpu) && !isTpuName(gpu))
       .map((gpu) => ({
         gpu_name: gpu,
         gpu_quantities: allGPUs[gpu].join(', '),
@@ -1164,17 +1165,11 @@ async function getSlurmPerNodeGPUs(clusterName = null) {
 // unreachable still comes back here after those two report nothing for it.
 export async function getSlurmClusterNames() {
   try {
-    const response = await apiClient.post(`/slurm_cluster_names`, {});
-    if (!response.ok) {
-      const msg = `Failed to get slurm cluster names with status ${response.status}`;
-      throw new Error(msg);
-    }
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    if (!id) {
-      const msg = 'No request ID received from server for slurm cluster names';
-      throw new Error(msg);
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    const fetchedData = await fetchResult(
+      '/slurm_cluster_names',
+      (headers) => apiClient.post(`/slurm_cluster_names`, {}, { headers }),
+      apiClient.get
+    );
     if (!fetchedData.ok) {
       const msg = `Failed to get slurm cluster names result with status ${fetchedData.status}`;
       throw new Error(msg);

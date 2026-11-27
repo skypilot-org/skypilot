@@ -213,11 +213,16 @@ def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
     return identities_only.lower() == 'yes'
 
 
-@annotations.lru_cache(scope='request')
 def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
+    """Get the nodes visible to the current Slurm user."""
+    return _get_slurm_nodes_info(cluster, get_submit_user(cluster))
+
+
+@annotations.lru_cache(scope='request')
+def _get_slurm_nodes_info(cluster: str,
+                          slurm_user: Optional[str]) -> List[slurm.NodeInfo]:
     ssh_config = get_slurm_ssh_config()
     ssh_config_dict = ssh_config.lookup(cluster)
-    slurm_user = get_submit_user(cluster)
     command_user = slurm_user or ssh_config_dict['user']
     cache_key = f'slurm:nodes_info:{cluster}:{command_user}'
     cached = kv_cache.get_cache_entry(cache_key)
@@ -575,13 +580,20 @@ def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     return partition
 
 
-@annotations.lru_cache(scope='request')
 def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
     """Get the default partition for a Slurm cluster.
 
     Queries the Slurm cluster for the partition marked with an asterisk (*)
-    in sinfo output. If no default partition is marked, returns None.
+    in sinfo output, as visible to the current Slurm user. If no default
+    partition is marked, returns None.
     """
+    return _get_cluster_default_partition(cluster_name,
+                                          get_submit_user(cluster_name))
+
+
+@annotations.lru_cache(scope='request')
+def _get_cluster_default_partition(cluster_name: str,
+                                   slurm_user: Optional[str]) -> Optional[str]:
     try:
         ssh_config = get_slurm_ssh_config()
         ssh_config_dict = ssh_config.lookup(cluster_name)
@@ -598,7 +610,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
-        slurm_user=get_submit_user(cluster_name),
+        slurm_user=slurm_user,
     )
 
     return client.get_default_partition()

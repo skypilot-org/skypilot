@@ -31,9 +31,9 @@ class TestFluentbitAptHardening(unittest.TestCase):
         # `sudo apt-get` anywhere -- one would bypass both the mirror fallback
         # and the locale pinning.
         self.assertEqual(self.cmd.count('sudo apt-get'), 0)
-        self.assertEqual(self.cmd.count('sudo env LC_ALL=C apt-get'), 2)
+        self.assertEqual(self.cmd.count('$sky_sudo env LC_ALL=C apt-get'), 2)
         self.assertNotIn('sky_apt_run 120 update', self.cmd)
-        self.assertIn('timeout "$_t" sudo env LC_ALL=C apt-get', self.cmd)
+        self.assertIn('timeout "$_t" $sky_sudo env LC_ALL=C apt-get', self.cmd)
         self.assertIn('sky_apt_run 600 update', self.cmd)
         # `install` is deliberately NOT wall-clock capped: a SIGTERM landing in
         # dpkg unpack/configure would leave the package database broken.

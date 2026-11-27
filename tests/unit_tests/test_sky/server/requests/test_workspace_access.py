@@ -173,6 +173,7 @@ _EXPECTED: Dict[Tuple[str, str], str] = {
     # allowlist entry (e.g. a `/serve/*` wildcard) would otherwise match.
     ('POST', '/launch'): WRITE,
     ('POST', '/jobs/launch'): WRITE,
+    ('POST', '/jobs/restart'): WRITE,
     ('POST', '/volumes/apply'): WRITE,
     ('POST', '/serve/up'): WRITE,
     ('POST', '/serve/update'): WRITE,
@@ -357,6 +358,7 @@ class TestForCurrentRequest:
     @pytest.mark.parametrize('method,path', [
         ('POST', '/launch'),
         ('POST', '/jobs/launch'),
+        ('POST', '/jobs/restart'),
         ('POST', '/volumes/apply'),
         ('POST', '/serve/up'),
         ('POST', '/serve/update'),
@@ -486,6 +488,7 @@ class TestReadOnlyEndpointDeclaration:
             ('/serve/up', 'POST', False),
             ('/launch', 'POST', False),
             ('/jobs/launch', 'POST', False),
+            ('/jobs/restart', 'POST', False),
             ('/jobs/pool_apply', 'POST', False),
             ('/volumes/apply', 'POST', False),
             # A sibling read under the same wildcard is still read.
@@ -500,6 +503,7 @@ class TestReadOnlyEndpointDeclaration:
             ('/serve/*', 'POST'),
             ('/launch', 'POST'),
             ('/jobs/launch', 'POST'),
+            ('/jobs/restart', 'POST'),
             ('/jobs/pool_apply', 'POST'),
             ('/volumes/apply', 'POST'),
         ]

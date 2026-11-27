@@ -521,15 +521,21 @@ def user_update(request: fastapi.Request,
             raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_info.id):
+        # A user deleted since the check above gets no password and no role:
+        # both writes only update an existing user.
         if password:
             password_hash = server_common.crypt_ctx.hash(password)
-            global_user_state.add_or_update_user(
-                models.User(id=user_info.id,
-                            name=user_info.name,
-                            password=password_hash))
+            if not global_user_state.set_user_password(user_info.id,
+                                                       password_hash):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
         if role and need_update_role:
-            # Update user role in casbin policy
-            permission.permission_service.update_role(user_info.id, role)
+            if not permission.permission_service.update_role(
+                    user_info.id, role, existing_user_only=True):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
 
 
 @router.post('/batch_update')
@@ -592,7 +598,8 @@ def user_batch_update(request: fastapi.Request,
         resolver = user_resolver.UserResolver()
         all_users_map = resolver.id_to_user
         batch_workspaces = resource_checker.load_fresh_workspaces()
-        batch_resources = resource_checker.ResourceSnapshot.fetch_all()
+        batch_resources = resource_checker.ResourceSnapshot.fetch_for_users(
+            list(user_ids))
         # Pre-resolve each private workspace's allowed_users -> user_id
         # set ONCE for the batch. Without this, check_user_role_demotion
         # iterates private workspaces and calls get_workspace_users for
@@ -601,8 +608,10 @@ def user_batch_update(request: fastapi.Request,
         batch_workspaces_allowed_users = (
             resolver.resolve_workspaces_allowed_users(batch_workspaces))
 
-    succeeded: List[str] = []
+    done: Set[str] = set()
     failed: List[Dict[str, str]] = []
+    # Users whose role changes, written together after the checks below.
+    to_update: List[str] = []
 
     for user_id in user_ids:
         try:
@@ -626,7 +635,7 @@ def user_batch_update(request: fastapi.Request,
                                 role != target_user_roles[0])
             if not need_update_role:
                 # Already in the desired role; record as success no-op.
-                succeeded.append(user_id)
+                done.add(user_id)
                 continue
             # When demoting from admin to a non-admin role (user / viewer),
             # ensure the user has no active resources in private workspaces
@@ -641,15 +650,36 @@ def user_batch_update(request: fastapi.Request,
                     workspaces=batch_workspaces,
                     resources=batch_resources,
                     workspaces_allowed_users=batch_workspaces_allowed_users)
-            with _user_lock(user_info.id):
-                permission.permission_service.update_role(user_info.id, role)
-            succeeded.append(user_id)
+            to_update.append(user_info.id)
         except ValueError as e:
             failed.append({'user_id': user_id, 'error': str(e)})
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(f'Failed to update role for user {user_id}')
             failed.append({'user_id': user_id, 'error': str(e)})
 
+    # No per-user locks: the checks above ran without them, and update_roles
+    # writes every role in one transaction under the policy lock, which
+    # serialises with other writers across processes and replicas.
+    targets = sorted(set(to_update))
+    if targets:
+        try:
+            # A user deleted since the checks above gets no role.
+            missing = permission.permission_service.update_roles(
+                {user_id: role for user_id in targets},
+                existing_users_only=True)
+            done.update(set(targets) - set(missing))
+            failed.extend({
+                'user_id': user_id,
+                'error': f'User {user_id} does not exist'
+            } for user_id in missing)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(f'Failed to update roles for users {targets}')
+            failed.extend({
+                'user_id': user_id,
+                'error': str(e)
+            } for user_id in targets)
+
+    succeeded = [user_id for user_id in user_ids if user_id in done]
     return {'succeeded': succeeded, 'failed': failed}
 
 
@@ -673,8 +703,7 @@ def _delete_user(user_id: str) -> None:
         raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_id):
-        global_user_state.delete_user(user_id)
-        permission.permission_service.delete_user(user_id)
+        permission.permission_service.delete_user_and_record(user_id)
 
 
 @router.post('/delete')
@@ -765,6 +794,7 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
     success_count = 0
     error_count = 0
     creation_errors = []
+    created_user_ids = []
 
     for user_data in users_to_create:
         try:
@@ -803,10 +833,23 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
                 permission.permission_service.update_role(user_hash, role)
 
             success_count += 1
+            created_user_ids.append(user_hash)
 
         except Exception as e:  # pylint: disable=broad-except
             error_count += 1
             creation_errors.append(f'{user_data["username"]}: {str(e)}')
+
+    if created_user_ids:
+        # Grant the private-workspace access `allowed_users` owes the new
+        # accounts, as `/users/create` does, once for the whole batch. The
+        # users already exist, so a failure is logged rather than raised: the
+        # grant is retried when a user next requests that workspace.
+        try:
+            (permission.permission_service.
+             resync_workspace_policies_for_new_users(created_user_ids))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Failed to grant private-workspace access for '
+                         f'imported users: {common_utils.format_exception(e)}')
 
     return {
         'success_count': success_count,
@@ -826,6 +869,8 @@ def user_export() -> Dict[str, Any]:
         skypilot_config.safe_reload_config()
         # Get all users
         user_list = global_user_state.get_all_users()
+        # One reload for the whole export, then read roles from memory.
+        permission.permission_service.refresh_policy()
 
         # Create CSV content
         csv_lines = ['username,password,role']  # Header
@@ -837,7 +882,7 @@ def user_export() -> Dict[str, Any]:
                 continue
 
             # Get user role
-            user_roles = permission.permission_service.get_user_roles(user.id)
+            user_roles = permission.permission_service.roles_in_memory(user.id)
             role = user_roles[0] if user_roles else rbac.get_default_role()
             # Avoid exporting `None` values
             line = ''
@@ -904,6 +949,16 @@ def get_service_account_tokens(
             if token['creator_user_hash'] == auth_user.id
         ]
 
+    users_by_id: Dict[str, models.User] = {}
+    if tokens:
+        # One reload and one user query for the whole list, not per token.
+        permission.permission_service.refresh_policy()
+        # Both columns are nullable, and get_users sorts its input.
+        users_by_id = global_user_state.get_users({
+            i for t in tokens
+            for i in (t['creator_user_hash'], t['service_account_user_id']) if i
+        })
+
     result = []
     for token in tokens:
         token_info = {
@@ -917,17 +972,17 @@ def get_service_account_tokens(
         }
 
         # Add creator display name
-        creator_user = global_user_state.get_user(token['creator_user_hash'])
+        creator_user = users_by_id.get(token['creator_user_hash'])
         token_info[
             'creator_name'] = creator_user.name if creator_user else 'Unknown'
 
         # Add service account name
-        sa_user = global_user_state.get_user(token['service_account_user_id'])
+        sa_user = users_by_id.get(token['service_account_user_id'])
         token_info['service_account_name'] = (sa_user.name if sa_user else
                                               token['token_name'])
 
         # Add service account roles
-        roles = permission.permission_service.get_user_roles(
+        roles = permission.permission_service.roles_in_memory(
             token['service_account_user_id'])
         token_info['service_account_roles'] = roles
 

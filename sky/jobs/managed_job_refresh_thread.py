@@ -238,8 +238,23 @@ def start_managed_job_refresh_daemon() -> None:
     """Start the refresh thread for this API server process, if needed.
 
     No-op when consolidation mode is off — mirrors the gating that the
-    historical ``should_skip_managed_job_status_refresh`` provided.
+    historical ``should_skip_managed_job_status_refresh`` provided. Also a
+    no-op in a local API server started by a jobs controller; see below.
     """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # This API server was started by a jobs controller process (the local
+        # server of a standalone controller cluster, via sdk.api_start) and
+        # inherited its OVERRIDE_CONSOLIDATION_MODE, so is_consolidation_mode()
+        # is true here even though this server does not own the controller
+        # pool: skylet does. Controllers started from here would be children
+        # of this server and inherit IS_SKYPILOT_SERVER, so they would treat
+        # it as their own process tree and never restart it if it died. The
+        # consolidation-mode API server never has this variable in its own
+        # environment: start_controller() exports it only in the controller's
+        # command.
+        logger.debug('API server started by a jobs controller; not starting '
+                     'the managed-job refresh thread.')
+        return
     if not managed_job_utils.is_consolidation_mode():
         logger.debug('Consolidation mode is off; not starting the managed-job '
                      'refresh thread.')

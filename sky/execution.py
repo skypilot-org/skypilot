@@ -360,8 +360,10 @@ def _execute(
                 for resource in task.resources:
                     resource.set_kubernetes_identity(_kubernetes_identity)
         dag.resolve_and_validate_volumes()
+        # Exec mounts nothing, so it must not mark the volumes as attached.
         if (not _is_launched_by_jobs_controller and
-                not _is_launched_by_sky_serve_controller):
+                not _is_launched_by_sky_serve_controller and _request_name !=
+                request_names.AdminPolicyRequestName.CLUSTER_EXEC):
             # Only process pre-mount operations on API server.
             dag.pre_mount_volumes()
         for task in dag.tasks:
@@ -859,11 +861,12 @@ def launch(
             cannot be satisfied. The failover_history of the exception
             will be set as:
                 1. Empty: iff the first-ever sky.optimize() fails to
-                find a feasible resource; no pre-check or actual launch is
-                attempted.
+                find a feasible resource on reachable infra; no pre-check or
+                actual launch is attempted.
                 2. Non-empty: iff at least 1 exception from either
-                our pre-checks (e.g., cluster name invalid) or a region/zone
-                throwing resource unavailability.
+                our pre-checks (e.g., cluster name invalid), a region/zone
+                throwing resource unavailability, or infra that could not be
+                reached while checking feasibility.
         exceptions.CommandError: any ssh command error.
         exceptions.NoCloudAccessError: if all clouds are disabled.
     Other exceptions may be raised depending on the backend.

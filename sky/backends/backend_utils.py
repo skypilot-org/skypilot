@@ -48,14 +48,18 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.modal import modal_utils
 from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.usage import usage_lib
+from sky.users import permission
+from sky.users import rbac
 from sky.utils import auth_utils
 from sky.utils import cluster_utils
 from sky.utils import command_runner
@@ -202,7 +206,7 @@ _RAY_VERSION_KEY = 'sky_ray_version'
 # cluster is on 2.9.3 -- the pinned version had not changed in 2.5 years.
 # TODO(hailong): one-shot migration constant; drop it once no marker-less
 # clusters remain (every cluster launched from this release on carries one).
-_LEGACY_RAY_VERSION = '2.9.3'
+_LEGACY_RAY_VERSION = constants.SKY_LEGACY_RAY_VERSION
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
 #    zone of the launched cluster is '1a'. If we restore, then on capacity errors
@@ -295,12 +299,6 @@ _TUNNEL_OUTPUT_TAIL_LINES = 100
 
 def _caller_is_viewer() -> bool:
     """Return True iff the executor worker is acting for a viewer user."""
-    # pylint: disable=import-outside-toplevel
-    # In-function import to avoid pulling the permission service into
-    # processes that never need it (e.g. the controller image's CLI
-    # entry point), which would also drag in casbin's import cost.
-    from sky.users import permission
-    from sky.users import rbac as rbac_mod
     user_id = os.environ.get(constants.USER_ID_ENV_VAR)
     if not user_id:
         return False
@@ -313,8 +311,8 @@ def _caller_is_viewer() -> bool:
     except Exception:  # pylint: disable=broad-except
         return False
     # Admin wins over viewer when both roles are present.
-    return (rbac_mod.RoleName.VIEWER.value in roles and
-            rbac_mod.RoleName.ADMIN.value not in roles)
+    return (rbac.RoleName.VIEWER.value in roles and
+            rbac.RoleName.ADMIN.value not in roles)
 
 
 def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
@@ -866,6 +864,165 @@ def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
         f'or {remove_hint}.')
 
 
+def _check_cluster_queue(cloud: str, queue: Optional[str]) -> None:
+    """Checks that the queue a cluster will run in is allowed."""
+    try:
+        skypilot_config.check_active_workspace_queue(cloud, queue)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.QueueNotAllowedError(str(e)) from None
+
+
+def _credential_upload_identity(
+        cloud: clouds.Cloud, region: clouds.Region, cluster_name: str,
+        to_provision: 'resources_lib.Resources',
+        server_only: bool) -> Tuple[str, Set[clouds.Cloud]]:
+    """The launch cloud's remote identity, and the clouds whose local
+    credentials are not uploaded to the cluster.
+
+    With `server_only`, from the server's own config: no client layer, task
+    override or admin policy output.
+    """
+    # Remote identity handling can have 4 cases:
+    # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
+    # 2. SERVICE_ACCOUNT: SkyPilot creates and manages a service account
+    # 3. Custom service account: Use specified service account
+    # 4. NO_UPLOAD: Do not upload any credentials
+    #
+    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In
+    # other cases, we exclude the cloud from credential file uploads after
+    # running required checks.
+    excluded_clouds: Set[clouds.Cloud] = set()
+
+    def get_remote_identity(cloud_str: str,
+                            override_configs: Optional[Dict[str, Any]]) -> Any:
+        if server_only:
+            return skypilot_config.get_server_workspace_region_config(
+                cloud=cloud_str,
+                region=region.name,
+                keys=('remote_identity',),
+                default_value=None)
+        return skypilot_config.get_effective_workspace_region_config(
+            cloud=cloud_str,
+            region=region.name,
+            keys=('remote_identity',),
+            default_value=None,
+            override_configs=override_configs)
+
+    remote_identity_config = get_remote_identity(
+        str(cloud).lower(), to_provision.cluster_config_overrides)
+    remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
+    if isinstance(remote_identity_config, str):
+        remote_identity = remote_identity_config
+    if isinstance(remote_identity_config, list):
+        # Some clouds (e.g., AWS) support specifying multiple service accounts
+        # chosen based on the cluster name. Do the matching here to pick the
+        # correct one.
+        for profile in remote_identity_config:
+            if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
+                remote_identity = list(profile.values())[0]
+                break
+    if (not server_only and isinstance(cloud, clouds.Kubernetes) and
+            not isinstance(to_provision.kubernetes_identity, str) and
+            not common.is_controller_name(cluster_name) and
+            clouds.Kubernetes.task_requests_none(
+                region.name, to_provision.cluster_config_overrides)):
+        # The task's NONE beats a per-context identity here too: a pod with no
+        # API identity must not be handed the kubeconfig either. A fixed
+        # in-process identity and controllers ignore it, as in
+        # make_deploy_resources_variables.
+        remote_identity = schemas.RemoteIdentityOptions.NONE.value
+    if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
+        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
+        # excluded_clouds set, but we must also check if the cloud supports
+        # service accounts.
+        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
+            # If NO_UPLOAD is specified, fall back to default remote identity
+            # for downstream logic but add it to excluded_clouds to skip
+            # credential file uploads.
+            remote_identity = schemas.get_default_remote_identity(
+                str(cloud).lower())
+        elif (not server_only and
+              not cloud.supports_service_account_on_remote()):
+            raise exceptions.InvalidCloudConfigs(
+                'remote_identity: SERVICE_ACCOUNT is specified in '
+                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
+                'is not supported by this cloud. Remove the config or set: '
+                '`remote_identity: LOCAL_CREDENTIALS`.')
+        if isinstance(cloud, clouds.Kubernetes):
+            allowed_contexts = skypilot_config.get_workspace_cloud(
+                'kubernetes').get('allowed_contexts', None)
+            if allowed_contexts is None:
+                allowed_contexts = skypilot_config.get_effective_region_config(
+                    cloud='kubernetes',
+                    region=None,
+                    keys=('allowed_contexts',),
+                    default_value=None)
+            # Exclude both Kubernetes and SSH explicitly since:
+            # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
+            #    inherits from Kubernetes)
+            # 2. Both share the same get_credential_file_mounts() which
+            #    returns the kubeconfig. So if we don't exclude both, the
+            #    unexcluded one will upload the kubeconfig.
+            # TODO(romilb): This is a workaround. The right long-term fix
+            # is to have SSH Node Pools use its own kubeconfig instead of
+            # sharing the global kubeconfig at ~/.kube/config. In the
+            # interim, SSH Node Pools' get_credential_file_mounts can filter
+            # contexts starting with ssh- and create a temp kubeconfig
+            # to upload.
+            # When allowed_contexts is not set, or when it is set for a
+            # non-controller cluster, we exclude kubeconfig upload. Controller
+            # clusters need kubeconfig to manage other K8s clusters.
+            is_controller = controller_utils.Controllers.from_name(
+                cluster_name, expect_exact_match=False) is not None
+            if allowed_contexts is None or not is_controller:
+                excluded_clouds.add(clouds.Kubernetes())
+                excluded_clouds.add(clouds.SSH())
+        else:
+            excluded_clouds.add(cloud)
+
+    for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
+        remote_identity_config = get_remote_identity(cloud_str.lower(), None)
+        if remote_identity_config:
+            if (remote_identity_config ==
+                    schemas.RemoteIdentityOptions.NO_UPLOAD.value):
+                excluded_clouds.add(cloud_obj)
+
+    return remote_identity, excluded_clouds
+
+
+def _refuse_loosening_kubeconfig_upload(
+        cloud: clouds.Cloud, region: clouds.Region, cluster_name: str,
+        to_provision: 'resources_lib.Resources',
+        excluded_clouds: Set[clouds.Cloud]) -> None:
+    """Raises if a non-admin's config uploads the API server's kubeconfig
+    where the server's own config would not.
+
+    Raises:
+        exceptions.InvalidCloudConfigs: if it does.
+    """
+    if not clouds.Kubernetes.uploads_kubeconfig(excluded_clouds):
+        return
+    _, server_excluded = _credential_upload_identity(cloud,
+                                                     region,
+                                                     cluster_name,
+                                                     to_provision,
+                                                     server_only=True)
+    if (clouds.Kubernetes.uploads_kubeconfig(server_excluded) or
+            permission.caller_is_admin()):
+        return
+    if isinstance(cloud, clouds.Kubernetes):
+        raise exceptions.InvalidCloudConfigs(
+            '`remote_identity: LOCAL_CREDENTIALS` would upload the API '
+            f'server\'s kubeconfig to your cluster on {cloud} '
+            f'({region.name}); only an admin can set it, in the API server\'s '
+            'config.')
+    raise exceptions.InvalidCloudConfigs(
+        '`remote_identity: NO_UPLOAD` is set for Kubernetes on the API '
+        'server, so its kubeconfig is not uploaded to clusters; your config '
+        'cannot override it.')
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -880,6 +1037,7 @@ def write_cluster_config(
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
+    storage_mounts: Optional[Dict[str, Any]] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
     extra_template_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
@@ -931,6 +1089,13 @@ def write_cluster_config(
             cluster_name,
             cluster_name_on_cloud,
         ), region, zones, num_nodes, dryrun, volume_mounts)
+    if isinstance(cloud, clouds.Slurm):
+        sbatch_options: Dict[str, Any] = typing.cast(
+            Dict[str, Any],
+            resources_vars.get('sbatch_options') or {})
+        _check_cluster_queue(
+            'slurm',
+            sbatch_options.get('qos') or sbatch_options.get('q'))
     config_dict = {}
 
     specific_reservations = set(
@@ -940,103 +1105,11 @@ def write_cluster_config(
             keys=('specific_reservations',),
             default_value=set()))
 
-    # Remote identity handling can have 4 cases:
-    # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
-    # 2. SERVICE_ACCOUNT: SkyPilot creates and manages a service account
-    # 3. Custom service account: Use specified service account
-    # 4. NO_UPLOAD: Do not upload any credentials
-    #
-    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In
-    # other cases, we exclude the cloud from credential file uploads after
-    # running required checks.
     assert cluster_name is not None
-    excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_effective_workspace_region_config(
-        cloud=str(cloud).lower(),
-        region=region.name,
-        keys=('remote_identity',),
-        default_value=None,
-        override_configs=to_provision.cluster_config_overrides)
-    remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
-    if isinstance(remote_identity_config, str):
-        remote_identity = remote_identity_config
-    if isinstance(remote_identity_config, list):
-        # Some clouds (e.g., AWS) support specifying multiple service accounts
-        # chosen based on the cluster name. Do the matching here to pick the
-        # correct one.
-        for profile in remote_identity_config:
-            if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
-                remote_identity = list(profile.values())[0]
-                break
-    if (isinstance(cloud, clouds.Kubernetes) and
-            not isinstance(to_provision.kubernetes_identity, str) and
-            not common.is_controller_name(cluster_name) and
-            clouds.Kubernetes.task_requests_none(
-                region.name, to_provision.cluster_config_overrides)):
-        # The task's NONE beats a per-context identity here too: a pod with no
-        # API identity must not be handed the kubeconfig either. A fixed
-        # in-process identity and controllers ignore it, as in
-        # make_deploy_resources_variables.
-        remote_identity = schemas.RemoteIdentityOptions.NONE.value
-    if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
-        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
-        # excluded_clouds set, but we must also check if the cloud supports
-        # service accounts.
-        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
-            # If NO_UPLOAD is specified, fall back to default remote identity
-            # for downstream logic but add it to excluded_clouds to skip
-            # credential file uploads.
-            remote_identity = schemas.get_default_remote_identity(
-                str(cloud).lower())
-        elif not cloud.supports_service_account_on_remote():
-            raise exceptions.InvalidCloudConfigs(
-                'remote_identity: SERVICE_ACCOUNT is specified in '
-                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
-                'is not supported by this cloud. Remove the config or set: '
-                '`remote_identity: LOCAL_CREDENTIALS`.')
-        if isinstance(cloud, clouds.Kubernetes):
-            allowed_contexts = skypilot_config.get_workspace_cloud(
-                'kubernetes').get('allowed_contexts', None)
-            if allowed_contexts is None:
-                allowed_contexts = skypilot_config.get_effective_region_config(
-                    cloud='kubernetes',
-                    region=None,
-                    keys=('allowed_contexts',),
-                    default_value=None)
-            # Exclude both Kubernetes and SSH explicitly since:
-            # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
-            #    inherits from Kubernetes)
-            # 2. Both share the same get_credential_file_mounts() which
-            #    returns the kubeconfig. So if we don't exclude both, the
-            #    unexcluded one will upload the kubeconfig.
-            # TODO(romilb): This is a workaround. The right long-term fix
-            # is to have SSH Node Pools use its own kubeconfig instead of
-            # sharing the global kubeconfig at ~/.kube/config. In the
-            # interim, SSH Node Pools' get_credential_file_mounts can filter
-            # contexts starting with ssh- and create a temp kubeconfig
-            # to upload.
-            # When allowed_contexts is not set, or when it is set for a
-            # non-controller cluster, we exclude kubeconfig upload. Controller
-            # clusters need kubeconfig to manage other K8s clusters.
-            is_controller = controller_utils.Controllers.from_name(
-                cluster_name, expect_exact_match=False) is not None
-            if allowed_contexts is None or not is_controller:
-                excluded_clouds.add(clouds.Kubernetes())
-                excluded_clouds.add(clouds.SSH())
-        else:
-            excluded_clouds.add(cloud)
-
-    for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_effective_workspace_region_config(
-            cloud=cloud_str.lower(),
-            region=region.name,
-            keys=('remote_identity',),
-            default_value=None)
-        if remote_identity_config:
-            if (remote_identity_config ==
-                    schemas.RemoteIdentityOptions.NO_UPLOAD.value):
-                excluded_clouds.add(cloud_obj)
-
+    remote_identity, excluded_clouds = _credential_upload_identity(
+        cloud, region, cluster_name, to_provision, server_only=False)
+    _refuse_loosening_kubeconfig_upload(cloud, region, cluster_name,
+                                        to_provision, excluded_clouds)
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     logging_agent = logs.get_logging_agent(cloud=str(cloud).lower(),
@@ -1313,6 +1386,13 @@ def write_cluster_config(
                         last_attached_at=now,
                         status=status_lib.VolumeStatus.IN_USE)
 
+    # Modal mounts buckets into the cluster's Function when it is launched,
+    # so they go into the cluster config rather than being mounted afterwards.
+    modal_cloud_bucket_mounts = []
+    if isinstance(cloud, clouds.Modal):
+        modal_cloud_bucket_mounts = modal_utils.get_cloud_bucket_mount_specs(
+            storage_mounts, dryrun=dryrun)
+
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
@@ -1413,6 +1493,9 @@ def write_cluster_config(
             'ray_installation_commands':
                 (constants.RAY_INSTALLATION_COMMANDS.replace(
                     '{ray_version}', ray_version)),
+            'ray_installed_check_command':
+                (constants.SKY_RAY_INSTALLED_CHECK_CMD.replace(
+                    '{ray_version}', ray_version)),
             'skypilot_wheel_installation_commands':
                 constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
                     '{sky_wheel_hash}',
@@ -1474,6 +1557,7 @@ def write_cluster_config(
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
             'volume_mount_rw_paths': volume_mount_rw_paths,
+            'modal_cloud_bucket_mounts': modal_cloud_bucket_mounts,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
@@ -1515,6 +1599,10 @@ def write_cluster_config(
 
         pod_config: Dict[str, Any] = combined_yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
+        _check_cluster_queue(cloud.canonical_name(),
+                             (pod_config.get('metadata') or {}).get(
+                                 'labels',
+                                 {}).get(k8s_constants.KUEUE_QUEUE_NAME_LABEL))
         # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
         pod_config.pop('deployment_spec', None)
         pod_config.pop('pvc_spec', None)
@@ -1620,6 +1708,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
+            clouds.Modal,
             clouds.Yotta,
         )):
         config = auth.configure_ssh_info(config)
@@ -2849,6 +2938,184 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
+_CLUSTER_REMOVED_BY_REFRESH = global_user_state.CLUSTER_REMOVED_BY_REFRESH
+# A refresh that re-enters after a failed cleanup must not overwrite the cause
+# it recorded (by then the evidence may have expired), nor a user's own
+# `sky down`. Setting duplicate_regex turns off add_cluster_event's exact-text
+# check, so this has to match every text _get_terminated_cluster_reason
+# writes, as well as the line servers wrote before it existed.
+_TERMINATED_CLUSTER_EVENT_REGEX = (
+    f'{re.escape(_CLUSTER_REMOVED_BY_REFRESH)}$|^' +
+    re.escape(global_user_state.user_action_event_prefix('terminated')) +
+    '|^All nodes terminated')
+
+_NO_TERMINATION_CAUSE = 'Nodes disappeared; no cause found.'
+_PARTIAL_LOSS_REASON = 'one or more nodes terminated'
+
+
+def _first_sentence(text: str) -> str:
+    lines = text.strip().splitlines()
+    sentence = lines[0].split('. ', 1)[0].rstrip('.') if lines else ''
+    return f'{sentence}.' if sentence else ''
+
+
+def _get_terminated_cluster_reason(
+        record: Dict[str, Any],
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        launched_resources: 'resources_lib.Resources',
+        external_cluster_failures: Optional[List[Dict[str, Any]]]) -> str:
+    """The event reason for a cluster whose nodes are all gone.
+
+    Says who or what removed the nodes and why, first: the dashboard's Details
+    cell shows only the start. Best-effort throughout; when nothing explains
+    the removal it says so rather than guess.
+    """
+    is_k8s = isinstance(launched_resources.cloud, clouds.Kubernetes)
+    autostop = record['autostop']
+    cause = None
+    ray_config = None
+    if is_k8s:
+        try:
+            ray_config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the cluster YAML of '
+                         f'{handle.cluster_name!r}: {e}')
+    provider_config = (ray_config or {}).get('provider')
+
+    # Autodown. Off Kubernetes, skylet terminates the VMs itself, which a
+    # refresh sees as AUTOSTOPPING; on Kubernetes the pods can be gone before
+    # any refresh does, so skylet leaves an Event breadcrumb that outlives them
+    # (instance.py::emit_autostop_event_best_effort). Looked up whatever the
+    # recorded autostop: a refresh that catches the autodown half way (Ray
+    # already down, head pod terminating) marks the cluster abnormal and
+    # resets autostop to -1.
+    autodowned = (record['status'] == status_lib.ClusterStatus.AUTOSTOPPING and
+                  record['to_down'])
+    # Whether the breadcrumb was looked for and is not there. The lookup
+    # returns None on API errors too, and the Event can expire or fail to emit.
+    no_autodown_record = False
+    if not autodowned and provider_config is not None:
+        autodowned = k8s_instance.get_cluster_autostop_event(
+            provider_config,
+            handle.cluster_name_on_cloud,
+            since=record['launched_at']) is not None
+        no_autodown_record = not autodowned
+    if autodowned:
+        idle = f' ({autostop} min)' if autostop >= 0 else ''
+        cause = f'Autodowned by SkyPilot after idle timeout{idle}.'
+
+    if cause is None:
+        k8s_cause = None
+        cluster_info = handle.cached_cluster_info
+        if provider_config is not None and cluster_info is not None:
+            launched_at = record.get('launched_at')
+            try:
+                k8s_cause = k8s_instance.get_cluster_termination_cause(
+                    provider_config, {
+                        pod: infos[0].node_name if infos else None
+                        for pod, infos in cluster_info.instances.items()
+                    },
+                    tolerations=_k8s_pod_tolerations(ray_config),
+                    since=(datetime.fromtimestamp(launched_at, tz=timezone.utc)
+                           if launched_at is not None else None))
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to find why the pods of '
+                             f'{handle.cluster_name!r} are gone: {e}')
+        failures = [
+            sentence for sentence in dict.fromkeys(
+                _first_sentence(f.get('failure_reason') or '')
+                for f in external_cluster_failures or []) if sentence
+        ]
+        reported = None
+        if failures:
+            reported = failures[0]
+            if len(failures) > 1:
+                reported += f' (+{len(failures) - 1} more).'
+        if k8s_cause is not None:
+            cause = k8s_cause
+            if reported is not None:
+                cause += f' Preceded by: {reported}'
+        elif reported is not None:
+            cause = f'Reported failure: {reported}'
+
+    launched_at = record.get('launched_at')
+    if cause is None and is_k8s and launched_at is not None:
+        # A terminating pod can report its cause before it disappears, even
+        # when Kubernetes retains no event explaining its deletion.
+        try:
+            events = global_user_state.get_cluster_events(
+                cluster_name=None,
+                cluster_hash=record['cluster_hash'],
+                event_type=global_user_state.ClusterEventType.TERMINAL,
+                include_timestamps=True,
+                limit=1)
+            since = launched_at - kubernetes_utils.POD_EVENT_CLOCK_SKEW_SECONDS
+            if events and int(events[0]['transitioned_at']) >= since:
+                cause = str(events[0]['reason']) or None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the terminal event for '
+                         f'{handle.cluster_name!r}: {e}')
+
+    # Autodown is likely only if it could have fired (the cluster is older
+    # than its idle limit) and nothing says it did not. A missing Kubernetes
+    # breadcrumb argues against it, but the lookup can miss, so the configured
+    # autodown is still noted.
+    could_autodown = (autostop >= 0 and record['to_down'] and
+                      (launched_at is None or
+                       time.time() - launched_at >= autostop * 60))
+    likely_autodowned = (f'Likely autodowned by SkyPilot (idle {autostop} '
+                         'min)')
+
+    if (cause is None and record['status'] == status_lib.ClusterStatus.INIT):
+        latest = global_user_state.get_last_cluster_event_of_type_multiple(
+            {record['cluster_hash']}, [
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                global_user_state.ClusterEventType.LAUNCH_PROGRESS
+            ]).get(record['cluster_hash'])
+        if global_user_state.is_unhealthy_init_reason(latest):
+            assert latest is not None
+            # The reason itself can span lines (a pod's last known state).
+            why = ' '.join(
+                latest[len(global_user_state.ABNORMAL_STATUS_REASON_PREFIX
+                          ):].split('. Transitioned to INIT')[0].split())
+            what = 'pods' if is_k8s else 'nodes'
+            if (could_autodown and not no_autodown_record and
+                    not launched_resources.use_spot and
+                    why.startswith('ray cluster is unhealthy')):
+                # A refresh that lands mid-autodown (Ray stopped, every VM
+                # still up) records the cluster as unhealthy this way; lost
+                # nodes point elsewhere, a spot preemption above all.
+                cause = (f'{likely_autodowned}; was unhealthy ({why}) before '
+                         f'its {what} disappeared.')
+            else:
+                cause = (f'Was unhealthy ({why}), then its {what} '
+                         'disappeared; no direct cause found.')
+
+    if cause is None:
+        # Nothing names a cause. Lead with what the cluster's own setup makes
+        # likely, as the refresh's warning for a vanished cluster does: the
+        # table cell shows only the start of the text.
+        if could_autodown and not no_autodown_record:
+            cause = f'{likely_autodowned}; no direct cause found.'
+        elif launched_resources.use_spot:
+            cause = 'Likely spot preemption; no direct cause found.'
+        else:
+            cause = _NO_TERMINATION_CAUSE
+        if could_autodown and no_autodown_record:
+            cause = (f'{cause[:-1]} (autodown was set, but left no '
+                     'record).')
+    return f'{cause} {_CLUSTER_REMOVED_BY_REFRESH}'
+
+
+def _k8s_pod_tolerations(
+        ray_config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    node_config = ((ray_config or {}).get('available_node_types',
+                                          {}).get('ray_head_default',
+                                                  {}).get('node_config', {}))
+    return node_config.get('spec', {}).get('tolerations') or []
+
+
 def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
@@ -2889,7 +3156,7 @@ def _update_cluster_status(
         global_user_state.add_cluster_event(
             cluster_name,
             None,
-            'Cluster has no YAML file. Removing the cluster from cache.',
+            global_user_state.CLUSTER_REMOVED_NO_YAML,
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
         global_user_state.remove_cluster(cluster_name, terminate=True)
@@ -3288,10 +3555,34 @@ def _update_cluster_status(
         ray_cluster_unhealthy = all_nodes_up
 
         # For Kubernetes clusters with unhealthy pods, check node health
-        # to provide better diagnostics (e.g., "node X is NotReady").
+        # to provide better diagnostics (e.g., "node X is NotReady"). Not only
+        # when Ray is unhealthy: a pod evicted from a failed node is Failed or
+        # Terminating, and its node is the cause.
+        # A cluster already INIT is reported again only with something new.
+        # Pods missing: only the first time they are seen missing (the cluster
+        # stays INIT with them gone until it is downed or relaunched, and a
+        # later refresh no longer looks them up, so it would overwrite their
+        # cause), and only on a cluster that was up (not an interrupted
+        # launch). Otherwise: when a pod names a cause (see the gate below).
+        first_loss = some_nodes_terminated
+        if some_nodes_terminated and status == status_lib.ClusterStatus.INIT:
+            last_event = global_user_state.get_last_cluster_event(
+                record['cluster_hash'],
+                event_type=global_user_state.ClusterEventType.STATUS_CHANGE)
+            first_loss = (
+                bool(record.get('cluster_ever_up')) and
+                not (last_event or '').startswith(
+                    f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX}'
+                    f' {_PARTIAL_LOSS_REASON}'))
+        report_again = (first_loss if some_nodes_terminated else any(
+            k8s_instance.pod_reason_identifies_cause(reason)
+            for _, reason in node_statuses.values()))
+
         node_health: Optional[Dict[str, 'NodeHealthInfo']] = None
-        if (ray_cluster_unhealthy and
-                isinstance(launched_resources.cloud, clouds.Kubernetes)):
+        # On a cluster already INIT the lookup would be discarded unless the
+        # event is reported again.
+        if (isinstance(launched_resources.cloud, clouds.Kubernetes) and
+            (status != status_lib.ClusterStatus.INIT or report_again)):
             unhealthy_pods = [
                 pod_name for pod_name, (_, reason) in node_statuses.items()
                 if reason is not None
@@ -3300,9 +3591,15 @@ def _update_cluster_status(
                 try:
                     ray_config = global_user_state.get_cluster_yaml_dict(
                         handle.cluster_yaml)
+                    launched_at = record.get('launched_at')
                     node_health = k8s_instance.get_node_health_for_cluster(
-                        handle.cluster_name_on_cloud, ray_config['provider'],
-                        unhealthy_pods)
+                        handle.cluster_name_on_cloud,
+                        ray_config['provider'],
+                        unhealthy_pods,
+                        tolerations=_k8s_pod_tolerations(ray_config),
+                        since=(datetime.fromtimestamp(launched_at,
+                                                      tz=timezone.utc)
+                               if launched_at is not None else None))
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node health for '
                                  f'{cluster_name!r}: {e}')
@@ -3368,34 +3665,46 @@ def _update_cluster_status(
                          status_lib.ClusterStatus.STOPPED)
         ]
         if some_nodes_terminated:
-            init_reason = 'one or more nodes terminated'
-            # Say where the node went. The pods are gone, so their live status
-            # explains nothing, but the Kubernetes nodes they were placed on
-            # still do: a node that no longer exists, or that is NotReady or
-            # cordoned, points at a cluster/cloud-side failure rather than a
-            # user-initiated teardown. K8s-only; other clouds keep the generic
-            # reason. Best-effort -- fall back to the generic message when the
-            # nodes are unknown or all look fine.
-            #
-            # Skipped once the cluster is already INIT, mirroring the guard on
-            # the event write below: a cluster stays INIT with the pod missing
-            # until it is downed or relaunched, so without this we would poll
-            # the K8s API once per node every refresh to build a string that
-            # is then discarded.
-            if (status != status_lib.ClusterStatus.INIT and
-                    not status_reason and
+            init_reason = _PARTIAL_LOSS_REASON
+            # Say where the missing pods went: their deletion events and the
+            # nodes they were placed on (a node that no longer exists, is
+            # NotReady or carries an evicting taint points at a cluster/cloud-
+            # side failure). Reported next to what the surviving pods say.
+            # K8s-only; best-effort; once (first_loss above).
+            if (first_loss and
                     isinstance(launched_resources.cloud, clouds.Kubernetes)):
                 try:
                     cluster_info = handle.cached_cluster_info
-                    node_names = (cluster_info.get_node_names()
-                                  if cluster_info is not None else None)
-                    if node_names:
-                        ray_config = global_user_state.get_cluster_yaml_dict(
-                            handle.cluster_yaml)
-                        if ray_config and 'provider' in ray_config:
-                            status_reason = (
-                                k8s_instance.get_missing_node_reason(
-                                    node_names, ray_config['provider']) or '')
+                    # Only the pods that are gone: a node whose pods still run
+                    # did not lose any.
+                    pod_nodes = ({
+                        pod: (infos[0].node_name if infos else None)
+                        for pod, infos in cluster_info.instances.items()
+                        if pod not in node_statuses
+                    } if cluster_info is not None else {})
+                    loss_config = (global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml) if pod_nodes else None)
+                    if loss_config and 'provider' in loss_config:
+                        launched_at = record.get('launched_at')
+                        since = (datetime.fromtimestamp(launched_at,
+                                                        tz=timezone.utc)
+                                 if launched_at is not None else None)
+                        tolerations = _k8s_pod_tolerations(loss_config)
+                        loss_reason = (
+                            k8s_instance.get_cluster_termination_cause(
+                                loss_config['provider'],
+                                pod_nodes,
+                                tolerations=tolerations,
+                                since=since) or
+                            k8s_instance.get_missing_node_reason(
+                                [n for n in pod_nodes.values() if n],
+                                loss_config['provider'],
+                                tolerations=tolerations,
+                                since=since))
+                        if loss_reason:
+                            status_reason = '; '.join(
+                                r for r in (loss_reason.rstrip('.'),
+                                            status_reason) if r)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node state for '
                                  f'{cluster_name!r}: {e}')
@@ -3547,8 +3856,10 @@ def _update_cluster_status(
             identified_cause = recovered_cause or any(
                 k8s_instance.pod_reason_identifies_cause(pod_reason)
                 for _, pod_reason in node_statuses.values())
-        # Skip if already INIT, unless this refresh explained why.
-        if (status != status_lib.ClusterStatus.INIT or identified_cause):
+        # Skip if already INIT, unless this refresh has something new (see
+        # report_again; a recovered cause also counts when no pod is missing).
+        if (status != status_lib.ClusterStatus.INIT or report_again or
+            (identified_cause and not some_nodes_terminated)):
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.INIT,
@@ -3586,51 +3897,54 @@ def _update_cluster_status(
             include_user_info=include_user_info,
             summary_response=summary_response)
 
-    verb = 'terminated' if to_terminate else 'stopped'
+    # Already recorded as STOPPED and still stopped: only record that the
+    # status was checked. This relies on STOPPED being written only by
+    # remove_cluster(terminate=False) via the post_teardown_cleanup() below,
+    # which removes the SSH config, clears the cached IPs and closes the usage
+    # interval. Anything else that records STOPPED must do the same cleanup,
+    # or refresh will never redo it.
+    if not to_terminate and status == status_lib.ClusterStatus.STOPPED:
+        global_user_state.set_cluster_status(cluster_name,
+                                             status_lib.ClusterStatus.STOPPED)
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+
     backend = backends.CloudVmRayBackend()
-
-    # For Kubernetes, recover an autodown that completed between two refreshes.
-    # On k8s, autostop is implemented as autodown (pod termination); if skylet
-    # deleted the pods before a refresh caught the cluster in AUTOSTOPPING, we
-    # would otherwise record only the generic cleanup event below. Skylet leaves
-    # a durable Event breadcrumb
-    # (kubernetes/instance.py::emit_autostop_event_best_effort) that outlives the
-    # deleted pods, so read it back and attribute the termination to autostop.
-    # nop_if_duplicate keeps the timeline clean in the non-race case where
-    # 'Cluster is autostopping.' was already recorded. Only attempt this when the
-    # cluster was configured with autostop/autodown -- otherwise the breadcrumb
-    # cannot exist and the lookup is pointless.
-    if (record['autostop'] >= 0 and to_terminate and
-            isinstance(launched_resources.cloud, clouds.Kubernetes)):
-        try:
-            ray_config = global_user_state.get_cluster_yaml_dict(
-                handle.cluster_yaml)
-            if ray_config and 'provider' in ray_config:
-                autostop_event = k8s_instance.get_cluster_autostop_event(
-                    ray_config['provider'],
-                    handle.cluster_name_on_cloud,
-                    since=record['launched_at'])
-                if autostop_event is not None:
-                    global_user_state.add_cluster_event(
-                        cluster_name,
-                        None,
-                        'Cluster was autodowned (idle timeout).',
-                        global_user_state.ClusterEventType.STATUS_CHANGE,
-                        nop_if_duplicate=True,
-                        transitioned_at=autostop_event.get('transitioned_at'))
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug('Failed to record autodown event for '
-                         f'{cluster_name!r}: {e}')
-
-    global_user_state.add_cluster_event(
-        cluster_name,
-        None,
-        f'All nodes {verb}, cleaning up the cluster.',
-        global_user_state.ClusterEventType.STATUS_CHANGE,
-        # This won't do anything for a terminated cluster, but it's needed for a
-        # stopped cluster.
-        nop_if_duplicate=True,
-    )
+    if to_terminate:
+        # A refresh re-entering after a failed cleanup has already recorded
+        # why; skip the Kubernetes lookups it would only throw away.
+        last_event = global_user_state.get_last_cluster_event(
+            record['cluster_hash'],
+            global_user_state.ClusterEventType.STATUS_CHANGE)
+        if last_event is None or not re.search(_TERMINATED_CLUSTER_EVENT_REGEX,
+                                               last_event):
+            try:
+                reason = _get_terminated_cluster_reason(
+                    record, handle, launched_resources,
+                    external_cluster_failures)
+            except Exception as e:  # pylint: disable=broad-except
+                # Explaining the removal must never block the cleanup below.
+                logger.debug(f'Failed to explain why {cluster_name!r} is '
+                             f'gone: {e}')
+                reason = (f'{_NO_TERMINATION_CAUSE} '
+                          f'{_CLUSTER_REMOVED_BY_REFRESH}')
+            global_user_state.add_cluster_event(
+                cluster_name,
+                None,
+                reason,
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                nop_if_duplicate=True,
+                duplicate_regex=_TERMINATED_CLUSTER_EVENT_REGEX)
+    else:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            'All nodes stopped, cleaning up the cluster.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True,
+        )
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(
         cluster_name,
@@ -4119,15 +4433,17 @@ class CloudFilter(enum.Enum):
     LOCAL = 'local'
 
 
-def _get_glob_clusters(
-        clusters: List[str],
-        silent: bool = False,
-        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+def _get_glob_clusters(clusters: List[str],
+                       silent: bool = False,
+                       workspaces_filter: Optional[Set[str]] = None,
+                       exclude_managed_clusters: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(
-            cluster, workspaces_filter=workspaces_filter)
+            cluster,
+            workspaces_filter=workspaces_filter,
+            exclude_managed_clusters=exclude_managed_clusters)
         if len(glob_cluster) == 0 and not silent:
             logger.info(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
@@ -4135,6 +4451,25 @@ def _get_glob_clusters(
 
 
 _MAX_NAMES_IN_SUMMARY = 3
+
+
+def _pod_reason_parts(reasons: Dict[str, str]) -> List[str]:
+    """'<pod> is not ready (<reason>)', grouping pods with the same reason."""
+    by_reason: Dict[str, List[str]] = {}
+    for pod_name, reason in reasons.items():
+        by_reason.setdefault(reason, []).append(pod_name)
+    parts = []
+    for reason, pods in by_reason.items():
+        names = sorted(pods)
+        if len(names) == 1:
+            parts.append(f'{names[0]} is not ready ({reason})')
+        else:
+            shown = names[:_MAX_NAMES_IN_SUMMARY]
+            name_list = ', '.join(shown)
+            if len(names) > _MAX_NAMES_IN_SUMMARY:
+                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
+            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+    return parts
 
 
 def _summarize_pod_reasons(
@@ -4145,7 +4480,8 @@ def _summarize_pod_reasons(
     """Summarize per-pod reasons into a concise grouped message.
 
     Groups issues by root cause:
-    1. Node-level issues (from node_health dict, deduplicated by node)
+    1. Node-level issues (from node_health dict, deduplicated by node),
+       followed by the reasons of the pods on those nodes
     2. Pod-level issues (grouped by reason, pod names from dict keys)
 
     Args:
@@ -4160,20 +4496,19 @@ def _summarize_pod_reasons(
         A summarized string, or '' if no reasons found.
     """
     parts = []
+    node_explained_pods = set()
 
-    # 1. Node-level summary (from structured data)
+    # 1. Node-level summary (from structured data), with what the node's pods
+    # report: the node says where, the pod says how it went.
     if node_health:
         # Group by issue type (e.g., all NotReady together)
         by_issue: Dict[str, List[str]] = {}
-        affected_by_issue: Dict[str, int] = {}
         for node_name, info in node_health.items():
             by_issue.setdefault(info.issue, []).append(node_name)
-            affected_by_issue[info.issue] = (
-                affected_by_issue.get(info.issue, 0) + len(info.pods))
 
         for issue, nodes in by_issue.items():
             names = sorted(nodes)
-            affected = affected_by_issue[issue]
+            affected = sum(len(node_health[n].pods) for n in names)
             if len(names) == 1:
                 part = f'node {names[0]} is {issue}'
             else:
@@ -4184,33 +4519,29 @@ def _summarize_pod_reasons(
                         f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
                 part = f'{len(names)} nodes are {issue} ({name_list})'
             part += f', affecting {affected} out of {total_pods} pods'
+            # The node is named above, so drop it from the pods' reasons (they
+            # then group); with several nodes, name each pod's node instead.
+            reasons = {}
+            for node_name in names:
+                for pod_name in node_health[node_name].pods:
+                    node_explained_pods.add(pod_name)
+                    reason = node_statuses.get(pod_name, (None, None))[1]
+                    if reason:
+                        label = (pod_name if len(names) == 1 else
+                                 f'{pod_name} on {node_name}')
+                        reasons[label] = reason.replace(f' on node {node_name}',
+                                                        '')
+            if reasons:
+                part += ': ' + '; '.join(_pod_reason_parts(reasons))
             parts.append(part)
 
-    # Collect pod names that are already explained by node issues
-    node_explained_pods = set()
-    if node_health:
-        for info in node_health.values():
-            node_explained_pods.update(info.pods)
-
     # 2. Pod-level summary (pods not already explained by node issues)
-    pod_issues: Dict[str, List[str]] = {}
-    for pod_name, (_, reason) in node_statuses.items():
-        if reason is None:
-            continue
-        if pod_name in node_explained_pods:
-            continue
-        pod_issues.setdefault(reason, []).append(pod_name)
-
-    for reason, pods in pod_issues.items():
-        names = sorted(pods)
-        if len(names) == 1:
-            parts.append(f'{names[0]} is not ready ({reason})')
-        else:
-            shown = names[:_MAX_NAMES_IN_SUMMARY]
-            name_list = ', '.join(shown)
-            if len(names) > _MAX_NAMES_IN_SUMMARY:
-                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
-            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+    parts.extend(
+        _pod_reason_parts({
+            pod_name: reason
+            for pod_name, (_, reason) in node_statuses.items()
+            if reason is not None and pod_name not in node_explained_pods
+        }))
 
     return '; '.join(parts)
 
@@ -4313,6 +4644,8 @@ def get_clusters(
     include_credentials: bool = False,
     summary_response: bool = False,
     include_handle: bool = True,
+    limit: Optional[int] = None,
+    after: Optional[Tuple[int, str]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -4333,6 +4666,10 @@ def get_clusters(
             return clusters from the current user.
         include_credentials: If True, include ssh credentials in the records of
             the clusters the current user owns.
+        limit: If provided, return at most this many clusters, newest launch
+            first.
+        after: If provided, only clusters after this (launched_at, name), the
+            last cluster of the previous page.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -4358,6 +4695,8 @@ def get_clusters(
             logger.debug('Suppressing include_credentials for viewer caller')
             include_credentials = False
 
+    exclude_managed_clusters = not (_include_is_managed or
+                                    env_options.Options.SHOW_DEBUG_INFO.get())
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -4370,14 +4709,14 @@ def get_clusters(
                 non_glob_cluster_names.append(cluster_name)
         cluster_names = non_glob_cluster_names
         if glob_cluster_names:
+            # Otherwise a pattern also matching a managed cluster would
+            # report it as not found below.
             cluster_names += _get_glob_clusters(
                 glob_cluster_names,
                 silent=True,
-                workspaces_filter=accessible_workspaces)
+                workspaces_filter=accessible_workspaces,
+                exclude_managed_clusters=exclude_managed_clusters)
 
-    exclude_managed_clusters = False
-    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
-        exclude_managed_clusters = True
     user_hashes_filter = None
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
@@ -4386,13 +4725,16 @@ def get_clusters(
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
-        summary_response=summary_response)
+        summary_response=summary_response,
+        limit=limit,
+        after=after)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
-    if cluster_names is not None:
+    # A page holds only some of the named clusters.
+    if cluster_names is not None and limit is None:
         record_names = {record['name'] for record in records}
         not_found_clusters = ux_utils.get_non_matched_query(
             cluster_names, record_names)

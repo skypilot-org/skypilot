@@ -107,6 +107,10 @@ def request_body_env_vars() -> dict:
     # timeouts it puts on its own users upsert from it, so a client must not
     # be able to supply it.
     env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS, None)
+    # The user to act as is sent in a header and only applies to this client's
+    # own requests. Forwarded, it would make any request the server or a
+    # controller later sends with a service account token act as that user.
+    env_vars.pop(constants.IMPERSONATE_USER_ENV_VAR, None)
     # Remove the in-cluster context name - this is only meaningful for the
     # local Kubernetes environment and should not be forwarded to the server,
     # which has its own cluster context configuration.
@@ -194,6 +198,16 @@ class RequestBody(BasePayload):
     # and keeps the pre-upgrade (loopback) behavior; see `stamp_request_body`
     # and the override logic in `executor.py`.
     from_loopback: bool = False
+    # The account that made an impersonated call, which usage metrics
+    # attribute the request to. Set server-side in `stamp_request_body`; a
+    # client-sent value is overwritten.
+    impersonator_id: Optional[str] = None
+    impersonator_name: Optional[str] = None
+    # Whether the server authenticated the caller, so the users row and its
+    # role exist and the worker need not upsert them. Set server-side in
+    # `stamp_request_body`; a client-sent value is overwritten. Relies on every
+    # middleware that sets `request.state.auth_user` ensuring both first.
+    authenticated: bool = False
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -230,6 +244,9 @@ class RequestBody(BasePayload):
         kwargs.pop('client_api_version', None)
         kwargs.pop('workspace_access', None)
         kwargs.pop('from_loopback', None)
+        kwargs.pop('authenticated', None)
+        kwargs.pop('impersonator_id', None)
+        kwargs.pop('impersonator_name', None)
         return kwargs
 
     @property
@@ -412,6 +429,11 @@ class StatusBody(RequestBody):
     summary_response: bool = False
     # Include the cluster handle in the response
     include_handle: bool = True
+    # A page of at most `limit` clusters, newest launch first. The cursor is the
+    # `launched_at` and `name` of the last cluster of the previous page.
+    limit: Optional[int] = None
+    after_launched_at: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class StartBody(RequestBody):
@@ -597,6 +619,9 @@ class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
     purge: bool = False
+    # Keep a k8s-hostpath volume's files even if it was registered with
+    # cleanup_on_deletion.
+    no_cleanup: bool = False
 
 
 class VolumeListBody(RequestBody):
@@ -605,6 +630,16 @@ class VolumeListBody(RequestBody):
     # None means every volume, so a client that predates this field and never
     # sends it keeps getting the whole listing.
     volume_names: Optional[List[str]] = None
+    # A page of at most `limit` volumes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
+
+
+class StorageListBody(RequestBody):
+    """The request body for the storage list endpoint."""
+    # A page of at most `limit` storages by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class VolumeValidateBody(RequestBody):
@@ -666,6 +701,20 @@ class JobsLaunchBody(RequestBody):
         return kwargs
 
 
+class JobsRestartBody(RequestBody):
+    """The request body for the jobs restart endpoint."""
+    # Exactly one of job_id and job_name names the job to restart.
+    job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    name: Optional[str] = None
+    pool: Optional[str] = None
+    # Resources.copy() kwargs, with `cloud` as a string.
+    resources_override: Optional[Dict[str, Any]] = None
+    env_overrides: Optional[List[Tuple[str, str]]] = None
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None
+    num_nodes: Optional[int] = None
+
+
 class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
@@ -695,6 +744,10 @@ class JobsQueueV2Body(RequestBody):
     infra_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
+    # Cursor: with `limit`, return the page of top-level jobs after this one
+    # in job id order. Servers older than MIN_JOBS_QUEUE_CURSOR_API_VERSION
+    # ignore this field, so the client checks the server version first.
+    after_job_id: Optional[int] = None
     statuses: Optional[List[str]] = None
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
@@ -1152,6 +1205,9 @@ class RecipeListBody(RequestBody):
     my_recipes_only: bool = False
     recipe_type: Optional[
         str] = None  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
+    # A page of at most `limit` recipes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

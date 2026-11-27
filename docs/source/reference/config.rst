@@ -46,6 +46,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       min_elapsed_seconds: 60
       min_retries: 5
     :ref:`max_launching_jobs_per_user <config-yaml-jobs-max-launching-jobs-per-user>`: 200
+    :ref:`allow_event_callback <config-yaml-jobs-allow-event-callback>`: false
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -56,6 +57,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         down: false  # use with caution!
       :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
       :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
+      :ref:`stream_task_logs_to_controller_log <config-yaml-jobs-controller-stream-task-logs-to-controller-log>`: true
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -101,6 +103,11 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`kai <config-yaml-kubernetes-kai>`:
+      :ref:`queue <config-yaml-kubernetes-kai-queue>`: team-queue
+      :ref:`preemptibility <config-yaml-kubernetes-kai-preemptibility>`: preemptible
+      :ref:`topology <config-yaml-kubernetes-kai-topology>`: fabric
+      :ref:`preferred_topology_level <config-yaml-kubernetes-kai-preferred-topology-level>`: leaf
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
@@ -259,6 +266,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
     :ref:`remote_identity <config-yaml-azure-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`vpc_name <config-yaml-azure-vpc-name>`: my-vnet
+    :ref:`subnet_id <config-yaml-azure-subnet-id>`: /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet
     :ref:`use_internal_ips <config-yaml-azure-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-azure-ssh-proxy-command>`: ssh -W %h:%p user@host
 
@@ -305,6 +313,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`allow_impersonation <config-yaml-rbac-allow-impersonation>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -558,6 +567,28 @@ Example:
   jobs:
     max_launching_jobs_per_user: 200
 
+.. _config-yaml-jobs-allow-event-callback:
+
+``jobs.allow_event_callback``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Allow managed jobs to set the deprecated ``event_callback`` field (optional).
+
+``event_callback`` is a shell script that the jobs controller runs whenever a managed job changes status. It is deprecated and will be removed in a future release. It is disabled by default: ``sky jobs launch`` rejects a job that sets it. When the jobs controller runs in the API server (:ref:`consolidation mode <jobs-consolidation-mode>`), jobs that were submitted before it was disabled skip their callbacks.
+
+Set this to ``true`` in the API server's config to keep using ``event_callback``. It cannot be set from a client's config.
+
+Unless locked down with an :ref:`admin policy <advanced-policy-config>`, this can allow users to run code on the API server pod.
+
+Default: ``false``. Changes require an API server restart to take effect.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    allow_event_callback: true
+
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
 
@@ -689,6 +720,32 @@ Example:
     controller:
       # Disable task logs GC (keep all logs indefinitely)
       task_logs_gc_retention_hours: -1
+
+
+.. _config-yaml-jobs-controller-stream-task-logs-to-controller-log:
+
+``jobs.controller.stream_task_logs_to_controller_log``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether the jobs controller copies a finished task's log into the controller
+log (optional).
+
+When a task finishes, the controller downloads the task log from the job
+cluster and, by default, also prints it into the controller log. Set to
+``false`` to skip that copy: ``sky jobs logs <job_id>`` and the dashboard
+still serve the downloaded task log, while ``sky jobs logs --controller``
+shows only controller events. This avoids storing each task log twice when
+logs are retained long-term.
+
+Default: ``true``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      stream_task_logs_to_controller_log: false
 
 
 .. _config-yaml-allowed-clouds:
@@ -1736,9 +1793,11 @@ errors from the cloud provider will be surfaced.
 
 Name of an existing Azure Virtual Network (VNet) to use for the cluster (optional).
 
-When specified, SkyPilot will use the existing VNet and its first subnet instead of
-creating new networking resources. If the subnet has an associated Network Security Group
-(NSG), it will be used; otherwise, SkyPilot will create its own NSG.
+When specified, SkyPilot will use the existing VNet instead of creating new
+networking resources. By default, it uses the first subnet returned by Azure;
+set :ref:`subnet_id <config-yaml-azure-subnet-id>` to select a specific subnet.
+If the subnet has an associated Network Security Group (NSG), it will be used;
+otherwise, SkyPilot will create its own NSG.
 
 This is useful for organizations that require instances to be launched in a pre-configured
 VNet with specific network policies.
@@ -1747,6 +1806,30 @@ VNet with specific network policies.
 
   azure:
     vpc_name: my-existing-vnet
+
+.. _config-yaml-azure-subnet-id:
+
+``azure.subnet_id``
+~~~~~~~~~~~~~~~~~~~
+
+Full resource ID of an existing Azure subnet to use for the cluster (optional).
+Requires ``azure.vpc_name``. The ID must match exactly one subnet in the resolved
+VNet, ignoring case. If it does not match, provisioning fails rather than falling
+back to another subnet. The selected subnet's NSG is used when present; otherwise,
+SkyPilot creates an NSG.
+
+This setting can also be overridden in a task's ``config.azure`` section.
+When overriding ``vpc_name``, also set ``subnet_id`` if the global configuration
+pins a subnet in a different VNet.
+
+If omitted, SkyPilot uses the first subnet returned by Azure for a custom VNet,
+or creates networking resources when no custom VNet is configured.
+
+.. code-block:: yaml
+
+  azure:
+    vpc_name: my-existing-vnet
+    subnet_id: /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/my-existing-vnet/subnets/my-subnet
 
 .. _config-yaml-azure-use-internal-ips:
 
@@ -1839,6 +1922,12 @@ One of:
 - ``NONE`` (case-insensitive, so ``none`` too): the pods get no Kubernetes
   identity: no token is mounted and no roles are granted. Autodown is not
   available. See :ref:`kubernetes-remote-identity-none`.
+
+With a remote API server, a user who is not an admin cannot make the API
+server's kubeconfig reach clusters that the server's own config does not send
+it to, such as with ``LOCAL_CREDENTIALS`` or by overriding the server's
+``NO_UPLOAD``. Such a value in their client config, task or admin policy
+output is refused; set it in the API server's config instead.
 
 .. _config-yaml-kubernetes-allowed-contexts:
 
@@ -2010,8 +2099,8 @@ If unset, the default is chosen based on the launch: ``10`` seconds for a
 single node, scaled up by ``0.2`` seconds per additional node (capped at
 ``60`` seconds); ``1200`` seconds (capped at ``2400``) when GCP DWS flex
 start is used; ``180`` seconds (capped at ``240``) when a ``ReadWriteMany``
-PVC must be provisioned; and 24 hours when a Kueue local queue is
-configured.
+PVC must be provisioned; and 24 hours when a Kueue local queue or a KAI
+queue is configured.
 
 Default: ``10``–``60`` seconds (see above).
 
@@ -2181,6 +2270,65 @@ jobs that set
 :ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
 which bounds their wait instead. Set the field explicitly to bound their wait
 as well.
+
+.. _config-yaml-kubernetes-kai:
+
+``kubernetes.kai``
+~~~~~~~~~~~~~~~~~~
+
+`KAI Scheduler <https://github.com/kai-scheduler/KAI-Scheduler>`_ configuration
+(optional). See :ref:`kubernetes-example-kai`. Cannot be combined with
+:ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`.
+
+The time KAI keeps a cluster queued counts toward
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`.
+
+.. _config-yaml-kubernetes-kai-queue:
+
+``kubernetes.kai.queue``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Queue`` to submit clusters to. A queue set for a context in
+a workspace always wins over a task's ``config.kubernetes.kai.queue``;
+elsewhere, which one wins depends on where this one is set. See
+:ref:`kubernetes-example-kai`.
+
+.. _config-yaml-kubernetes-kai-preemptibility:
+
+``kubernetes.kai.preemptibility``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``preemptible`` or ``non-preemptible`` (optional). If not set, KAI derives it
+from the cluster's priority: below 100 is preemptible.
+
+.. _config-yaml-kubernetes-kai-topology:
+
+``kubernetes.kai.topology``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Topology`` to place the cluster's pods in (optional). Set it
+with :ref:`required_topology_level <config-yaml-kubernetes-kai-required-topology-level>`,
+:ref:`preferred_topology_level <config-yaml-kubernetes-kai-preferred-topology-level>`,
+or both. See :ref:`kubernetes-example-kai`.
+
+.. _config-yaml-kubernetes-kai-required-topology-level:
+
+``kubernetes.kai.required_topology_level``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A level of the ``Topology``, by node label or alias (optional). All of the
+cluster's pods must land in one domain at this level, and the cluster stays
+queued until one has room, including when no domain at this level is large
+enough.
+
+.. _config-yaml-kubernetes-kai-preferred-topology-level:
+
+``kubernetes.kai.preferred_topology_level``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A level of the ``Topology``, by node label or alias, at or below the required
+level (optional). KAI places the pods in one domain at this level if it can,
+and otherwise in one at the lowest broader level that has room.
 
 .. _config-yaml-kubernetes-dws:
 
@@ -2357,7 +2505,10 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
 Override the APT mirrors tried when installing packages on a pod (optional).
 Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
 fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
-(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``). The image's own sources are
+tried first. A mirror replaces only the image's Ubuntu sources
+(``*.ubuntu.com/ubuntu``), so it must serve Ubuntu packages over HTTP at
+``/ubuntu``.
 
 Example:
 
@@ -2891,7 +3042,9 @@ Supported fields:
     metrics from several clusters. Without a filter, all series returned by
     ``url`` are attributed to this cluster. Clusters sharing a ``url``
     automatically exclude each other's filtered slices, so a fleet is never
-    counted twice.
+    counted twice. URLs are compared as text: give Prometheus servers that
+    run on different login nodes distinct URLs (for example the node's
+    hostname rather than ``localhost``).
   - ``via``: Name of another Slurm cluster whose login node runs the
     ``/federate`` request instead of this cluster's own, for a central
     Prometheus reachable from only some login nodes. The fetched series are
@@ -3140,6 +3293,7 @@ Advanced OCI configuration (optional).
 
 ``oci_config_profile``
     The profile name in ``~/.oci/config`` to use for launching instances.
+    A region-specific section can name a different profile for that region; ``sky check`` probes every profile named this way, and the key and token files of all of them are copied to clusters.
     Default: ``DEFAULT``
 
 ``compartment_ocid``
@@ -3551,6 +3705,26 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-rbac-allow-impersonation:
+
+``rbac.allow_impersonation``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether admin service accounts may act on behalf of other users (optional).
+Default: ``false``.
+
+When ``true``, a request authenticated with the token of a service account
+whose role is ``admin`` can set the ``X-SkyPilot-Impersonate-User`` header
+(``sky.impersonate()`` in the Python SDK, ``SKYPILOT_IMPERSONATE_USER`` for
+the CLI) to run as an existing user. The user owns what the request creates,
+and the API server logs the service account behind each such request.
+Impersonated requests cannot change users or service account tokens.
+
+.. code-block:: yaml
+
+  rbac:
+    allow_impersonation: true
 
 .. _config-yaml-db:
 

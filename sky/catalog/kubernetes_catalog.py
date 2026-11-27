@@ -4,6 +4,7 @@ Kubernetes does not require a catalog of instances, but we need an image catalog
 mapping SkyPilot image tags to corresponding container image tags.
 """
 import collections
+import contextvars
 import re
 import typing
 from typing import Dict, List, Optional, Set, Tuple
@@ -11,12 +12,17 @@ from typing import Dict, List, Optional, Set, Tuple
 from sky import check as sky_check
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.catalog import CloudFilter
 from sky.catalog import common
+from sky.catalog import config as catalog_config
 from sky.clouds import cloud
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import plugin_extensions
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -105,70 +111,241 @@ def _list_accelerators(
     realtime: bool = False
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
-    """List accelerators in the Kubernetes cluster.
+    """List accelerators in the Kubernetes clusters.
 
-    If realtime is True, the function will query the cluster to fetch real-time
-    GPU usage, which is returned in total_accelerators_available. Note that
-    this may require an expensive list_pod_for_all_namespaces call, which
-    requires cluster-wide pod read permissions.
+    When ``region_filter`` is None, all Kubernetes contexts allowed by the
+    active workspace (falling back to the in-cluster context when no kubeconfig
+    context is available) are queried, like the table output of
+    ``sky gpus list --infra k8s``. Otherwise, only the context named by
+    ``region_filter`` is queried. See list_accelerators_in_contexts() for the
+    returned values.
+    """
+    # Every context is listed regardless of all_regions: see
+    # list_accelerators_in_contexts().
+    del all_regions, require_price  # Unused.
+    # Listing the contexts needs the Kubernetes python client: check that
+    # Kubernetes is enabled first.
+    if not _kubernetes_enabled():
+        return {}, {}, {}
+    if region_filter is not None:
+        contexts = [region_filter]
+    else:
+        # List accelerators from all contexts allowed by the active workspace,
+        # never falling back to a context it does not allow. The in-cluster
+        # context is included by existing_allowed_contexts() when there is no
+        # kubeconfig context to fall back to (e.g., running in a pod).
+        contexts = [
+            context
+            for context in sky_clouds.Kubernetes.existing_allowed_contexts(
+                silent=True)
+            if context is not None
+        ]
+    return list_accelerators_in_contexts(contexts,
+                                         gpus_only=gpus_only,
+                                         name_filter=name_filter,
+                                         quantity_filter=quantity_filter,
+                                         case_sensitive=case_sensitive,
+                                         realtime=realtime)
+
+
+def _kubernetes_enabled() -> bool:
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        cloud.CloudCapability.COMPUTE)
+    return sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(), enabled_clouds)
+
+
+def list_accelerators_in_contexts(
+    contexts: List[str],
+    gpus_only: bool,
+    name_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    realtime: bool = False
+) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
+                                                                          int]]:
+    """Lists the accelerators of the given Kubernetes contexts and merges them.
+
+    The callers decide which contexts to list: the Kubernetes catalog lists
+    the allowed Kubernetes contexts, and the SSH catalog its allowed SSH Node
+    Pool contexts.
+
+    Each context is a separate pool of GPUs, so each keeps its own entries
+    (their ``region`` is the context), as the table output of ``sky gpus
+    list`` and the Slurm catalog (one entry per partition) do. Contexts offering
+    the same GPU and quantity are not merged into one entry, whether or not
+    ``--all-regions`` is set (#9267).
+
+    A context known to be unreachable, or whose credentials are invalid, is
+    skipped, so one unreachable cluster does not abort the listing of the
+    others.
+
+    If realtime is True, the function will query the clusters to fetch
+    real-time GPU usage, which is returned in total_accelerators_available.
+    Note that this may require an expensive list_pod_for_all_namespaces call,
+    which requires cluster-wide pod read permissions.
 
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
 
+    If realtime is True and a NodeInfoSource snapshot provider serves a
+    context, that context's nodes and pods are read from its snapshot instead
+    of the Kubernetes API.
+
     Returns:
         A tuple of three dictionaries:
         - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo
-            objects with quantity information.
+            objects with quantity information, one per context offering it.
         - total_accelerators_capacity: Dict mapping accelerator names to their
-            total capacity in the cluster.
+            total capacity across all queried contexts.
         - total_accelerators_available: Dict mapping accelerator names to their
-            current availability. Returns -1 for each accelerator if
-            realtime=False or if insufficient permissions.
+            current availability across all queried contexts. Returns -1 for
+            each accelerator if realtime=False or if insufficient permissions.
     """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
-    del all_regions, require_price  # Unused.
 
     # First check if Kubernetes is enabled. This ensures k8s python client is
     # installed. Do not put any k8s-specific logic before this check.
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-        cloud.CloudCapability.COMPUTE)
-    if not sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(),
-                                        enabled_clouds):
+    if not _kubernetes_enabled():
         return {}, {}, {}
 
-    # TODO(zhwu): this should return all accelerators in multiple kubernetes
-    # clusters defined by allowed_contexts.
-    if region_filter is None:
-        context = kubernetes_utils.get_current_kube_config_context_name()
-        if context is None and kubernetes_utils.is_incluster_config_available():
-            # If context is None and we are running in a kubernetes pod, use the
-            # in-cluster context as the current context.
-            context = kubernetes.in_cluster_context_name()
-        # Never fall back to a context the active workspace does not allow.
-        allowed = sky_clouds.Kubernetes.existing_allowed_contexts(silent=True)
-        if context not in allowed:
-            context = next((c for c in allowed if c is not None), None)
+    # Skip contexts known to be unreachable without waiting for them to time
+    # out, as the table output does (core.realtime_kubernetes_gpu_availability).
+    reachable_contexts = []
+    for context in contexts:
+        reason = kubernetes_utils.known_unreachable_reason(context)
+        if reason is None:
+            reachable_contexts.append(context)
+        else:
+            logger.debug(
+                f'Skipping unreachable Kubernetes context {context!r}: '
+                f'{reason}')
+    if not reachable_contexts:
+        return {}, {}, {}
+
+    # Query the contexts in parallel, like the table output's realtime
+    # availability path: each context needs credential checks and API calls,
+    # and exec-based auth (e.g., on EKS/GKE) can take seconds per context.
+    # Pool threads start without the request's config context, active
+    # workspace and catalog fallback flag (thread-local), so carry them over;
+    # each thread needs its own context copy.
+    workspace = skypilot_config.get_active_workspace()
+    use_default_catalog = catalog_config.get_use_default_catalog_if_failed()
+    request_context = contextvars.copy_context()
+
+    def _list_in_context(context: str):
+
+        def _run():
+            with skypilot_config.local_active_workspace_ctx(
+                    workspace
+            ), catalog_config.set_use_default_catalog_if_failed(
+                    use_default_catalog):
+                return _list_accelerators_in_context(
+                    context=context,
+                    name_filter=name_filter,
+                    quantity_filter=quantity_filter,
+                    case_sensitive=case_sensitive,
+                    realtime=realtime)
+
+        return request_context.copy().run(_run)
+
+    per_context_results = subprocess_utils.run_in_parallel(
+        _list_in_context, reachable_contexts)
+
+    result = []
+    total_accelerators_capacity: Dict[str, int] = {}
+    total_accelerators_available: Dict[str, int] = {}
+    for context_result, capacity, available in per_context_results:
+        result.extend(context_result)
+        for accelerator_name, count in capacity.items():
+            total_accelerators_capacity[accelerator_name] = (
+                total_accelerators_capacity.get(accelerator_name, 0) + count)
+        for accelerator_name, count in available.items():
+            if (count == -1 or
+                    total_accelerators_available.get(accelerator_name) == -1):
+                # -1 (unknown) dominates: if the availability cannot be
+                # determined in one context, do not report the partial sum
+                # from the other contexts as if it were the total.
+                total_accelerators_available[accelerator_name] = -1
+            else:
+                total_accelerators_available[accelerator_name] = (
+                    total_accelerators_available.get(accelerator_name, 0) +
+                    count)
+
+    df = pd.DataFrame(result,
+                      columns=[
+                          'Cloud', 'InstanceType', 'AcceleratorName',
+                          'AcceleratorCount', 'vCPUs', 'DeviceMemoryGiB',
+                          'MemoryGiB', 'Price', 'SpotPrice', 'Region'
+                      ])
+    df['GpuInfo'] = True
+    # all_regions=True keeps one entry per context (the Region column): without
+    # it, list_accelerators_impl keeps only the cheapest region of entries that
+    # differ only in region, as for a cloud's interchangeable regions.
+    qtys_map = common.list_accelerators_impl('Kubernetes',
+                                             df,
+                                             gpus_only,
+                                             name_filter,
+                                             region_filter=None,
+                                             quantity_filter=quantity_filter,
+                                             case_sensitive=case_sensitive,
+                                             all_regions=True)
+    return qtys_map, total_accelerators_capacity, total_accelerators_available
+
+
+def _list_accelerators_in_context(
+    context: str,
+    name_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool,
+    realtime: bool,
+) -> Tuple[List[common.InstanceTypeInfo], Dict[str, int], Dict[str, int]]:
+    """Lists the accelerators of a single Kubernetes context.
+
+    A context with invalid credentials or no GPU labels is skipped (empty
+    results), so that one bad or unreachable cluster does not abort the
+    listing of the other contexts.
+
+    Returns:
+        A tuple of:
+        - The InstanceTypeInfo entries found in the context, each with its
+            ``region`` field set to the context it came from.
+        - The total accelerator capacity in the context, and the current
+            accelerator availability in the context, each keyed by accelerator
+            name. The availability is -1 if it cannot be determined.
+    """
+    snapshot = (plugin_extensions.NodeInfoSource.get_snapshot(
+        context, kubernetes_utils.get_node_snapshot_label_keys(context))
+                if realtime else None)
+    snapshot_inputs = (kubernetes_utils.read_node_snapshot(context, snapshot)
+                       if snapshot is not None else None)
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    if snapshot_inputs is not None:
+        nodes, gpu_resource_key, allocated_qty_by_node = snapshot_inputs
     else:
-        context = region_filter
-    if context is None:
-        return {}, {}, {}
+        # Verify that the credentials are still valid. A context whose
+        # credentials fail is skipped, so one unreachable cluster does not
+        # abort the listing of the other contexts.
+        if not kubernetes_utils.check_credentials(context,
+                                                  cloud='kubernetes')[0]:
+            logger.debug(f'Skipping Kubernetes context {context!r}: invalid '
+                         'credentials.')
+            return [], {}, {}
 
-    # Verify that the credentials are still valid.
-    if not kubernetes_utils.check_credentials(context, cloud='kubernetes')[0]:
-        return {}, {}, {}
+        has_gpu = kubernetes_utils.detect_accelerator_resource(context)
+        if not has_gpu:
+            return [], {}, {}
 
-    has_gpu = kubernetes_utils.detect_accelerator_resource(context)
-    if not has_gpu:
-        return {}, {}, {}
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context,
+                                                      consistency=reads.CACHED)
+        gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)
 
-    lf, _ = kubernetes_utils.detect_gpu_label_formatter(context)
+    lf, _ = kubernetes_utils.detect_gpu_label_formatter_from_nodes(nodes)
     if not lf:
-        return {}, {}, {}
+        return [], {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
-    nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
 
     # Check if any nodes have accelerators before fetching pods
     has_accelerator_nodes = False
@@ -181,13 +358,13 @@ def _list_accelerators(
             break
 
     # Only fetch pods if we have accelerator nodes and realtime is requested
-    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
     error_on_get_allocated_gpu_qty_by_node = False
-    if realtime and has_accelerator_nodes:
+    if snapshot_inputs is None and realtime and has_accelerator_nodes:
         # Get the allocated GPU quantity by each node
         try:
             allocated_qty_by_node = (
-                kubernetes_utils.get_allocated_gpu_qty_by_node(context=context))
+                kubernetes_utils.get_allocated_gpu_qty_by_node(
+                    context=context, consistency=reads.CACHED))
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 logger.warning(
@@ -198,6 +375,7 @@ def _list_accelerators(
                 error_on_get_allocated_gpu_qty_by_node = True
             else:
                 raise
+
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
@@ -207,10 +385,7 @@ def _list_accelerators(
     configured_tolerations = kubernetes_utils.get_configured_tolerations(
         context)
 
-    for node in nodes:
-        # Check if node is ready
-        node_is_ready = node.is_ready()
-        node_is_cordoned = node.is_cordoned()
+    def _is_tainted(node) -> bool:
         node_taints = node.get_taints(
             exclude_cordon=True,
             exclude_not_ready=True,
@@ -221,21 +396,65 @@ def _list_accelerators(
         # does not make the node un-schedulable for the user's workloads.
         # Without configured tolerations, every retained taint has
         # `tolerated=False` so this is equivalent to `len(node_taints) > 0`.
-        node_is_tainted = kubernetes_utils.has_untolerated_taint(node_taints)
+        return kubernetes_utils.has_untolerated_taint(node_taints)
+
+    # A multi-host TPU slice is one GKE node pool and is only usable whole:
+    # its VMs count as free only when every VM of the pool is ready,
+    # schedulable and idle.
+    # A pool also counts as busy when fewer of its VMs are visible than the
+    # slice has (a pool still scaling up, or allowed_nodes listing only some
+    # of its VMs), or when a VM has fewer allocatable chips than it has (each
+    # slice pod requests all chips of its VM).
+    pool_key = kubernetes_utils.GKE_NODEPOOL_LABEL_KEY
+    busy_slice_pools: Set[str] = set()
+    pool_vms: Dict[str, int] = collections.defaultdict(int)
+    pool_vms_needed: Dict[str, int] = {}
+    for node in nodes:
+        labels = node.metadata.labels or {}
+        if not (kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in labels and
+                kubernetes_utils.is_multi_host_tpu(labels)):
+            continue
+        pool = labels.get(pool_key, '')
+        pool_vms[pool] += 1
+        formatter = kubernetes_utils.GKELabelFormatter
+        pool_vms_needed[pool] = (
+            kubernetes_utils.reduce_tpu_topology(
+                labels[formatter.TPU_TOPOLOGY_LABEL_KEY]) //
+            max(1, int(labels[formatter.ACCELERATOR_COUNT_LABEL_KEY])))
+        allocatable_chips = kubernetes_utils.get_node_accelerator_count(
+            context, node.status.allocatable, gpu_resource_key=gpu_resource_key)
+        if (not node.is_ready() or node.is_cordoned() or _is_tainted(node) or
+                allocated_qty_by_node.get(node.metadata.name, 0) > 0 or
+                allocatable_chips < int(
+                    labels[formatter.ACCELERATOR_COUNT_LABEL_KEY])):
+            busy_slice_pools.add(pool)
+    busy_slice_pools.update(pool for pool, needed in pool_vms_needed.items()
+                            if pool_vms[pool] < needed)
+
+    for node in nodes:
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+        node_is_cordoned = node.is_cordoned()
+        node_is_tainted = _is_tainted(node)
 
         for key in keys:
             if key in node.metadata.labels:
                 accelerator_name = lf.get_accelerator_from_label_value(
-                    node.metadata.labels.get(key))
+                    node.metadata.labels[key])
 
                 # Heterogenous cluster may have some nodes with empty labels.
                 if not accelerator_name:
                     continue
 
-                # Exclude multi-host TPUs from being processed.
-                # TODO(Doyoung): Remove the logic when adding support for
-                # multi-host TPUs.
-                if kubernetes_utils.is_multi_host_tpu(node.metadata.labels):
+                # One VM of a multi-host TPU slice is requested as the whole
+                # slice, so its requestable quantity is the slice's chips.
+                # Slices of a shape SkyPilot cannot launch are skipped.
+                multi_host_slice_chips = (
+                    kubernetes_utils.launchable_tpu_slice_chips(
+                        accelerator_name, node.metadata.labels))
+                if (multi_host_slice_chips is None and
+                        kubernetes_utils.is_multi_host_tpu(
+                            node.metadata.labels)):
                     continue
 
                 # Check if name_filter regex matches the accelerator_name
@@ -247,7 +466,9 @@ def _list_accelerators(
                 # Generate the accelerator quantities
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
-                        context, node.status.allocatable))
+                        context,
+                        node.status.allocatable,
+                        gpu_resource_key=gpu_resource_key))
                 # Physical device count for the TOTAL column: capacity keeps
                 # devices the device plugin has withdrawn from scheduling,
                 # matching get_kubernetes_node_info's total so the show-gpus
@@ -257,7 +478,9 @@ def _list_accelerators(
                 # requested.
                 accelerator_capacity = max(
                     kubernetes_utils.get_node_accelerator_count(
-                        context, node.status.capacity), accelerator_count)
+                        context,
+                        node.status.capacity,
+                        gpu_resource_key=gpu_resource_key), accelerator_count)
 
                 # The quantity ladder describes the node's hardware shape
                 # (what request sizes fit on it), so it derives from capacity
@@ -270,7 +493,10 @@ def _list_accelerators(
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
                     # provisioned, but TPUs are considered as an atomic unit.
-                    if kubernetes_utils.is_tpu_on_gke(accelerator_name):
+                    if multi_host_slice_chips is not None:
+                        accelerators_qtys.add(
+                            (accelerator_name, multi_host_slice_chips))
+                    elif kubernetes_utils.is_tpu_on_gke(accelerator_name):
                         accelerators_qtys.add(
                             (accelerator_name, accelerator_capacity))
                     else:
@@ -285,7 +511,14 @@ def _list_accelerators(
                             accelerators_qtys.add(
                                 (accelerator_name, accelerator_capacity))
 
-                if accelerator_capacity >= min_quantity_filter:
+                if multi_host_slice_chips is not None:
+                    # Each VM adds its own chips. A slice only serves a request
+                    # for exactly its size, so a quantity filter must match it.
+                    if quantity_filter in (None, multi_host_slice_chips):
+                        total_accelerators_capacity[accelerator_name] = (
+                            total_accelerators_capacity.get(
+                                accelerator_name, 0) + accelerator_capacity)
+                elif accelerator_capacity >= min_quantity_filter:
                     quantized_count = (
                         min_quantity_filter *
                         (accelerator_capacity // min_quantity_filter))
@@ -315,7 +548,18 @@ def _list_accelerators(
                 allocated_qty = allocated_qty_by_node[node.metadata.name]
                 accelerators_available = accelerator_count - allocated_qty
 
-                if accelerators_available >= min_quantity_filter:
+                if multi_host_slice_chips is not None:
+                    # A slice VM's chips count as free only when its whole
+                    # slice (node pool) is ready and idle.
+                    pool = node.metadata.labels.get(pool_key, '')
+                    if (quantity_filter in (None, multi_host_slice_chips) and
+                            pool not in busy_slice_pools and
+                            accelerators_available == accelerator_count and
+                            accelerator_count > 0):
+                        total_accelerators_available[accelerator_name] = (
+                            total_accelerators_available.get(
+                                accelerator_name, 0) + accelerator_count)
+                elif accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
                     if quantized_availability > 0:
@@ -350,17 +594,7 @@ def _list_accelerators(
                                     spot_price=accel_price,
                                     region=context))
 
-    df = pd.DataFrame(result,
-                      columns=[
-                          'Cloud', 'InstanceType', 'AcceleratorName',
-                          'AcceleratorCount', 'vCPUs', 'DeviceMemoryGiB',
-                          'MemoryGiB', 'Price', 'SpotPrice', 'Region'
-                      ])
-    df['GpuInfo'] = True
-    qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
-                                             name_filter, region_filter,
-                                             quantity_filter, case_sensitive)
-    return qtys_map, total_accelerators_capacity, total_accelerators_available
+    return result, total_accelerators_capacity, total_accelerators_available
 
 
 def _get_pricing(region: Optional[str]) -> Dict:

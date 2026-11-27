@@ -17,10 +17,13 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import kai
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1046,17 +1049,8 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
 
 @timeline.event
 def _is_transport_error(e: Exception) -> bool:
-    """Whether ``e`` is a failure of the HTTP transport to the API server.
-
-    urllib3 transport errors propagate raw out of the kubernetes client,
-    with one exception: the client wraps ``urllib3.exceptions.SSLError``
-    into an ``ApiException`` with ``status=0`` (no HTTP response was
-    received). An ``ApiException`` with a real HTTP status is an API error
-    response, not a transport failure.
-    """
-    if isinstance(e, kubernetes.api_exception()):
-        return e.status == 0
-    return isinstance(e, kubernetes.urllib3_http_error())
+    """See api_errors.is_transport_error."""
+    return api_errors.is_transport_error(e)
 
 
 def _count_transport_error(e: Exception, first_error_time: Optional[float],
@@ -2115,21 +2109,109 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
                 f'Force delete of terminating pod {pod_name} failed: {e}')
 
 
+# How long pod creation keeps retrying while an admission webhook on the
+# cluster cannot be called. A webhook whose service has no ready endpoints
+# (e.g. its controller is restarting) fails every pod create with a 500, and
+# such outages are often intermittent.
+_WEBHOOK_UNAVAILABLE_RETRY_SECONDS = 60
+# Kept under its old name for callers outside this module.
+_WEBHOOK_UNAVAILABLE_PATTERN: 're.Pattern[str]' = (
+    api_errors.WEBHOOK_UNAVAILABLE_PATTERN)
+
+
+def _create_namespaced_pod_retrying_webhook_errors(
+        namespace: str, pod_spec: dict, context: Optional[str]) -> Any:
+    """Creates a Pod, retrying while an admission webhook cannot be called.
+
+    Raises:
+        config_lib.KubernetesError: an admission webhook still could not be
+            called after _WEBHOOK_UNAVAILABLE_RETRY_SECONDS.
+        kubernetes.api_exception(): any other pod creation error.
+    """
+    deadline = time.time() + _WEBHOOK_UNAVAILABLE_RETRY_SECONDS
+    backoff = common_utils.Backoff(initial_backoff=2, max_backoff_factor=5)
+    while True:
+        try:
+            return kubernetes.core_api(context).create_namespaced_pod(
+                namespace, pod_spec)
+        except kubernetes.api_exception() as e:
+            webhook = api_errors.unavailable_webhook(e)
+            if webhook is None:
+                raise
+            error_message = api_errors.status_message(e)
+            # The last sleep is cut short so a final attempt lands on the
+            # deadline.
+            sleep_seconds = min(backoff.current_backoff(),
+                                deadline - time.time())
+            if sleep_seconds <= 0:
+                raise config_lib.KubernetesError(
+                    f'Pod creation in context {context!r} was rejected '
+                    f'because admission webhook {webhook!r} could not be '
+                    f'called (retried for up to '
+                    f'{_WEBHOOK_UNAVAILABLE_RETRY_SECONDS}s). This is a '
+                    'problem with the webhook\'s service on the cluster, not '
+                    'a lack of resources: check that the pods serving the '
+                    f'webhook are running and ready. Details: {error_message}'
+                ) from e
+            logger.warning(f'Admission webhook {webhook!r} could not be '
+                           'called while creating a pod in context '
+                           f'{context!r}; retrying in {sleep_seconds:.1f}s.')
+            time.sleep(sleep_seconds)
+
+
+# Kept under its old name for callers outside this module.
+_invalid_pod_spec_message = api_errors.invalid_pod_spec_message
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
     """Attempts to create a Kubernetes Pod and handle any errors.
 
+    See _create_namespaced_pod_handling_known_errors for the errors that are
+    retried or worked around.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: the API server rejected the pod
+            spec as invalid, which retrying the same spec cannot fix.
+
+    Returns: The created Pod object.
+    """
+    try:
+        return _create_namespaced_pod_handling_known_errors(
+            namespace, pod_spec, context)
+    except kubernetes.api_exception() as e:
+        invalid_message = _invalid_pod_spec_message(e)
+        if invalid_message is None:
+            raise
+        # Not a ResourcesUnavailableError: failover still tries the other
+        # candidates (another context may render a valid spec), but a caller
+        # waiting for capacity, such as a managed job, stops when this is the
+        # only kind of failure (see ProvisionUnsupportedError).
+        raise exceptions.ProvisionUnsupportedError(
+            f'Kubernetes rejected the pod spec in context {context!r} as '
+            f'invalid: {invalid_message}. Retrying the same spec cannot '
+            'succeed; fix the pod spec (e.g. kubernetes.pod_config in the '
+            'task or in the config for this context) and launch again.') from e
+
+
+def _create_namespaced_pod_handling_known_errors(namespace: str, pod_spec: dict,
+                                                 context: Optional[str]) -> Any:
+    """Creates a Pod, handling the errors we know how to work around.
+
     Currently, we handle errors due to the AppArmor annotation and retry if
     it fails due to the `FieldValueForbidden` error.
     See https://github.com/skypilot-org/skypilot/issues/4174 for details.
+    On every create attempt, an admission webhook that cannot be called is
+    retried for a while and then raised as a KubernetesError naming the
+    webhook.
 
     Returns: The created Pod object.
     """
     try:
         # Attempt to create the Pod with the AppArmor annotation
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        pod = _create_namespaced_pod_retrying_webhook_errors(
+            namespace, pod_spec, context)
         return pod
     except kubernetes.api_exception() as e:
         try:
@@ -2166,8 +2248,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
             # Retry Pod creation without the AppArmor annotation
             try:
-                pod = kubernetes.core_api(context).create_namespaced_pod(
-                    namespace, pod_spec)
+                pod = _create_namespaced_pod_retrying_webhook_errors(
+                    namespace, pod_spec, context)
                 logger.info(f'Pod {pod.metadata.name} created successfully '
                             'without AppArmor annotation.')
                 return pod
@@ -2207,8 +2289,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # the old object around; _force_remove_terminating_pod clears both.
             _force_remove_terminating_pod(pod_name, namespace, context)
             try:
-                pod = kubernetes.core_api(context).create_namespaced_pod(
-                    namespace, pod_spec)
+                pod = _create_namespaced_pod_retrying_webhook_errors(
+                    namespace, pod_spec, context)
                 logger.info(f'Pod {pod.metadata.name} created successfully '
                             'after force-removing the terminating pod.')
                 return pod
@@ -2343,6 +2425,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
+    if kai.uses_kai(provider_config):
+        # Created before the pods so KAI schedules them as one gang.
+        kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -2512,6 +2598,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
+    # Pods of a multi-host TPU slice: one node pool per slice. A queue (Kueue
+    # or KAI) places whole slices itself and groups the pods into slices in
+    # its own order, so with a queue the pods get no slice label or rules;
+    # _check_tpu_slices_in_one_node_pool() still checks the result.
+    tpu_vms_per_slice = _multi_host_tpu_vms_per_slice(
+        pod_spec['spec'].get('nodeSelector'))
+    tpu_slice_placement = bool(tpu_vms_per_slice) and not (
+        k8s_constants.KUEUE_QUEUE_NAME_LABEL in pod_spec['metadata']['labels']
+        or kai.uses_kai(provider_config))
+
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         # 0 is for head pod, while 1+ is for worker pods.
@@ -2537,6 +2633,13 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        if tpu_slice_placement:
+            # Pod i is in slice i // VMs per slice, the same split the task
+            # nodes use (num_nodes slices of VMs-per-slice pods each).
+            _add_tpu_slice_placement(
+                pod_spec_copy,
+                f'{cluster_name_on_cloud}-{i // tpu_vms_per_slice}')
 
         if host_network_port_blocks:
             assert head_gcs_port is not None
@@ -2771,6 +2874,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         cluster_name,
         create_pods_start,
         admission_timeout=provider_config.get('queue_admission_timeout'))
+    if kai.uses_kai(provider_config):
+        # A no-op for a new cluster. A resize adds pods to a running gang, and
+        # a higher minMember before they are bound lets KAI evict the gang.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud,
+                          config.count)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -2780,6 +2888,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: waiting for pods to be running: '
                  f'{[pod.metadata.name for pod in pods]}')
     _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    if tpu_vms_per_slice:
+        _check_tpu_slices_in_one_node_pool(namespace, context,
+                                           cluster_name_on_cloud)
     # Reset spinner message here because it might have hinted the reason
     # pods were pending.
     rich_utils.force_update_status(
@@ -3057,6 +3168,10 @@ def terminate_instances(
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
+    if worker_only and kai.uses_kai(provider_config):
+        # Without this, KAI evicts the head as a gang below its minMember.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud, 1)
+
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
@@ -3099,6 +3214,8 @@ def cleanup_cluster_resources(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+    if kai.uses_kai(provider_config):
+        kai.delete_pod_group(context, namespace, cluster_name_on_cloud)
 
 
 # The probe runs as soon as ray-installation finishes in step 2 of the
@@ -3201,6 +3318,180 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
         time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
 
 
+def _multi_host_tpu_vms_per_slice(node_selector: Any) -> int:
+    """VMs per slice for a pod with ``node_selector``, or 0.
+
+    A pod of a multi-host GKE TPU slice selects the whole slice's topology
+    and the chips of one VM, and the topology has more chips than the VM.
+    """
+    if not isinstance(node_selector, dict):
+        return 0
+    formatter = kubernetes_utils.GKELabelFormatter
+    topology = node_selector.get(formatter.TPU_TOPOLOGY_LABEL_KEY)
+    chips_per_vm = node_selector.get(formatter.ACCELERATOR_COUNT_LABEL_KEY)
+    if not topology or not chips_per_vm or not str(chips_per_vm).isdigit():
+        return 0
+    chips_in_slice = kubernetes_utils.reduce_tpu_topology(topology)
+    if chips_in_slice <= int(chips_per_vm):
+        return 0
+    return chips_in_slice // int(chips_per_vm)
+
+
+def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str) -> None:
+    """Places a pod of a multi-host TPU slice launched without a queue.
+
+    One multi-host GKE node pool is one slice, and each pod takes all chips
+    of one VM, so a slice's pods must share a node pool that holds no other
+    slice. The label names the pod's slice. A required podAffinity keeps the
+    pods of a slice in one node pool and a required podAntiAffinity keeps
+    pods of any other slice (of this cluster or another, in any namespace)
+    out of it. The first pod of a slice matches only itself, so it may go to
+    any node pool without another slice.
+    """
+    pod_spec['metadata']['labels'][kubernetes_utils.TPU_SLICE_LABEL] = (
+        slice_name)
+    affinity = pod_spec['spec'].setdefault('affinity', {})
+    affinity.setdefault('podAffinity', {}).setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', []).append({
+            'labelSelector': {
+                'matchLabels': {
+                    kubernetes_utils.TPU_SLICE_LABEL: slice_name
+                }
+            },
+            'topologyKey': kubernetes_utils.GKE_NODEPOOL_LABEL_KEY,
+        })
+    affinity.setdefault('podAntiAffinity', {}).setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', []
+    ).append({
+        # Clusters in other namespaces share the node pools too. An empty
+        # selector matches every namespace; without one the term only
+        # sees pods in this pod's namespace.
+        'namespaceSelector': {},
+        'labelSelector': {
+            'matchExpressions': [{
+                'key': kubernetes_utils.TPU_SLICE_LABEL,
+                'operator': 'Exists',
+            }, {
+                'key': kubernetes_utils.TPU_SLICE_LABEL,
+                'operator': 'NotIn',
+                'values': [slice_name],
+            }]
+        },
+        'topologyKey': kubernetes_utils.GKE_NODEPOOL_LABEL_KEY,
+    })
+
+
+def _tpu_slice_pods_by_node_pool(
+        context: Optional[str],
+        running_pods: Dict[str, Any]) -> Tuple[Dict[str, List[str]], int]:
+    """Groups the running pods of multi-host TPU slices by node pool.
+
+    A multi-host GKE TPU node pool is exactly one slice. Returns the pod
+    names per node pool and the VMs per slice (0 when no pod is a multi-host
+    slice pod, in which case no API call is made).
+    """
+    slice_members: List[Tuple[str, str]] = []  # (pod name, node name)
+    topologies: Set[str] = set()
+    vms_per_slice = 0
+    for pod_name, pod in running_pods.items():
+        node_selector = getattr(pod.spec, 'node_selector', None)
+        vms = _multi_host_tpu_vms_per_slice(node_selector)
+        if not vms:
+            continue
+        assert node_selector is not None  # vms > 0 needs a selector.
+        vms_per_slice = vms
+        node_name = getattr(pod.spec, 'node_name', None)
+        if node_name is None:
+            continue
+        slice_members.append((pod_name, node_name))
+        topologies.add(node_selector[
+            kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY])
+    if not slice_members:
+        return {}, vms_per_slice
+    # One list call for all nodes of the slices' topology (the pods select
+    # it), instead of one read per pod.
+    label_selector = (
+        f'{kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY} in '
+        f'({",".join(sorted(topologies))})')
+    nodes = kubernetes.core_api(context).list_node(
+        label_selector=label_selector,
+        _request_timeout=kubernetes.API_TIMEOUT).items
+    node_pool_by_name = {
+        node.metadata.name: (node.metadata.labels or
+                             {}).get(kubernetes_utils.GKE_NODEPOOL_LABEL_KEY,
+                                     node.metadata.name) for node in nodes
+    }
+    slice_pods: Dict[str, List[str]] = {}
+    for pod_name, node_name in slice_members:
+        node_pool = node_pool_by_name.get(node_name, node_name)
+        slice_pods.setdefault(node_pool, []).append(pod_name)
+    return slice_pods, vms_per_slice
+
+
+def _check_tpu_slices_in_one_node_pool(namespace: str, context: Optional[str],
+                                       cluster_name_on_cloud: str) -> None:
+    """Fails the provision if a multi-host TPU slice spans node pools.
+
+    Placement rules or a queue keep each slice in one node pool. This catches
+    what they cannot: a queue that does not place whole slices, pods created
+    without the rules, or a pod_config that overrides the affinity. Without
+    the check such a cluster comes up and its TPU program hangs waiting for a
+    peer on another slice.
+    """
+    running_pods = kubernetes_utils.filter_pods(
+        namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
+    slice_pods, vms_per_slice = _tpu_slice_pods_by_node_pool(
+        context, running_pods)
+    wrong = {
+        pool: len(members)
+        for pool, members in slice_pods.items()
+        if len(members) != vms_per_slice
+    }
+    if wrong:
+        pools = ', '.join(
+            f'{pool!r} ({count})' for pool, count in sorted(wrong.items()))
+        raise config_lib.KubernetesError(
+            f'The pods of cluster {cluster_name_on_cloud!r} do not form whole '
+            f'TPU slices: each multi-host node pool (one slice of '
+            f'{vms_per_slice} VMs) must run {vms_per_slice} of its pods, but '
+            f'these run a different number: {pools}. Use a queue that places '
+            'whole slices, or launch without one.')
+
+
+def _tag_tpu_multi_host_workers(
+        cluster_name_on_cloud: str, context: Optional[str],
+        running_pods: Dict[str,
+                           Any], pods: Dict[str,
+                                            List[common.InstanceInfo]]) -> None:
+    """Tags each pod of a multi-host TPU slice with its worker ID.
+
+    GKE does not inject TPU_WORKER_ID / TPU_WORKER_HOSTNAMES into plain pods
+    (only into JobSet and Indexed Job pods), and which slice a pod lands on is
+    decided by the scheduler, not by the pod's index. A multi-host GKE TPU
+    node pool is exactly one slice, so the pods are grouped by the node pool
+    of the node each one runs on. Within a slice, worker IDs follow the node
+    name order, and the worker hostnames are the pod IPs in worker ID order.
+    """
+    slice_pods, vms_per_slice = _tpu_slice_pods_by_node_pool(
+        context, running_pods)
+    for node_pool, members in slice_pods.items():
+        if len(members) != vms_per_slice:
+            logger.warning(f'Node pool {node_pool!r} runs {len(members)} pods '
+                           f'of cluster {cluster_name_on_cloud!r}, but its '
+                           f'TPU slice has {vms_per_slice} VMs.')
+        members.sort(key=lambda name: running_pods[name].spec.node_name)
+        hostnames = ','.join(
+            running_pods[name].status.pod_ip or '' for name in members)
+        for worker_id, pod_name in enumerate(members):
+            info = pods[pod_name][0]
+            tags = dict(info.tags or {})
+            tags[kubernetes_utils.TPU_WORKER_ID_TAG] = str(worker_id)
+            tags[kubernetes_utils.TPU_WORKER_HOSTNAMES_TAG] = hostnames
+            tags[kubernetes_utils.TPU_SLICE_NAME_TAG] = (
+                f'{cluster_name_on_cloud}-{node_pool}')
+            info.tags = tags
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -3293,6 +3584,9 @@ def get_cluster_info(
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
                            ' or not Running, check the Pod status')
+
+    _tag_tpu_multi_host_workers(cluster_name_on_cloud, context, running_pods,
+                                pods)
 
     ssh_user = 'sky'
     # Use pattern matching to extract SSH user, handling MOTD contamination.
@@ -3453,38 +3747,64 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
     return '; '.join(parts)
 
 
+# A cluster stuck INIT reads its pods' nodes on every status refresh.
+_MAX_NODES_READ = 10
+
+
 def _check_nodes_health(
     context: Optional[str],
     node_names: Set[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
-    Tries a registered NodeInfoSource first, then falls back to direct
-    Kubernetes API calls.
+    Reads the first _MAX_NODES_READ nodes (by name) from the Kubernetes API;
+    the rest, and any it cannot read, fall back to a registered
+    NodeInfoSource, which knows only NotReady / cordoned.
 
     Args:
         context: Kubernetes context name.
         node_names: Set of node names to check.
+        tolerations: The cluster pods' tolerations; NoExecute taints they
+            tolerate are not reported.
+        since: The cluster's launch; older taints are not reported.
 
     Returns:
-        Dict mapping node_name -> issue description for unhealthy nodes.
+        Dict mapping node_name -> issue description for unhealthy nodes, e.g.
+        'NotReady (NoExecute taint node.kubernetes.io/unreachable)',
+        'tainted (NoExecute taint k=v)' or 'deleted'.
         Healthy nodes are omitted.
     """
     if not node_names:
         return {}
 
     issues: Dict[str, str] = {}
+    names = sorted(node_names)
+    unread = names[_MAX_NODES_READ:]
+    nodes = _inspect_nodes(names[:_MAX_NODES_READ], context, tolerations or [],
+                           since)
+    for name, node in nodes.items():
+        if not node.read:
+            unread.append(name)
+            continue
+        tainted = (f' (NoExecute taint {", ".join(node.taints)})'
+                   if node.taints else '')
+        if node.state == _NODE_GONE:
+            issues[name] = 'deleted'
+        elif node.state == _NODE_NOT_READY:
+            issues[name] = f'NotReady{tainted}'
+        elif node.state == _NODE_CORDONED:
+            issues[name] = f'cordoned{tainted}'
+        elif node.taints:
+            issues[name] = f'tainted{tainted}'
 
-    # Try NodeInfoSource first; get() safely returns None when no provider
-    # is registered.
-    # Note: if a node is in node_names but not in the result, it's silently
-    # skipped (we don't fall back to the k8s API for missing entries). This
-    # is acceptable since this is diagnostic-only and doesn't affect the
-    # cluster status transition.
-    node_info = plugin_extensions.NodeInfoSource.get(
-        context) if context is not None else None
+    # Past the cap, or no permission to read nodes: what the plugin's node
+    # cache knows.
+    node_info = (plugin_extensions.NodeInfoSource.get(context)
+                 if unread and context is not None else None)
     if node_info is not None:
-        for name in node_names:
+        for name in unread:
             info = node_info.node_info_dict.get(name)
             if info is None:
                 continue
@@ -3492,32 +3812,6 @@ def _check_nodes_health(
                 issues[name] = 'NotReady'
             elif info.is_cordoned:
                 issues[name] = 'cordoned'
-        return issues
-
-    # Fallback: direct Kubernetes API (parallelized)
-    def _check_single_node(name: str) -> Optional[Tuple[str, str]]:
-        try:
-            node = kubernetes.core_api(context).read_node(
-                name, _request_timeout=kubernetes.API_TIMEOUT)
-            # Check NotReady first (more severe than cordoned)
-            node_status = getattr(node, 'status', None)
-            for condition in (getattr(node_status, 'conditions', None) or []):
-                if condition.type == 'Ready' and condition.status != 'True':
-                    return (name, 'NotReady')
-            # Check if node is cordoned (unschedulable)
-            node_spec = getattr(node, 'spec', None)
-            if getattr(node_spec, 'unschedulable', False):
-                return (name, 'cordoned')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to read node {name}: {e}')
-        return None
-
-    results = subprocess_utils.run_in_parallel(_check_single_node,
-                                               sorted(node_names))
-    for result in results:
-        if result is not None:
-            issues[result[0]] = result[1]
-
     return issues
 
 
@@ -3525,11 +3819,13 @@ def get_node_health_for_cluster(
     cluster_name_on_cloud: str,
     provider_config: Dict[str, Any],
     unhealthy_pod_names: List[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
 ) -> Dict[str, NodeHealthInfo]:
     """Check node health for specific unhealthy pods in a cluster.
 
     Fetches pods to determine which nodes they run on, then checks
-    those nodes' health via NodeInfoSource or the Kubernetes API.
+    those nodes' health via the Kubernetes API (or NodeInfoSource).
 
     Args:
         cluster_name_on_cloud: The cluster name as known to the cloud.
@@ -3562,7 +3858,7 @@ def get_node_health_for_cluster(
     if not unique_nodes:
         return {}
 
-    node_issues = _check_nodes_health(context, unique_nodes)
+    node_issues = _check_nodes_health(context, unique_nodes, tolerations, since)
     if not node_issues:
         return {}
 
@@ -3578,28 +3874,114 @@ def get_node_health_for_cluster(
     return result
 
 
-def get_missing_node_reason(node_names: List[str],
-                            provider_config: Dict[str, Any]) -> Optional[str]:
+_NODE_GONE = 'no longer exists'
+_NODE_NOT_READY = 'is NotReady'
+_NODE_CORDONED = 'is cordoned'
+
+
+class _NodeState(NamedTuple):
+    read: bool  # False when the node could not be read; the rest is unknown.
+    state: Optional[str]  # _NODE_GONE / _NODE_NOT_READY / _NODE_CORDONED.
+    taints: List[str]  # NoExecute taints that could have evicted the pods.
+
+
+def _evicting_taints(node: Any, tolerations: List[Dict[str, Any]],
+                     since: Optional[datetime.datetime]) -> List[str]:
+    """The node's NoExecute taints that could have evicted the cluster's pods.
+
+    A taint the pods tolerate cannot have evicted them, except through
+    tolerationSeconds, which only delays the eviction. A taint older than the
+    launch was already there when the pods were placed, so they tolerated it;
+    this also covers tolerations added at pod creation, which ``tolerations``
+    (read from the cluster YAML) does not carry.
+    """
+    tolerating = [t for t in tolerations if t.get('tolerationSeconds') is None]
+    cutoff = (since - datetime.timedelta(
+        seconds=kubernetes_utils.POD_EVENT_CLOCK_SKEW_SECONDS)
+              if since is not None else None)
+    taints = []
+    for taint in (getattr(node.spec, 'taints', None) or []):
+        if taint.effect != 'NoExecute':
+            continue
+        if kubernetes_utils.taint_is_tolerated(
+            {
+                'key': taint.key,
+                'value': taint.value,
+                'effect': taint.effect
+            }, tolerating):
+            continue
+        if (cutoff is not None and taint.time_added is not None and
+                taint.time_added < cutoff):
+            continue
+        taints.append(
+            f'{taint.key}={taint.value}' if taint.value else taint.key)
+    return taints
+
+
+def _inspect_nodes(
+    node_names: List[str],
+    context: Optional[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
+) -> Dict[str, _NodeState]:
+    """Reads each named node's state. Taints only when ``tolerations`` is set.
+    """
+    unique_names = sorted({name for name in node_names if name})
+
+    def _inspect_node(name: str) -> _NodeState:
+        # One unreadable node must not lose the others: all of it in the try.
+        try:
+            result = reads.get_object(
+                context,
+                reads.NODES,
+                name,
+                consistency=reads.CACHED,
+                convert=kubernetes_utils.k8s_node_from_dict,
+                attempts=1)
+            if not result.items:
+                return _NodeState(True, _NODE_GONE, [])
+            node = result.items[0]
+            taints = (_evicting_taints(node, tolerations, since)
+                      if tolerations is not None else [])
+            node_status = getattr(node, 'status', None)
+            for condition in (getattr(node_status, 'conditions', None) or []):
+                if condition.type == 'Ready' and condition.status != 'True':
+                    return _NodeState(True, _NODE_NOT_READY, taints)
+            if getattr(getattr(node, 'spec', None), 'unschedulable', False):
+                return _NodeState(True, _NODE_CORDONED, taints)
+            return _NodeState(True, None, taints)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read node {name}: {e}')
+            return _NodeState(False, None, [])
+
+    results = subprocess_utils.run_in_parallel(_inspect_node, unique_names)
+    return dict(zip(unique_names, results))
+
+
+def get_missing_node_reason(
+        node_names: List[str],
+        provider_config: Dict[str, Any],
+        tolerations: Optional[List[Dict[str, Any]]] = None,
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
     """Best-effort reason a cluster lost node(s), from current node state.
 
     Answers "where did the node go" by asking Kubernetes about the nodes the
     cluster's pods were placed on, rather than by replaying the pod's event
-    history. A node that no longer exists, or that exists but is NotReady or
-    cordoned, explains a pod that vanished from under the cluster.
+    history. A node that no longer exists, that exists but is NotReady or
+    cordoned, or that carries a NoExecute taint the pods could not stay
+    through (only checked when ``tolerations`` is given), explains a pod that
+    vanished from under the cluster.
 
     Reporting current state (rather than a past event) keeps this idempotent:
     it returns the same answer on every status refresh, with no dependence on
     what a previous call already consumed.
 
-    Note this deliberately does not use the NodeInfoSource that
-    ``_check_nodes_health`` prefers: a node absent from its result is
-    indistinguishable from a healthy one, and a deleted node is exactly the
-    case this needs to report.
-
     Args:
         node_names: The Kubernetes node names the cluster's pods were placed
             on, e.g. from ``ClusterInfo.get_node_names()``.
         provider_config: The Kubernetes provider config.
+        tolerations: The cluster's pod tolerations; enables the taint check.
+        since: When the cluster was launched; older taints are ignored.
 
     Returns:
         A human-readable reason, or None when every node is present and
@@ -3607,41 +3989,134 @@ def get_missing_node_reason(node_names: List[str],
     """
     context = kubernetes_utils.get_execution_context_from_config(
         provider_config)
-    unique_names = sorted({name for name in node_names if name})
-    if not unique_names:
-        return None
-
-    def _inspect_node(name: str) -> Optional[str]:
-        """Returns an issue description for a node, or None if it is fine."""
-        try:
-            node = kubernetes.core_api(context).read_node(
-                name, _request_timeout=kubernetes.API_TIMEOUT)
-        except kubernetes.api_exception() as e:
-            if e.status == 404:
-                return 'no longer exists'
-            logger.debug(f'Failed to read node {name}: {e}')
-            return None
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to read node {name}: {e}')
-            return None
-        # NotReady first: it is more severe than cordoned, and a cordoned
-        # node that has also gone NotReady is described by the former.
-        node_status = getattr(node, 'status', None)
-        for condition in (getattr(node_status, 'conditions', None) or []):
-            if condition.type == 'Ready' and condition.status != 'True':
-                return 'is NotReady'
-        if getattr(getattr(node, 'spec', None), 'unschedulable', False):
-            return 'is cordoned'
-        return None
-
-    issues = subprocess_utils.run_in_parallel(_inspect_node, unique_names)
-    parts = [
-        f'node {name} {issue}' for name, issue in zip(unique_names, issues)
-        if issue is not None
-    ]
+    nodes = _inspect_nodes(node_names, context, tolerations, since)
+    parts = []
+    for name, node in nodes.items():
+        # NotReady first: it is more severe than a taint or a cordon, and a
+        # NotReady node is tainted by Kubernetes itself.
+        if node.state in (_NODE_GONE, _NODE_NOT_READY):
+            parts.append(f'node {name} {node.state}')
+        elif node.taints:
+            parts.append(
+                f'node {name} has NoExecute taint {", ".join(node.taints)}')
+        elif node.state is not None:
+            parts.append(f'node {name} {node.state}')
     if not parts:
         return None
     return '; '.join(parts)
+
+
+def _as_sentence(text: str) -> str:
+    text = ' '.join(text.split())
+    return text if text.endswith(('.', '!', '?')) else f'{text}.'
+
+
+def get_cluster_termination_cause(
+        provider_config: Dict[str, Any], pod_nodes: Dict[str, Optional[str]], *,
+        tolerations: List[Dict[str, Any]],
+        since: Optional[datetime.datetime]) -> Optional[str]:
+    """Who removed a cluster's pods, and why; None when nothing says.
+
+    For pods that are gone (all of a cluster's, or some). Worded actor
+    first, because a table cell shows only the start of it. Combines the pods'
+    own deletion events (see kubernetes_utils.pod_deletion_event) with the
+    current state of the nodes they ran on. ``pod_nodes`` maps each pod to
+    the node it ran on.
+    """
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+
+    def _pod_events(pod_name: str) -> List[Any]:
+        try:
+            return _get_pod_events(context, namespace, pod_name)
+        except Exception:  # pylint: disable=broad-except
+            return []
+
+    # Every pod's events, head first: the most decisive deletion event of the
+    # whole cluster wins, and a tie goes to the head.
+    event = kubernetes_utils.pod_deletion_event([
+        e for events in subprocess_utils.run_in_parallel(
+            _pod_events, list(pod_nodes)) for e in events
+    ], since)
+    nodes = _inspect_nodes([n for n in pod_nodes.values() if n], context,
+                           tolerations, since)
+    pods = 'Pods' if len(pod_nodes) > 1 else 'Pod'
+
+    def _names(state: Optional[str] = None) -> str:
+        matching = [n for n, node in nodes.items() if node.state == state]
+        return ', '.join(matching if state and matching else nodes) or 'unknown'
+
+    if event is None:
+        # Only what removes pods: a cordon alone does not.
+        sentences = []
+        for name, node in nodes.items():
+            if node.state == _NODE_GONE:
+                sentences.append(f'Node {name} deleted in Kubernetes')
+            elif node.state == _NODE_NOT_READY:
+                sentences.append(f'Node {name} is NotReady')
+            elif node.taints:
+                sentences.append(f'Node {name} has NoExecute taint '
+                                 f'{", ".join(node.taints)}')
+        if not sentences:
+            return None
+        return f'{"; ".join(sentences)}; pods lost.'
+
+    # Explain the event by the node its pod ran on: another node of the
+    # cluster, tainted or recovered, did not remove that pod.
+    event_pod = getattr(getattr(event, 'involved_object', None), 'name', None)
+    event_node = pod_nodes.get(event_pod) if isinstance(event_pod,
+                                                        str) else None
+    if event_node in nodes:
+        nodes = {event_node: nodes[event_node]}
+
+    reason = event.reason
+    message = ' '.join((event.message or '').split())
+    detail = f': {message}' if message else ''
+    if reason == 'TaintManagerEviction':
+        tainted = [(n, node.taints) for n, node in nodes.items() if node.taints]
+        if tainted:
+            where = '; '.join(
+                f'NoExecute taint {", ".join(taints)} on node {name}'
+                for name, taints in tainted)
+            return f'{pods} evicted by Kubernetes: {where}.'
+        if any(node.state == _NODE_GONE for node in nodes.values()):
+            return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                    f'{_names(_NODE_GONE)} (node since deleted).')
+        if any(node.state == _NODE_NOT_READY for node in nodes.values()):
+            return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                    f'{_names(_NODE_NOT_READY)}, which is NotReady.')
+        # Claim the taint is gone only when every node was read and is fine.
+        lifted = bool(nodes) and all(
+            node.read and node.state is None for node in nodes.values())
+        removed = ' (since removed)' if lifted else ''
+        return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                f'{_names()}{removed}.')
+    if reason == 'DeletingNode':
+        return f'Node {_names(_NODE_GONE)} deleted in Kubernetes; pods lost.'
+    if reason == 'NodeNotReady':
+        # A node that went NotReady and was then deleted is reported as
+        # deleted: that is what the user will find when they look for it.
+        if any(node.state == _NODE_GONE for node in nodes.values()):
+            return (f'Node {_names(_NODE_GONE)} deleted in Kubernetes; '
+                    'pods lost.')
+        return f'Node {_names(_NODE_NOT_READY)} became NotReady; pods lost.'
+    if reason == 'Evicted':
+        # Drain controllers and node autoscalers emit 'Evicted' as well as the
+        # kubelet, so name whoever reported it rather than assume.
+        source = getattr(event, 'source', None)
+        reporter = (getattr(event, 'reporting_component', None) or
+                    getattr(source, 'component', None))
+        by = f' by {reporter}' if reporter else ''
+        return _as_sentence(f'{pods} evicted{by}{detail}')
+    if reason == 'Preempted':
+        return _as_sentence(f'{pods} preempted by Kubernetes scheduler{detail}')
+    if reason == 'Stopped':
+        return _as_sentence(f'{pods} stopped by Kueue{detail}')
+    if reason == 'ExcessPodDeleted':
+        return _as_sentence(
+            f'{pods} deleted by Kueue (excess pod in group){detail}')
+    return _as_sentence(f'{pods} deleted in Kubernetes ({reason}){detail}')
 
 
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
@@ -3673,9 +4148,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                 termination_reason += f' ({message})'
         # Generic disruption.
         elif condition.type == 'DisruptionTarget':
-            termination_reason = f'Disrupted: {reason}'
-            if message:
-                termination_reason += f' ({message})'
+            termination_reason = kubernetes_utils.disruption_reason(
+                reason, message, pod)
 
         if condition.last_transition_time is not None:
             latest_timestamp = max(latest_timestamp,
@@ -4205,13 +4679,19 @@ def _format_pod_missing_reason(
     return event_str, event_type
 
 
+def _event_pod_uid(event: Any) -> Optional[str]:
+    uid = getattr(getattr(event, 'involved_object', None), 'uid', None)
+    return uid if isinstance(uid, str) else None
+
+
 def _record_pod_missing_events(context: Optional[str], namespace: str,
                                cluster_name: str, pod_name: str,
                                first_pod: bool) -> Tuple[List[Any], bool]:
     """Record a deleted pod's events (and its last node's) as cluster events.
 
-    Returns the pod's own events, newest first, and whether any event -- pod
-    or node -- had not been recorded before.
+    Returns the pod's own events since the cluster was provisioned, newest
+    first, and whether any event -- pod or node -- had not been recorded
+    before.
 
     Recording is kept separate from deriving a reason because the two have
     different callers. A status refresh must not re-report a failure it has
@@ -4220,19 +4700,57 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
     """
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_events = _get_pod_events(context, namespace, pod_name)
+    # A relaunch reuses the pod name, and the previous pod's events outlive it
+    # for about an hour: only events since this cluster's first event (its
+    # provisioning start) are recorded. Not launched_at: it is rewritten when
+    # provisioning finishes, after the pod's own early events.
+    since = None
+    try:
+        first = global_user_state.get_cluster_events(
+            cluster_name,
+            None,
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            include_timestamps=True)
+        if first:
+            since = datetime.datetime.fromtimestamp(
+                int(first[0]['transitioned_at']), datetime.timezone.utc)
+    except ValueError:  # No record for the cluster.
+        pass
+    bounded = kubernetes_utils.events_since(pod_events, since)
+    # The clock-skew allowance can still admit a predecessor that went just
+    # before this launch; its events carry another pod UID. The current pod is
+    # the one scheduled since this launch began (a predecessor was scheduled
+    # before it; a reconnecting kubelet can post a late event for the old pod,
+    # never a Scheduled one). Unscheduled: the newest event's.
+    uids = [_event_pod_uid(e) for e in bounded]
+    known = [(e, u) for e, u in zip(bounded, uids) if u is not None]
+    uid = next((u for e, u in known if e.reason == 'Scheduled' and
+                (since is None or e.metadata.creation_timestamp >= since)),
+               known[0][1] if known else None)
+    current = {
+        id(e)
+        for e, u in zip(bounded, uids)
+        if u is None or uid is None or u == uid
+    }
     last_scheduled_node = None
     insert_new_pod_event = True
     new_event_inserted = False
     inserted_pod_events = 0
+    # Kubernetes can emit identical events within one second, which share a
+    # cluster_events key. Only a key recorded by an earlier walk means the
+    # rest is recorded too; a repeat within this walk is skipped.
+    seen: Set[Tuple[str, int]] = set()
 
     for event in pod_events:
-        if event.reason == 'Scheduled':
+        # Newest first, so the first one is the current pod's.
+        if (event.reason == 'Scheduled' and last_scheduled_node is None and
+                id(event) in current):
             pattern = r'Successfully assigned (\S+) to (\S+)'
             match = re.search(pattern, event.message)
             if match:
                 scheduled_node = match.group(2)
                 last_scheduled_node = scheduled_node
-        if insert_new_pod_event:
+        if insert_new_pod_event and id(event) in current:
             # Try inserting the latest events first. If the event is a
             # duplicate, it means the event (and any previous events) have
             # already been inserted - so do not insert further events.
@@ -4244,6 +4762,9 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
                 first_pod=first_pod,
                 cluster_name=cluster_name,
                 transitioned_at=transitioned_at)
+            if (event_str, transitioned_at) in seen:
+                continue
+            seen.add((event_str, transitioned_at))
             try:
                 global_user_state.add_cluster_event(
                     cluster_name,
@@ -4273,7 +4794,7 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
             field_selector=node_field_selector,
             _request_timeout=kubernetes.API_TIMEOUT).items
         node_events = sorted(
-            node_events,
+            kubernetes_utils.events_since(node_events, since),
             key=lambda event: event.metadata.creation_timestamp,
             # latest event appears first
             reverse=True)
@@ -4284,14 +4805,20 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
                 # Try inserting the latest events first. If the event is a
                 # duplicate, it means the event (and any previous events) have
                 # already been inserted - so do not insert further events.
+                event_str = (f'[kubernetes node {last_scheduled_node}] '
+                             f'{event.reason} {event.message}')
+                transitioned_at = int(
+                    event.metadata.creation_timestamp.timestamp())
+                if (event_str, transitioned_at) in seen:
+                    continue
+                seen.add((event_str, transitioned_at))
                 try:
                     global_user_state.add_cluster_event(
                         cluster_name,
-                        None, f'[kubernetes node {last_scheduled_node}] '
-                        f'{event.reason} {event.message}',
+                        None,
+                        event_str,
                         global_user_state.ClusterEventType.DEBUG,
-                        transitioned_at=int(
-                            event.metadata.creation_timestamp.timestamp()),
+                        transitioned_at=transitioned_at,
                         expose_duplicate_error=True)
                     logger.debug(
                         f'[pod {pod_name}] encountered new node event: '
@@ -4311,7 +4838,7 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
         logger.debug(f'[pod {pod_name}] could not determine the node '
                      'the pod was scheduled to')
 
-    return pod_events, new_event_inserted
+    return [e for e in pod_events if id(e) in current], new_event_inserted
 
 
 def _derive_missing_pod_reason_from_cluster_events(
@@ -4342,7 +4869,10 @@ def _derive_missing_pod_reason_from_cluster_events(
 
         if event.startswith('NodeNotReady '):
             _record_failure_reason(event[len('NodeNotReady '):], 1)
-        elif event.startswith('TaintManagerEviction '):
+        elif (event.startswith('TaintManagerEviction ') and
+              not kubernetes_utils.is_cancelled_taint_eviction(
+                  'TaintManagerEviction',
+                  event[len('TaintManagerEviction '):])):
             # usually the event message for TaintManagerEviction is not useful
             # so we record a more generic message.
             _record_failure_reason('pod was evicted by taint manager', 2)
@@ -4372,11 +4902,9 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         # the deletion -- the scheduler's, or a volume mount's -- must not be
         # dressed up as the reason the pod went away.
         #
-        # Unbounded on purpose: this path is entered with a pod name and no
-        # object, so there is no creation time to bound the events by. What
-        # keeps a same-named predecessor's deletion from being re-reported is
-        # the gate above -- its events were recorded when they were first
-        # read, so they are no longer new.
+        # Bounded by the cluster's launch, not the pod's creation: this path
+        # is entered with a pod name and no object. Events of a same-named
+        # predecessor are dropped by _record_pod_missing_events.
         reason = kubernetes_utils.reason_from_pod_events(pod_events)
     return reason
 
@@ -4631,10 +5159,32 @@ def _deleted_pods_error(
     return config_lib.KubernetesError(message)
 
 
-def list_namespaced_pod(context: Optional[str], namespace: str,
-                        cluster_name_on_cloud: str, is_ssh: bool, identity: str,
-                        label_selector: str) -> List[Any]:
-    # Get all the pods with the label skypilot-cluster-name: <cluster_name>
+def list_namespaced_pod(
+    context: Optional[str],
+    namespace: str,
+    cluster_name_on_cloud: str,
+    is_ssh: bool,
+    identity: str,
+    label_selector: str,
+    cache_accepts: Optional[Callable[[List[Any]], bool]] = None,
+) -> List[Any]:
+    """Lists the pods matching label_selector.
+
+    Args:
+        cache_accepts: None reads the API server. Otherwise a cached answer is
+            returned when cache_accepts(pods) is true, and any other answer is
+            read again from the API server.
+    """
+
+    def read(consistency: reads.Consistency) -> reads.ReadResult:
+        return reads.list_objects(context,
+                                  reads.PODS,
+                                  namespace=namespace,
+                                  label_selector=label_selector,
+                                  consistency=consistency,
+                                  convert=kubernetes_utils.k8s_pod_from_dict,
+                                  attempts=1)
+
     try:
         # log the query parameters we pass to the k8s api
         logger.debug(f'Querying k8s api for pods:\n'
@@ -4642,19 +5192,19 @@ def list_namespaced_pod(context: Optional[str], namespace: str,
                      f'namespace: {namespace}\n'
                      f'label selector:`{label_selector}`.')
 
-        response = kubernetes.core_api(context).list_namespaced_pod(
-            namespace,
-            label_selector=label_selector,
-            _request_timeout=kubernetes.API_TIMEOUT)
+        result = read(reads.FRESH if cache_accepts is None else reads.CACHED)
+        if (cache_accepts is not None and
+                result.source == reads.SOURCE_CACHE and
+                not cache_accepts(result.items)):
+            result = read(reads.FRESH)
 
         # log PodList response info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'k8s api response for `{label_selector}`:\n'
-                         f'apiVersion={response.api_version}, '
-                         f'kind={response.kind},\n'
-                         f'metadata={response.metadata}')
+                         f'source={result.source}, reason={result.reason}, '
+                         f'resourceVersion={result.resource_version}')
 
-        pods = response.items
+        pods = result.items
 
         # log detailed Pod info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
@@ -4675,23 +5225,20 @@ def list_namespaced_pod(context: Optional[str], namespace: str,
                              f'pod.status={pod.status}')
         return pods
 
-    except kubernetes.max_retry_error():
+    except exceptions.KubeAPIUnreachableError as e:
+        if is_ssh:
+            node_pool = common_utils.removeprefix(context,
+                                                  'ssh-') if context else ''
+            hint = (f'Please check if the SSH Node Pool {node_pool} is up and '
+                    'accessible. To debug, run `sky check ssh` to check the '
+                    'status of the SSH Node Pool.')
+        else:
+            hint = (f'Check if the {identity} in context {context} is up and '
+                    'accessible.')
         with ux_utils.print_exception_no_traceback():
-            if is_ssh:
-                node_pool = common_utils.removeprefix(context,
-                                                      'ssh-') if context else ''
-                msg = (
-                    f'Cannot connect to SSH Node Pool {node_pool}. '
-                    'Please check if the SSH Node Pool is up and accessible. '
-                    'To debug, run `sky check ssh` to check the status of '
-                    'the SSH Node Pool.')
-            else:
-                ctx = kubernetes_utils.get_current_kube_config_context_name()
-                msg = (f'Network error - check if the {identity} in '
-                       f'context {ctx} is up and accessible.')
             raise exceptions.ClusterStatusFetchingError(
-                f'Failed to query cluster {cluster_name_on_cloud!r} status. ' +
-                msg) from None
+                f'Failed to query cluster {cluster_name_on_cloud!r} status: '
+                f'{common_utils.format_exception(e)} {hint}') from None
     except Exception as e:  # pylint: disable=broad-except
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
@@ -4730,10 +5277,25 @@ def query_instances(
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
                       f'{cluster_name_on_cloud}')
+    # Find the list of pod names that should be there
+    # from k8s services. Filter duplicates as -ssh service
+    # creates a duplicate entry.
+    target_pod_names = {
+        service['spec']['selector']['component']
+        for service in provider_config.get('services', [])
+    }
 
     attempts = 0
-    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
-                               is_ssh, identity, label_selector)
+    pods = list_namespaced_pod(
+        context,
+        namespace,
+        cluster_name_on_cloud,
+        is_ssh,
+        identity,
+        label_selector,
+        # Verifying a teardown must not see pods a stale cache still holds.
+        cache_accepts=((lambda pods: _all_pods_up(pods, target_pod_names))
+                       if non_terminated_only else None))
     # When we see no pods returned from the k8s api, we assume the pods have
     # been terminated by the user directly and mark the cluster as terminated
     # in the global user state.
@@ -4780,6 +5342,11 @@ def query_instances(
                 # creation: a relaunch under the same cluster name must not
                 # be told why the pod it replaced was deleted.
                 since=_pod_created_at(pod))
+            if event_reason is None and kai.uses_kai(provider_config):
+                event_reason = kai.eviction_reason(context,
+                                                   namespace,
+                                                   pod.metadata.name,
+                                                   since=_pod_created_at(pod))
             if event_reason is not None:
                 reason = f'{reason}; {event_reason}'
         if non_terminated_only and pod_status is None:
@@ -4789,15 +5356,6 @@ def query_instances(
             continue
         pod_name = pod.metadata.name
         cluster_status[pod_name] = (pod_status, reason)
-
-    # Find the list of pod names that should be there
-    # from k8s services. Filter duplicates as -ssh service
-    # creates a duplicate entry.
-    target_pod_names = list(
-        set([
-            service['spec']['selector']['component']
-            for service in provider_config.get('services', [])
-        ]))
 
     first_pod = True
     for target_pod_name in target_pod_names:
@@ -4812,6 +5370,20 @@ def query_instances(
                 cluster_status[target_pod_name] = (None, reason)
 
     return cluster_status
+
+
+def _all_pods_up(pods: List[Any], target_pod_names: Set[str]) -> bool:
+    """Whether every expected pod is present, Running and healthy."""
+    if not pods:
+        return False
+    # Services select pods by component label; a Deployment's pod has a
+    # generated name.
+    present = ({pod.metadata.name for pod in pods} |
+               {(pod.metadata.labels or {}).get('component') for pod in pods})
+    if not target_pod_names <= present:
+        return False
+    return all(pod.status.phase == 'Running' and pod.metadata.deletion_timestamp
+               is None and _get_pod_health_issues(pod) is None for pod in pods)
 
 
 def get_command_runners(

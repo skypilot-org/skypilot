@@ -64,3 +64,21 @@ def test_reset_on_startup_no_clients_dir(tmp_path):
         # Should not raise.
         storage.reset_on_startup()
     assert not clients_dir.exists()
+
+
+def test_request_results_live_in_the_clients_dir_across_restarts(tmp_path):
+    """Stored request results persist where the clients dir does, and a
+    restart keeps them, as it keeps their request rows."""
+    clients_dir = tmp_path / 'clients'
+    storage = local_blob_storage.LocalFilesystemBlobStorage()
+    with mock.patch.object(local_blob_storage.server_common,
+                           'API_SERVER_CLIENT_DIR', clients_dir):
+        results_dir = storage.request_results_dir()
+        assert results_dir.parent == clients_dir
+        results_dir.mkdir(parents=True)
+        (results_dir / 'req-1.json.zlib').write_bytes(b'x')
+
+        storage.reset_on_startup()
+
+        assert (results_dir / 'req-1.json.zlib').exists()
+        assert storage.list_users() == []

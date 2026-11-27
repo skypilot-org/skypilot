@@ -300,6 +300,21 @@ class TestWorkspaceSchema(unittest.TestCase):
             except jsonschema.exceptions.ValidationError as e:
                 self.fail(f"Valid config {config} was rejected: {e}")
 
+    def test_allowed_queues_take_one_name_per_entry(self):
+        """Each allowed queue entry is a single queue name."""
+        for cloud in ('kubernetes', 'slurm'):
+            for queues, valid in ((['a', 'b'], True), (['a,b'], False),
+                                  (['a b'], False), ([''], False)):
+                config = {'ws': {cloud: {'quota': {'allowed_queues': queues}}}}
+                if valid:
+                    jsonschema.validate(instance=config,
+                                        schema=self.workspaces_schema)
+                else:
+                    with self.assertRaises(
+                            jsonschema.exceptions.ValidationError):
+                        jsonschema.validate(instance=config,
+                                            schema=self.workspaces_schema)
+
     def test_non_gcp_clouds_only_allow_disabled(self):
         """Test that non-GCP clouds only allow 'disabled' property."""
         # Test that all non-GCP clouds only accept 'disabled' property
