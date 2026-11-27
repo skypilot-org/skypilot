@@ -1623,6 +1623,8 @@ class TestStatusExprSeam:
         ]
         with engine.begin() as conn:
             for jid, st, ov in rows:
+                conn.execute(state.job_info_table.insert().values(
+                    spot_job_id=jid, name=f'j{jid}'))
                 conn.execute(state.spot_table.insert().values(
                     spot_job_id=jid,
                     task_id=0,

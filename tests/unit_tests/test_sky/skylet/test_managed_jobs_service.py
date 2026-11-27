@@ -483,7 +483,9 @@ class TestGetJobTable:
         assert response.total == 4 and sum(response.status_counts.values()) == 4
         response = self.service.GetJobTable(
             managed_jobsv1_pb2.GetJobTableRequest(
-                accessible_workspaces=workspaces, limit=2,
+                accessible_workspaces=workspaces,
+                page=1,
+                limit=2,
                 include_counts=False), context_mock)
         context_mock.abort.assert_not_called()
         assert len({j.job_id for j in response.jobs}) == 2

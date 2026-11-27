@@ -726,7 +726,8 @@ class TestGetJobClustersFromManagedJobs:
         assert ctx['cluster_names'] == expected
         mock_queue.assert_called_once_with(refresh=False,
                                            job_ids=[5],
-                                           all_users=True)
+                                           all_users=True,
+                                           include_counts=False)
 
     @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
     @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')

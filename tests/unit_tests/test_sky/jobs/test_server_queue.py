@@ -1025,7 +1025,7 @@ class TestGetManagedJobQueueIncludeTree:
 
         def fake_jobs(**kw):
             seen['jobs'] = kw
-            return [], 0
+            return [], 0 if kw.get('count_total', True) else None
 
         st = jobs_utils.managed_job_state
         monkeypatch.setattr(st, 'get_tree_root_ids', fake_roots)
@@ -1199,7 +1199,8 @@ class TestDumpManagedJobQueue:
                                                sort_order=None,
                                                submitted_after=None,
                                                submitted_before=None,
-                                               status_expr=None):
+                                               status_expr=None,
+                                               count_total=True):
             # Apply pre-filters aligned with utils.get_managed_job_queue
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,
