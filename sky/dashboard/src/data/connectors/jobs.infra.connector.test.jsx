@@ -64,7 +64,8 @@ describe('getManagedJobs and the infra filter', () => {
     await getManagedJobs({ infraMatch: 'k8s/my-context' });
     expect(apiClient.post).toHaveBeenCalledWith(
       '/jobs/queue/v2',
-      expect.objectContaining({ infra_match: 'k8s/my-context' })
+      expect.objectContaining({ infra_match: 'k8s/my-context' }),
+      expect.anything()
     );
   });
 

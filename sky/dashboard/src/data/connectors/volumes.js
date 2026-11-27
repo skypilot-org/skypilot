@@ -1,9 +1,46 @@
 import { apiClient } from '@/data/connectors/client';
+import {
+  fetchListInPages,
+  MIN_LIST_CURSOR_API_VERSION,
+  sendRequest,
+  syncPageSize,
+} from '@/data/connectors/syncCalls';
+
+// The volumes GET /volumes returns. When the server answers sync calls and
+// takes the volume cursor, they are fetched as sync calls of its maximum size,
+// by name.
+async function fetchVolumes() {
+  const pageSize = await syncPageSize(MIN_LIST_CURSOR_API_VERSION);
+  if (pageSize !== null) {
+    const volumes = await fetchListInPages({
+      path: '/volumes',
+      pageSize,
+      sendPage: (afterName, size) => {
+        const params = new URLSearchParams({ limit: String(size) });
+        if (afterName !== null) params.set('after_name', afterName);
+        return sendRequest(
+          (headers) =>
+            apiClient.fetchImmediate(
+              `/volumes?${params.toString()}`,
+              undefined,
+              'GET',
+              { headers }
+            ),
+          { limit: size, fallback: false }
+        );
+      },
+      cursorOf: (row) => row.name,
+    });
+    if (volumes !== null) return volumes;
+  }
+  // A list call without `limit` is not answered as a sync call.
+  return apiClient.fetch('/volumes', {}, 'GET', { sync: false });
+}
 import { getErrorMessageFromResponse } from '@/data/utils';
 
 export async function getVolumes() {
   try {
-    const data = await apiClient.fetch('/volumes', {}, 'GET');
+    const data = await fetchVolumes();
     // Transform the data to match the expected format
     const transformedData =
       data.map((volume) => {
