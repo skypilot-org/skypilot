@@ -546,13 +546,11 @@ def _queue_in_pages(
                                                 str, int]], Optional[int]]]]:
     """Fetches the queue as sync calls of up to page_size top-level jobs.
 
-    Only the first page asks for the counts, and the result takes them from
-    it.
+    Only the first page asks for the counts; the result takes them from it.
     """
     if body.fields and 'root_job_id' not in body.fields:
         # Rows name their top-level job in root_job_id; the cursor needs it.
         body = body.model_copy(update={'fields': [*body.fields, 'root_job_id']})
-    first_page: Dict[str, Any] = {}
 
     def send(after_job_id: Optional[int], size: int) -> server_common.RequestId:
         return _send_queue_v2(
@@ -569,8 +567,6 @@ def _queue_in_pages(
     ) -> Optional[Tuple[List[Any], int, Any]]:
         if not isinstance(value, dict) or 'jobs' not in value:
             return None
-        if after_job_id is None:
-            first_page.update(value)
         jobs = value['jobs']
         roots = {
             job['job_id']
@@ -584,8 +580,8 @@ def _queue_in_pages(
     return client_common.fetch_in_pages(send,
                                         page_size,
                                         read_page,
-                                        lambda _, jobs: {
-                                            **first_page, 'jobs': jobs
+                                        lambda first_value, jobs: {
+                                            **first_value, 'jobs': jobs
                                         },
                                         limit=body.limit)
 

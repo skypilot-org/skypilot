@@ -17,6 +17,7 @@ import sqlalchemy
 from sqlalchemy import orm
 
 from sky.jobs import state as managed_job_state
+from sky.jobs import state_db
 from sky.skylet import constants as skylet_constants
 from sky.utils.db import db_utils
 
@@ -225,8 +226,8 @@ def test_a_queue_page_walks_a_tree_root_index(tmp_path, monkeypatch):
     for user_hashes in (None, ['user']):
         for query in _queue_page_queries(user_hashes):
             plan = _plan(engine, query)
-            assert any(name in plan
-                       for name in managed_job_state.TREE_ROOT_INDEXES), plan
+            assert any(
+                name in plan for name in state_db.TREE_ROOT_INDEXES), plan
             # The slice and the cursor come off the index, not a sort of
             # every job.
             assert 'temp b-tree' not in plan, plan

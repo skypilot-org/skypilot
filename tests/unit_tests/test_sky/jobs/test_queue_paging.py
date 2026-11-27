@@ -11,7 +11,7 @@ from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 
-_PAGING_VERSION = (server_constants.MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION)
+_PAGING_VERSION = server_constants.MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION
 
 
 def _entrypoint():

@@ -383,13 +383,16 @@ job_info_table = sqlalchemy.Table(
                      unique=True),
 )
 
+# The indexed tree-root expression, as the index definition spells it.
+TREE_ROOT_SQL = 'coalesce(root_job_id, spot_job_id)'
+
 
 def job_info_tree_root() -> 'sqlalchemy.ColumnElement':
     """The top-level job of a job_info row's tree: root_job_id, else itself.
 
-    Indexed (see TREE_ROOT_INDEXES), so a queue page and its cursor walk an
-    index instead of sorting every job. Queries must use this exact
-    expression for the index to apply.
+    TREE_ROOT_SQL on job_info, which TREE_ROOT_INDEXES index, so a queue page
+    and its cursor walk an index instead of sorting every job. A query must
+    use this expression for the index to apply.
     """
     return sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
                                     job_info_table.c.spot_job_id)
@@ -692,7 +695,6 @@ __all__ = [
     'spot_table',
     'job_info_table',
     'job_info_tree_root',
-    'TREE_ROOT_INDEXES',
     'api_access_token_table',
     'ha_recovery_script_table',
     'job_events_table',

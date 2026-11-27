@@ -30,8 +30,7 @@ def upgrade():
     """Create the indexes that don't exist yet."""
     with op.get_context().autocommit_block():
         for name, leading in state_db.TREE_ROOT_INDEXES.items():
-            columns = ', '.join(
-                [*leading, 'coalesce(root_job_id, spot_job_id)'])
+            columns = ', '.join([*leading, state_db.TREE_ROOT_SQL])
             op.execute(f'CREATE INDEX IF NOT EXISTS {name} '
                        f'ON job_info ({columns})')
 

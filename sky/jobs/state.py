@@ -92,7 +92,6 @@ if sqlalchemy_deps.sqlalchemy_available():
     spot_table = _jobs_db.spot_table
     job_info_table = _jobs_db.job_info_table
     job_info_tree_root = _jobs_db.job_info_tree_root
-    TREE_ROOT_INDEXES = _jobs_db.TREE_ROOT_INDEXES
     api_access_token_table = _jobs_db.api_access_token_table
     ha_recovery_script_table = _jobs_db.ha_recovery_script_table
     job_events_table = _jobs_db.job_events_table
@@ -1704,8 +1703,10 @@ def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
 
     A job launched from inside another managed job (a dynamic job group
     member) has its own spot_job_id but belongs, for listing purposes, to
-    the tree of its root. The queue pages and counts by this expression so
-    a group and everything launched under it stay on one page.
+    the tree of its root. The queue counts and orders by this expression so
+    a group and everything launched under it stay together. It falls back to
+    spot's id so a spot row without a job_info row is its own root; selecting
+    a page uses ``job_info_tree_root``, which the tree-root indexes cover.
     """
     return sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
                                     spot_table.c.spot_job_id)
@@ -1830,8 +1831,8 @@ def build_managed_jobs_with_filters_no_status_query(
     job_ids keeps only those jobs' own rows. tree_root_ids keeps only the
     rows of the trees rooted at those ids (the roots' tasks and every job
     launched under them). The ids must be tree roots; see
-    ``get_tree_root_ids``. Pagination passes the roots on the current page,
-    and the tree lookup (``include_tree``) passes the requested jobs' roots.
+    ``get_tree_root_ids``. The tree lookup (``include_tree``) passes the
+    requested jobs' roots.
     See the module comment above ``_tree_root_expr`` for the whole picture.
 
     submitted_after / submitted_before are epoch seconds and restrict the
@@ -5383,10 +5384,8 @@ def get_jobs_launched_from(
     if not job_ids:
         return []
     engine = _db_manager.get_engine()
-    roots = sqlalchemy.select(
-        sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
-                                 job_info_table.c.spot_job_id)).where(
-                                     job_info_table.c.spot_job_id.in_(job_ids))
+    roots = sqlalchemy.select(job_info_tree_root()).where(
+        job_info_table.c.spot_job_id.in_(job_ids))
     with orm.Session(engine) as session:
         rows = session.execute(
             sqlalchemy.select(
