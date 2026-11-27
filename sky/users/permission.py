@@ -121,23 +121,42 @@ _READ_ERROR = 'error'
 # every request.
 _SUPPORTED_ROLES = frozenset(rbac.get_supported_roles())
 
-# User types an authenticated person or service account is stored with. An
-# admin of one of these types means the deployment already has an admin.
-_HUMAN_USER_TYPES = frozenset({
-    models.UserType.BASIC.value,
-    models.UserType.SSO.value,
-    models.UserType.LEGACY.value,
-    models.UserType.SA.value,
-})
+
+def _env_true(name: str) -> bool:
+    return os.environ.get(name, 'false').lower() == 'true'
 
 
-def _is_human(user: models.User) -> bool:
-    if user.user_type is not None:
-        return user.user_type in _HUMAN_USER_TYPES
-    # A row from before user types existed: one with a password was
-    # authenticated. An `sa-` id proves nothing; a client without
-    # authentication picks its own id.
-    return user.password is not None
+def _can_log_in_without_token(user: models.User) -> bool:
+    """Whether `user` can still log in as a person, by proxy or password."""
+    if user.user_type in (models.UserType.SSO.value,
+                          models.UserType.LEGACY.value):
+        return True
+    # A row from before user types existed has no type; a password shows it
+    # was a basic-auth user.
+    if (user.user_type == models.UserType.BASIC.value or
+            user.user_type is None and user.password is not None):
+        # Off once the deployment moved to SSO, which leaves these unusable.
+        # (Disabling only the middleware hands basic auth to a plugin.)
+        return _env_true(constants.ENV_VAR_ENABLE_BASIC_AUTH)
+    return False
+
+
+def _is_service_account(user: models.User) -> bool:
+    # An untyped `sa-` row alone proves nothing (a client without
+    # authentication picks its own id); the caller also requires a token.
+    return (user.user_type == models.UserType.SA.value or
+            user.user_type is None and user.is_service_account())
+
+
+def _service_accounts_with_live_tokens() -> Set[str]:
+    if not _env_true(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS):
+        return set()
+    now = int(time.time())
+    return {
+        token['service_account_user_id']
+        for token in global_user_state.get_all_service_account_tokens()
+        if token['expires_at'] is None or token['expires_at'] >= now
+    }
 
 
 def _take_ttl_permit(cache: Dict[str, float], key: str, ttl: float,
@@ -780,17 +799,21 @@ class PermissionService:
         return False
 
     def _human_admin_exists_no_lock(self) -> bool:
-        """Whether an admin exists that a person or service account holds.
+        """Whether a person or service account that can still log in is admin.
 
         System users (the server's own identities) hold admin by design, and
-        type-NULL rows without a password were never authenticated, so neither
-        counts.
+        untyped rows without a password were never authenticated, so neither
+        counts. Nor does an admin that can no longer authenticate (basic auth
+        turned off, every token expired), or no one could manage roles.
         """
         admin_ids = set(self._ensure_enforcer().get_users_for_role(
             rbac.RoleName.ADMIN.value))
-        return any(
-            _is_human(user)
-            for user in global_user_state.get_users(admin_ids).values())
+        admins = global_user_state.get_users(admin_ids).values()
+        if any(_can_log_in_without_token(user) for user in admins):
+            return True
+        sa_admins = {user.id for user in admins if _is_service_account(user)}
+        return bool(sa_admins and
+                    sa_admins & _service_accounts_with_live_tokens())
 
     def delete_user(self, user_id: str) -> None:
         """Remove every policy naming a user: their role and workspace grants.

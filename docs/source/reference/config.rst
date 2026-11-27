@@ -3542,9 +3542,12 @@ If not specified:
 
 If specified, new users get this role instead. Existing users keep their roles.
 
-Either way, while no authenticated user or service account holds ``admin``,
-the first new user who logs in through an auth proxy or OAuth2 proxy gets
-``admin``, so a deployment without an initial administrator is not locked out.
+Either way, while no user or service account that can still log in holds
+``admin``, the first new user who logs in through an auth proxy or OAuth2 proxy
+gets ``admin``, so a deployment without a usable administrator is not locked
+out. Admins that can no longer log in do not count: basic-auth users once
+the API server's basic auth is turned off, and service accounts whose tokens
+have all expired.
 This applies again if every admin is later removed.
 
 .. TODO(aylei): Refine this after unified authentication.

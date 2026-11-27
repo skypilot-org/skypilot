@@ -1292,14 +1292,35 @@ class TestSeedNewUserRole:
 class TestFirstAdminBootstrap:
     """A login seed may make the first admin.
 
-    Only while no person or service account holds admin, and only for a seed
-    that opted in, so a deployment without an initial admin is not locked out
-    and a bulk provisioner cannot hand admin to whoever comes first.
+    Only while no person or service account that can still log in holds
+    admin, and only for a seed that opted in, so a deployment without a usable
+    admin is not locked out and a bulk provisioner cannot hand admin to
+    whoever comes first.
     """
 
     @pytest.fixture
-    def users(self, monkeypatch):
-        """The users table, as `{id: type}`; tests add rows to it."""
+    def tokens(self, monkeypatch):
+        """Service account tokens, as `{sa id: expires_at}`."""
+        table = {}
+        monkeypatch.setattr(
+            permission.global_user_state, 'get_all_service_account_tokens',
+            lambda: [{
+                'service_account_user_id': sa,
+                'expires_at': expires_at
+            } for sa, expires_at in table.items()])
+        return table
+
+    @pytest.fixture
+    def users(self, monkeypatch, tokens):
+        """The users table, as `{id: type}`; tests add rows to it.
+
+        Basic auth and service accounts start enabled.
+        """
+        del tokens  # Installed so no test reads the real token table.
+        monkeypatch.setenv('ENABLE_BASIC_AUTH', 'true')
+        monkeypatch.setenv('ENABLE_SERVICE_ACCOUNTS', 'true')
+        monkeypatch.delenv('SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE',
+                           raising=False)
         table = {}
         monkeypatch.setattr(
             permission.global_user_state, 'get_users', lambda ids: {
@@ -1342,8 +1363,10 @@ class TestFirstAdminBootstrap:
         assert _grouping_rows(service, 'bob') == ['user']
 
     @pytest.mark.parametrize('admin_type', ['basic', 'sso', 'legacy', 'sa'])
-    def test_an_existing_human_admin_stops_it(self, users, service, admin_type):
+    def test_an_existing_human_admin_stops_it(self, users, tokens, service,
+                                              admin_type):
         users.update(root=admin_type, alice='sso')
+        tokens['root'] = None  # Never expires; only an `sa` admin needs it.
         service.update_role('root', 'admin')
         service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
         assert _grouping_rows(service, 'alice') == ['user']
@@ -1363,13 +1386,16 @@ class TestFirstAdminBootstrap:
         [
             (models.User(id='old-basic', name='old-basic',
                          password='hash'), True),
-            # A client without authentication can claim an `sa-` id.
+            # A client without authentication can claim an `sa-` id, but
+            # not a token: only a real service account has one.
             (models.User(id='sa-forged', name='sa-forged'), False),
+            (models.User(id='sa-old', name='old-token'), True),
         ])
-    def test_an_untyped_admin_counts_only_with_a_password(
-            self, users, service, monkeypatch, old_admin, stops):
-        # A row from before user types existed has no type; a password
-        # proves it was authenticated.
+    def test_an_untyped_admin_counts_only_if_authenticated(
+            self, users, tokens, service, monkeypatch, old_admin, stops):
+        # A row from before user types existed has no type; a password or a
+        # token proves it was authenticated.
+        tokens['sa-old'] = None
         rows = {
             old_admin.id: old_admin,
             'alice': models.User(id='alice', name='alice', user_type='sso'),
@@ -1377,6 +1403,48 @@ class TestFirstAdminBootstrap:
         monkeypatch.setattr(permission.global_user_state, 'get_users',
                             lambda ids: {i: rows[i] for i in ids if i in rows})
         service.update_role(old_admin.id, 'admin')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service,
+                              'alice') == ['user' if stops else 'admin']
+
+    @pytest.mark.parametrize(
+        'admin,env,expires_in,stops',
+        [
+            # The deployment moved to SSO: basic auth is off.
+            ('basic', {
+                'ENABLE_BASIC_AUTH': 'false'
+            }, None, False),
+            ('untyped-password', {
+                'ENABLE_BASIC_AUTH': 'false'
+            }, None, False),
+            # A plugin serves basic auth instead of the middleware.
+            ('basic', {
+                'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE': 'true'
+            }, None, True),
+            ('sa', {}, -1, False),  # Every token expired.
+            ('sa', {}, 0, True),  # Expires this second: still accepted.
+            ('sa', {}, 'no token', False),
+            ('sa', {
+                'ENABLE_SERVICE_ACCOUNTS': 'false'
+            }, None, False),
+        ])
+    def test_only_an_admin_who_can_log_in_counts(self, users, tokens, service,
+                                                 monkeypatch, admin, env,
+                                                 expires_in, stops):
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(permission.time, 'time', lambda: 1000)
+        if expires_in != 'no token':
+            tokens['root'] = None if expires_in is None else 1000 + expires_in
+        rows = {
+            'root': (models.User(id='root', name='root', password='hash')
+                     if admin == 'untyped-password' else models.User(
+                         id='root', name='root', user_type=admin)),
+            'alice': models.User(id='alice', name='alice', user_type='sso'),
+        }
+        monkeypatch.setattr(permission.global_user_state, 'get_users',
+                            lambda ids: {i: rows[i] for i in ids if i in rows})
+        service.update_role('root', 'admin')
         service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
         assert _grouping_rows(service,
                               'alice') == ['user' if stops else 'admin']
