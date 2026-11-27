@@ -4,13 +4,16 @@ These tests cover validation that should fire *before* any server call,
 rejecting obviously-malformed flag values with actionable errors.
 """
 import json
+import os
 import sys
+import threading
 from unittest import mock
 
 from click import testing as cli_testing
 
 from sky import exceptions
 from sky.client.cli import command
+from sky.client.cli import flags
 
 
 def test_jobs_launch_num_jobs_must_be_positive():
@@ -176,6 +179,33 @@ def test_secret_file_must_exist():
         ['--secret-file', '/no/such/secret/file.env', 'echo', 'hi'])
     assert result.exit_code != 0
     assert '/no/such/secret/file.env' in result.output
+
+
+def test_dotenv_file_can_be_a_named_pipe(tmp_path):
+    # Secret managers and process substitution (`<(...)`)
+    # serve dotenv files as named pipes, which are not regular files.
+    fifo = tmp_path / 'secrets.env'
+    os.mkfifo(fifo)
+
+    def write():
+        with open(fifo, 'w', encoding='utf-8') as f:
+            f.write('API_KEY=abc123\n')
+
+    writer = threading.Thread(target=write, daemon=True)
+    writer.start()
+    try:
+        assert flags._parse_dotenv_file(str(fifo)) == {'API_KEY': 'abc123'}
+    finally:
+        writer.join(timeout=5)
+
+
+def test_dotenv_path_must_not_be_a_directory(tmp_path):
+    runner = cli_testing.CliRunner()
+    result = runner.invoke(
+        command.launch,
+        ['--env-file', str(tmp_path), 'echo', 'hi'])
+    assert result.exit_code != 0
+    assert 'is a directory' in result.output
 
 
 def _launch_for_output(args, job_ids, capfd, config_log=None):

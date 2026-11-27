@@ -18,12 +18,19 @@ def _parse_dotenv_file(path: str) -> Dict[str, Optional[str]]:
     The raw `dotenv.dotenv_values` accepts a non-existent path and returns
     an empty dict, which means a typo in `--env-file` silently produces
     an empty environment. Validate up-front so the user learns early.
+
+    Named pipes are accepted, so a dotenv file served by a secret manager
+    or by process substitution (`<(...)`) works.
     """
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         raise click.UsageError(
             f'Dotenv file does not exist: {path}. Provide a path to an '
             'existing file, or remove the flag.')
-    return dotenv.dotenv_values(path)
+    if os.path.isdir(path):
+        raise click.UsageError(
+            f'Dotenv path is a directory: {path}. Provide a path to a file.')
+    with open(path, encoding='utf-8') as f:
+        return dotenv.dotenv_values(stream=f)
 
 
 def _parse_env_var(env_var: str) -> Tuple[str, str]:
