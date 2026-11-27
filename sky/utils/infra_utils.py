@@ -195,7 +195,7 @@ class InfraInfo:
         # For Slurm, zones = partitions. We want to show the cluster
         # name (region) instead of the partition name (zone), as different
         # Slurm clusters can easily have same partition name.
-        is_slurm = self.cloud.lower() == 'slurm'
+        is_slurm = self.cloud.lower() in ('slurm', 'pbs')
         if not is_slurm and self.zone is not None and self.zone != '*':
             region_or_zone = self.zone
         elif self.region is not None and self.region != '*':

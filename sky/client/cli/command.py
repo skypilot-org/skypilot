@@ -215,6 +215,14 @@ def _write_ssh_config_for_cluster(handle: Any, credentials: Dict[str, Any],
                          f'{handle.cluster_name} '
                          f'slurm-job-ssh-proxy %w')
         credentials['ssh_proxy_command'] = proxy_command
+    elif isinstance(handle.launched_resources.cloud, clouds.PBS):
+        # The node's sshd is only reachable through the login node, which
+        # the API server tunnels to; %w selects the node.
+        proxy_command = (f'{ws_proxy_cmd} '
+                         f'{server_common.get_server_url()} '
+                         f'{handle.cluster_name} '
+                         f'pbs-job-ssh-proxy %w')
+        credentials['ssh_proxy_command'] = proxy_command
 
     cluster_utils.SSHConfigHelper.add_cluster(
         handle.cluster_name,

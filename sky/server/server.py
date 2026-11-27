@@ -60,6 +60,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.pbs import utils as pbs_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
@@ -4173,11 +4174,19 @@ def _build_slurm_job_ssh_command(
 
 
 @app.websocket('/slurm-job-ssh-proxy')
+@app.websocket('/pbs-job-ssh-proxy')
 async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                               cluster_name: str,
                               worker: int = 0,
                               client_version: Optional[int] = None) -> None:
-    """Proxies SSH to the Slurm job via sshd inside srun."""
+    """Proxies SSH to a Slurm or PBS job through its login node.
+
+    Slurm: via sshd inside srun. PBS: ``ssh -W`` to the user-level sshd the
+    allocation runs on the node (see sky/provision/pbs/instance.py).
+    """
+    is_pbs = websocket.url.path.endswith('/pbs-job-ssh-proxy')
+    ssh_path = (websocket_utils.SSH_PATH_PBS
+                if is_pbs else websocket_utils.SSH_PATH_SLURM)
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: '
                 f'{cluster_name}')
@@ -4188,8 +4197,8 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     if not await _check_ssh_proxy_ws_permission(websocket, cluster_name):
         return
-    handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
-                                                      clouds.Slurm)
+    handle = await _validate_cluster_for_ssh_proxy_ws(
+        websocket, cluster_name, clouds.PBS if is_pbs else clouds.Slurm)
     if handle is None:
         return
 
@@ -4204,13 +4213,17 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     login_node_proxy_command = login_node_ssh_config.get('proxycommand', None)
     login_node_proxy_jump = login_node_ssh_config.get('proxyjump', None)
 
-    login_node_runner = command_runner.SSHCommandRunner(
-        (login_node_host, login_node_port),
-        login_node_user,
-        login_node_key,
-        ssh_proxy_command=login_node_proxy_command,
-        ssh_proxy_jump=login_node_proxy_jump,
-    )
+    if is_pbs:
+        login_node_runner = pbs_utils.make_login_node_runner(
+            login_node_ssh_config)
+    else:
+        login_node_runner = command_runner.SSHCommandRunner(
+            (login_node_host, login_node_port),
+            login_node_user,
+            login_node_key,
+            ssh_proxy_command=login_node_proxy_command,
+            ssh_proxy_jump=login_node_proxy_jump,
+        )
 
     ssh_cmd = login_node_runner.ssh_base_command(
         ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
@@ -4232,20 +4245,28 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             f'Cluster has {len(node_hostnames)} nodes.')
     target_node = node_hostnames[worker]
 
-    # Run sshd inside the Slurm job "container" via srun, such that it inherits
-    # the resource constraints of the Slurm job.
-    is_container_image = handle.launched_resources.extract_docker_image(
-    ) is not None
-    ssh_cmd += [
-        shlex.quote(
-            _build_slurm_job_ssh_command(
-                provider_config,
-                job_id,
-                target_node,
-                handle.cluster_name_on_cloud,
-                is_container_image,
-            ))
-    ]
+    if is_pbs:
+        # `-W` goes before the destination that ssh_base_command appended.
+        target_port = list(instances.values())[worker][0].ssh_port
+        ssh_cmd = ssh_cmd[:-1] + [
+            '-W',
+            shlex.quote(f'{target_node}:{target_port}'), ssh_cmd[-1]
+        ]
+    else:
+        # Run sshd inside the Slurm job "container" via srun, such that it
+        # inherits the resource constraints of the Slurm job.
+        is_container_image = handle.launched_resources.extract_docker_image(
+        ) is not None
+        ssh_cmd += [
+            shlex.quote(
+                _build_slurm_job_ssh_command(
+                    provider_config,
+                    job_id,
+                    target_node,
+                    handle.cluster_name_on_cloud,
+                    is_container_image,
+                ))
+        ]
 
     loop = asyncio.get_running_loop()
     # `/bin/sh -c` is what `asyncio.create_subprocess_shell` would run, minus
@@ -4287,7 +4308,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     try:
         conn_gauge.inc()
         metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
-            path=websocket_utils.SSH_PATH_SLURM).inc()
+            path=ssh_path).inc()
 
         async def write_and_drain(data: bytes) -> None:
             await stdin.write(data)
@@ -4307,7 +4328,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             timestamps_supported=timestamps_supported,
             # srun's stdio, not a port-forward: keep the two out of one
             # histogram, their latency profiles have nothing in common.
-            path=websocket_utils.SSH_PATH_SLURM,
+            path=ssh_path,
         )
 
     finally:

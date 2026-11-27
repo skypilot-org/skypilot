@@ -43,6 +43,7 @@ def ssh_options_list(
     escape_percent_expand: bool = ...,
     ssh_log_file: Optional[str] = ...,
     disable_identities_only: bool = ...,
+    ssh_control_path: Optional[str] = ...,
 ) -> List[str]:
     ...
 
@@ -253,6 +254,7 @@ class SSHCommandRunner(CommandRunner):
         port_forward_execute_remote_command: Optional[bool] = ...,
         enable_interactive_auth: bool = ...,
         disable_identities_only: bool = ...,
+        ssh_control_path: Optional[str] = ...,
     ) -> None:
         ...
 
@@ -535,4 +537,23 @@ class LocalProcessCommandRunner(CommandRunner):
             run_in_background: bool = ...,
             timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+
+class PbsCommandRunner(SSHCommandRunner):
+    """Runner for the nodes of a PBS allocation."""
+    sky_dir: str
+    skypilot_runtime_dir: str
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        sky_dir: str,
+        skypilot_runtime_dir: str,
+        login_node_proxy_command: str,
+        **kwargs,
+    ) -> None:
         ...
