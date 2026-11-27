@@ -965,6 +965,191 @@ def test_slurm_filesystem_routing_policy(add_example_policy_paths, task):
     assert ('cluster-b', required) in slurm_policy._filesystem_cache
 
 
+def test_criticality_tier_policy(add_example_policy_paths, task):
+    from example_policy.skypilot_policy import CriticalityTierPolicy
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+
+    # No label: the request is unchanged.
+    task.set_resources([sky.Resources(accelerators={'V100': 1})])
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [False]
+
+    # critical: on-demand. A pinned zone is kept unless the admin widens it.
+    def pinned_critical():
+        task.set_resources({
+            sky.Resources(infra='aws/us-east-1/us-east-1a',
+                          accelerators={'V100': 1},
+                          use_spot=True,
+                          labels={'criticality': 'critical'})
+        })
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+        (r,) = dag.tasks[0].resources
+        return r
+
+    r = pinned_critical()
+    assert not r.use_spot and r.zone == 'us-east-1a'
+    assert r.labels['criticality'] == 'critical'
+    with mock.patch.object(CriticalityTierPolicy, 'WIDEN_PINNED_ZONE', True):
+        r = pinned_critical()
+    assert not r.use_spot and r.region == 'us-east-1' and r.zone is None
+
+    # standard: an ordered list, spot first, then on-demand. Spot and
+    # on-demand copies of one GPU request collapse to one of each, and
+    # CPU-only resources are unchanged and come last.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'standard'}),
+        sky.Resources(accelerators={'V100': 1},
+                      use_spot=True,
+                      labels={'criticality': 'standard'}),
+        sky.Resources(cpus='4+', labels={'criticality': 'standard'}),
+    })
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    resources = dag.tasks[0].resources
+    assert isinstance(resources, list)
+    assert [(bool(r.accelerators), r.use_spot) for r in resources
+           ] == [(True, True), (True, False), (False, False)]
+
+    # Labels are matched case-insensitively, also across resources.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'Standard'}),
+        sky.Resources(accelerators={'A100': 1},
+                      labels={'criticality': 'STANDARD'}),
+    })
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources
+           ] == [True, True, False, False]
+
+    # Listing a tier only in SPOT_ONLY_TIERS makes it wait for spot.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'standard'})
+    })
+    with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                           ('standard',)):
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [True]
+
+    # Admins can add their own tier names.
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'preemptible'})
+    })
+    with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                           ('preemptible',)):
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [True]
+
+    # Unknown tiers and conflicting tiers are rejected.
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy, match='Unknown'):
+        _load_task_and_apply_policy(task, config_path)
+    task.set_resources({
+        sky.Resources(accelerators={'V100': 1},
+                      labels={'criticality': 'critical'}),
+        sky.Resources(accelerators={'A100': 1},
+                      labels={'criticality': 'standard'}),
+    })
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match='different'):
+        _load_task_and_apply_policy(task, config_path)
+
+
+def test_criticality_tier_policy_keeps_user_order(add_example_policy_paths,
+                                                  task):
+    from example_policy.skypilot_policy import CriticalityTierPolicy
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+
+    def apply(tier):
+        task.set_resources([
+            sky.Resources(cpus='8+', labels={'criticality': tier}),
+            sky.Resources(accelerators={'A100': 1},
+                          labels={'criticality': tier}),
+            sky.Resources(accelerators={'H100': 1},
+                          labels={'criticality': tier}),
+        ])
+        dag, _ = _load_task_and_apply_policy(task, config_path)
+        resources = dag.tasks[0].resources
+        assert isinstance(resources, list)
+        return [(list(r.accelerators)[0] if r.accelerators else 'cpu',
+                 r.use_spot) for r in resources]
+
+    # The user prefers CPU, then A100, then H100. Every tier keeps that order.
+    assert apply('critical') == [('cpu', False), ('A100', False),
+                                 ('H100', False)]
+    assert apply('standard') == [('cpu', False), ('A100', True),
+                                 ('A100', False), ('H100', True),
+                                 ('H100', False)]
+    with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                           ('preemptible',)):
+        assert apply('preemptible') == [('cpu', False), ('A100', True),
+                                        ('H100', True)]
+
+
+@pytest.mark.parametrize('ordered', [False, True])
+@pytest.mark.parametrize('tier', ['critical', 'standard', 'preemptible'])
+def test_criticality_tier_policy_applied_twice(add_example_policy_paths, task,
+                                               tier, ordered):
+    from example_policy.skypilot_policy import CriticalityTierPolicy
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+    resources = [
+        sky.Resources(accelerators={gpu: 1}, labels={'criticality': tier})
+        for gpu in ('A100', 'H100')
+    ] + [sky.Resources(cpus='8+', labels={'criticality': tier})]
+    task.set_resources(resources if ordered else set(resources))
+
+    def apply(t):
+        with mock.patch.object(CriticalityTierPolicy, 'SPOT_ONLY_TIERS',
+                               ('preemptible',)):
+            dag, _ = _load_task_and_apply_policy(t, config_path)
+        return dag.tasks[0]
+
+    def choices(t):
+        found = [(list(r.accelerators)[0] if r.accelerators else 'cpu',
+                  r.use_spot) for r in t.resources]
+        # A set has no order to compare.
+        return found if isinstance(t.resources, list) else sorted(found)
+
+    # Managed jobs apply the policy on the client, then again on the server
+    # after the task is sent as YAML. The second pass must keep the order.
+    once = apply(task)
+    first = choices(once)
+    twice = apply(sky.Task.from_yaml_config(once.to_yaml_config()))
+    assert choices(twice) == first
+    assert isinstance(twice.resources, type(once.resources))
+    if tier == 'standard' and not ordered:
+        # Every spot choice still comes before every on-demand one.
+        assert [spot for _, spot in first] == [True, True, False, False, False]
+
+
+@pytest.mark.parametrize('pool', [False, True])
+def test_criticality_tier_policy_leaves_services_unchanged(
+        add_example_policy_paths, pool):
+    from sky.serve import serve_utils
+    config_path = os.path.join(POLICY_PATH, 'criticality_tier.yaml')
+    resources = {
+        'accelerators': 'A100:1',
+        'labels': {
+            'criticality': 'standard'
+        },
+    }
+    if pool:
+        config = {'pool': {'workers': 1}}
+    else:
+        config = {'service': {'readiness_probe': '/', 'replicas': 1}}
+        resources['ports'] = 8080
+    task = sky.Task.from_yaml_config({
+        **config,
+        'resources': resources,
+        'run': 'python serve.py',
+    })
+    dag, _ = _load_task_and_apply_policy(task, config_path)
+    # SkyServe needs one capacity for all resources and no ordered list for
+    # pools, so the mutated task must still pass its validation.
+    serve_utils.validate_service_task(dag.tasks[0], pool=pool)
+    assert [r.use_spot for r in dag.tasks[0].resources] == [False]
+
+
 def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
                                                        task):
     """Test consistency between server-side and client-side execution.
