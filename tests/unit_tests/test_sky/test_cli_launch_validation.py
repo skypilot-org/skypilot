@@ -208,6 +208,29 @@ def test_dotenv_path_must_not_be_a_directory(tmp_path):
     assert 'is a directory' in result.output
 
 
+def test_dotenv_path_rejects_device_file():
+    runner = cli_testing.CliRunner()
+    result = runner.invoke(command.launch,
+                           ['--env-file', '/dev/zero', 'echo', 'hi'])
+    assert result.exit_code != 0
+    assert 'regular file or named pipe' in result.output
+
+
+def test_dotenv_shell_completion_does_not_open_named_pipe(tmp_path):
+    # Tab completion parses already-typed flags with resilient_parsing=True.
+    # Without a writer, opening the FIFO would block indefinitely.
+    fifo = tmp_path / 'secrets.env'
+    os.mkfifo(fifo)
+    for flag, param in (('--env-file', 'env_file'), ('--secret-file',
+                                                     'secret_file')):
+        ctx = command.launch.make_context(
+            'launch',
+            [flag, str(fifo), 'echo', 'hi'],
+            resilient_parsing=True,
+        )
+        assert ctx.params[param] is None
+
+
 def _launch_for_output(args, job_ids, capfd, config_log=None):
     runner = cli_testing.CliRunner(mix_stderr=False)
 
