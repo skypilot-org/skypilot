@@ -1059,8 +1059,8 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
     # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
     # `get_nested` reads without the config lock (hot path), so a transient
     # empty config would be observable by a concurrent reader and e.g. make
-    # `rbac.get_default_role()` fall back to admin. On any exception below the
-    # previously-loaded config is left in place (stale is safer than empty).
+    # `rbac.get_default_role()` ignore a configured role. On any exception below
+    # the previously-loaded config is left in place (stale is safer than empty).
     server_config_path = _resolve_server_config_path()
     # Validation turns strict once plugins load, so a parse from before then
     # must not be reused after.

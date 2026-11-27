@@ -393,8 +393,8 @@ def test_api_cancel_other_users_request(generic_cloud: str):
         usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
 
     def mint_tokens() -> Generator[str, None, None]:
-        # The first user to reach the server through the auth-proxy header
-        # gets the default (admin) role and mints a token per test identity.
+        # The minter, promoted to admin by the step before, mints a token
+        # per test identity.
         me = requests.get(f'{base_url}/users/role', headers=headers,
                           timeout=30).json()
         # /users/role answers admin for an unauthenticated caller too, so
@@ -452,6 +452,8 @@ def test_api_cancel_other_users_request(generic_cloud: str):
         'test_api_cancel_other_users_request',
         [
             restart_with_service_accounts,
+            # A new header identity is admin only if no admin exists yet.
+            smoke_tests_utils.promote_header_user_to_admin_cmd(minter),
             mint_tokens,
             f'{as_("admin")}sky check kubernetes',
             # A non-admin starts a request that stays active until cancelled.
@@ -496,9 +498,8 @@ def test_api_cancel_other_users_request(generic_cloud: str):
             f'account token $(cat "$f") (HTTP $code): '
             f'$(cat {state_dir}/delete.out 2>/dev/null)"; '
             f'done; '
-            # The minter itself was created as an admin on its first
-            # request. Delete it without the header, which would create it
-            # again.
+            # Delete the minter itself without the header, which would
+            # create it again.
             f'code=$(curl -sS -o {state_dir}/delete.out -w "%{{http_code}}" '
             f'-X POST -H "Content-Type: application/json" '
             f'-d \'{{"user_id": "{minter_id}"}}\' {base_url}/users/delete); '

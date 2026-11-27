@@ -619,8 +619,9 @@ SkyPilot provides basic RBAC (role-based access control) support. Two roles are 
 RBAC support is enabled only when :ref:`SSO authentication <api-server-oauth>` is used (not when using :ref:`basic auth <api-server-basic-auth>`).
 
 Config :ref:`config-yaml-rbac-default-role` determines whether a new
-SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is
-set to ``admin`` to ease first-time setup.
+SkyPilot user is created with the ``user`` or ``admin`` role. If it is unset,
+new users get ``user``, and the first user to log in while no admin exists gets
+``admin``.
 
 User management
 ~~~~~~~~~~~~~~~

@@ -1060,6 +1060,8 @@ def override_request_env_and_config(
             # TODO(zhwu): we need to make the entire request a context
             # available to the entire request execution, so that we can
             # access info like user through the execution.
+            # No user_type: this is the only writer of a type-NULL user, which
+            # `permission.seed_new_user_role` reads as never authenticated.
             user = models.User(
                 id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                 name=request_body.env_vars[constants.USER_ENV_VAR])

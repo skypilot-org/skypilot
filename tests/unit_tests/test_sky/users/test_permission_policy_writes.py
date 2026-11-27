@@ -68,7 +68,9 @@ def service(engine, monkeypatch):
                         lambda: engine)
     monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
     monkeypatch.setattr(permission, '_enforcer_instance', None)
-    monkeypatch.setattr(permission.rbac, 'get_default_role', lambda: 'user')
+    monkeypatch.setattr(permission.rbac,
+                        'get_default_role',
+                        lambda authenticated=True: 'user')
     service = permission.PermissionService()
     service._lazy_initialize()
     return service

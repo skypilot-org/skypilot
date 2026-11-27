@@ -121,6 +121,15 @@ _READ_ERROR = 'error'
 # every request.
 _SUPPORTED_ROLES = frozenset(rbac.get_supported_roles())
 
+# User types an authenticated person or service account is stored with. An
+# admin of one of these types means the deployment already has an admin.
+_HUMAN_USER_TYPES = frozenset({
+    models.UserType.BASIC.value,
+    models.UserType.SSO.value,
+    models.UserType.LEGACY.value,
+    models.UserType.SA.value,
+})
+
 
 def _take_ttl_permit(cache: Dict[str, float], key: str, ttl: float,
                      cap: int) -> bool:
@@ -705,7 +714,8 @@ class PermissionService:
             # A system user's explicit role is seeded below. Letting the default
             # land first would win, because the seed only fills a gap.
             seeds = {
-                str(user.id): rbac.get_default_role()
+                str(user.id):
+                rbac.get_default_role(authenticated=user.user_type is not None)
                 for user in all_users
                 if user.id not in system_roles and
                 str(user.id) not in users_with_roles
@@ -720,19 +730,27 @@ class PermissionService:
 
     def add_user_if_not_exists(self,
                                user_id: str,
-                               role: Optional[str] = None) -> None:
-        """Add user role relationship. `role` overrides the default role."""
+                               role: Optional[str] = None,
+                               bootstrap_admin: bool = False) -> None:
+        """Add user role relationship. `role` overrides the default role.
+
+        With `bootstrap_admin`, the user gets admin instead while no human
+        holds admin, so a deployment with no initial admin does not lock
+        everyone out.
+        """
         self._lazy_initialize()
         with _policy_lock():
             # Refresh before deciding: the callee reads this process's
             # in-memory model, which may predate another worker's write, and
-            # would then add a *second* role for a user who already has one.
+            # would then add a *second* role for a user who already has one,
+            # or a second bootstrap admin.
             self._load_policy_no_lock()
-            self._add_user_if_not_exists_no_lock(user_id, role)
+            self._add_user_if_not_exists_no_lock(user_id, role, bootstrap_admin)
 
     def _add_user_if_not_exists_no_lock(self,
                                         user_id: str,
-                                        role: Optional[str] = None) -> bool:
+                                        role: Optional[str] = None,
+                                        bootstrap_admin: bool = False) -> bool:
         """Add user role relationship without lock.
 
         Returns:
@@ -741,12 +759,27 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         user_roles = enforcer.get_roles_for_user(user_id)
         if not user_roles:
+            role = role or rbac.get_default_role()
+            if bootstrap_admin and not self._human_admin_exists_no_lock():
+                logger.warning(f'No authenticated admin exists: user '
+                               f'{user_id} becomes the first admin.')
+                role = rbac.RoleName.ADMIN.value
             with self._local_write():
-                enforcer.add_grouping_policy(user_id, role or
-                                             rbac.get_default_role())
+                enforcer.add_grouping_policy(user_id, role)
             _clear_legacy_member_cache()
             return True
         return False
+
+    def _human_admin_exists_no_lock(self) -> bool:
+        """Whether an admin exists that a person or service account holds.
+
+        System users (the server's own identities) hold admin by design, and
+        type-NULL rows were never authenticated, so neither counts.
+        """
+        admin_ids = set(self._ensure_enforcer().get_users_for_role(
+            rbac.RoleName.ADMIN.value))
+        return any(user.user_type in _HUMAN_USER_TYPES
+                   for user in global_user_state.get_users(admin_ids).values())
 
     def delete_user(self, user_id: str) -> None:
         """Remove every policy naming a user: their role and workspace grants.
@@ -2032,13 +2065,16 @@ def caller_is_admin() -> bool:
     return is_admin(common_utils.get_current_user().id)
 
 
-def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:
+def seed_new_user_role(user_id: str,
+                       role: Optional[str] = None,
+                       bootstrap_admin: bool = False) -> None:
     """Reload config, then set up policies for a newly-created user.
 
-    Assigns `role` (the default role when omitted) and grants any
-    private-workspace access that the config's `allowed_users` lists owe this
-    user (see `resync_workspace_policies_for_new_user` for why this can only
-    happen once the user record exists).
+    Assigns `role` (when omitted, the default role for the user's type; see
+    `rbac.get_default_role`) and grants any private-workspace access that the
+    config's `allowed_users` lists owe this user (see
+    `resync_workspace_policies_for_new_user` for why this can only happen once
+    the user record exists).
 
     Refreshes the in-memory config first so a runtime change to
     `rbac.default_role` or `workspaces` is honored without a server restart:
@@ -2046,11 +2082,22 @@ def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:
     executor's per-request config reload. `add_user_if_not_exists` is a no-op if
     the user already has a role.
 
+    `bootstrap_admin` (only with the default role) makes the user admin when no
+    human admin exists yet; see `add_user_if_not_exists`.
+
     Blocking (config file/DB read + policy lock). Async callers MUST offload it
     via `asyncio.to_thread` so it does not block the event loop.
     """
     skypilot_config.safe_reload_config()
-    permission_service.add_user_if_not_exists(user_id, role)
+    if role is None:
+        # Only the executor's unauthenticated path writes a user without a
+        # type; a missing row takes the stricter, authenticated default.
+        user = global_user_state.get_user(user_id)
+        role = rbac.get_default_role(
+            authenticated=user is None or user.user_type is not None)
+    else:
+        bootstrap_admin = False
+    permission_service.add_user_if_not_exists(user_id, role, bootstrap_admin)
     # This worker just gave them a role; the loop-side guard should not have to
     # learn that from a repair.
     permission_service.remember_role_seen(user_id)

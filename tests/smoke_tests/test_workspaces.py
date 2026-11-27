@@ -146,8 +146,9 @@ def test_workspace_private_access_pre_login_user(generic_cloud: str):
     config. The user's first authenticated contact is simulated with an
     ``X-Auth-Request-Email`` header (the auth-proxy identity path), which is
     what lazily creates the user record and runs the new-user policy setup.
-    ``rbac.default_role: user`` makes the new user a non-admin, so their
-    workspace access depends entirely on the private workspace's
+    ``rbac.default_role: user``, with an admin already present so the
+    first-admin bootstrap does not apply, makes the new user a non-admin, so
+    their workspace access depends entirely on the private workspace's
     ``allowed_users`` (admins can access every workspace and would mask the
     bug).
 
@@ -219,7 +220,9 @@ def test_workspace_private_access_pre_login_user(generic_cloud: str):
         [
             f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
             f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+            smoke_tests_utils.ensure_human_admin_cmd(),
             assert_access_cmd,
+            smoke_tests_utils.assert_header_user_role_cmd(user_name, 'user'),
             # Enable the cloud on the freshly-restarted server. Runs as the
             # test user, whose requests resolve to the private workspace.
             f'{as_user}sky check {generic_cloud}',
@@ -314,11 +317,11 @@ def test_cluster_job_spec_private_workspace(generic_cloud: str):
         [
             f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
             f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
-            # First contact creates both users (see the pre-login test).
-            f'curl -sS -H "X-Auth-Request-Email: {owner}" '
-            f'{base_url}/users/me/workspace',
-            f'curl -sS -H "X-Auth-Request-Email: {outsider}" '
-            f'{base_url}/users/me/workspace',
+            # First contact creates both users as non-admins (see the
+            # pre-login test).
+            smoke_tests_utils.ensure_human_admin_cmd(),
+            smoke_tests_utils.assert_header_user_role_cmd(owner, 'user'),
+            smoke_tests_utils.assert_header_user_role_cmd(outsider, 'user'),
             f'{as_owner}sky check {generic_cloud}',
             f'{as_owner}sky launch -y -c {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',

@@ -187,7 +187,7 @@ def test_reload_config_no_empty_window(monkeypatch, tmp_path) -> None:
     assignment. A concurrent reader that hits `get_nested` while a reload is in
     flight must observe the previously-loaded value, never the fallback. This
     guards against the old blank-then-repopulate behavior, which let a reader
-    (e.g. `rbac.get_default_role()`) fall back to admin mid-reload.
+    (e.g. `rbac.get_default_role()`) ignore a configured role mid-reload.
     """
     config_file = tmp_path / 'config.yaml'
     config_file.write_text('rbac:\n  default_role: user\n')

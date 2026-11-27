@@ -2,6 +2,7 @@ import configparser
 import contextlib
 import enum
 import functools
+import hashlib
 import inspect
 import json
 import os
@@ -1628,6 +1629,52 @@ def restart_api_server_with_config(config_path: str) -> str:
 RESTORE_API_SERVER_CONFIG = (
     f'unset {skypilot_config.ENV_VAR_GLOBAL_CONFIG} && '
     f'{SKY_API_RESTART}')
+
+
+def assert_header_user_role_cmd(email: str, role: str) -> str:
+    """Shell command asserting the auth-proxy identity `email` has `role`.
+
+    Its first request with the header creates it and seeds its role.
+    """
+    base_url = ENDPOINT.rsplit('/api/health', 1)[0]
+    # The name check: /users/role answers admin for a caller without the
+    # header too.
+    return (f'r=$(curl -sS -H "X-Auth-Request-Email: {email}" '
+            f'{base_url}/users/role); echo "$r"; '
+            f'echo "$r" | python3 -c "import sys, json; '
+            f'd = json.load(sys.stdin); '
+            f"assert (d.get('name'), d.get('role')) == ({email!r}, {role!r}), "
+            f'd"')
+
+
+def promote_header_user_to_admin_cmd(email: str) -> str:
+    """Shell command creating the auth-proxy identity `email` as an admin.
+
+    The promotion is sent without the header, as the local unauthenticated
+    caller, which is admin.
+    """
+    base_url = ENDPOINT.rsplit('/api/health', 1)[0]
+    user_id = hashlib.md5(
+        email.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    body = json.dumps({'user_id': user_id, 'role': 'admin'})
+    return (f'curl -sS -o /dev/null -H "X-Auth-Request-Email: {email}" '
+            f'{base_url}/users/role && '
+            f'code=$(curl -sS -o /dev/null -w "%{{http_code}}" -X POST '
+            f'-H "Content-Type: application/json" -d \'{body}\' '
+            f'{base_url}/users/update); echo "promote {email}: HTTP $code"; '
+            f'[ "$code" = 200 ] || exit 1; '
+            f'{assert_header_user_role_cmd(email, "admin")}')
+
+
+def ensure_human_admin_cmd() -> str:
+    """Shell command making sure the local API server has a human admin.
+
+    Until one exists, the first auth-proxy login becomes admin whatever
+    `rbac.default_role` says. Run it before a header identity's first request
+    when that identity must get the default role.
+    """
+    return promote_header_user_to_admin_cmd('smoke-admin@example.com')
 
 
 def _get_controller_pod_name(controller_name: str) -> str:

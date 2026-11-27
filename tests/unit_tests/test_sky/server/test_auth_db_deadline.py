@@ -366,7 +366,8 @@ class TestAuthProxyRoleRepair:
                 mock.patch('sky.users.permission.permission_service'
                           ) as perm_service:
             await middleware.dispatch(mock_request, call_next_sentinel)
-        seed.assert_called_once_with('u-1')
+        # A login seed is the one that may make the first admin.
+        seed.assert_called_once_with('u-1', bootstrap_admin=True)
         perm_service.queue_role_repair.assert_not_called()
 
     @pytest.mark.asyncio
