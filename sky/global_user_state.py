@@ -747,8 +747,14 @@ def add_or_update_cluster(cluster_name: str,
                 # pylint: disable-next=import-outside-toplevel
                 from sky.utils import instance_links as instance_links_utils
                 try:
+                    # The provisioner tags the instances with the cluster's
+                    # name on the cloud, which differs from `cluster_name`
+                    # when that one is truncated and hashed, so the link has
+                    # to filter on it.
                     generated = instance_links_utils.generate_instance_links(
-                        ci, cluster_name)
+                        ci,
+                        getattr(cluster_handle, 'cluster_name_on_cloud',
+                                cluster_name))
                     if generated:
                         instance_links = generated
                 except Exception as e:  # pylint: disable=broad-except

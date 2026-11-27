@@ -1880,10 +1880,14 @@ class StrategyExecutor:
                                         handle, 'cached_cluster_info') and
                                         handle.cached_cluster_info is not None):
                                     cluster_info = handle.cached_cluster_info
-                                    instance_links = (instance_links_utils.
-                                                      generate_instance_links(
-                                                          cluster_info,
-                                                          self.cluster_name))
+                                    # The instances are tagged with the
+                                    # cluster's name on the cloud, not with
+                                    # self.cluster_name.
+                                    instance_links = (
+                                        instance_links_utils.
+                                        generate_instance_links(
+                                            cluster_info,
+                                            handle.cluster_name_on_cloud))
                                     if instance_links:
                                         # Store instance links directly in
                                         # database
