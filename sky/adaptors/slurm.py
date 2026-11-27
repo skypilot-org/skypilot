@@ -1088,6 +1088,7 @@ class SlurmClient:
         partition: str,
         job_name: str,
         script_path: str,
+        hold: bool = False,
     ) -> str:
         """Submit a Slurm job script.
 
@@ -1095,14 +1096,18 @@ class SlurmClient:
             partition: Slurm partition to submit to.
             job_name: Name to give the job.
             script_path: Remote path where the script will be stored.
+            hold: Submit the job held, so it cannot start until released.
 
         Returns:
             The job ID of the submitted job.
         """
         cmd = [
             'sbatch', f'--partition={partition}',
-            f'--chdir={self.get_remote_home_dir()}', script_path
+            f'--chdir={self.get_remote_home_dir()}'
         ]
+        if hold:
+            cmd.append('--hold')
+        cmd.append(script_path)
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            shlex.join(cmd),
@@ -1121,6 +1126,60 @@ class SlurmClient:
                      f'{job_name}: {stdout}')
 
         return job_id
+
+    def get_job_fields(self, job_id: str) -> Dict[str, str]:
+        """Get a job's fields from `scontrol show job`, e.g. 'CPUs/Task'.
+
+        Args:
+            job_id: The Slurm job ID.
+
+        Returns:
+            The job's ``Key=Value`` fields as a dict of strings. Only the
+            first occurrence of a key is kept: Slurm prints the job's own
+            fields before free text such as its Comment, which can contain
+            ``Key=Value`` pairs of its own.
+        """
+        cmd = ['scontrol', 'show', 'job', '--oneliner', job_id]
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           shlex.join(cmd),
+                                           f'Failed to show job {job_id}.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
+        fields: Dict[str, str] = {}
+        for token in stdout.split():
+            key, sep, value = token.partition('=')
+            if sep:
+                fields.setdefault(key, value)
+        return fields
+
+    def release_job(self, job_id: str) -> None:
+        """Release a held job so that it can be scheduled.
+
+        Args:
+            job_id: The Slurm job ID.
+        """
+        cmd = ['scontrol', 'release', job_id]
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           shlex.join(cmd),
+                                           f'Failed to release job {job_id}.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
+
+    def cancel_job(self, job_id: str) -> None:
+        """Cancel a job by ID.
+
+        Args:
+            job_id: The Slurm job ID.
+        """
+        cmd = ['scancel', job_id]
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           shlex.join(cmd),
+                                           f'Failed to cancel job {job_id}.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
     def get_partitions_info(self) -> List[SlurmPartition]:
         """Get the partitions information for the Slurm cluster.

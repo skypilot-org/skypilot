@@ -1203,3 +1203,105 @@ class TestGetAllNodeDetails:
         assert list(result.keys()) == ['node1']
         assert result['node1']['State'] == 'IDLE'
         assert result['node1']['CPUTot'] == '8'
+
+
+class TestHeldJobCommands:
+    """Tests for submitting, inspecting, releasing and cancelling held jobs."""
+
+    @staticmethod
+    def _client():
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        client.get_remote_home_dir = mock.Mock(return_value='/home/u')
+        return client
+
+    @pytest.mark.parametrize('hold, expected_cmd', [
+        (False, ['sbatch', '--partition=p', '--chdir=/home/u', 'job.sh']),
+        (True,
+         ['sbatch', '--partition=p', '--chdir=/home/u', '--hold', 'job.sh']),
+    ])
+    def test_submit_job_hold(self, hold, expected_cmd):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(0, 'Submitted batch job 42\n',
+                                             '')) as run:
+            assert client.submit_job('p', 'name', 'job.sh', hold=hold) == '42'
+        assert run.call_args.args[0] == expected_cmd
+
+    def test_get_job_fields_parses_oneliner(self):
+        client = self._client()
+        out = ('JobId=42 JobName=c JobState=PENDING Reason=JobHeldUser '
+               'NumNodes=1 NumCPUs=8 NumTasks=1 CPUs/Task=8 '
+               'ReqTRES=cpu=4,mem=64G,node=1 AllocTRES=(null)\n')
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(0, out, '')) as run:
+            fields = client.get_job_fields('42')
+        assert run.call_args.args[0] == [
+            'scontrol', 'show', 'job', '--oneliner', '42'
+        ]
+        assert fields['CPUs/Task'] == '8'
+        assert fields['NumNodes'] == '1'
+        assert fields['ReqTRES'] == 'cpu=4,mem=64G,node=1'
+
+    def test_get_job_fields_ignores_fields_inside_the_comment(self):
+        # A realistic `scontrol show job --oneliner` line: the Comment comes
+        # after the job's own counts, and its text must not replace them.
+        client = self._client()
+        out = ('JobId=42 JobName=sky-c-1a2b UserId=u(1000) GroupId=u(1000) '
+               'MCS_label=N/A Priority=0 Nice=0 Account=a QOS=normal '
+               'JobState=PENDING Reason=JobHeldUser Dependency=(null) '
+               'Requeue=0 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 '
+               'RunTime=00:00:00 TimeLimit=1-00:00:00 TimeMin=N/A '
+               'Partition=batch AllocNode:Sid=login:1 ReqNodeList=(null) '
+               'ExcNodeList=(null) NodeList= NumNodes=1-1 NumCPUs=4 '
+               'NumTasks=1 CPUs/Task=4 ReqB:S:C:T=0:0:*:* '
+               'ReqTRES=cpu=4,mem=16G,node=1,billing=4 AllocTRES=(null) '
+               'Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* '
+               'MinCPUsNode=4 MinMemoryNode=16G MinTmpDiskNode=0 '
+               'Features=(null) DelayBoot=00:00:00 OverSubscribe=OK '
+               'Contiguous=0 Licenses=(null) Network=(null) '
+               'Command=/home/u/job.sh WorkDir=/home/u '
+               'Comment=resize to NumNodes=2 CPUs/Task=8 later '
+               'StdErr=/home/u/job.err StdIn=/dev/null '
+               'StdOut=/home/u/job.out\n')
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(0, out, '')):
+            fields = client.get_job_fields('42')
+        assert fields['NumNodes'] == '1-1'
+        assert fields['CPUs/Task'] == '4'
+        assert fields['Reason'] == 'JobHeldUser'
+        assert fields['Comment'] == 'resize'
+
+    def test_get_job_fields_raises_on_error(self):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(1, '', 'Invalid job id')):
+            with pytest.raises(exceptions.CommandError):
+                client.get_job_fields('42')
+
+    @pytest.mark.parametrize('method, expected_cmd', [
+        ('release_job', ['scontrol', 'release', '42']),
+        ('cancel_job', ['scancel', '42']),
+    ])
+    def test_release_and_cancel(self, method, expected_cmd):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(0, '', '')) as run:
+            getattr(client, method)('42')
+        assert run.call_args.args[0] == expected_cmd
+
+    @pytest.mark.parametrize('method', ['release_job', 'cancel_job'])
+    def test_release_and_cancel_raise_on_error(self, method):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(1, '', 'denied')):
+            with pytest.raises(exceptions.CommandError):
+                getattr(client, method)('42')

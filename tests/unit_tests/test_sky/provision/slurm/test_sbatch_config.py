@@ -89,6 +89,14 @@ class TestBuildCustomSbatchDirectives:
         result = _build_custom_sbatch_directives({'requeue': True})
         assert result == ''
 
+    @pytest.mark.parametrize('value', [True, 'value'])
+    def test_hold_is_protected(self, value):
+        # The job is submitted held and released by SkyPilot once verified,
+        # which would release a user's own hold too.
+        assert 'hold' in _SBATCH_PROTECTED_OPTIONS
+        result = _build_custom_sbatch_directives({'hold': value})
+        assert result == ''
+
     @pytest.mark.parametrize('option', sorted(_SBATCH_PROTECTED_OPTIONS))
     def test_all_protected_options_skipped(self, option):
         result = _build_custom_sbatch_directives({option: 'value'})
