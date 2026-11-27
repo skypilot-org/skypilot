@@ -84,6 +84,12 @@ profile {PROFILE_NAME} flags=(attach_disconnected,mediate_deleted) {{
 
 # Printed by install_profile_cmd when it installed the profile.
 INSTALLED_MARKER = 'SKYPILOT_APPARMOR_PROFILE_INSTALLED'
+# Printed when an existing profile was left alone because it differs from
+# ours (a deliberate admin override, or an unknown variant).
+SKIPPED_MARKER = 'SKYPILOT_APPARMOR_PROFILE_SKIPPED_CUSTOM'
+# The rule whose absence is the bug; also how we recognize a profile that
+# already carries the fix, whatever wrote it.
+STACKED_PEER_RULE = f'peer={PROFILE_NAME}//&unconfined'
 
 
 def install_profile_cmd(askpass_block: str) -> str:
@@ -91,13 +97,27 @@ def install_profile_cmd(askpass_block: str) -> str:
 
     A no-op unless the node stacks container profiles, i.e. AppArmor is
     enabled and kernel.apparmor_restrict_unprivileged_unconfined is 1, so
-    nodes that are not affected are left alone.
+    nodes that are not affected are left alone. An existing profile file
+    that already carries the stacked-peer rule is left as is (ours from a
+    previous run, a future containerd, or an admin who fixed it themselves),
+    and one that differs from ours without the rule is never overwritten —
+    that is a deliberate admin override, so we only warn.
+
+    The parser is looked up via ``sudo``: it usually lives in /usr/sbin,
+    which a non-login SSH session's PATH can omit.
     """
     return f"""
         {askpass_block}
         if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined 2>/dev/null)" = "1" ] &&
            [ -d /sys/kernel/security/apparmor ] &&
-           command -v apparmor_parser >/dev/null 2>&1; then
+           sudo -A sh -c 'command -v apparmor_parser >/dev/null 2>&1'; then
+            if [ -f {PROFILE_PATH} ]; then
+                if grep -qF {STACKED_PEER_RULE!r} {PROFILE_PATH}; then
+                    exit 0
+                fi
+                echo {SKIPPED_MARKER}
+                exit 0
+            fi
             sudo -A tee {PROFILE_PATH} >/dev/null <<'SKYPILOT_APPARMOR_EOF'
 {PROFILE}SKYPILOT_APPARMOR_EOF
             sudo -A apparmor_parser -r {PROFILE_PATH} &&

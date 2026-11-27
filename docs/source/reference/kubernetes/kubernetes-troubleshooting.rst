@@ -331,12 +331,20 @@ AppArmor profile only allows signals between processes labeled exactly
 :code:`cri-containerd.apparmor.d`, so every :code:`kill()` inside the
 container is denied. The rsync process that syncs your task files into the
 pod waits forever for a signal that never arrives. Job cancellation is
-affected the same way. Verify on a node:
+affected the same way. Verify on the node named in the launch error (pin the
+probe pod to it, or a mixed cluster may schedule it on a healthy node):
 
 .. code-block:: bash
 
-    $ kubectl run probe --image=alpine:3.20 --restart=Never -- sleep infinity
+    $ kubectl run probe --image=alpine:3.20 --restart=Never \
+        --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"<node>"}}}' \
+        -- sleep infinity
     $ kubectl exec probe -- sh -c 'sleep 60 >/dev/null 2>&1 & kill $!'
+
+On an affected node, the last command prints:
+
+.. code-block:: none
+
     sh: can't kill pid 7: Permission denied
 
 **Fix (pick one):**

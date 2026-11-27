@@ -620,7 +620,10 @@ def test_join_token_cannot_run_shell_commands(monkeypatch, tmp_path, join):
     else:
         deploy.start_server_node('10.0.0.2', '10.0.0.1', token, 'u', 'key', '',
                                  '--tls-san=10.0.0.1')
-    assignment = re.search(r'K3S_TOKEN=\S+', cmds[0]).group(0)
+    # The join command is not necessarily cmds[0]: the AppArmor profile
+    # install runs first on each node.
+    join_cmd = next(c for c in cmds if 'K3S_TOKEN=' in c)
+    assignment = re.search(r'K3S_TOKEN=\S+', join_cmd).group(0)
     out = subprocess.run(['bash', '-c', f'{assignment} printenv K3S_TOKEN'],
                          capture_output=True,
                          text=True,

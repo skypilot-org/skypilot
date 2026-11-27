@@ -144,3 +144,32 @@ def test_install_command_guards_on_restrict_sysctl():
     # until the next reboot.
     assert 'apparmor_parser -r' in cmd
     assert apparmor.PROFILE_NAME in cmd
+
+
+def test_install_command_looks_up_parser_under_sudo():
+    """apparmor_parser usually lives in /usr/sbin, which a non-login SSH
+    session's PATH can omit — the availability check must run as root, or
+    affected nodes silently skip the fix."""
+    cmd = apparmor.install_profile_cmd('')
+    assert "sudo -A sh -c 'command -v apparmor_parser" in cmd
+    # And the parse itself must run as root too.
+    assert 'sudo -A apparmor_parser -r' in cmd
+
+
+def test_install_command_never_overwrites_a_custom_profile():
+    """An existing profile file that differs from ours is an admin override:
+    it must be left in place with a warning, not overwritten. One that
+    already carries the stacked-peer rule (ours from a previous run, or an
+    admin's own fix) is left alone silently."""
+    cmd = apparmor.install_profile_cmd('')
+    # The exists-then-decide branch precedes any write.
+    exists_check = cmd.index(f'[ -f {apparmor.PROFILE_PATH} ]')
+    write = cmd.index(f'sudo -A tee {apparmor.PROFILE_PATH}')
+    assert exists_check < write
+    # Already-fixed profile: silent no-op before any write.
+    assert cmd.index('grep -qF') < write
+    # Custom profile: skipped with a marker, still no write on that path.
+    assert apparmor.SKIPPED_MARKER in cmd
+    # `grep -F`: the rule contains no regex metacharacters today, but -F
+    # keeps the match literal if that ever changes.
+    assert 'grep -qF' in cmd

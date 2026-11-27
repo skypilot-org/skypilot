@@ -1018,11 +1018,15 @@ def _check_pods_can_signal(namespace: str, context: Optional[str],
                                         timeout=_SIGNAL_PROBE_TIMEOUT_SECONDS)
         if rc == _SIGNAL_PROBE_DENIED_CODE:
             # `pod` was read before it was scheduled, so re-read it for the
-            # node name. Only on this failure path, so launches pay nothing.
+            # node name. Only on this failure path, so launches pay nothing;
+            # bounded so a stalled API server cannot delay the error we
+            # already have enough information to report.
             node_name = None
             try:
                 node_name = kubernetes.core_api(context).read_namespaced_pod(
-                    pod_name, namespace).spec.node_name
+                    pod_name,
+                    namespace,
+                    _request_timeout=_POD_POLL_REQUEST_TIMEOUT).spec.node_name
             except Exception:  # pylint: disable=broad-except
                 pass
             return pod_name, node_name, stdout.strip()

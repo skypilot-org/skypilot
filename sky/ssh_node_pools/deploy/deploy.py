@@ -1263,6 +1263,13 @@ def install_apparmor_profile(node,
             f'{colorama.Fore.YELLOW}Failed to install the containerd AppArmor '
             f'fix on node ({node}). If the node runs Ubuntu 26.04, SkyPilot '
             f'pods on it cannot signal their own processes.{RESET_ALL}')
+    elif apparmor.SKIPPED_MARKER in result:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Found a custom '
+            f'{apparmor.PROFILE_PATH} on node ({node}) that differs from '
+            f'SkyPilot\'s; leaving it in place. If the node denies '
+            f'in-container signals, add the `'
+            f'{apparmor.STACKED_PEER_RULE}` rule to it.{RESET_ALL}')
     elif apparmor.INSTALLED_MARKER in result:
         logger.info(
             f'{colorama.Style.DIM}Installed the containerd AppArmor fix '
