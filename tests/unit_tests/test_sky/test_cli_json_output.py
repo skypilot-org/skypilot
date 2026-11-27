@@ -294,6 +294,8 @@ class TestJobsQueueJsonOutput:
              ], ['RUNNING', 'FAILED', 'FAILED_SETUP']),
             # Case-insensitive, with surrounding whitespace.
             (['--status', 'failed, failed_setup'], ['FAILED', 'FAILED_SETUP']),
+            # Empty entries are ignored when the list contains a valid value.
+            (['--status', ',FAILED, '], ['FAILED']),
             # The -s short flag works the same as --status.
             (['-s', 'FAILED', '-s', 'FAILED_SETUP'], ['FAILED', 'FAILED_SETUP']
             ),
@@ -328,6 +330,13 @@ class TestJobsQueueJsonOutput:
                                ['-o', 'json', '--status', 'FAILED,BOGUS'])
         assert result.exit_code != 0
         assert 'BOGUS' in result.output
+
+    @pytest.mark.parametrize('value', ['', ' ', ', ,'])
+    def test_status_filter_rejects_empty(self, monkeypatch, value):
+        result, captured = self._run_capturing(monkeypatch, ['--status', value])
+        assert result.exit_code == 2
+        assert 'At least one job status is required' in result.output
+        assert not captured
 
     def _run_capturing(self, monkeypatch, args):
         """Invoke jobs_queue with args, returning (result, captured kwargs)."""

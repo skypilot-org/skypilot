@@ -6708,11 +6708,14 @@ class StatusList(click.Choice):
         # handler can treat it as --skip-finished.
         if value == _SKIP_FINISHED_SENTINEL:
             return [value]
-        return [
+        statuses = [
             super(StatusList, self).convert(v.strip(), param, ctx)
             for v in value.split(',')
             if v.strip()
         ]
+        if not statuses:
+            self.fail('At least one job status is required.', param, ctx)
+        return statuses
 
 
 # Accepted absolute date/time formats for --after / --before. ISO date and
