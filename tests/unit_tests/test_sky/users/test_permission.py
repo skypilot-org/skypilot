@@ -1358,6 +1358,29 @@ class TestFirstAdminBootstrap:
         service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
         assert _grouping_rows(service, 'alice') == ['admin']
 
+    @pytest.mark.parametrize(
+        'old_admin,stops',
+        [
+            (models.User(id='old-basic', name='old-basic',
+                         password='hash'), True),
+            # A client without authentication can claim an `sa-` id.
+            (models.User(id='sa-forged', name='sa-forged'), False),
+        ])
+    def test_an_untyped_admin_counts_only_with_a_password(
+            self, users, service, monkeypatch, old_admin, stops):
+        # A row from before user types existed has no type; a password
+        # proves it was authenticated.
+        rows = {
+            old_admin.id: old_admin,
+            'alice': models.User(id='alice', name='alice', user_type='sso'),
+        }
+        monkeypatch.setattr(permission.global_user_state, 'get_users',
+                            lambda ids: {i: rows[i] for i in ids if i in rows})
+        service.update_role(old_admin.id, 'admin')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service,
+                              'alice') == ['user' if stops else 'admin']
+
     def test_a_second_worker_sees_the_first_admin(self, users, two_workers):
         users.update(alice='sso', bob='sso')
         worker_a, worker_b = two_workers

@@ -131,6 +131,15 @@ _HUMAN_USER_TYPES = frozenset({
 })
 
 
+def _is_human(user: models.User) -> bool:
+    if user.user_type is not None:
+        return user.user_type in _HUMAN_USER_TYPES
+    # A row from before user types existed: one with a password was
+    # authenticated. An `sa-` id proves nothing; a client without
+    # authentication picks its own id.
+    return user.password is not None
+
+
 def _take_ttl_permit(cache: Dict[str, float], key: str, ttl: float,
                      cap: int) -> bool:
     """Take `key`'s permit for the work behind it, if the last one has expired.
@@ -774,12 +783,14 @@ class PermissionService:
         """Whether an admin exists that a person or service account holds.
 
         System users (the server's own identities) hold admin by design, and
-        type-NULL rows were never authenticated, so neither counts.
+        type-NULL rows without a password were never authenticated, so neither
+        counts.
         """
         admin_ids = set(self._ensure_enforcer().get_users_for_role(
             rbac.RoleName.ADMIN.value))
-        return any(user.user_type in _HUMAN_USER_TYPES
-                   for user in global_user_state.get_users(admin_ids).values())
+        return any(
+            _is_human(user)
+            for user in global_user_state.get_users(admin_ids).values())
 
     def delete_user(self, user_id: str) -> None:
         """Remove every policy naming a user: their role and workspace grants.
