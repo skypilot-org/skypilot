@@ -185,7 +185,8 @@ def test_install_command_reloads_our_own_profile():
     install = cmd.index(f'cp "$tmp" {apparmor.STAGING_PATH}')
     # Last occurrence: the final reload after the staged install (an earlier
     # one exists on the config-managed symlink branch).
-    reload_ = cmd.rindex(f'apparmor_parser -r {apparmor.PROFILE_PATH}')
+    reload_ = cmd.rindex(
+        f'apparmor_parser -r --skip-cache {apparmor.PROFILE_PATH}')
     # The reload is unconditional after the install: identical files flow
     # through cp + apparmor_parser -r again.
     assert reload_ > install
@@ -278,9 +279,13 @@ def test_install_command_branch_decisions():
 
         ptrace_only = apparmor.PROFILE.replace(
             apparmor.STACKED_PEER_SIGNAL_RULE + ',', '', 1)
-        out, _, parsed = run(ptrace_only)
-        assert (apparmor.SKIPPED_MARKER in out, False) == (True, parsed), (
-            'profile without the signal rule must be skipped with a warning')
+        # Early-exit branches must also consume a leftover staging file —
+        # the up-front cleanup runs before any content check bails out.
+        out, leftover, parsed = run(ptrace_only, preexisting_staging=True)
+        assert (apparmor.SKIPPED_MARKER
+                in out, False, False) == (True, leftover, parsed), (
+                    'profile without the signal rule must be skipped with a '
+                    'warning, and consume the staging leftover')
 
         # A config-managed symlink is never replaced by the install, even
         # when its target is byte-identical to ours: the reload goes through

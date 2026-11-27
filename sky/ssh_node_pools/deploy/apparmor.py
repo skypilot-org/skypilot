@@ -126,7 +126,9 @@ def install_profile_cmd(askpass_block: str) -> str:
     both AppArmor's boot loader and ``apparmor_parser`` skip dotfiles when
     loading a profile directory, so a staging file left behind by a killed
     run is never parsed. It is also removed up front, so one leftover
-    cannot outlive the next run.
+    cannot outlive the next run. Reloads pass ``--skip-cache`` so the
+    kernel gets the text we just verified, not a compiled cache that a
+    symlinked target's timestamps could make look current.
 
     The parser is looked up via ``sudo``: it usually lives in /usr/sbin,
     which a non-login SSH session's PATH can omit.
@@ -158,7 +160,7 @@ def install_profile_cmd(askpass_block: str) -> str:
                     # Identical through the link, but config-managed: reload
                     # what the link resolves to, never replace the link.
                     sudo -A rm -f "$tmp"
-                    sudo -A apparmor_parser -r {PROFILE_PATH} &&
+                    sudo -A apparmor_parser -r --skip-cache {PROFILE_PATH} &&
                     echo {INSTALLED_MARKER}
                     exit $?
                 fi
@@ -166,7 +168,7 @@ def install_profile_cmd(askpass_block: str) -> str:
             sudo -A cp "$tmp" {STAGING_PATH} &&
             sudo -A rm -f "$tmp" &&
             sudo -A mv -f {STAGING_PATH} {PROFILE_PATH} &&
-            sudo -A apparmor_parser -r {PROFILE_PATH} &&
+            sudo -A apparmor_parser -r --skip-cache {PROFILE_PATH} &&
             echo {INSTALLED_MARKER}
         fi
     """
