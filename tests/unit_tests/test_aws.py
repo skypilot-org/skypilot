@@ -207,6 +207,70 @@ def test_run_instances_tags_resumed_instance_volumes():
     }
 
 
+def _instance_not_found(instance_id: str):
+    return aws_instance.aws.botocore_exceptions().ClientError(
+        error_response={
+            'Error': {
+                'Code': 'InvalidInstanceID.NotFound',
+                'Message': f"The instance ID '{instance_id}' does not exist",
+            }
+        },
+        operation_name='CreateTags',
+    )
+
+
+def test_run_instances_retries_head_tag_until_new_instance_is_visible():
+    # EC2 is eventually consistent: CreateTags on an instance that
+    # RunInstances returned a moment ago can fail with NotFound. Failing the
+    # launch there leaks the instance, because the teardown that follows finds
+    # instances by a tag filter that does not see the new instance either.
+    created = SimpleNamespace(
+        id='i-new',
+        placement={'AvailabilityZone': 'us-east-1a'},
+        tags=[{
+            'Key': 'Owner',
+            'Value': 'alice'
+        }],
+    )
+    mock_ec2 = MagicMock()
+    mock_ec2.meta.client.meta.region_name = 'us-east-1'
+    mock_ec2.instances.filter.return_value = []
+    mock_ec2.meta.client.create_tags.side_effect = [
+        _instance_not_found('i-new'), {}
+    ]
+
+    provision_config = provision_common.ProvisionConfig(
+        provider_config={'use_internal_ips': False},
+        authentication_config={},
+        docker_config={},
+        node_config={},
+        count=1,
+        tags={'Owner': 'alice'},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+
+    with patch.object(aws_instance,
+                      '_default_ec2_resource',
+                      return_value=mock_ec2), patch.object(
+                          aws_instance.aws,
+                          'resource',
+                          return_value=_fail_fast_mock()), patch.object(
+                              aws_instance,
+                              '_create_instances',
+                              return_value=[created]), patch.object(
+                                  aws_instance.time, 'sleep'):
+        record = aws_instance.run_instances(region='us-east-1',
+                                            cluster_name='cluster',
+                                            cluster_name_on_cloud='cluster',
+                                            config=provision_config)
+
+    assert record.head_instance_id == 'i-new'
+    create_tags_calls = mock_ec2.meta.client.create_tags.call_args_list
+    assert len(create_tags_calls) == 2
+    assert create_tags_calls[0] == create_tags_calls[1]
+
+
 # Verbatim from AWS: credentials allowed to tag instances but not volumes.
 _VOLUME_TAG_DENIED_MSG = (
     'You are not authorized to perform this operation. User: '

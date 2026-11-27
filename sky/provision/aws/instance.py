@@ -119,6 +119,8 @@ def _cluster_name_filter(
 
 def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
                                          log_level=logging.DEBUG,
+                                         extra_retry_codes: Tuple[str,
+                                                                  ...] = (),
                                          **kwargs) -> _T:
     # Here we have to handle 'RequestLimitExceeded' error, so the provision
     # would not fail due to request limit issues.
@@ -126,6 +128,7 @@ def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
     # have any special meaning.
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=12)
     ret = None
+    error_code = None
     for _ in range(utils.BOTO_MAX_RETRIES):
         try:
             ret = ec2_fail_fast_fn(**kwargs)
@@ -136,7 +139,8 @@ def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
             error_code = e.response['Error']['Code']
             if error_code in [
                     'RequestLimitExceeded', 'ServerInternal',
-                    'ServiceUnavailable', 'InternalError', 'Unavailable'
+                    'ServiceUnavailable', 'InternalError', 'Unavailable',
+                    *extra_retry_codes
             ]:
                 time.sleep(backoff.current_backoff())
                 logger.debug(f'create_instances: {error_code}, retrying.')
@@ -146,7 +150,7 @@ def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
     if ret is None:
         raise RuntimeError(
             f'Failed to call ec2 function {ec2_fail_fast_fn} due to '
-            'RequestLimitExceeded. Max attempts exceeded.')
+            f'{error_code}. Max attempts exceeded.')
     return ret
 
 
@@ -519,7 +523,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             tag for tag in target_instance.tags
             if not tag['Key'].startswith('aws:')
         ]
-        ec2.meta.client.create_tags(
+        # EC2 is eventually consistent: an instance that RunInstances just
+        # returned can be unknown to CreateTags for a few seconds. Failing the
+        # launch here would leak the instance, since the teardown finds
+        # instances with a tag filter that does not see it yet either.
+        _ec2_call_with_retry_on_server_error(
+            ec2.meta.client.create_tags,
+            extra_retry_codes=('InvalidInstanceID.NotFound',),
             Resources=[target_instance.id],
             Tags=target_instance_tags + node_tag,
         )
