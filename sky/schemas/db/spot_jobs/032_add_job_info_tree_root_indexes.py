@@ -7,6 +7,11 @@ lets a page read its rows from the index instead of sorting every job.
 Raw SQL with IF NOT EXISTS: SQLAlchemy cannot reflect an expression index on
 SQLite, so the usual inspect-then-create check would not see these.
 
+A plain build, not CONCURRENTLY: each index blocks writes to job_info only
+while it builds, well under a second at 100k jobs. CONCURRENTLY waits for every
+open transaction on the table and would stall server startup behind an idle one,
+and a failed concurrent build leaves an invalid index that IF NOT EXISTS skips.
+
 Revision ID: 032
 Revises: 031
 Create Date: 2026-11-27
