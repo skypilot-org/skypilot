@@ -1,9 +1,46 @@
 import { apiClient } from '@/data/connectors/client';
+import {
+  fetchListInPages,
+  MIN_LIST_CURSOR_API_VERSION,
+  sendRequest,
+  syncPageSize,
+} from '@/data/connectors/syncCalls';
+
+// The volumes GET /volumes returns. When the server answers sync calls and
+// takes the volume cursor, they are fetched as sync calls of its maximum size,
+// by name.
+async function fetchVolumes() {
+  const pageSize = await syncPageSize(MIN_LIST_CURSOR_API_VERSION);
+  if (pageSize !== null) {
+    const volumes = await fetchListInPages({
+      path: '/volumes',
+      pageSize,
+      sendPage: (afterName, size) => {
+        const params = new URLSearchParams({ limit: String(size) });
+        if (afterName !== null) params.set('after_name', afterName);
+        return sendRequest(
+          (headers) =>
+            apiClient.fetchImmediate(
+              `/volumes?${params.toString()}`,
+              undefined,
+              'GET',
+              { headers }
+            ),
+          { limit: size, fallback: false }
+        );
+      },
+      cursorOf: (row) => row.name,
+    });
+    if (volumes !== null) return volumes;
+  }
+  // A list call without `limit` is not answered as a sync call.
+  return apiClient.fetch('/volumes', {}, 'GET', { sync: false });
+}
 import { getErrorMessageFromResponse } from '@/data/utils';
 
 export async function getVolumes() {
   try {
-    const data = await apiClient.fetch('/volumes', {}, 'GET');
+    const data = await fetchVolumes();
     // Transform the data to match the expected format
     const transformedData =
       data.map((volume) => {
@@ -22,6 +59,8 @@ export async function getVolumes() {
           user_hash: volume.user_hash,
           user_name: volume.user_name || '-',
           workspace: volume.workspace || '-',
+          // The name, for display and filters; older servers send none.
+          workspace_name: volume.workspace_name || null,
           last_attached_at: volume.last_attached_at,
           status: volume.status,
           type: volume.type,
@@ -39,7 +78,18 @@ export async function getVolumes() {
           usedby_clusters: volume.usedby_clusters,
           last_use: volume.last_use || null,
           error_message: volume.error_message || null,
+          // Whether the error above is one the volume can recover from. Servers
+          // older than this field report nothing, which reads as undefined --
+          // distinct from a definite false, so callers can tell "will not bind"
+          // from "cannot tell".
+          error_may_resolve: volume.error_may_resolve,
           creation_yaml: volume.creation_yaml || null,
+          // Only set while the volume is being resized: `size` above is the
+          // capacity it has now, which is not what was asked for until the
+          // resize lands. Servers older than these fields report nothing.
+          resize_status: volume.resize_status || null,
+          resize_target_size: volume.resize_target_size ?? null,
+          resize_message: volume.resize_message || null,
         };
       }) || [];
 
@@ -50,20 +100,33 @@ export async function getVolumes() {
   }
 }
 
-export async function deleteVolume(volumeName, { purge = false } = {}) {
+export async function deleteVolume(
+  volumeName,
+  { purge = false, noCleanup = false } = {}
+) {
   let msg = '';
   try {
     const response = await apiClient.post('/volumes/delete', {
       names: [volumeName],
       purge,
+      no_cleanup: noCleanup,
     });
     if (!response.ok) {
       console.error(
         `Initial API request to delete volume failed with status ${response.status}`
       );
+      // A refusal (e.g. 403) says why in `detail`.
+      const detail = await response
+        .json()
+        .then((body) => body?.detail)
+        .catch(() => null);
       return {
         success: false,
-        msg: `Failed to delete volume with status ${response.status}`,
+        forbidden: response.status === 403,
+        msg:
+          typeof detail === 'string'
+            ? `Failed to delete volume: ${detail}`
+            : `Failed to delete volume with status ${response.status}`,
       };
     }
     const id = response.headers.get('X-SkyPilot-Request-ID');

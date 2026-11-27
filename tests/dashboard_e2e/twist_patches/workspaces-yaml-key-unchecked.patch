@@ -1,0 +1,9 @@
+diff --git a/sky/dashboard/src/components/workspace-editor.jsx b/sky/dashboard/src/components/workspace-editor.jsx
+index 22a405f36..a0de4f858 100644
+--- a/sky/dashboard/src/components/workspace-editor.jsx
++++ b/sky/dashboard/src/components/workspace-editor.jsx
+@@ -676,3 +676,3 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
+         const parsedWorkspaceName = keys[0];
+-        if (parsedWorkspaceName !== displayName) {
++        if (false && parsedWorkspaceName !== displayName) { // TWIST: key unchecked
+           setYamlError(

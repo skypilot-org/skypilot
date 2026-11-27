@@ -1,21 +1,31 @@
 """Unit tests for sky.server.requests.requests module."""
 import asyncio
+import json
 import logging
+import os
 import pathlib
+import threading
 import time
 from typing import List, Optional
 import unittest.mock as mock
 
 import filelock
+import orjson
 import pytest
 
 from sky import core
+from sky import sky_logging
 from sky.server import constants as server_constants
+from sky.server import daemons
+from sky.server.blob import blob_storage as requests_bs
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
+from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.server.requests.serializers import return_value_serializers
+from sky.skylet import constants as skylet_constants
 
 
 def dummy():
@@ -29,17 +39,25 @@ def isolated_database(tmp_path):
     temp_db_path = tmp_path / "requests.db"
     temp_log_path = tmp_path / "logs"
     temp_log_path.mkdir()
+    temp_debug_log_path = tmp_path / "debug_logs"
+    temp_debug_log_path.mkdir()
 
     # Patch the database path and log path constants
     with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
                     str(temp_db_path)):
         with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
                         str(temp_log_path)):
-            # Reset the global database variable to force re-initialization
-            requests._DB = None
-            yield
-            # Clean up after the test
-            requests._DB = None
+            with mock.patch('sky.sky_logging.DEBUG_LOG_DIR',
+                            str(temp_debug_log_path)), mock.patch(
+                                'sky.server.requests.stored_results.'
+                                'results_dir',
+                                return_value=tmp_path / 'results'):
+                # Reset the global database variable to force
+                # re-initialization
+                requests._DB = None
+                yield
+                # Clean up after the test
+                requests._DB = None
 
 
 @pytest.mark.asyncio
@@ -103,9 +121,10 @@ async def test_set_request_succeeded(isolated_database, test_async):
     await requests.create_if_not_exists_async(request)
     result = {'key': 'value', 'number': 42}
     if test_async:
-        await requests.set_request_succeeded_async('test-request-1', result)
+        stored = await requests.set_request_succeeded_async(request, result)
     else:
-        requests.set_request_succeeded('test-request-1', result)
+        stored = requests.set_request_succeeded('test-request-1', result)
+    assert stored == len(orjson.dumps(result))
 
     # Get the updated request
     if test_async:
@@ -127,6 +146,237 @@ def test_set_request_succeeded_nonexistent_request(isolated_database):
     # Try to set a non-existent request as succeeded
     with pytest.raises(AssertionError):
         requests.set_request_succeeded('nonexistent-request', {'result': 'ok'})
+
+
+class _DefaultUpdateBackend(requests.SqliteRequestBackend):
+    """SQLite backend that uses the RequestBackend default conditional
+    update."""
+    update_if_status_async = (
+        requests.request_storage.RequestBackend.update_if_status_async)
+
+
+@pytest.fixture(params=['sqlite', 'default'])
+def conditional_backend(request, isolated_database):
+    backend = (requests.SqliteRequestBackend()
+               if request.param == 'sqlite' else _DefaultUpdateBackend())
+    with mock.patch.object(requests.request_storage, '_storage_backend',
+                           backend):
+        yield backend
+
+
+def _new_request(request_id: str, status: RequestStatus,
+                 **kwargs) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='test-request',
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=status,
+                            created_at=time.time(),
+                            user_id='user-1',
+                            **kwargs)
+
+
+async def _create_request(status: RequestStatus) -> requests.Request:
+    request = _new_request('cond-request', status, status_msg='queued')
+    await requests.create_if_not_exists_async(request)
+    return request
+
+
+async def _status(request_id: str = 'cond-request') -> RequestStatus:
+    request = await requests.get_request_async(request_id)
+    assert request is not None
+    return request.status
+
+
+@pytest.mark.asyncio
+async def test_update_if_status_async(conditional_backend):
+    await _create_request(RequestStatus.RUNNING)
+    values = {'status': RequestStatus.SUCCEEDED.value, 'finished_at': 1.0}
+
+    assert not await conditional_backend.update_if_status_async(
+        'cond-request', [RequestStatus.PENDING], values)
+    assert await _status() == RequestStatus.RUNNING
+
+    assert await conditional_backend.update_if_status_async(
+        'cond-request', [RequestStatus.PENDING, RequestStatus.RUNNING], values)
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.SUCCEEDED
+    assert request.finished_at == 1.0
+    assert request.status_msg == 'queued'
+
+    assert not await conditional_backend.update_if_status_async(
+        'missing-request', [RequestStatus.RUNNING], values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'status',
+    [RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED])
+async def test_finished_request_keeps_its_outcome(conditional_backend, status):
+    created = await _create_request(status)
+
+    assert await requests.set_request_succeeded_async(created,
+                                                      {'key': 'value'}) is None
+    await requests.set_request_failed_async('cond-request', ValueError('Boom'))
+    await requests.set_request_cancelled_async('cond-request')
+    assert not await requests.transition_request_status_async(
+        'cond-request', RequestStatus.executable_statuses(),
+        RequestStatus.RUNNING)
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == status
+    assert request.return_value is None
+    assert request.error is None
+
+
+@pytest.mark.asyncio
+async def test_set_request_succeeded_async_stores_result(conditional_backend):
+    created = await _create_request(RequestStatus.RUNNING)
+    result = {'key': 'välue'}
+
+    stored = await requests.set_request_succeeded_async(created, result)
+
+    assert stored == len(orjson.dumps(result))
+    # The caller's request object is left as it was.
+    assert created.return_value is None
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.SUCCEEDED
+    assert request.finished_at is not None
+    assert request.get_return_value() == result
+
+
+@pytest.mark.asyncio
+async def test_set_request_succeeded_async_encodes_through_set_return_value(
+        conditional_backend, monkeypatch):
+    created = await _create_request(RequestStatus.RUNNING)
+    original = requests.Request.set_return_value
+
+    def _set_return_value(self, return_value):
+        original(self, {'wrapped': return_value})
+
+    monkeypatch.setattr(requests.Request, 'set_return_value', _set_return_value)
+
+    await requests.set_request_succeeded_async(created, 'value')
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.get_return_value() == {'wrapped': 'value'}
+
+
+@pytest.mark.asyncio
+async def test_set_request_failed_async_stores_error(conditional_backend):
+    await _create_request(RequestStatus.RUNNING)
+
+    await requests.set_request_failed_async('cond-request', ValueError('Boom'))
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.FAILED
+    assert request.finished_at is not None
+    error = request.get_error()
+    assert error is not None
+    assert error['type'] == 'ValueError'
+    assert error['message'] == 'Boom'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status',
+                         [RequestStatus.PENDING, RequestStatus.WAITING])
+async def test_transition_request_status_async_claims(conditional_backend,
+                                                      status):
+    await _create_request(status)
+
+    assert await requests.transition_request_status_async(
+        'cond-request', RequestStatus.executable_statuses(),
+        RequestStatus.RUNNING)
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.RUNNING
+    assert request.status_msg is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', RequestStatus.active_statuses())
+async def test_set_request_failed_if_pending_async(conditional_backend, status):
+    await _create_request(status)
+
+    failed = await requests.set_request_failed_if_pending_async(
+        'cond-request', ValueError('Boom'))
+
+    assert failed == (status == RequestStatus.PENDING)
+    expected = RequestStatus.FAILED if failed else status
+    assert await _status() == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', list(RequestStatus))
+async def test_set_request_failed_if_active(conditional_backend, status):
+    await _create_request(status)
+
+    failed = await asyncio.to_thread(requests.set_request_failed_if_active,
+                                     'cond-request', ValueError('Boom'))
+
+    assert failed == (status in RequestStatus.active_statuses())
+    expected = RequestStatus.FAILED if failed else status
+    assert await _status() == expected
+
+
+@pytest.mark.asyncio
+async def test_noop_update_is_logged(conditional_backend, monkeypatch):
+    monkeypatch.setattr(requests.sky_logging, 'logging_enabled',
+                        lambda *_: True)
+    debug = mock.Mock()
+    monkeypatch.setattr(requests.logger, 'debug', debug)
+
+    await requests.set_request_cancelled_async('missing-request')
+
+    debug.assert_called_once()
+    assert 'missing-request' in debug.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', RequestStatus.active_statuses())
+async def test_set_request_cancelled_async(conditional_backend, status):
+    await _create_request(status)
+
+    await requests.set_request_cancelled_async('cond-request')
+
+    request = await requests.get_request_async('cond-request')
+    assert request is not None
+    assert request.status == RequestStatus.CANCELLED
+    assert request.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_conditional_update_waits_for_update_request(conditional_backend):
+    """A cancellation written under update_request() is not overwritten."""
+    created = await _create_request(RequestStatus.RUNNING)
+    locked = threading.Event()
+    release = threading.Event()
+
+    def _cancel_under_lock():
+        with requests.update_request('cond-request') as request:
+            assert request is not None
+            request.status = RequestStatus.CANCELLED
+            locked.set()
+            release.wait(timeout=10)
+
+    canceller = threading.Thread(target=_cancel_under_lock)
+    canceller.start()
+    assert await asyncio.to_thread(locked.wait, 10)
+    succeed = asyncio.create_task(
+        requests.set_request_succeeded_async(created, {'key': 'value'}))
+    await asyncio.sleep(0.2)
+    assert not succeed.done()
+    release.set()
+    await asyncio.to_thread(canceller.join, 10)
+
+    assert await succeed is None
+    assert await _status() == RequestStatus.CANCELLED
 
 
 @pytest.mark.asyncio
@@ -678,6 +928,125 @@ async def test_clean_finished_requests_cleans_both_paths(
 
     # Verify the request was deleted
     assert requests.get_request('legacy-test-req-1') is None
+
+
+@pytest.mark.asyncio
+async def test_clean_orphan_request_files(isolated_database):
+    """Test that log files whose request row is gone are reclaimed."""
+    current_time = time.time()
+    # Older than the grace period the sweep applies to the age cutoff.
+    stale_mtime = current_time - 10 * requests_bs.GC_GRACE_SECONDS
+
+    live_request = requests.Request(request_id='live-req',
+                                    name='test-request',
+                                    entrypoint=dummy,
+                                    request_body=payloads.RequestBody(),
+                                    status=RequestStatus.RUNNING,
+                                    created_at=stale_mtime,
+                                    user_id='test-user')
+    await requests.create_if_not_exists_async(live_request)
+
+    request_log_dir, debug_log_dir = requests.request_log_dirs()
+
+    # No request row: the files to reclaim. The same request ID in both
+    # directories exercises the grouping of a request's files.
+    orphans = [
+        request_log_dir / 'orphan-req.log', debug_log_dir / 'orphan-req.log'
+    ]
+    for orphan in orphans:
+        orphan.write_text('orphan')
+        os.utime(orphan, (stale_mtime, stale_mtime))
+
+    # Stale, but the request is still in the database.
+    live = request_log_dir / 'live-req.log'
+    live.write_text('live')
+    os.utime(live, (stale_mtime, stale_mtime))
+    # No request row, but written within the grace period.
+    fresh = request_log_dir / 'fresh-req.log'
+    fresh.write_text('fresh')
+    # A running internal daemon's log, which can go a long time without a
+    # write and has no row of its own on a replica that skips it.
+    daemon_log = (request_log_dir /
+                  f'{daemons.INTERNAL_REQUEST_DAEMONS[0].id}.log')
+    daemon_log.write_text('daemon')
+    os.utime(daemon_log, (stale_mtime, stale_mtime))
+    # Not a log file.
+    lock = request_log_dir / '.orphan-req.lock'
+    lock.write_text('')
+    os.utime(lock, (stale_mtime, stale_mtime))
+    kept = [live, fresh, daemon_log, lock]
+
+    with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+        await requests.clean_finished_requests_with_retention(60)
+
+    for path in orphans:
+        assert not path.exists(), f'{path} should have been reclaimed'
+    for path in kept:
+        assert path.exists(), f'{path} should have been kept'
+
+    messages = [call[0][0] for call in mock_logger.info.call_args_list]
+    assert any('Cleaned up 2 orphan request file(s)' in message
+               for message in messages), messages
+
+
+@pytest.mark.asyncio
+async def test_clean_orphan_request_files_many_files(isolated_database):
+    """Test reclaiming more orphans than fit in one existence query."""
+    stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
+    count = 2 * requests._ORPHAN_LOG_QUERY_CHUNK_SIZE + 1
+    log_dir = requests.request_log_dirs()[0]
+    for i in range(count):
+        path = log_dir / f'orphan-{i}.log'
+        path.write_text('x')
+        os.utime(path, (stale_mtime, stale_mtime))
+
+    await requests.clean_finished_requests_with_retention(60)
+
+    assert not list(log_dir.glob('orphan-*.log'))
+
+
+def test_list_stale_log_files_missing_dir(tmp_path):
+    """Test that a missing log directory yields nothing, not an error."""
+    assert requests._list_stale_log_files(tmp_path / 'gone', time.time()) == []
+
+
+@pytest.mark.asyncio
+async def test_request_task_filter_request_ids(isolated_database):
+    """Test filtering requests by request ID."""
+    for request_id in ['req-a', 'req-b', 'req-c']:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=request_id,
+                             name='test-request',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=time.time(),
+                             user_id='test-user'))
+
+    found = await requests.get_request_tasks_async(
+        req_filter=requests.RequestTaskFilter(request_ids=['req-a', 'req-c'],
+                                              fields=['request_id']))
+    assert {req.request_id for req in found} == {'req-a', 'req-c'}
+
+    found = await requests.get_request_tasks_async(
+        req_filter=requests.RequestTaskFilter(request_ids=[]))
+    assert not found
+
+
+def test_reset_db_and_logs_clears_debug_log_dir(isolated_database, tmp_path):
+    """Test that startup clears the request debug log directory."""
+    debug_log = pathlib.Path(sky_logging.DEBUG_LOG_DIR) / 'stale-req.log'
+    debug_log.write_text('stale')
+
+    with mock.patch('sky.server.common.clear_local_api_server_database'), \
+         mock.patch('sky.server.blob.blob_storage.get_blob_storage'), \
+         mock.patch('sky.server.requests.storage.get_request_backend'), \
+         mock.patch(
+             'sky.server.requests.requests.LEGACY_REQUEST_LOG_PATH_PREFIX',
+             str(tmp_path / 'legacy_logs')):
+        requests.reset_db_and_logs()
+
+    assert not debug_log.exists()
 
 
 @pytest.mark.asyncio
@@ -1933,13 +2302,7 @@ def test_active_statuses_includes_waiting():
 
 
 def _waiting_request():
-    return requests.Request(request_id='waiting-req',
-                            name='test-request',
-                            entrypoint=dummy,
-                            request_body=payloads.RequestBody(),
-                            status=RequestStatus.WAITING,
-                            created_at=time.time(),
-                            user_id='user-1')
+    return _new_request('waiting-req', RequestStatus.WAITING)
 
 
 @pytest.fixture()
@@ -2217,3 +2580,386 @@ async def test_interrupt_request_without_retry_records_plain_cancellation(
     error = interrupted.get_error()
     assert error is not None
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+# --- Display serializers: request body scoped to the caller -----------------
+
+_SECRET_TASK_YAML = """name: t
+resources:
+  cloud: aws
+envs:
+  HF_TOKEN: env-marker-secret
+secrets:
+  WANDB_API_KEY: secret-marker-value
+run: echo hi
+"""
+
+
+def _launch_body_with_secrets():
+    return payloads.LaunchBody(
+        task=_SECRET_TASK_YAML,
+        cluster_name='c',
+        env_vars={'MY_TOKEN': 'env-var-marker'},
+        override_skypilot_config={'aws': {
+            'token': 'CONFIG-MARKER'
+        }})
+
+
+def _make_request(request_id: str, body) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='sky.launch',
+                            entrypoint=dummy,
+                            request_body=body,
+                            status=RequestStatus.SUCCEEDED,
+                            created_at=0.0,
+                            user_id='alice')
+
+
+def _assert_full(request_body: str):
+    for marker in ('env-marker-secret', 'secret-marker-value', 'CONFIG-MARKER',
+                   'env-var-marker'):
+        assert marker in request_body, f'{marker!r} missing from owner body'
+
+
+def test_encode_owner_path_keeps_real_values():
+    """Request.encode() (the /api/get owner path) is never scoped/dropped."""
+    request = _make_request('display-owner-1', _launch_body_with_secrets())
+    encoded = request.encode()
+    decoded_body = decoders.decode_and_unpickle(encoded.request_body)
+    assert 'env-marker-secret' in decoded_body.task
+    assert 'secret-marker-value' in decoded_body.task
+    assert decoded_body.override_skypilot_config == {
+        'aws': {
+            'token': 'CONFIG-MARKER'
+        }
+    }
+
+
+def test_encode_for_client_drops_body(monkeypatch):
+    """/api/get never returns the body, which may hold the server's env."""
+    request = _make_request('display-client-1', _launch_body_with_secrets())
+    pickled = []
+    pickle_and_encode = encoders.pickle_and_encode
+    monkeypatch.setattr(
+        encoders, 'pickle_and_encode',
+        lambda obj: pickled.append(obj) or pickle_and_encode(obj))
+    payload = request.encode_for_client()
+    # The body is skipped, not pickled and then thrown away.
+    assert request.request_body not in pickled
+    assert payload.request_body == server_constants.EMPTY_PICKLED_VALUE
+    assert decoders.decode_and_unpickle(payload.request_body) is None
+    for marker in ('env-marker-secret', 'secret-marker-value', 'CONFIG-MARKER',
+                   'env-var-marker'):
+        assert marker not in payload.model_dump_json()
+    # Wire-only: the stored row still holds the whole body.
+    assert request.encode().request_body != payload.request_body
+    _assert_full(request.request_body.model_dump_json())
+
+
+@pytest.mark.asyncio
+async def test_readable_encode_drops_body(isolated_database):
+    request = _make_request('display-readable-1', _launch_body_with_secrets())
+    await requests.create_if_not_exists_async(request)
+    row = requests.get_request('display-readable-1')
+    assert row.readable_encode().request_body == json.dumps(None)
+
+
+def test_encode_requests_drops_body():
+    """The other listing serializer (GET /api/status without request_ids)."""
+    request = _make_request('display-listing-1', _launch_body_with_secrets())
+    with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
+        payload = requests.encode_requests([request])[0]
+    assert payload.request_body == json.dumps(None)
+    assert payload.request_id == 'display-listing-1'
+
+
+@pytest.mark.asyncio
+async def test_kill_requests_scoped_by_user(isolated_database):
+    """kill_requests with an explicit request_ids list must still honor the
+    user_id scope, so a caller cannot cancel another user's request."""
+    alice = requests.Request(request_id='kill-alice-1',
+                             name='sky.launch',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             pid=None,
+                             user_id='alice')
+    bob = requests.Request(request_id='kill-bob-1',
+                           name='sky.launch',
+                           entrypoint=dummy,
+                           request_body=payloads.RequestBody(),
+                           status=RequestStatus.RUNNING,
+                           created_at=0.0,
+                           pid=None,
+                           user_id='bob')
+    await requests.create_if_not_exists_async(alice)
+    await requests.create_if_not_exists_async(bob)
+
+    # Alice tries to cancel both by explicit id; only her own is cancelled.
+    cancelled = requests.kill_requests(
+        request_ids=['kill-alice-1', 'kill-bob-1'], user_id='alice')
+    assert cancelled == ['kill-alice-1']
+    assert requests.get_request(
+        'kill-alice-1').status == RequestStatus.CANCELLED
+    # Bob's request is untouched.
+    assert requests.get_request('kill-bob-1').status == RequestStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_kill_requests_unscoped_cancels_all(isolated_database):
+    """user_id=None stays privileged (internal shutdown path): cancels all."""
+    for rid, uid in [('shutdown-a', 'alice'), ('shutdown-b', 'bob')]:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=rid,
+                             name='sky.launch',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             pid=None,
+                             user_id=uid))
+    cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
+                                       user_id=None)
+    assert set(cancelled) == {'shutdown-a', 'shutdown-b'}
+
+
+def test_stored_result_size_counts_utf8_bytes():
+    request = requests.Request(request_id='test-request-utf8',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               user_id='test-user')
+    result = {'name': '名字'}
+    request.set_return_value(result)
+    request.to_row()
+    assert request.stored_result_size == len(orjson.dumps(result))
+
+
+def _running_request(request_id: str) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='test-request',
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=RequestStatus.RUNNING,
+                            created_at=time.time(),
+                            user_id='test-user')
+
+
+_LARGE_RESULT = {'jobs': [{'id': i, 'name': f'job-{i}'} for i in range(200)]}
+
+
+@pytest.fixture
+def store_large_results(monkeypatch):
+    monkeypatch.setenv(skylet_constants.ENV_VAR_SERVER_STORE_LARGE_RESULTS, '1')
+    monkeypatch.setattr(requests.stored_results, 'MAX_IN_ROW_BYTES', 1024)
+
+
+def _recorded_return_value(request_id: str):
+    """The return value as recorded in the row, without loading a stored one."""
+    request = requests.get_request(request_id, fields=['return_value'])
+    assert request is not None
+    return request.return_value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_large_result_is_stored_outside_the_row(isolated_database,
+                                                      store_large_results,
+                                                      test_async):
+    request = _running_request('large-req')
+    await requests.create_if_not_exists_async(request)
+    if test_async:
+        size = await requests.set_request_succeeded_async(
+            request, _LARGE_RESULT)
+    else:
+        size = requests.set_request_succeeded('large-req', _LARGE_RESULT)
+
+    encoded = orjson.dumps(_LARGE_RESULT)
+    # The usage metrics still see the size of the result itself.
+    assert size == len(encoded)
+    assert requests.stored_results.result_path('large-req').exists()
+    assert _recorded_return_value('large-req') == (
+        requests.stored_results.StoredResult(size=len(encoded)))
+
+    request = requests.get_request('large-req')
+    assert request is not None
+    assert request.has_stored_result
+    assert request.get_return_value() == _LARGE_RESULT
+    assert request.encode().return_value == encoded.decode('utf-8')
+
+
+@pytest.mark.asyncio
+async def test_small_result_stays_in_the_row(isolated_database,
+                                             store_large_results):
+    await requests.create_if_not_exists_async(_running_request('small-req'))
+    requests.set_request_succeeded('small-req', {'ok': True})
+
+    assert not requests.stored_results.result_path('small-req').exists()
+    assert _recorded_return_value('small-req') == {'ok': True}
+    request = requests.get_request('small-req')
+    assert request is not None
+    assert not request.has_stored_result
+    assert request.get_return_value() == {'ok': True}
+
+
+@pytest.mark.asyncio
+async def test_result_stays_in_the_row_when_storing_fails(
+        isolated_database, store_large_results):
+    await requests.create_if_not_exists_async(_running_request('fail-req'))
+    with mock.patch.object(requests.stored_results,
+                           'store',
+                           side_effect=OSError('disk full')):
+        requests.set_request_succeeded('fail-req', _LARGE_RESULT)
+
+    assert _recorded_return_value('fail-req') == _LARGE_RESULT
+    request = requests.get_request('fail-req')
+    assert request is not None
+    assert request.get_return_value() == _LARGE_RESULT
+
+
+@pytest.mark.asyncio
+async def test_updating_a_request_keeps_its_stored_result(
+        isolated_database, store_large_results):
+    await requests.create_if_not_exists_async(_running_request('update-req'))
+    requests.set_request_succeeded('update-req', _LARGE_RESULT)
+    path = requests.stored_results.result_path('update-req')
+    mtime = path.stat().st_mtime_ns
+
+    with mock.patch.object(requests.stored_results,
+                           'load',
+                           side_effect=AssertionError('loaded')):
+        with requests.update_request('update-req') as request:
+            assert request is not None
+            request.status_msg = 'updated'
+
+    assert path.stat().st_mtime_ns == mtime
+    request = requests.get_request('update-req')
+    assert request is not None
+    assert request.status_msg == 'updated'
+    assert request.get_return_value() == _LARGE_RESULT
+
+
+@pytest.mark.asyncio
+async def test_listing_does_not_load_stored_results(isolated_database,
+                                                    store_large_results):
+    await requests.create_if_not_exists_async(_running_request('list-req'))
+    requests.set_request_succeeded('list-req', _LARGE_RESULT)
+
+    with mock.patch.object(requests.stored_results,
+                           'load',
+                           side_effect=AssertionError('loaded')), \
+            mock.patch.object(requests.stored_results,
+                              'load_text',
+                              side_effect=AssertionError('loaded')):
+        listing = orjson.loads(
+            requests.list_requests_json(
+                requests.RequestTaskFilter(fields=requests.DISPLAY_COLUMNS)))
+    assert [item['request_id'] for item in listing] == ['list-req']
+
+
+@pytest.mark.asyncio
+async def test_gc_deletes_stored_result_with_its_row(isolated_database,
+                                                     store_large_results):
+    await requests.create_if_not_exists_async(_running_request('gc-req'))
+    requests.set_request_succeeded('gc-req', _LARGE_RESULT)
+    with requests.update_request('gc-req') as request:
+        assert request is not None
+        request.finished_at = time.time() - 3600
+    path = requests.stored_results.result_path('gc-req')
+    stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
+    os.utime(path, (stale_mtime, stale_mtime))
+
+    await requests.clean_finished_requests_with_retention(60)
+
+    assert requests.get_request('gc-req') is None
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_gc_deletes_orphan_stored_results(isolated_database,
+                                                store_large_results):
+    stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
+    await requests.create_if_not_exists_async(_running_request('live-req'))
+    requests.set_request_succeeded('live-req', _LARGE_RESULT)
+    results_dir = requests.stored_results.results_dir()
+    live = requests.stored_results.result_path('live-req')
+    os.utime(live, (stale_mtime, stale_mtime))
+    orphans = [
+        requests.stored_results.result_path('orphan-req'),
+        # A write interrupted before it was renamed into place.
+        results_dir / 'orphan-tmp-req.0123abcd.tmp',
+    ]
+    for orphan in orphans:
+        orphan.write_bytes(b'x')
+        os.utime(orphan, (stale_mtime, stale_mtime))
+    # No row, but written within the grace period.
+    fresh = requests.stored_results.result_path('fresh-req')
+    fresh.write_bytes(b'x')
+
+    await requests.clean_finished_requests_with_retention(60)
+
+    for orphan in orphans:
+        assert not orphan.exists(), orphan
+    assert live.exists()
+    assert fresh.exists()
+
+
+def test_stored_result_reference_survives_a_row_round_trip(
+        isolated_database, store_large_results):
+    request = _running_request('round-trip-req')
+    request.set_return_value(_LARGE_RESULT)
+    row = request.to_row()
+    assert request.has_stored_result
+
+    decoded = requests.Request.from_row(row)
+    assert decoded.return_value == request.return_value
+    assert decoded.get_return_value() == _LARGE_RESULT
+
+
+def test_missing_stored_result_raises_a_clear_error(isolated_database,
+                                                    store_large_results):
+    request = _running_request('missing-req')
+    request.set_return_value(_LARGE_RESULT)
+    request.to_row()
+    requests.stored_results.result_path('missing-req').unlink()
+
+    with pytest.raises(RuntimeError, match='no longer available'):
+        request.get_return_value()
+
+
+def test_stored_result_goes_through_a_version_aware_serializer(
+        isolated_database, store_large_results, monkeypatch):
+    old_client = []
+
+    def serializer(value):
+        if old_client:
+            value = {'jobs': [{'id': job['id']} for job in value['jobs']]}
+        return orjson.dumps(value).decode('utf-8')
+
+    monkeypatch.setitem(return_value_serializers.handlers, 'test-request',
+                        serializer)
+    request = _running_request('serializer-req')
+    request.set_return_value(_LARGE_RESULT)
+    request.to_row()
+    assert request.has_stored_result
+
+    old_client.append(True)
+    assert request.encode().return_value == orjson.dumps({
+        'jobs': [{
+            'id': i
+        } for i in range(200)]
+    }).decode('utf-8')
+
+
+@pytest.mark.asyncio
+async def test_large_result_stays_in_the_row_until_storing_is_enabled(
+        isolated_database, store_large_results, monkeypatch):
+    monkeypatch.delenv(skylet_constants.ENV_VAR_SERVER_STORE_LARGE_RESULTS)
+    await requests.create_if_not_exists_async(_running_request('off-req'))
+    requests.set_request_succeeded('off-req', _LARGE_RESULT)
+
+    assert not requests.stored_results.result_path('off-req').exists()
+    assert _recorded_return_value('off-req') == _LARGE_RESULT

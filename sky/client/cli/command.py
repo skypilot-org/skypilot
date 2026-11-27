@@ -25,6 +25,7 @@ each other.
 """
 import collections
 import concurrent.futures
+import contextlib
 import datetime
 import fnmatch
 import io
@@ -159,8 +160,8 @@ T = TypeVar('T')
 def _get_ws_proxy_command() -> str:
     """Returns the ws-proxy command string.
 
-    Defaults to the Python websocket_proxy.py script. Plugins can
-    replace this function to prefer a native binary.
+    Defaults to the Python websocket_proxy.py script. Plugins may
+    replace this function.
     """
     escaped_executable_path = shlex.quote(sys.executable)
     escaped_websocket_proxy_path = shlex.quote(
@@ -255,6 +256,7 @@ def _get_cluster_records_and_set_ssh_config(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     verbose: bool = False,
+    output_stream: Optional[io.TextIOBase] = None,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -264,6 +266,9 @@ def _get_cluster_records_and_set_ssh_config(
         all_users: Whether to query clusters from all users.
             If clusters is not None, this field is ignored because cluster list
             can include other users' clusters.
+        output_stream: Where to write the request's streamed server-side logs.
+            If None, they go to the console. Callers printing machine-readable
+            output pass a sink to keep stdout parseable.
     """
     # TODO(zhwu): we should move this function into SDK.
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
@@ -274,7 +279,8 @@ def _get_cluster_records_and_set_ssh_config(
                             all_users=all_users,
                             _include_credentials=True,
                             _summary_response=not verbose)
-    cluster_records = sdk.stream_and_get(request_id)
+    cluster_records = sdk.stream_and_get(request_id,
+                                         output_stream=output_stream)
     # Cache the ws-proxy command (constant across clusters).
     ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
@@ -333,6 +339,241 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
+def _is_glob_pattern(name: str) -> bool:
+    return any(c in name for c in '*?[')
+
+
+def _bulk_workspace() -> Optional[str]:
+    """The id of the workspace that -a, -u and globs act on: the one the
+    server runs this command in. None from a server too old to say, or one
+    without authentication, which leaves the selection as it was."""
+    try:
+        info = sdk.get_user_workspace()
+    except exceptions.APINotSupportedError:
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        # Whatever HTTP client raised it.
+        response: Any = getattr(e, 'response', None)
+        status_code = getattr(response, 'status_code', None)
+        if status_code == 401:
+            return None
+        if status_code == 409:
+            # The active workspace names more than one workspace.
+            try:
+                detail = response.json().get('detail')
+            except Exception:  # pylint: disable=broad-except
+                detail = None
+            raise click.UsageError(
+                detail if isinstance(detail, str) else str(e)) from e
+        raise
+    if info.get('workspace') is None:
+        message = f'Cannot tell which workspace to act on: {info.get("note")}'
+        if info.get('source') == workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS:
+            message += f'\n{exceptions.WorkspaceAmbiguousError.recovery_hint()}'
+        raise click.UsageError(message)
+    return info['workspace']
+
+
+def _in_workspace(records: List[Any], workspace_id: Optional[str]) -> List[Any]:
+    # Records from a server older than their `workspace` field (which the
+    # response models default to None) cannot be scoped; leave them as they
+    # were.
+    if workspace_id is None or all(r.get('workspace') is None for r in records):
+        return list(records)
+    return [r for r in records if r.get('workspace') == workspace_id]
+
+
+def _caller_hash() -> str:
+    user = sdk.api_info().user
+    return user.id if user is not None else common_utils.get_user_hash()
+
+
+def _note_other_workspaces(noun: str,
+                           records: List[Any],
+                           workspace_id: Optional[str],
+                           name_key: str = 'name') -> None:
+    """Says which of the records a bulk selector reached it leaves out for
+    being in another workspace: the caller's own by name, others' as a count."""
+    kept = {id(r) for r in _in_workspace(records, workspace_id)}
+    # Keyed by workspace too: a name may repeat across workspaces, and a job
+    # has a row per task.
+    skipped = {(r['workspace'], r[name_key]): r
+               for r in records
+               if id(r) not in kept and r.get('workspace') is not None}
+    if not skipped:
+        return
+    me = _caller_hash()
+    own = [
+        str(key[1]) for key, r in skipped.items() if r.get('user_hash') == me
+    ]
+    parts = []
+    if own:
+        more = f' and {len(own) - 2} more' if len(own) > 2 else ''
+        parts.append(f'{len(own)} yours ({", ".join(own[:2])}{more})')
+    if len(own) < len(skipped):
+        parts.append(f'{len(skipped) - len(own)} of other users')
+    plural = 's' if len(skipped) > 1 else ''
+    click.echo(f'Skipped {len(skipped)} {noun}{plural} in other workspaces: '
+               f'{", ".join(parts)}. Switch the active workspace to act on '
+               'them.')
+
+
+def _service_down_targets(names: List[str], apply_to_all: bool, is_pool: bool,
+                          workspace_id: Optional[str]) -> Optional[List[Any]]:
+    """The services or pools `down` reaches, as the server picks them: -a and
+    patterns stay in the workspace and take only the caller's own unless they
+    are an admin. None when they cannot be listed or scoped."""
+    if workspace_id is None:
+        return None
+    try:
+        records = sdk.stream_and_get(
+            managed_jobs.pool_status(None) if is_pool else serve_lib.status(None
+                                                                           ))
+        role = server_common.make_authenticated_request('GET', '/users/role')
+        role.raise_for_status()
+        caller = role.json()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Cannot list what down reaches: {e}')
+        return None
+    # Older servers report None for a workspace the caller cannot read (newer
+    # ones leave the record out), so key presence cannot tell a controller
+    # older than the field apart.
+    if records and all(r.get('workspace') is None for r in records):
+        # The server does not scope these either.
+        return None
+    exact_names = {name for name in names if '*' not in name}
+    patterns = [
+        re.compile('.*'.join(map(re.escape, name.split('*'))))
+        for name in names
+        if '*' in name
+    ]
+
+    def _matched(candidates: List[Any]) -> List[Any]:
+        if apply_to_all:
+            return candidates
+        return [
+            r for r in candidates if r['name'] not in exact_names and any(
+                p.fullmatch(r['name']) for p in patterns)
+        ]
+
+    def _owned(r: Any) -> bool:
+        return caller.get('role') == 'admin' or r.get(
+            'user_hash') == caller['id']
+
+    def _selected(candidates: List[Any]) -> List[Any]:
+        return [r for r in _matched(candidates) if _owned(r)]
+
+    noun = 'pool' if is_pool else 'service'
+    unknown = _selected([r for r in records if r.get('workspace') is None])
+    if unknown:
+        click.echo(f'Skipping {noun}s whose workspace is unknown or not '
+                   f'readable (name them to tear them down): '
+                   f'{", ".join(r["name"] for r in unknown)}')
+    _note_other_workspaces(
+        noun, _selected([r for r in records if r.get('workspace') is not None]),
+        workspace_id)
+    matched = _matched(_in_workspace(records, workspace_id))
+    skipped = [r for r in matched if not _owned(r)]
+    if skipped:
+        unrecorded = sum(r.get('user_hash') is None for r in skipped)
+        extra = (f' ({unrecorded} with no recorded creator; an admin can tear '
+                 f'{"them" if unrecorded > 1 else "it"} down)'
+                 if unrecorded else '')
+        click.echo(f'Skipped {len(skipped)} {noun}'
+                   f'{"s" if len(skipped) > 1 else ""} not owned by you'
+                   f'{extra}.')
+    return [r for r in records if r['name'] in exact_names
+           ] + [r for r in matched if _owned(r)]
+
+
+def _down_names(targets: List[Any], names: List[str]) -> List[str]:
+    """The names to send `down` after a preview: the targets, plus any exact
+    name that matched nothing so the server still reports it."""
+    found = [r['name'] for r in targets]
+    return found + [n for n in names if '*' not in n and n not in found]
+
+
+def _confirm_bulk(operation: str,
+                  noun: str,
+                  records: List[Any],
+                  workspace_id: Optional[str],
+                  name_key: str = 'name',
+                  warning: str = '') -> None:
+    """Asks before a bulk operation. Other users' targets are listed by owner
+    and make the default answer no; so does a warning."""
+    me = _caller_hash()
+    own = [str(r[name_key]) for r in records if r.get('user_hash') == me]
+    others: Dict[str, List[str]] = collections.defaultdict(list)
+    for r in records:
+        if r.get('user_hash') != me:
+            owner = r.get('user_name') or r.get('user_hash') or 'unknown'
+            others[owner].append(str(r[name_key]))
+    head = f'{operation} {len(records)} {noun}{"s" if len(records) > 1 else ""}'
+    if not others:
+        prompt = f'{head}: {", ".join(own)}.'
+        click.confirm(f'{prompt}\n{warning}\nProceed?'
+                      if warning else f'{prompt} Proceed?',
+                      default=not warning,
+                      abort=True,
+                      show_default=True)
+        return
+    if workspace_id is not None:
+        label = next(
+            (r['workspace_name']
+             for r in records
+             if r.get('workspace') == workspace_id and r.get('workspace_name')),
+            workspace_id)
+        head += f' in workspace {label!r}'
+    num_others = len(records) - len(own)
+    lines = [f'{head}:']
+    if own:
+        lines.append(f'  yours ({len(own)}): {", ".join(own)}')
+    lines.append(f'  other users ({num_others}): ' + '; '.join(
+        f'{owner}: {", ".join(names)}' for owner, names in others.items()))
+    if warning:
+        lines.append(warning)
+    lines.append(f'{num_others} of them belong to other users. Proceed?')
+    click.confirm('\n'.join(lines),
+                  default=False,
+                  abort=True,
+                  show_default=True)
+
+
+def _drop_unwritable_volumes(listed: List[responses.VolumeRecord],
+                             names: List[str]) -> List[str]:
+    """Drops the volumes in workspaces the user cannot modify.
+
+    The listing also shows read-only workspaces' volumes, and the server
+    refuses a delete request naming any of them as a whole.
+    """
+    if not names:
+        return names
+    workspaces = sdk.get(sdk.workspaces())
+    # A server too old to report `writable` cannot be filtered against.
+    unwritable = {
+        ws for ws, ws_config in workspaces.items()
+        if ws_config.get('writable') is False
+    }
+    skipped = sorted(
+        volume['name']
+        for volume in listed
+        if volume['name'] in names and (volume.get(
+            'workspace') or constants.SKYPILOT_DEFAULT_WORKSPACE) in unwritable)
+    if skipped:
+        click.echo(f'Skipping {len(skipped)} volume(s) in workspaces you '
+                   f'cannot modify: {", ".join(skipped)}')
+    names = [name for name in names if name not in skipped]
+    hostpath = sorted(
+        volume['name'] for volume in listed if volume['name'] in names and
+        volume.get('type') == volume_utils.VolumeType.HOSTPATH.value)
+    if hostpath and server_common.make_authenticated_request(
+            'GET', '/users/role').json().get('role') != 'admin':
+        click.echo(f'Skipping {len(hostpath)} k8s-hostpath volume(s) only an '
+                   f'admin can delete: {", ".join(hostpath)}')
+        names = [name for name in names if name not in hostpath]
+    return names
+
+
 def _async_call_or_wait(request_id: server_common.RequestId[T],
                         async_call: bool, request_name: str) -> Any:
     short_request_id = request_id[:8]
@@ -363,6 +604,44 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             'the request, run: '
             f'{ux_utils.BOLD}sky api cancel {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n')
+
+
+_JOB_IDS_OUTPUT_KEY = 'job_ids_output'
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr() -> Generator[typing.TextIO, None, None]:
+    """Send everything written to stdout to stderr until the block exits.
+
+    The stdout file descriptor is redirected too, because logging handlers
+    hold the original sys.stdout object. Yields a stream to the original
+    stdout.
+    """
+    streams = [s for s in (sys.stdout, sys.__stdout__) if s is not None]
+    for stream in streams:
+        stream.flush()
+    saved_stdout_fd = os.dup(1)
+    original_stdout = os.fdopen(os.dup(saved_stdout_fd), 'w')
+    try:
+        os.dup2(2, 1)
+        with contextlib.redirect_stdout(sys.stderr):
+            yield original_stdout
+    finally:
+        for stream in streams:
+            stream.flush()
+        original_stdout.close()
+        os.dup2(saved_stdout_fd, 1)
+        os.close(saved_stdout_fd)
+
+
+def _route_stdout_for_output(ctx: click.Context, param: click.Parameter,
+                             value: Optional[str]) -> Optional[str]:
+    """Eager --output callback: send stdout to stderr before the other
+    options' callbacks run, keeping a stream to the original stdout."""
+    del param  # Unused.
+    if value is not None:
+        ctx.meta[_JOB_IDS_OUTPUT_KEY] = ctx.with_resource(_stdout_to_stderr())
+    return value
 
 
 def _merge_cli_and_file_vars(
@@ -908,7 +1187,7 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
             # Make API request to fetch recipe from server
             body = payloads.RecipeGetBody(recipe_name=recipe_name)
             response = server_common.make_authenticated_request(
-                'POST', '/recipes/get', json=body.model_dump())
+                'POST', '/recipes/get', json=body.model_dump(), sync_call=True)
             request_id: server_common.RequestId[Optional[Dict[
                 str, Any]]] = server_common.get_request_id(response)
             recipe = sdk.get(request_id)
@@ -1029,14 +1308,14 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
         # Check if this is a JobGroup YAML
         if dag_utils.is_job_group_yaml(entrypoint):
-            click.secho('Detected JobGroup YAML', fg='cyan')
+            click.secho('Detected Job Group YAML', fg='cyan')
             dag = dag_utils.load_job_group_from_yaml(entrypoint,
                                                      env_overrides=env,
                                                      secrets_overrides=secret)
             if override_params:
                 click.secho(
                     f'WARNING: override params {override_params} are ignored '
-                    'for JobGroup YAML.',
+                    'for Job Group YAML.',
                     fg='yellow')
             for task in dag.tasks:
                 task.update_workdir(workdir, git_url, git_ref)
@@ -1748,7 +2027,7 @@ def _handle_jobs_queue_request(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
-    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
+    # TODO: remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     msg = ''
     status_counts: Optional[Dict[str, int]] = None
@@ -2311,10 +2590,20 @@ def status(verbose: bool,
                               pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users, verbose)
+        query_clusters,
+        refresh_mode,
+        all_users,
+        verbose,
+        # Keep stdout parseable. The status request's server-side logs are
+        # streamed back here, and a cluster name matching nothing logs a line
+        # exactly when a caller is most likely to be scripting against a name
+        # it is unsure of. Ahead of the JSON that is a line a parser cannot
+        # read, so send the stream to a sink, as `sky check -o json` does.
+        output_stream=io.StringIO() if json_output else None)
 
-    if output_format == flags.OUTPUT_FORMAT_JSON:
+    if json_output:
         click.echo(
             json.dumps([
                 r.model_dump(mode='json', exclude={'handle', 'credentials'})
@@ -2349,6 +2638,11 @@ def status(verbose: bool,
     # on. `_show_enabled_infra` is a pure renderer and only takes the
     # final label.
     display_workspace = active_workspace or resolved_workspace
+    if display_workspace is not None:
+        # Either may be an id (a typed name resolves against the client's
+        # own `workspaces:` when it has one); show the name.
+        display_workspace = skypilot_config.get_workspace_name(
+            display_workspace, all_workspaces)
     _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
@@ -3038,8 +3332,9 @@ def cancel(
     job_identity_str += f' on cluster(s): {", ".join(matching_clusters)}'
 
     if not yes:
+        # All users' jobs may include other users': default to no.
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
-                      default=True,
+                      default=not all_users,
                       abort=True,
                       show_default=True)
 
@@ -3051,8 +3346,7 @@ def cancel(
                                     job_ids=job_ids_to_cancel)
             _async_call_or_wait(request_id, async_call, 'sky.cancel')
         except exceptions.NotSupportedError as e:
-            controller = controller_utils.Controllers.from_name(
-                cluster, expect_exact_match=False)
+            controller = controller_utils.Controllers.from_prefix(cluster)
             assert controller is not None, cluster
             with ux_utils.print_exception_no_traceback():
                 raise click.UsageError(
@@ -3333,6 +3627,8 @@ def start(
             '--idle-minutes-to-autostop must be set if --down is set.')
     to_start = []
 
+    is_bulk = all or any(map(_is_glob_pattern, clusters))
+    target_workspace = _bulk_workspace() if is_bulk else None
     cluster_records = None
     if not clusters and not all:
         # UX: frequently users may have only 1 cluster. In this case, be smart
@@ -3351,19 +3647,31 @@ def start(
             click.echo('Both --all and cluster(s) specified for sky start. '
                        'Letting --all take effect.')
 
-        all_clusters = _get_cluster_records_and_set_ssh_config(
-            clusters=None, refresh=common.StatusRefreshMode.AUTO)
-
         # Get all clusters that are not controllers.
-        cluster_records = [
-            cluster for cluster in all_clusters
+        all_clusters = [
+            cluster for cluster in _get_cluster_records_and_set_ssh_config(
+                clusters=None, refresh=common.StatusRefreshMode.AUTO)
             if controller_utils.Controllers.from_name(
                 cluster['name'], expect_exact_match=False) is None
         ]
+        _note_other_workspaces('cluster', [
+            c for c in all_clusters
+            if force or c['status'] != status_lib.ClusterStatus.UP
+        ], target_workspace)
+        cluster_records = _in_workspace(all_clusters, target_workspace)
     if cluster_records is None:
         # Get GLOB cluster names
-        cluster_records = _get_cluster_records_and_set_ssh_config(
+        exact_names = {name for name in clusters if not _is_glob_pattern(name)}
+        listed = _get_cluster_records_and_set_ssh_config(
             clusters, refresh=common.StatusRefreshMode.AUTO)
+        _note_other_workspaces('cluster', [
+            r for r in listed if r['name'] not in exact_names and
+            (force or r['status'] != status_lib.ClusterStatus.UP)
+        ], target_workspace)
+        cluster_records = [
+            record for record in listed if record['name'] in exact_names or
+            _in_workspace([record], target_workspace)
+        ]
 
     if not cluster_records:
         click.echo('Cluster(s) not found (tip: see `sky status`). Do you '
@@ -3443,7 +3751,12 @@ def start(
                 'controllers. Use the default autostop settings by directly '
                 f'calling: {bold}sky start {" ".join(controllers)}{reset_bold}')
 
-    if not yes:
+    if not yes and is_bulk:
+        records_by_name = {record['name']: record for record in cluster_records}
+        _confirm_bulk('Restarting', 'cluster',
+                      [records_by_name[name] for name in to_start],
+                      target_workspace)
+    elif not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
         cluster_list = ', '.join(to_start)
         click.confirm(
@@ -3757,18 +4070,34 @@ def _down_or_stop_clusters(
         operation = f'{verb} auto{option_str} on'
 
     names = list(names)
+    is_bulk = apply_to_all or all_users or any(map(_is_glob_pattern, names))
+    target_workspace = _bulk_workspace() if is_bulk else None
+    records_by_name: Dict[str, responses.StatusResponse] = {}
     if names:
         controllers = [
             name for name in names if controller_utils.Controllers.from_name(
                 name, expect_exact_match=False) is not None
         ]
         controllers_str = ', '.join(map(repr, controllers))
-        names = [
-            cluster['name']
+        exact_names = {name for name in names if not _is_glob_pattern(name)}
+        listed = [
+            cluster
             for cluster in _get_cluster_records_and_set_ssh_config(names)
             if controller_utils.Controllers.from_name(
                 cluster['name'], expect_exact_match=False) is None
         ]
+        if not (apply_to_all or all_users):
+            # Otherwise -a below says it, for what it takes over.
+            _note_other_workspaces(
+                'cluster', [c for c in listed if c['name'] not in exact_names],
+                target_workspace)
+        records_by_name = {
+            cluster['name']: cluster
+            for cluster in listed
+            if cluster['name'] in exact_names or
+            _in_workspace([cluster], target_workspace)
+        }
+        names = list(records_by_name)
 
         # Make sure the controllers are explicitly specified without other
         # normal clusters.
@@ -3826,8 +4155,6 @@ def _down_or_stop_clusters(
         names += controllers
 
     if apply_to_all or all_users:
-        all_clusters = _get_cluster_records_and_set_ssh_config(
-            clusters=None, all_users=all_users)
         if names:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
@@ -3837,14 +4164,18 @@ def _down_or_stop_clusters(
 
         # do not select already stopped clusters for stop command.
         # stopped clusters are still included for down or autostop commands.
-        names = [
-            record['name']
-            for record in all_clusters
+        reachable = [
+            record for record in _get_cluster_records_and_set_ssh_config(
+                clusters=None, all_users=all_users)
             if controller_utils.Controllers.from_name(
                 record['name'], expect_exact_match=False) is None and
             (down or idle_minutes_to_autostop is not None or
              record['status'] != status_lib.ClusterStatus.STOPPED)
         ]
+        _note_other_workspaces('cluster', reachable, target_workspace)
+        all_clusters = _in_workspace(reachable, target_workspace)
+        records_by_name = {record['name']: record for record in all_clusters}
+        names = list(records_by_name)
 
     clusters = names
     usage_lib.record_cluster_name_for_current_operation(clusters)
@@ -3853,7 +4184,11 @@ def _down_or_stop_clusters(
         click.echo('Cluster(s) not found (tip: see `sky status`).')
         return
 
-    if not no_confirm and clusters:
+    if not no_confirm and clusters and is_bulk:
+        _confirm_bulk(operation, 'cluster',
+                      [records_by_name[name] for name in clusters],
+                      target_workspace)
+    elif not no_confirm and clusters:
         cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
         cluster_list = ', '.join(clusters)
         click.confirm(
@@ -4059,8 +4394,10 @@ def check(infra_list: Tuple[str],
         api_server_url = server_common.get_server_url()
         click.echo()
         click.echo(
-            click.style(f'Using SkyPilot API server: {api_server_url}',
-                        fg='green'))
+            click.style(
+                'Using SkyPilot API server: '
+                f'{server_common.redact_url_password(api_server_url)}',
+                fg='green'))
 
 
 @cli.command()
@@ -5276,6 +5613,10 @@ def gpus_list(
     GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
     accelerator details.
 
+    With ``-o json``, Kubernetes clusters and SSH Node Pools are listed like
+    in the table: every allowed context, each with its own entries (the
+    ``region`` field is the context), with or without ``--all-regions``.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
@@ -5417,18 +5758,36 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
+    is_bulk = all or any(map(_is_glob_pattern, names))
+    target_workspace = _bulk_workspace() if is_bulk else None
+    storages = sdk.get(sdk.storage_ls())
     if all:
-        storages = sdk.get(sdk.storage_ls())
+        _note_other_workspaces('storage', storages, target_workspace)
+        storages = _in_workspace(storages, target_workspace)
         if not storages:
             click.echo('No storage(s) to delete.')
             return
         names = [storage['name'] for storage in storages]
     else:
-        storages = sdk.get(sdk.storage_ls())
-        existing_storage_names = [storage['name'] for storage in storages]
-        names = _get_glob_matches(existing_storage_names, names)
+        exact_names = [name for name in names if not _is_glob_pattern(name)]
+        patterns = [name for name in names if _is_glob_pattern(name)]
+        _note_other_workspaces('storage', [
+            s for s in storages if s['name'] not in exact_names and any(
+                fnmatch.fnmatch(s['name'], p) for p in patterns)
+        ], target_workspace)
+        names = list(
+            set(
+                _get_glob_matches([s['name'] for s in storages], exact_names) +
+                _get_glob_matches([
+                    s['name'] for s in _in_workspace(storages, target_workspace)
+                ], patterns)))
     if names:
-        if not yes:
+        if not yes and is_bulk:
+            records_by_name = {s['name']: s for s in storages}
+            _confirm_bulk('Deleting', 'storage',
+                          [records_by_name[name] for name in names],
+                          target_workspace)
+        elif not yes:
             storage_names = ', '.join(names)
             storage_str = 'storages' if len(names) > 1 else 'storage'
             click.confirm(
@@ -5614,6 +5973,11 @@ def _build_volume_override_config(
 
 @volumes.command('ls', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_volume_name))
 @click.option('--verbose',
               '-v',
               default=False,
@@ -5628,11 +5992,79 @@ def _build_volume_override_config(
               help='Refresh volume state from cloud APIs before listing. '
               'Without this flag, cached data is returned which is updated '
               'periodically by the background daemon.')
+@flags.output_format_option()
 @usage_lib.entrypoint
-def volumes_ls(verbose: bool, refresh: bool):
-    """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls(refresh=refresh)
-    all_volumes = sdk.stream_and_get(request_id)
+def volumes_ls(names: List[str],
+               verbose: bool,
+               refresh: bool,
+               output_format: str = 'table'):
+    """List volumes managed by SkyPilot.
+
+    Pass one or more volume names to show only those. Combined with --refresh,
+    only the named volumes are re-probed, which is much cheaper than refreshing
+    every volume when you are waiting on one you just created. Names are exact;
+    unlike sky volumes delete, this does not take glob patterns.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Show every volume.
+        sky volumes ls
+        \b
+        # Show one volume, re-probing just that one.
+        sky volumes ls my-vol -r
+        \b
+        # Read a volume's status from a script.
+        sky volumes ls my-vol -o json
+    """
+    request_id = volumes_sdk.ls(refresh=refresh, names=names)
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
+    if json_output:
+        # Keep stdout parseable. A request's server-side logs are streamed back
+        # here, and volume_refresh logs a line exactly when a volume's status
+        # changes -- the NOT_READY -> READY tick a poller is waiting for. Ahead
+        # of the JSON that is the one iteration a parser cannot read, so send
+        # the stream to a sink, as `sky check -o json` does.
+        all_volumes = sdk.stream_and_get(request_id,
+                                         output_stream=io.StringIO())
+    else:
+        all_volumes = sdk.stream_and_get(request_id)
+    if names:
+        # Filter here as well as on the server. An API server older than this
+        # change ignores the names and returns every volume; narrowing again
+        # keeps the output correct against those servers, which is what lets
+        # the names be sent without an API version gate. Against a current
+        # server the response is already narrowed and this is a no-op.
+        requested = set(names)
+        all_volumes = [
+            volume for volume in all_volumes if volume.name in requested
+        ]
+        if not json_output:
+            # Report what matched nothing, rather than showing an empty table
+            # and letting a typo read as "the volume is gone" -- the message a
+            # not-ready volume points here with makes that an easy mistake.
+            # Not on the json path, where an empty array already says it and a
+            # stray line would break parsing.
+            missing = sorted(requested - {v.name for v in all_volumes})
+            if len(missing) == 1:
+                # Worded as `sky volumes delete` words it.
+                click.echo(f'Volume {missing[0]} not found.')
+            elif missing:
+                # One line rather than one per name: here a miss is the whole
+                # answer for that name, so a list reads better than a stack.
+                click.echo(f'Volumes not found: {", ".join(missing)}.')
+            if not all_volumes:
+                # Nothing left to tabulate. The empty table renders as "No
+                # existing volumes.", which is a claim about the whole table --
+                # and a filtered listing never looked at the whole table.
+                return
+    if json_output:
+        click.echo(
+            json.dumps(
+                [volume.model_dump(mode='json') for volume in all_volumes],
+                indent=2))
+        return
     volume_table = table_utils.format_volume_table(all_volumes,
                                                    show_all=verbose)
     click.echo(volume_table)
@@ -5658,6 +6090,12 @@ def volumes_ls(verbose: bool, refresh: bool):
               required=False,
               help=('Forcibly delete the volume from the volumes table even '
                     'if the deletion API fails.'))
+@click.option('--no-cleanup',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Keep the files of k8s-hostpath volumes registered with '
+                    'cleanup_on_deletion.'))
 @click.option('--yes',
               '-y',
               default=False,
@@ -5670,6 +6108,7 @@ def volumes_delete(
         names: List[str],
         all: bool,  # pylint: disable=redefined-builtin
         purge: bool,
+        no_cleanup: bool,
         yes: bool,
         async_call: bool):
     """Delete volumes.
@@ -5689,34 +6128,78 @@ def volumes_delete(
         \b
         # Forcibly delete a volume.
         sky volumes delete pvc1 -p
+        \b
+        # Delete a k8s-hostpath volume but keep its files on the nodes.
+        sky volumes delete hostpath1 --no-cleanup
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
+    is_bulk = all or any(map(_is_glob_pattern, names))
+    target_workspace = _bulk_workspace() if is_bulk else None
     all_volumes = sdk.get(volumes_sdk.ls())
+    # -a and patterns act on the active workspace only.
+    bulk_volumes = _in_workspace(all_volumes, target_workspace)
     if all:
-        if not all_volumes:
+        _note_other_workspaces('volume', all_volumes, target_workspace)
+        if not bulk_volumes:
             click.echo('No volumes to delete.')
             return
-        names = [volume['name'] for volume in all_volumes]
+        names = _drop_unwritable_volumes(
+            bulk_volumes, [volume['name'] for volume in bulk_volumes])
     else:
         existing_volume_names = [volume['name'] for volume in all_volumes]
-        names = _get_glob_matches(existing_volume_names,
-                                  names,
-                                  resource_type='Volume')
-    if names:
-        if not yes:
+        # A name given exactly is left to the server, which says why it
+        # cannot be deleted; only pattern matches are narrowed.
+        exact_names = [n for n in names if not _is_glob_pattern(n)]
+        patterns = [n for n in names if _is_glob_pattern(n)]
+        _note_other_workspaces('volume', [
+            v for v in all_volumes if v['name'] not in exact_names and any(
+                fnmatch.fnmatch(v['name'], p) for p in patterns)
+        ], target_workspace)
+        names = list(
+            set(
+                _get_glob_matches(
+                    existing_volume_names, exact_names, resource_type='Volume')
+                + _drop_unwritable_volumes(
+                    bulk_volumes,
+                    _get_glob_matches([v['name'] for v in bulk_volumes],
+                                      patterns,
+                                      resource_type='Volume'))))
+    if names and not yes:
+        # A k8s-hostpath volume with cleanup wipes its host path on every
+        # node: say where, and default to no.
+        wiped = [] if no_cleanup else [
+            f'  {volume["name"]}: {volume["config"].get("host_path")} on '
+            f'every node of {volume.get("region")}'
+            for volume in all_volumes
+            if volume['name'] in names and
+            volume.get('type') == volume_utils.VolumeType.HOSTPATH.value and
+            volume['config'].get('cleanup_on_deletion')
+        ]
+        warning = ('This also deletes everything under:\n' + '\n'.join(wiped) +
+                   '\n(use --no-cleanup to keep the files)') if wiped else ''
+        if is_bulk:
+            records_by_name = {v['name']: v for v in all_volumes}
+            _confirm_bulk('Deleting',
+                          'volume', [records_by_name[name] for name in names],
+                          target_workspace,
+                          warning=warning)
+        else:
             volume_names = ', '.join(names)
             volume_str = 'volumes' if len(names) > 1 else 'volume'
-            click.confirm(
-                f'Deleting {len(names)} {volume_str}: '
-                f'{volume_names}. Proceed?',
-                default=True,
-                abort=True,
-                show_default=True)
+            prompt = f'Deleting {len(names)} {volume_str}: {volume_names}.'
+            if warning:
+                prompt += f'\n{warning}'
+            click.confirm(f'{prompt}\nProceed?',
+                          default=not warning,
+                          abort=True,
+                          show_default=True)
 
+    if names:
         try:
-            _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
-                                async_call, 'sky.volumes.delete')
+            _async_call_or_wait(
+                volumes_sdk.delete(names, purge=purge, no_cleanup=no_cleanup),
+                async_call, 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
@@ -5728,10 +6211,23 @@ def jobs():
     pass
 
 
+def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
+    """Parse ``--depends-on`` (comma-separated managed job IDs)."""
+    if value is None:
+        return None
+    ids = [part.strip() for part in value.split(',') if part.strip()]
+    if not ids or not all(part.isdigit() and int(part) > 0 for part in ids):
+        raise click.UsageError(
+            f'--depends-on must be comma-separated managed job IDs. Got: '
+            f'{value!r}.')
+    return [int(part) for part in ids]
+
+
 @jobs.command('launch', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=True)
+# Optional only so that --restart can stand alone; checked in jobs_launch.
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -5767,6 +6263,28 @@ def jobs():
               type=int,
               required=False,
               help='Number of jobs to submit.')
+@click.option('--job-group',
+              default=None,
+              type=str,
+              required=False,
+              help=('Attach to an existing job group, by job id or unique '
+                    'running job name. The job is shown under it and '
+                    'cancelled with it. Defaults to the surrounding job '
+                    'group when launched from inside one.'))
+@click.option('--no-job-group',
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('Launch a top-level job even when running inside a job '
+                    'group (do not attach to it).'))
+@click.option('--depends-on',
+              default=None,
+              type=str,
+              required=False,
+              help=('Comma-separated managed job IDs to wait for. The job '
+                    'starts once all of them succeed, and is cancelled if any '
+                    'of them ends otherwise. The launch fails if one of them '
+                    'has already ended without succeeding.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -5779,6 +6297,27 @@ def jobs():
               callback=flags.apply_workspace_option_callback,
               help=('Workspace to submit the managed job into. Shorthand for '
                     '`--config active_workspace=<name>`.'))
+@click.option('--output',
+              '-o',
+              'output_format',
+              type=click.Choice(['id', 'json'], case_sensitive=False),
+              default=None,
+              is_eager=True,
+              callback=_route_stdout_for_output,
+              help=('Print only the submitted job IDs, for scripts: `id` '
+                    'prints one per line, `json` prints {"job_ids": [...]}. '
+                    'Everything else goes to stderr. Implies --detach-run.'))
+@click.option('--restart',
+              'restart',
+              metavar='JOB',
+              type=str,
+              default=None,
+              help=('Launch a finished managed job again, by ID or name, as a '
+                    'new job, like running `sky jobs launch` again with its '
+                    'YAML and flags. Resource, --env and --secret flags '
+                    'override it. Takes no ENTRYPOINT. Needs write access to '
+                    'the job\'s workspace. A job group member is restarted '
+                    'on its own, as a standalone job.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -5817,6 +6356,11 @@ def jobs_launch(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
+    job_group: Optional[str] = None,
+    no_job_group: bool = False,
+    depends_on: Optional[str] = None,
+    output_format: Optional[str] = None,
+    restart: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -5831,10 +6375,29 @@ def jobs_launch(
       sky jobs launch task.yaml
 
       sky jobs launch 'echo hello!'
+
+      # Start after managed jobs 12 and 13 succeed.
+      sky jobs launch --depends-on 12,13 task.yaml
+
+      # Print only the job ID, e.g. to pass it to another command.
+      JOB_ID=$(sky jobs launch -y -o id task.yaml)
+
+      # Run finished job 12 again as a new job.
+      sky jobs launch --restart 12
+
+      # Run it again on 8 H100s with a different learning rate.
+      sky jobs launch --restart 12 --gpus H100:8 --env LR=1e-4
     """
+    if not entrypoint and restart is None:
+        raise click.UsageError('Missing argument ENTRYPOINT.')
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
+    depends_on_ids = _parse_depends_on(depends_on)
+    if output_format is not None and async_call:
+        raise click.UsageError(
+            '--output cannot be used with --async, which returns before the '
+            'job IDs exist.')
 
     if cluster is not None:
         if name is not None and name != cluster:
@@ -5845,6 +6408,44 @@ def jobs_launch(
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
+    if restart is not None:
+        _jobs_restart(restart,
+                      entrypoint=entrypoint,
+                      name=name,
+                      workdir=workdir,
+                      git_url=git_url,
+                      git_ref=git_ref,
+                      num_jobs=num_jobs,
+                      job_group=job_group,
+                      no_job_group=no_job_group,
+                      depends_on_ids=depends_on_ids,
+                      override_params=_parse_override_params(
+                          cloud=cloud,
+                          region=region,
+                          zone=zone,
+                          gpus=gpus,
+                          cpus=cpus,
+                          memory=memory,
+                          instance_type=instance_type,
+                          use_spot=use_spot,
+                          image_id=image_id,
+                          disk_size=disk_size,
+                          disk_tier=disk_tier,
+                          network_tier=network_tier,
+                          local_disk=local_disk,
+                          ports=ports,
+                          priority=priority,
+                          config_override=config_override),
+                      job_recovery=job_recovery,
+                      env=env,
+                      secret=secret,
+                      num_nodes=num_nodes,
+                      pool_name=pool,
+                      yes=yes,
+                      detach_run=detach_run,
+                      async_call=async_call,
+                      output_format=output_format)
+        return
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -5922,11 +6523,91 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
+    if job_group is not None and no_job_group:
+        raise click.UsageError(
+            '--job-group and --no-job-group are mutually exclusive.')
+    job_group_arg: Union[int, str, None, Any] = managed_jobs.AUTO_JOB_GROUP
+    if no_job_group:
+        job_group_arg = None
+    elif job_group is not None:
+        job_group_arg = int(job_group) if job_group.isdigit() else job_group
+
     request_id = managed_jobs.launch(dag,
                                      name,
                                      pool,
                                      num_jobs,
+                                     job_group=job_group_arg,
+                                     depends_on=depends_on_ids,
                                      _need_confirmation=not yes)
+    _report_jobs_launch_result(request_id,
+                               async_call=async_call,
+                               output_format=output_format,
+                               detach_run=detach_run,
+                               pool_name=pool)
+
+
+def _jobs_restart(job: str, *, entrypoint: Tuple[str, ...], name: Optional[str],
+                  workdir: Optional[str], git_url: Optional[str],
+                  git_ref: Optional[str], num_jobs: Optional[int],
+                  job_group: Optional[str], no_job_group: bool,
+                  depends_on_ids: Optional[List[int]],
+                  override_params: Dict[str, Any], job_recovery: Optional[str],
+                  env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
+                  num_nodes: Optional[int], pool_name: Optional[str], yes: bool,
+                  detach_run: bool, async_call: bool,
+                  output_format: Optional[str]) -> None:
+    """Handles `sky jobs launch --restart JOB`."""
+    if entrypoint:
+        raise click.UsageError(
+            '--restart takes no ENTRYPOINT: it runs the stored spec of the '
+            'job. Override fields with flags such as --gpus or --env.')
+    # These change where the code comes from or how the job is attached; the
+    # restarted job keeps the original's code and is a top-level job.
+    incompatible = {
+        '--workdir': workdir is not None,
+        '--git-url': git_url is not None,
+        '--git-ref': git_ref is not None,
+        '--num-jobs': num_jobs is not None,
+        '--job-group': job_group is not None,
+        '--no-job-group': no_job_group,
+        '--depends-on': bool(depends_on_ids),
+    }
+    used = [flag for flag, is_set in incompatible.items() if is_set]
+    if used:
+        raise click.UsageError(
+            f'--restart cannot be used with {", ".join(used)}.')
+    if name is not None:
+        common_utils.check_cluster_name_is_valid(name)
+    if job_recovery is not None:
+        override_params['job_recovery'] = job_recovery
+
+    if not yes:
+        click.confirm(
+            f'Launching managed job {job!r} again as a new job. '
+            'Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
+    request_id = managed_jobs.restart(job,
+                                      name=name,
+                                      pool=pool_name,
+                                      resources_override=override_params or
+                                      None,
+                                      env_overrides=env or None,
+                                      secrets_overrides=secret or None,
+                                      num_nodes=num_nodes)
+    _report_jobs_launch_result(request_id,
+                               async_call=async_call,
+                               output_format=output_format,
+                               detach_run=detach_run,
+                               pool_name=pool_name)
+
+
+def _report_jobs_launch_result(request_id: server_common.RequestId, *,
+                               async_call: bool, output_format: Optional[str],
+                               detach_run: bool,
+                               pool_name: Optional[str]) -> None:
+    """Waits for a jobs launch request and reports or tails the new job(s)."""
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
@@ -5935,6 +6616,13 @@ def jobs_launch(
 
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
+    if output_format is not None:
+        output = click.get_current_context().meta[_JOB_IDS_OUTPUT_KEY]
+        if output_format == 'json':
+            output.write(json.dumps({'job_ids': job_ids}) + '\n')
+        else:
+            output.write(''.join(f'{job_id}\n' for job_id in job_ids))
+        return
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
@@ -5961,11 +6649,11 @@ def jobs_launch(
         job_ids_str = managed_job_utils.format_job_ids_as_ranges(job_ids)
         dashboard_hint = ''
         if not server_common.is_api_server_local():
-            if pool is not None:
+            if pool_name is not None:
                 query = urllib.parse.urlencode({
                     'property': 'pool',
                     'operator': ':',
-                    'value': pool,
+                    'value': pool_name,
                 })
                 starting_page = f'jobs?{query}'
                 show_jobs_label = 'Show all jobs in the pool:'
@@ -5977,10 +6665,10 @@ def jobs_launch(
             dashboard_hint = (f'\n{ux_utils.INDENT_SYMBOL}{show_jobs_label}'
                               f'\t\t{ux_utils.BOLD}{dashboard_url}'
                               f'{ux_utils.RESET_BOLD}')
-        if pool is not None:
+        if pool_name is not None:
             cancel_hint = (
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool_name}'
                 f'{ux_utils.RESET_BOLD}')
         else:
             cancel_hint = (
@@ -6118,6 +6806,20 @@ def _parse_datetime_to_epoch(value: str) -> float:
     required=False,
     help=('Show only jobs submitted at or before this absolute local time '
           '(e.g. "2026-01-13" or "2026-01-13 15:30:00").'))
+@click.option(
+    '--infra',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'Show only jobs running on this infrastructure. '
+        'Format: cloud, cloud/region, cloud/region/zone, '
+        'k8s/context-name, or ssh/node-pool-name. '
+        'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
+        # TODO(zhwu): we have to use `\*` to make sure the docs build
+        # not complaining about the `*`, but this will cause `--help`
+        # to show `\*` instead of `*`.
+        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'))
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -6130,6 +6832,7 @@ def jobs_queue(verbose: bool,
                since: Optional[str],
                after: Optional[str],
                before: Optional[str],
+               infra: Optional[str],
                all_users: bool,
                all: bool,
                limit: int,
@@ -6217,6 +6920,12 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue --after 2026-01-01 --before 2026-01-31
 
+    (Tip) To show only jobs on one infrastructure, use ``--infra``:
+
+    .. code-block:: bash
+
+      sky jobs queue --infra k8s/my-context
+
     """
     status_filter = [status for group in statuses for status in group]
     # TODO(kevin): remove in 0.15.0, along with _SKIP_FINISHED_SENTINEL and the
@@ -6277,7 +6986,8 @@ def jobs_queue(verbose: bool,
                 fields=fields,
                 statuses=status_filter,
                 submitted_after=submitted_after,
-                submitted_before=submitted_before)
+                submitted_before=submitted_before,
+                infra_match=infra)
 
         def get_pool_status():
             try:
@@ -6343,6 +7053,14 @@ def jobs_queue(verbose: bool,
               type=str,
               help='Pool name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@click.option('--task',
+              'task',
+              default=None,
+              type=str,
+              required=False,
+              help=('Cancel one dynamic task of the job (a job launched from '
+                    'inside it), by the index shown in `sky jobs queue` or '
+                    'by name. A declared task cannot be cancelled alone.'))
 @_add_click_options(flags.GRACEFUL_OPTIONS)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
@@ -6352,7 +7070,8 @@ def jobs_queue(verbose: bool,
 def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
-    job_ids: Tuple[int],
+    job_ids: Tuple[int, ...],
+    task: Optional[str],
     graceful: bool,
     graceful_timeout: Optional[int],
     all: bool,
@@ -6376,8 +7095,19 @@ def jobs_cancel(
       \b
       # Cancel all managed jobs in pool 'my-pool'
       $ sky jobs cancel -p my-pool
+      \b
+      # Cancel only task 2 of job group 39 (a job launched from inside it)
+      $ sky jobs cancel 39 --task 2
     """
     job_id_str = ','.join(map(str, job_ids))
+    task_arg: Optional[Union[str, int]] = None
+    if task is not None:
+        if len(job_ids) != 1 or name is not None or pool is not None or (
+                all or all_users):
+            raise click.UsageError(
+                '--task takes exactly one JOB_ID and no --name, --pool, '
+                '--all or --all-users.')
+        task_arg = int(task) if task.isdigit() else task
     if sum([
             bool(job_ids), name is not None, pool is not None, all or all_users
     ]) != 1:
@@ -6391,11 +7121,49 @@ def jobs_cancel(
             'Can only specify one of JOB_IDS, --name, --pool, or '
             f'--all/--all-users. Provided {" ".join(arguments)!r}.')
 
-    if not yes:
+    if not yes and (all or all_users):
+        # List what -a/-u reach, then cancel exactly those ids, so a job
+        # submitted while the prompt is open is not cancelled unseen.
+        target_workspace = _bulk_workspace()
+        request_id, queue_result_version = cli_utils.get_managed_job_queue(
+            refresh=False,
+            skip_finished=True,
+            all_users=all_users,
+            limit=None,
+            fields=[
+                'job_id', 'job_name', 'user_name', 'user_hash', 'workspace'
+            ])
+        queue_result = sdk.stream_and_get(request_id)
+        job_records: List[responses.ManagedJobRecord]
+        if queue_result_version.v2():
+            job_records = queue_result[0]
+        else:
+            job_records = typing.cast(List[responses.ManagedJobRecord],
+                                      queue_result)
+        # One row per task: keep one per job.
+        jobs_by_id: Dict[int, responses.ManagedJobRecord] = {}
+        _note_other_workspaces('managed job',
+                               job_records,
+                               target_workspace,
+                               name_key='job_id')
+        for job in _in_workspace(job_records, target_workspace):
+            jobs_by_id.setdefault(job['job_id'], job)
+        if not jobs_by_id:
+            click.echo('No job to cancel.')
+            return
+        _confirm_bulk('Cancelling',
+                      'managed job',
+                      list(jobs_by_id.values()),
+                      target_workspace,
+                      name_key='job_id')
+        job_ids, all, all_users = tuple(jobs_by_id), False, False
+    elif not yes:
         plural = 's' if len(job_ids) > 1 else ''
         job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else f'{name!r}' if name is not None else
                             f'managed jobs in pool {pool!r}')
+        if task_arg is not None:
+            job_identity_str = f'task {task_arg} of managed job {job_id_str}'
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
         elif all:
@@ -6411,6 +7179,7 @@ def jobs_cancel(
                             pool=pool,
                             graceful=graceful,
                             graceful_timeout=graceful_timeout,
+                            task=task_arg,
                             all=all,
                             all_users=all_users))
 
@@ -6458,7 +7227,9 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     """Tail or sync down the log of a managed job.
 
     TASK can be a task ID (integer) or task name. Numeric values are treated
-    as task IDs. If not specified, logs for all tasks are shown.
+    as task IDs. If not specified, logs for all tasks are shown. A job
+    launched from inside a job group (a dynamic task) is addressed like the
+    group's declared tasks, by the index shown in `sky jobs queue` or by name.
 
 
     Examples:
@@ -6474,6 +7245,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     \b
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
+
+    \b
+    # View logs for the job launched from inside job group 39 shown as task 2
+    sky jobs logs 39 2
     """
     # tail == -1: user didn't pass --tail. With --sync-down that
     # means "fetch the whole file" (preserves pre-default-flip
@@ -6821,13 +7596,29 @@ def jobs_pool_down(
         pool_jobs = [job for job in jobs_list if _should_include_job(job)]
         return pool_jobs
 
+    already_confirmed = False
+    if all or any('*' in name for name in pool_names):
+        target_workspace = _bulk_workspace()
+        targets = _service_down_targets(list(pool_names),
+                                        all,
+                                        is_pool=True,
+                                        workspace_id=target_workspace)
+        if targets is not None:
+            # Tear down exactly the pools listed, whatever the server would
+            # expand -a or the patterns to.
+            pool_names, all = _down_names(targets, pool_names), False
+            if not pool_names:
+                click.echo('No pool to terminate.')
+                return
+            if not yes and targets:
+                _confirm_bulk('Terminating', 'pool', targets, target_workspace)
+                already_confirmed = True
+
     quoted_pool_names = [f'{name!r}' for name in pool_names]
     list_pool_str = ', '.join(quoted_pool_names)
     pool_identity_str = f'pool(s) {list_pool_str}'
     if all:
         pool_identity_str = 'all pools'
-
-    already_confirmed = False
     try:
         pool_jobs = _get_nonterminal_jobs(pool_names, all)
         if pool_jobs:
@@ -6880,6 +7671,8 @@ def jobs_pool_down(
                         f'anyway.{colorama.Style.RESET_ALL}')
                 else:
                     click.echo('All jobs cancelled.')
+    except click.Abort:
+        raise
     except Exception as e:  # pylint: disable=broad-except
         # If API call fails, log warning but continue with pool down
         logger.warning(
@@ -7496,6 +8289,12 @@ def serve_update(
 @serve.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
+@click.option('--all',
+              '-a',
+              'show_all',
+              is_flag=True,
+              default=False,
+              help='Show all replicas.')
 @click.option('--endpoint',
               default=False,
               is_flag=True,
@@ -7504,7 +8303,8 @@ def serve_update(
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
+def serve_status(verbose: bool, endpoint: bool, service_names: List[str],
+                 show_all: bool):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
@@ -7595,6 +8395,9 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
       \b
       # Only show status of my-service
       sky serve status my-service
+      \b
+      # Show all replicas of my-service
+      sky serve status my-service --all
     """
     service_names_to_query: Optional[List[str]] = service_names
     if not service_names:
@@ -7604,7 +8407,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
         service_status_request_id = serve_lib.status(service_names_to_query)
         _, msg = _handle_services_request(service_status_request_id,
                                           service_names=service_names_to_query,
-                                          show_all=verbose,
+                                          show_all=verbose or show_all,
                                           show_endpoint=endpoint,
                                           is_called_by_user=True)
 
@@ -7699,15 +8502,33 @@ def serve_down(
                 abort=True,
                 show_default=True)
         else:
-            quoted_service_names = [f'{name!r}' for name in service_names]
-            list_service_str = ', '.join(quoted_service_names)
-            service_identity_str = f'service(s) {list_service_str}'
-            if all:
-                service_identity_str = 'all services'
-            click.confirm(f'Terminating {service_identity_str}. Proceed?',
-                          default=True,
-                          abort=True,
-                          show_default=True)
+            targets = None
+            if all or any('*' in name for name in service_names):
+                target_workspace = _bulk_workspace()
+                targets = _service_down_targets(list(service_names),
+                                                all,
+                                                is_pool=False,
+                                                workspace_id=target_workspace)
+            if targets is not None:
+                # Tear down exactly the services listed, whatever the server
+                # would expand -a or the patterns to.
+                service_names, all = _down_names(targets, service_names), False
+                if not service_names:
+                    click.echo('No service to terminate.')
+                    return
+            if targets:
+                _confirm_bulk('Terminating', 'service', targets,
+                              target_workspace)
+            else:
+                quoted_service_names = [f'{name!r}' for name in service_names]
+                list_service_str = ', '.join(quoted_service_names)
+                service_identity_str = f'service(s) {list_service_str}'
+                if all:
+                    service_identity_str = 'all services'
+                click.confirm(f'Terminating {service_identity_str}. Proceed?',
+                              default=True,
+                              abort=True,
+                              show_default=True)
 
     if replica_id_is_defined:
         assert replica_id is not None
@@ -7985,18 +8806,47 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
-@flags.all_users_option('Cancel all requests from all users.')
+@flags.all_users_option('Cancel all requests from all users. On a server with '
+                        'per-user auth, a non-admin cancels only their own.')
 @flags.yes_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
                yes: bool):
-    """Cancel a request running on SkyPilot API server."""
+    """Cancel a request running on SkyPilot API server.
+
+    A request named by ID is cancelled whoever owns it, if you are allowed
+    to: on a server with per-user auth, an admin can cancel any request and
+    other users only their own.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Cancel specific requests.
+      sky api cancel 0d35ffa7 a9d59602
+      \b
+      # Cancel all your requests.
+      sky api cancel --all
+      \b
+      # Cancel all requests from all users.
+      sky api cancel --all-users
+
+    """
+    if request_ids and (all or all_users):
+        flag = '--all-users' if all_users else '--all'
+        raise click.UsageError(
+            f'Can only specify one of REQUEST_IDS or --all/--all-users. '
+            f'Provided REQUEST_IDS and {flag!r}.')
     if all or all_users:
         if not yes:
-            keyword = 'ALL USERS\'' if all_users else 'YOUR'
+            if all_users:
+                scope = ('all requests from ALL USERS (only your own if you '
+                         'are not an admin on a server with per-user auth)')
+            else:
+                scope = 'all YOUR requests'
             user_input = click.prompt(
-                f'This will cancel all {keyword} requests.\n'
+                f'This will cancel {scope}.\n'
                 f'To proceed, please type {colorama.Style.BRIGHT}'
                 f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
                 type=str)
@@ -8207,7 +9057,10 @@ def api_info(output_format: str):
                        'server: sky api start')
         else:
             click.echo(
-                f'Could not connect to SkyPilot API server at {url}\n'
+                'Could not connect to SkyPilot API server at '
+                f'{server_common.redact_url_password(url)}\n'
+                # The hint below is meant to be copy-pasted, so it keeps the
+                # real URL -- redacting it would hand the user a broken command.
                 f'{ux_utils.INDENT_SYMBOL}To re-login to the API server: '
                 f'sky api login --relogin -e {url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}To logout the server: '
@@ -8256,7 +9109,8 @@ def api_info(output_format: str):
             location = f'Endpoint set via {config_path}'
     else:
         location = 'Endpoint set to default local API server.'
-    click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
+    click.echo(f'Using SkyPilot API server and dashboard: '
+               f'{server_common.redact_url_password(url)}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'
@@ -8337,14 +9191,22 @@ def workspace_info(output_format: str):
         click.echo(json.dumps(info, indent=2))
         return
 
-    workspace_str = (f'{info["workspace"]!r}'
+    # The server answers with workspace ids; `names` maps them to names
+    # (absent from older servers).
+    names = info.get('names') or {}
+    workspace_str = (f'{names.get(info["workspace"], info["workspace"])!r}'
                      if info.get('workspace') is not None else '(none)')
     source_str = info.get('source') or '-'
     preferred = info.get('preferred')
-    preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
-    accessible = info.get('accessible') or []
-    accessible_str = (', '.join(
-        repr(w) for w in accessible) if accessible else '(none)')
+    preferred_str = (f'{names.get(preferred, preferred)!r}'
+                     if preferred is not None else '(not set)')
+    # `accessible` is the writable set (where a launch can land);
+    # `read_only` is listed separately.
+    writable = info.get('accessible') or []
+    read_only = info.get('read_only') or []
+    writable_str = ', '.join(
+        repr(names.get(w, w)) for w in writable) if writable else '(none)'
+    read_only_str = ', '.join(repr(names.get(w, w)) for w in read_only)
     note = info.get('note')
     lines = [
         f'Workspace: {workspace_str}',
@@ -8352,10 +9214,14 @@ def workspace_info(output_format: str):
     ]
     if note:
         lines.append(f'{ux_utils.INDENT_SYMBOL}Note: {note}')
-    lines.extend([
-        f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}',
-        f'{ux_utils.INDENT_LAST_SYMBOL}Accessible: {accessible_str}',
-    ])
+    lines.append(f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}')
+    if read_only:
+        lines.extend([
+            f'{ux_utils.INDENT_SYMBOL}Writable: {writable_str}',
+            f'{ux_utils.INDENT_LAST_SYMBOL}Read-only: {read_only_str}',
+        ])
+    else:
+        lines.append(f'{ux_utils.INDENT_LAST_SYMBOL}Writable: {writable_str}')
     click.echo('\n'.join(lines))
 
     # AMBIGUOUS is the only state whose recovery message is multi-line

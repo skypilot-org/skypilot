@@ -9,6 +9,7 @@ import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
+import { LinkifiedText } from '@/components/elements/LinkifiedText';
 import Link from 'next/link';
 import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
@@ -20,13 +21,8 @@ import {
   streamClusterJobLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
-import {
-  RotateCwIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  CheckIcon,
-} from 'lucide-react';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
+import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import {
   CustomTooltip as Tooltip,
@@ -50,12 +46,12 @@ import {
 } from '@/components/elements/modals';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
-import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
+import { EntrypointAndYaml } from '@/components/elements/EntrypointYaml';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
+import { isController } from '@/data/utils';
 import { trackClusterAction } from '@/lib/analytics';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import {
@@ -90,6 +86,15 @@ function ClusterDetails() {
     refreshData,
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
+
+  // Per-workspace writability, so Connect/VSCode are disabled here for a
+  // cluster in a workspace the user can only read — matching the clusters
+  // list, which gates the same actions per row. Missing entry -> treated as
+  // writable (open/default workspace).
+  const { isWorkspaceWritable } = useWorkspacesConfig();
+  const isClusterWorkspaceWritable = isWorkspaceWritable(
+    clusterData?.workspace
+  );
 
   // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
@@ -187,13 +192,13 @@ function ClusterDetails() {
       <>
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
-            <Link href="/clusters" className="text-sky-blue hover:underline">
+            <Link href="/clusters" className="text-brand hover:underline">
               Sky Clusters
             </Link>
-            <span className="mx-2 text-gray-500">›</span>
+            <span className="mx-2 text-content-tertiary">›</span>
             <Link
               href={`/clusters/${cluster}`}
-              className="text-sky-blue hover:underline"
+              className="text-brand hover:underline"
             >
               {cluster}
             </Link>
@@ -204,7 +209,7 @@ function ClusterDetails() {
               {(clusterDetailsLoading || isRefreshing) && (
                 <div className="flex items-center mr-4">
                   <CircularProgress size={15} className="mt-0" />
-                  <span className="ml-2 text-gray-500">Loading...</span>
+                  <span className="ml-2 text-content-tertiary">Loading...</span>
                 </div>
               )}
               {clusterData && (
@@ -216,7 +221,7 @@ function ClusterDetails() {
                     <button
                       onClick={handleManualRefresh}
                       disabled={clusterDetailsLoading || isRefreshing}
-                      className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+                      className="text-brand hover:text-brand-bright font-medium inline-flex items-center"
                     >
                       <RotateCwIcon className="w-4 h-4 mr-1.5" />
                       {!isMobile && <span>Refresh</span>}
@@ -228,6 +233,7 @@ function ClusterDetails() {
                     status={clusterData.status}
                     onOpenSSHModal={handleConnectClick}
                     onOpenVSCodeModal={handleVSCodeClick}
+                    writable={isClusterWorkspaceWritable}
                   />
                 </div>
               )}
@@ -238,7 +244,9 @@ function ClusterDetails() {
         {(clusterDetailsLoading && isInitialLoad) || historyLoading ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">Loading cluster details...</span>
+            <span className="text-content-tertiary">
+              Loading cluster details...
+            </span>
           </div>
         ) : clusterData ? (
           <ActiveTab
@@ -266,7 +274,7 @@ function ClusterDetails() {
           />
         ) : (
           <div className="flex justify-center items-center py-12">
-            <span className="text-gray-500">
+            <span className="text-content-tertiary">
               Cluster not found in active clusters or history.
             </span>
           </div>
@@ -301,10 +309,6 @@ function ActiveTab({
   telemetryRefreshTrigger,
   isHistoricalCluster = false,
 }) {
-  const [isYamlExpanded, setIsYamlExpanded] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  const [isCommandCopied, setIsCommandCopied] = useState(false);
-
   // Links extracted from provision logs and the latest job's tail logs,
   // matched against built-in plus admin-configured `dashboard.external_links`.
   const [clusterExtractedLinks, setClusterExtractedLinks] = useState({});
@@ -358,39 +362,13 @@ function ActiveTab({
     LINK_SCOPE_CLUSTER
   );
 
-  const toggleYamlExpanded = () => {
-    setIsYamlExpanded(!isYamlExpanded);
-  };
-
-  const copyYamlToClipboard = async () => {
-    try {
-      const yamlContent =
-        clusterData.task_yaml || clusterData.last_creation_yaml;
-      const formattedYaml = formatYaml(yamlContent);
-      await navigator.clipboard.writeText(formattedYaml);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy YAML to clipboard:', err);
-    }
-  };
-
-  const copyCommandToClipboard = async () => {
-    try {
-      const command = clusterData.command || clusterData.last_creation_command;
-      await navigator.clipboard.writeText(command);
-      setIsCommandCopied(true);
-      setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy command to clipboard:', err);
-    }
-  };
-
-  const hasCreationArtifacts =
-    clusterData?.last_creation_command ||
-    clusterData?.last_creation_yaml ||
-    clusterData?.command ||
-    clusterData?.task_yaml;
+  // The YAML the cluster was launched with. Not shown for the controllers,
+  // whose YAML is generated rather than the user's.
+  const clusterName = clusterData?.cluster || clusterData?.name;
+  const creationYaml =
+    clusterName && isController(clusterName)
+      ? null
+      : clusterData?.task_yaml || clusterData?.last_creation_yaml;
 
   // Helper functions for historical clusters
   const formatDuration = (durationSeconds) => {
@@ -451,7 +429,7 @@ function ActiveTab({
           <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Status
                 </div>
                 <div className="text-base mt-1">
@@ -468,7 +446,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Cluster
                 </div>
                 <div className="text-base mt-1">
@@ -477,7 +455,7 @@ function ActiveTab({
                       content={`Name on ${clusterData.cloud || clusterData.infra?.split('(')[0]?.trim() || 'cloud'}: ${clusterData.cluster_name_on_cloud}`}
                       className="text-sm text-muted-foreground"
                     >
-                      <span className="border-b border-dotted border-gray-400 cursor-help">
+                      <span className="border-b border-dotted border-line-stronger cursor-help">
                         {clusterData.cluster || clusterData.name}
                       </span>
                     </NonCapitalizedTooltip>
@@ -487,7 +465,9 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">User</div>
+                <div className="text-content-secondary font-medium text-base">
+                  User
+                </div>
                 <div className="text-base mt-1">
                   <UserDisplay
                     username={clusterData.user}
@@ -496,42 +476,60 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
-                  {isHistoricalCluster ? 'Cloud' : 'Infra'}
+                <div className="text-content-secondary font-medium text-base">
+                  Infra
                 </div>
                 <div className="text-base mt-1">
-                  {isHistoricalCluster ? (
-                    clusterData.cloud || 'N/A'
-                  ) : clusterData.infra ? (
-                    <NonCapitalizedTooltip
-                      content={clusterData.full_infra || clusterData.infra}
-                      className="text-sm text-muted-foreground"
-                    >
-                      <span>
-                        <Link
-                          href="/infra"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {clusterData.cloud ||
-                            clusterData.infra.split('(')[0].trim()}
-                        </Link>
-                        {clusterData.infra.includes('(') && (
-                          <span>
-                            {' ' +
-                              clusterData.infra.substring(
-                                clusterData.infra.indexOf('(')
-                              )}
-                          </span>
-                        )}
-                      </span>
-                    </NonCapitalizedTooltip>
-                  ) : (
-                    'N/A'
-                  )}
+                  {(() => {
+                    // The default rendering, also handed to the plugin slot
+                    // as `defaultContent` so a plugin that only changes how
+                    // *some* clusters read can return it unchanged for the
+                    // rest. `fallback` keeps the no-plugin case identical.
+                    // Terminated (historical) clusters use the same Infra
+                    // rendering as live ones; the connector builds their
+                    // `infra` as `cloud (zone-or-region)` too.
+                    const infraContent = clusterData.infra ? (
+                      <NonCapitalizedTooltip
+                        content={clusterData.full_infra || clusterData.infra}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>
+                          <Link
+                            href="/infra"
+                            className="text-blue-fg hover:underline"
+                          >
+                            {clusterData.cloud ||
+                              clusterData.infra.split('(')[0].trim()}
+                          </Link>
+                          {clusterData.infra.includes('(') && (
+                            <span>
+                              {' ' +
+                                clusterData.infra.substring(
+                                  clusterData.infra.indexOf('(')
+                                )}
+                            </span>
+                          )}
+                        </span>
+                      </NonCapitalizedTooltip>
+                    ) : (
+                      'N/A'
+                    );
+                    return (
+                      <PluginSlot
+                        name="clusters.detail.infra"
+                        context={{
+                          cluster: clusterData,
+                          isHistorical: isHistoricalCluster,
+                          defaultContent: infraContent,
+                        }}
+                        fallback={infraContent}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Resources
                 </div>
                 <div className="text-base mt-1">
@@ -541,7 +539,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Started
                 </div>
                 <div className="text-base mt-1">
@@ -551,7 +549,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Last Event
                 </div>
                 <div className="text-base mt-1">
@@ -563,7 +561,7 @@ function ActiveTab({
                         content={clusterData.last_event || '-'}
                         className="text-sm text-muted-foreground"
                       >
-                        <span>{clusterData.last_event || '-'}</span>
+                        <LinkifiedText text={clusterData.last_event || '-'} />
                       </NonCapitalizedTooltip>
                     }
                   />
@@ -573,7 +571,7 @@ function ActiveTab({
               {isHistoricalCluster ? (
                 <>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Duration
                     </div>
                     <div className="text-base mt-1">
@@ -581,7 +579,7 @@ function ActiveTab({
                     </div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Cost
                     </div>
                     <div className="text-base mt-1">
@@ -591,7 +589,7 @@ function ActiveTab({
                 </>
               ) : (
                 <div>
-                  <div className="text-gray-600 font-medium text-base">
+                  <div className="text-content-secondary font-medium text-base">
                     Autostop
                   </div>
                   <div className="text-base mt-1">
@@ -609,7 +607,7 @@ function ActiveTab({
                   (e.g., W&B). Only renders once at least one link is known. */}
               {Object.keys(combinedClusterLinks).length > 0 && (
                 <div className="col-span-2">
-                  <div className="text-gray-600 font-medium text-base">
+                  <div className="text-content-secondary font-medium text-base">
                     External Links
                   </div>
                   <div className="text-base mt-1">
@@ -623,7 +621,7 @@ function ActiveTab({
                               href={normalizedUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                              className="text-blue-fg hover:text-blue-fg-stronger hover:underline"
                             >
                               {label}
                             </a>
@@ -650,106 +648,12 @@ function ActiveTab({
               )}
 
               {/* Created by section - spans both columns */}
-              {hasCreationArtifacts && (
-                <div className="col-span-2">
-                  {(clusterData.command ||
-                    clusterData.last_creation_command) && (
-                    <div className="flex items-center">
-                      <div className="text-gray-600 font-medium text-base">
-                        Entrypoint
-                      </div>
-                      {clusterData.command && (
-                        <Tooltip
-                          content={isCommandCopied ? 'Copied!' : 'Copy command'}
-                          className="text-muted-foreground"
-                        >
-                          <button
-                            onClick={copyCommandToClipboard}
-                            className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                          >
-                            {isCommandCopied ? (
-                              <CheckIcon className="w-4 h-4 text-green-600" />
-                            ) : (
-                              <CopyIcon className="w-4 h-4" />
-                            )}
-                          </button>
-                        </Tooltip>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-4 mt-3">
-                    {/* Creation Command */}
-                    {(clusterData.command ||
-                      clusterData.last_creation_command) && (
-                      <div>
-                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                          <code className="text-sm text-gray-800 font-mono break-all">
-                            {clusterData.command ||
-                              clusterData.last_creation_command}
-                          </code>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Task YAML - Collapsible */}
-                    {(clusterData.task_yaml ||
-                      clusterData.last_creation_yaml) &&
-                      clusterData.task_yaml !== '{}' &&
-                      clusterData.last_creation_yaml !== '{}' &&
-                      !(clusterData.cluster || clusterData.name)?.startsWith(
-                        'sky-jobs-controller-'
-                      ) &&
-                      !(clusterData.cluster || clusterData.name)?.startsWith(
-                        'sky-serve-controller-'
-                      ) && (
-                        <div>
-                          <div className="flex items-center mb-2">
-                            <button
-                              onClick={toggleYamlExpanded}
-                              className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                            >
-                              {isYamlExpanded ? (
-                                <ChevronDownIcon className="w-4 h-4 mr-1" />
-                              ) : (
-                                <ChevronRightIcon className="w-4 h-4 mr-1" />
-                              )}
-                              <span className="text-base">
-                                Show SkyPilot YAML
-                              </span>
-                            </button>
-
-                            <Tooltip
-                              content={isCopied ? 'Copied!' : 'Copy YAML'}
-                              className="text-muted-foreground"
-                            >
-                              <button
-                                onClick={copyYamlToClipboard}
-                                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                              >
-                                {isCopied ? (
-                                  <CheckIcon className="w-4 h-4 text-green-600" />
-                                ) : (
-                                  <CopyIcon className="w-4 h-4" />
-                                )}
-                              </button>
-                            </Tooltip>
-                          </div>
-
-                          {isYamlExpanded && (
-                            <YamlCodeBlock
-                              value={formatYaml(
-                                clusterData.task_yaml ||
-                                  clusterData.last_creation_yaml
-                              )}
-                              readOnly
-                            />
-                          )}
-                        </div>
-                      )}
-                  </div>
-                </div>
-              )}
+              <EntrypointAndYaml
+                entrypoint={
+                  clusterData.command || clusterData.last_creation_command
+                }
+                taskYaml={creationYaml}
+              />
             </div>
           </div>
         </div>
@@ -909,7 +813,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
         <div className="flex items-center">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+            className="flex items-center text-left focus:outline-none hover:text-content transition-colors duration-200"
           >
             {isExpanded ? (
               <ChevronDownIcon className="w-5 h-5 mr-2" />
@@ -942,7 +846,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
                   </SelectContent>
                 </Select>
               )}
-              <span className="ml-2 text-xs text-gray-500">
+              <span className="ml-2 text-xs text-content-tertiary">
                 (Logs are not streaming; click refresh to fetch the latest
                 logs.)
               </span>
@@ -955,7 +859,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
               <button
                 onClick={handleRefreshLogs}
                 disabled={isLoading}
-                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                className="text-brand hover:text-brand-bright flex items-center"
               >
                 <RotateCwIcon
                   className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
@@ -973,7 +877,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
               <span>Loading...</span>
             </div>
           ) : displayLines.length === 0 ? (
-            <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+            <div className="bg-surface-log flex items-center justify-center py-4 text-content-tertiary">
               <span>No provision logs available.</span>
             </div>
           ) : (

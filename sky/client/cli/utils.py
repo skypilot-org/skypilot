@@ -41,6 +41,7 @@ def get_managed_job_queue(
     statuses: Optional[List[str]] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    infra_match: Optional[str] = None,
 ) -> Tuple[server_common.RequestId[Union[List[responses.ManagedJobRecord],
                                          Tuple[List[responses.ManagedJobRecord],
                                                int, Dict[str, int], int]]],
@@ -61,6 +62,7 @@ def get_managed_job_queue(
             (seconds).
         submitted_before: Only show jobs submitted at or before this epoch
             time (seconds).
+        infra_match: Only show jobs on this infra, as an ``--infra`` spec.
 
     Returns:
         - the request ID of the queue request
@@ -75,13 +77,13 @@ def get_managed_job_queue(
         server_common.RequestId[Union[List[responses.ManagedJobRecord],
                                       Tuple[List[responses.ManagedJobRecord],
                                             int, Dict[str, int], int]]],
-        managed_jobs.queue_v2(
-            refresh,
-            skip_finished,
-            all_users,
-            job_ids,
-            limit,
-            fields,
-            statuses=statuses,
-            submitted_after=submitted_after,
-            submitted_before=submitted_before)), QueueResultVersion.V2
+        managed_jobs.queue_v2(refresh,
+                              skip_finished,
+                              all_users,
+                              job_ids,
+                              limit,
+                              fields,
+                              statuses=statuses,
+                              submitted_after=submitted_after,
+                              submitted_before=submitted_before,
+                              infra_match=infra_match)), QueueResultVersion.V2

@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 import urllib.parse
 
 import colorama
@@ -51,6 +51,92 @@ if typing.TYPE_CHECKING:
     import mypy_boto3_s3
 
 logger = sky_logging.init_logger(__name__)
+
+# Storage created before storage belonged to workspaces was placed in the
+# default workspace with no creator, so its owner may now be refused.
+_PREDATES_WORKSPACES_HINT = (
+    'It was created before storage belonged to workspaces; if it belongs to '
+    'your workspace, ask an admin to move it there.')
+
+
+def _predates_workspaces(record: Dict[str, Any]) -> bool:
+    return (record['user_hash'] is None and
+            record['workspace'] == constants.SKYPILOT_DEFAULT_WORKSPACE)
+
+
+def _get_accessible_handle(
+        storage_name: Optional[str],
+        for_controller: bool = False) -> Optional['Storage.StorageMetadata']:
+    """The handle of a sky-managed storage the caller may reuse by name.
+
+    Reuse by name syncs into the bucket and, with ``persistent: false``,
+    deletes it, so it needs write access to the storage's workspace, as
+    deletion does. Outside a request the code runs on a controller, pinned
+    to the workspace of its job or service (in consolidation mode too), and
+    reaches that workspace's storage only. ``for_controller`` holds a
+    request to that rule as well, for a storage the controller will tear
+    down: accepting it here would leave its bucket behind.
+
+    Raises:
+        exceptions.StorageWorkspaceError: If the storage is in a workspace
+            the caller cannot read, or the controller does not run for, or
+            (``for_controller``) that is not the active one.
+        exceptions.StorageReadOnlyError: If the storage is in a workspace
+            the caller can only read.
+    """
+    if storage_name is None:
+        return None
+    record = global_user_state.get_storage_by_name(storage_name)
+    if record is None:
+        return None
+    workspace = record['workspace']
+    active = skypilot_config.get_active_workspace()
+    hint = (f' {_PREDATES_WORKSPACES_HINT}'
+            if _predates_workspaces(record) else '')
+    if not common_utils.is_in_request_context():
+        if workspace == active:
+            return record['handle']
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.StorageWorkspaceError(
+                f'Storage {storage_name!r} not found in workspace '
+                f'{skypilot_config.get_workspace_name(active)!r}.{hint}')
+    # Imported here because of a circular import: sky.server.common imports
+    # sky.data (this module), and sky.workspaces.core reaches back to
+    # sky.server.common through sky.backends.backend_utils -> sky.jobs ->
+    # sky.client.common -> sky.schemas.api.responses.
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import core as workspaces_core
+    readable, writable = workspaces_core.get_workspace_access_sets()
+    if workspace in writable:
+        if for_controller and workspace != active:
+            workspace_name = skypilot_config.get_workspace_name(workspace)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageWorkspaceError(
+                    f'Storage {storage_name!r} is in workspace '
+                    f'{workspace_name!r}, not in the active workspace '
+                    f'{skypilot_config.get_workspace_name(active)!r}. A job '
+                    'or service tears its storage down from the workspace '
+                    'it is launched in, so launch it in workspace '
+                    f'{workspace_name!r} to use this storage.{hint}')
+        return record['handle']
+    if workspace in readable:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.StorageReadOnlyError(
+                f'Storage {storage_name!r} is in workspace '
+                f'{skypilot_config.get_workspace_name(workspace)!r}, which '
+                f'is read-only for you.{hint}')
+    if (not for_controller and
+            workspaces_core.get_readable_workspace_names() is None):
+        # An admin, and the workspace was removed from the config: the
+        # access sets cover configured workspaces only.
+        return record['handle']
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.StorageWorkspaceError(
+            f'Storage name {storage_name!r} is taken by a storage in a '
+            'workspace you cannot access.' +
+            (f'{hint} Otherwise, choose another name.'
+             if hint else ' Choose another name.'))
+
 
 StorageHandle = Any
 StorageStatus = status_lib.StorageStatus
@@ -760,7 +846,7 @@ class AbstractStore:
         if self.source is None:
             # Retrieve a handle associated with the storage name.
             # This handle links to sky managed storage if it exists.
-            handle = global_user_state.get_handle_from_storage_name(self.name)
+            handle = _get_accessible_handle(self.name)
             # If handle is None, it implies the bucket is created
             # externally and not managed by Skypilot. For mounting such
             # externally created buckets, users must provide the
@@ -968,6 +1054,12 @@ class Storage(object):
         self._bucket_sub_path = _bucket_sub_path
 
         self._constructed = False
+        # Whether the record under this name was loaded into this object, by
+        # ``construct`` or ``from_handle``; until then the record is not its.
+        self._record_loaded = False
+        # Store types of the loaded record whose buckets were deleted outside
+        # SkyPilot (not ones whose lookup failed for another reason).
+        self._gone_store_types: Set[StoreType] = set()
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
         # for managed jobs. Once sky storage supports forced management for
         # external buckets, this can be deprecated.
@@ -997,6 +1089,19 @@ class Storage(object):
                     'config.mount can only be specified when '
                     f'mode is {StorageMode.MOUNT.value}. '
                     f'Got mode={self.mode.value}.')
+        # _bucket_sub_path comes from the task YAML and ends up in shell
+        # commands that sync, mount and delete the bucket, so only allow a
+        # plain relative path. Stores strip leading/trailing slashes.
+        sub_path = (_bucket_sub_path.strip('/')
+                    if _bucket_sub_path is not None else '')
+        if sub_path and (not re.fullmatch(constants.SUB_PATH_PATTERN, sub_path)
+                         or '..' in sub_path.split('/')):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSpecError(
+                    f'Invalid _bucket_sub_path: {_bucket_sub_path!r}. Must be '
+                    'a relative path containing only alphanumeric characters, '
+                    'dots, slashes, underscores and hyphens, and must not '
+                    'contain directory traversal (..).')
 
     def resolve_mount_cached_config(self) -> Optional[MountCachedConfig]:
         """Resolve file_mount_type + overrides into a final MountCachedConfig.
@@ -1011,6 +1116,21 @@ class Storage(object):
             return merge_mount_cached_config(self.file_mount_type,
                                              self.mount_cached_config)
         return self.mount_cached_config
+
+    def check_accessible(self) -> None:
+        """Refuses a storage the caller may not reuse by name, before the
+        task reaches a controller. A controller constructs outside any
+        request what it tears down, the non-persistent mounts, and only in
+        its own workspace, so those are held to the active workspace here;
+        a persistent mount is constructed through a request as the owner.
+        The name of a storage given by a bucket URL is the bucket's, as
+        ``construct`` will set it. A name no storage has yet passes.
+        """
+        name = self.name
+        if (name is None and isinstance(self.source, str) and
+                data_utils.is_cloud_store_url(self.source)):
+            name, _ = self._name_from_source(self.source)
+        _get_accessible_handle(name, for_controller=not self.persistent)
 
     def construct(self):
         """Constructs the storage object.
@@ -1036,9 +1156,10 @@ class Storage(object):
         self._validate_storage_spec(self.name)
 
         # Logic to rebuild Storage if it is in global user state
-        handle = global_user_state.get_handle_from_storage_name(self.name)
+        handle = _get_accessible_handle(self.name)
         if handle is not None:
             self.handle = handle
+            self._record_loaded = True
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
@@ -1284,7 +1405,7 @@ class Storage(object):
                 # (e.g. used as scratch previously). Such storage objects can be
                 # mounted in copy mode even though they have no source in the
                 # yaml spec (the name is the source).
-                handle = global_user_state.get_handle_from_storage_name(name)
+                handle = _get_accessible_handle(name)
                 if handle is None:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageSourceError(
@@ -1314,23 +1435,9 @@ class Storage(object):
                 else:
                     assert isinstance(source, str)
                     # Set name to source bucket name and continue
-                    if data_utils.is_hf_path(source):
-                        if data_utils.is_hf_bucket_path(source):
-                            name, sub_path = data_utils.split_hf_path(source)
-                        else:
-                            repo_type, repo_id, _, sub_path = (
-                                data_utils.split_hf_repo_path(source))
-                            name = HuggingFaceStore.hf_id_from_repo_parts(
-                                repo_type, repo_id)
-                        if sub_path and self._bucket_sub_path is None:
-                            self._bucket_sub_path = sub_path
-                    elif source.startswith('cos://'):
-                        # cos url requires custom parsing
-                        name = data_utils.split_cos_path(source)[0]
-                    elif data_utils.is_az_container_endpoint(source):
-                        _, name, _ = data_utils.split_az_path(source)
-                    else:
-                        name = urllib.parse.urlsplit(source).netloc
+                    name, sub_path = self._name_from_source(source)
+                    if sub_path and self._bucket_sub_path is None:
+                        self._bucket_sub_path = sub_path
                     assert name is not None, source
                     self.name = name
                     return
@@ -1351,6 +1458,28 @@ class Storage(object):
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
+
+    @staticmethod
+    def _name_from_source(source: str) -> Tuple[str, Optional[str]]:
+        """The bucket (or repo) a cloud store URL names, and the sub path
+        under it that an ``hf://`` URL may give."""
+        sub_path = None
+        if data_utils.is_hf_path(source):
+            if data_utils.is_hf_bucket_path(source):
+                name, sub_path = data_utils.split_hf_path(source)
+            else:
+                repo_type, repo_id, _, sub_path = (
+                    data_utils.split_hf_repo_path(source))
+                name = HuggingFaceStore.hf_id_from_repo_parts(
+                    repo_type, repo_id)
+        elif source.startswith('cos://'):
+            # cos url requires custom parsing
+            name = data_utils.split_cos_path(source)[0]
+        elif data_utils.is_az_container_endpoint(source):
+            _, name, _ = data_utils.split_az_path(source)
+        else:
+            name = urllib.parse.urlsplit(source).netloc
+        return name, sub_path
 
     def _add_store_from_metadata(
             self, sky_stores: Dict[StoreType,
@@ -1448,6 +1577,7 @@ class Storage(object):
                     logger.debug(f'Storage object {self.name!r} was attempted '
                                  'to be reconstructed while the corresponding '
                                  'bucket was externally deleted.')
+                self._gone_store_types.add(s_type)
                 continue
             self._add_store(store, is_reconstructed=True)
 
@@ -1600,10 +1730,31 @@ class Storage(object):
             store_type: StoreType; Specific cloud store to remove from the list
               of backing stores.
         """
+        unbuilt = [t for t, s in self.stores.items() if s is None]
+        if any(t not in self._gone_store_types for t in unbuilt):
+            # A store type booked but never built: construction was refused,
+            # did not finish, or could not look the bucket up (e.g. a 403).
+            # The bucket may still exist; leave it and its record.
+            logger.warning('Could not look up or construct storage '
+                           f'{self.name!r}; leaving its bucket and record.')
+            return
+        # The rest are in the loaded record but their buckets are gone
+        # (deleted outside SkyPilot): nothing left to delete for them. Only
+        # a rebuild without sync_on_reconstruction (`sky storage delete`)
+        # gets here; a task's teardown re-creates the bucket first.
+        for t in unbuilt:
+            del self.stores[t]
         if not self.stores:
+            if not self._record_loaded:
+                # A record under this name, if any, belongs to a storage this
+                # object was refused, or never reached. Leave it.
+                logger.debug(f'Storage {self.name!r} has no stores of its '
+                             'own; nothing to delete.')
+                return
             logger.info('No backing stores found. Deleting storage.')
             assert self.name is not None
             global_user_state.remove_storage(self.name)
+            return
         if store_type is not None:
             assert self.name is not None
             store = self.stores[store_type]
@@ -1687,6 +1838,7 @@ class Storage(object):
                   source=handle.source,
                   sync_on_reconstruction=False)
         obj.handle = handle
+        obj._record_loaded = True
         obj._add_store_from_metadata(handle.sky_stores)
         return obj
 
@@ -2275,7 +2427,7 @@ class S3CompatibleStore(AbstractStore):
             # Build AWS CLI command with provider-specific configuration
             cmd_parts = ['aws s3 sync --no-follow-symlinks --exclude="*"']
             cmd_parts.append(f'{includes} {base_dir_path}')
-            cmd_parts.append(f's3://{self.name}{sub_path}')
+            cmd_parts.append(shlex.quote(f's3://{self.name}{sub_path}'))
 
             # Add provider-specific arguments
             if self.config.get_endpoint_url:
@@ -2327,7 +2479,8 @@ class S3CompatibleStore(AbstractStore):
 
             cmd_parts = ['aws s3 sync --no-follow-symlinks']
             cmd_parts.append(f'{excludes} {src_dir_path}')
-            cmd_parts.append(f's3://{self.name}{sub_path}/{dest_dir_name}')
+            cmd_parts.append(
+                shlex.quote(f's3://{self.name}{sub_path}/{dest_dir_name}'))
 
             if self.config.get_endpoint_url:
                 cmd_parts.append(
@@ -2521,7 +2674,8 @@ class S3CompatibleStore(AbstractStore):
 
     def _delete_bucket_sub_path(self, bucket_name: str, sub_path: str) -> bool:
         """Delete objects in the sub path from the bucket."""
-        cmd_parts = [f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive']
+        sub_path_url = shlex.quote(f's3://{bucket_name}/{sub_path}/')
+        cmd_parts = [f'aws s3 rm {sub_path_url} --recursive']
 
         if self.config.aws_profile:
             cmd_parts.append(f'--profile={self.config.aws_profile}')
@@ -2797,8 +2951,11 @@ class GcsStore(AbstractStore):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
         sub_path = (f'/{self._bucket_sub_path}'
                     if self._bucket_sub_path else '')
-        sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
-                        f'cp -e -n -r -I gs://{self.name}{sub_path}')
+        dest_url = shlex.quote(f'gs://{self.name}{sub_path}')
+        # copy_list holds client-controlled paths, so it is quoted as a single
+        # shell argument (the quoting keeps the embedded newlines).
+        sync_command = (f'{alias_gen}; echo {shlex.quote(copy_list)} | '
+                        f'{gsutil_alias} cp -e -n -r -I {dest_url}')
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
         sync_path = f'{source_message} -> gs://{self.name}{sub_path}/'
@@ -2837,24 +2994,34 @@ class GcsStore(AbstractStore):
                     if self._bucket_sub_path else '')
 
         def get_file_sync_command(base_dir_path, file_names):
+            # file_names are client-controlled (they are the names of the
+            # uploaded files), so the regex is built first and then quoted as a
+            # single shell argument.
             sync_format = '|'.join(file_names)
+            exclude_pattern = shlex.quote(f'^(?!{sync_format}$).*')
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             base_dir_path = shlex.quote(base_dir_path)
+            dest_url = shlex.quote(f'gs://{self.name}{sub_path}')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -x \'^(?!{sync_format}$).*\' '
-                            f'{base_dir_path} gs://{self.name}{sub_path}')
+                            f'rsync -e -x {exclude_pattern} '
+                            f'{base_dir_path} {dest_url}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             excluded_list = storage_utils.get_excluded_files(src_dir_path)
             # we exclude .git directory from the sync
             excluded_list.append(r'^\.git/.*$')
+            # excluded_list is derived from client-controlled file names, so the
+            # regex is built first and then quoted as a single shell argument.
             excludes = '|'.join(excluded_list)
+            exclude_pattern = shlex.quote(f'({excludes})')
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             src_dir_path = shlex.quote(src_dir_path)
+            dest_url = shlex.quote(
+                f'gs://{self.name}{sub_path}/{dest_dir_name}')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
-                            f'gs://{self.name}{sub_path}/{dest_dir_name}')
+                            f'rsync -e -r -x {exclude_pattern} {src_dir_path} '
+                            f'{dest_url}')
             return sync_command
 
         # Generate message for upload
@@ -3065,9 +3232,9 @@ class GcsStore(AbstractStore):
                 return False
             try:
                 gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-                remove_obj_command = (
-                    f'{alias_gen};{gsutil_alias} '
-                    f'rm -r gs://{bucket_name}{command_suffix}')
+                remove_url = shlex.quote(f'gs://{bucket_name}{command_suffix}')
+                remove_obj_command = (f'{alias_gen};{gsutil_alias} '
+                                      f'rm -r {remove_url}')
                 subprocess.check_output(remove_obj_command,
                                         stderr=subprocess.STDOUT,
                                         shell=True,
@@ -3687,11 +3854,12 @@ class AzureBlobStore(AbstractStore):
                           if self._bucket_sub_path else self.container_name)
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
-            # shlex.quote is not used for file_names as 'az storage blob sync'
-            # already handles file names with empty spaces when used with
-            # '--include-pattern' option.
+            # file_names are client-controlled, so the ';'-joined pattern is
+            # built first and then quoted as a single shell argument. 'az
+            # storage blob sync' still receives the literal pattern (including
+            # any spaces) via '--include-pattern'.
             includes_list = ';'.join(file_names)
-            includes = f'--include-pattern "{includes_list}"'
+            includes = f'--include-pattern {shlex.quote(includes_list)}'
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
@@ -3699,28 +3867,32 @@ class AzureBlobStore(AbstractStore):
                             f'{includes} '
                             '--delete-destination false '
                             f'--source {base_dir_path} '
-                            f'--container {container_path}')
+                            f'--container {shlex.quote(container_path)}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/')
+            # excluded_list is derived from client-controlled file names, so the
+            # ';'-joined pattern is built first and then quoted as a single
+            # shell argument.
             excludes_list = ';'.join(
                 [file_name.rstrip('*') for file_name in excluded_list])
-            excludes = f'--exclude-path "{excludes_list}"'
+            excludes = f'--exclude-path {shlex.quote(excludes_list)}'
             src_dir_path = shlex.quote(src_dir_path)
             if dest_dir_name:
                 dest_dir_name = f'/{dest_dir_name}'
             else:
                 dest_dir_name = ''
+            dest_container = shlex.quote(f'{container_path}{dest_dir_name}')
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
                             f'{excludes} '
                             '--delete-destination false '
                             f'--source {src_dir_path} '
-                            f'--container {container_path}{dest_dir_name}')
+                            f'--container {dest_container}')
             return sync_command
 
         # Generate message for upload
@@ -4213,10 +4385,10 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
+            dest_path = shlex.quote(f'{self.rclone_profile_name}:{self.name}'
+                                    f'{sub_path}/{dest_dir_name}')
             sync_command = ('rclone copy --exclude ".git/*" '
-                            f'{src_dir_path} '
-                            f'{self.rclone_profile_name}:{self.name}{sub_path}'
-                            f'/{dest_dir_name}')
+                            f'{src_dir_path} {dest_path}')
             return sync_command
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
@@ -4242,9 +4414,10 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
+            dest_path = shlex.quote(
+                f'{self.rclone_profile_name}:{self.name}{sub_path}')
             sync_command = ('rclone copy '
-                            f'{includes} {base_dir_path} '
-                            f'{self.rclone_profile_name}:{self.name}{sub_path}')
+                            f'{includes} {base_dir_path} {dest_path}')
             return sync_command
 
         # Generate message for upload
@@ -4664,15 +4837,21 @@ class OciStore(AbstractStore):
 
         @oci.with_oci_env
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            # file_names are client-controlled, so each is quoted as a single
+            # shell argument.
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             prefix_arg = ''
             if sub_path:
-                prefix_arg = f'--object-prefix "{sub_path.strip("/")}"'
+                prefix_arg = ('--object-prefix '
+                              f'{shlex.quote(sub_path.strip("/"))}')
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--region {self.region} --src-dir "{base_dir_path}" '
+                f'--region {self.region} '
+                f'--src-dir {shlex.quote(base_dir_path)} '
                 f'{prefix_arg} '
                 f'{includes}')
 
@@ -4690,13 +4869,14 @@ class OciStore(AbstractStore):
                 for file_name in excluded_list
             ])
 
+            object_prefix = shlex.quote(f'{sub_path}{dest_dir_name}')
             # we exclude .git directory from the sync
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--region {self.region} '
-                f'--object-prefix "{sub_path}{dest_dir_name}" '
-                f'--src-dir "{src_dir_path}" {excludes}')
+                f'--object-prefix {object_prefix} '
+                f'--src-dir {shlex.quote(src_dir_path)} {excludes}')
 
             return sync_command
 

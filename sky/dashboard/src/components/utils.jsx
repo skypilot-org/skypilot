@@ -161,6 +161,8 @@ export function formatDate(date) {
 const DEFAULT_TOOLTIP_PROPS = {
   placement: 'bottom',
   color: 'default',
+  // The enter animation ends with a one-frame opacity blink.
+  disableAnimation: true,
 };
 
 export const CustomTooltip = ({ children, ...props }) => {
@@ -171,7 +173,7 @@ export const CustomTooltip = ({ children, ...props }) => {
       {...DEFAULT_TOOLTIP_PROPS}
       {...props}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm capitalize rounded">
+        <span className="left-full w-max px-2 py-1 text-sm bg-tooltip text-tooltip-foreground capitalize rounded">
           {content}
         </span>
       }
@@ -191,7 +193,7 @@ export const NonCapitalizedTooltip = ({ children, ...props }) => {
       {...DEFAULT_TOOLTIP_PROPS}
       {...restProps}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 rounded whitespace-pre-line normal-case">
+        <span className="left-full w-max px-2 py-1 text-sm bg-tooltip text-tooltip-foreground rounded whitespace-pre-line normal-case">
           {content}
         </span>
       }
@@ -255,7 +257,7 @@ export const LastUpdatedTimestamp = ({ timestamp, className = '' }) => {
       content={`Last updated: ${formatDateTime(timestamp)}`}
       className="text-sm text-muted-foreground"
     >
-      <span className={`text-xs text-gray-500 ${className}`}>
+      <span className={`text-xs text-content-tertiary ${className}`}>
         Updated {relativeText}
       </span>
     </NonCapitalizedTooltip>
@@ -288,6 +290,13 @@ export function formatAutostop(autostop, toDown) {
 
   return autostopStr;
 }
+
+// Sizes come from the API as a number of GiB.
+export const formatSize = (size) => {
+  if (size == null) return '-';
+  if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
+  return `${size}Gi`;
+};
 
 // Format duration from seconds to a readable format
 export function formatDuration(durationInSeconds) {
@@ -349,7 +358,7 @@ export function formatLogs(str) {
 
 export const logStyles = `
   .logs-container {
-    background-color: #f7f7f7;
+    background-color: hsl(var(--surface-log));
     padding: 16px;
     max-height: calc(100vh - 300px);
     overflow-y: auto;
@@ -374,46 +383,46 @@ export const logStyles = `
   }
 
   .log-line.INFO .level {
-    color: #2563eb;
+    color: hsl(var(--blue-fg));
   }
 
   .log-line.WARNING .level {
-    color: #d97706;
+    color: hsl(var(--amber-fg));
   }
 
   .log-line.ERROR .level {
-    color: #dc2626;
+    color: hsl(var(--red-fg));
   }
 
   .log-line.DEBUG .level {
-    color: #6b7280;
+    color: hsl(var(--content-tertiary));
   }
 
   .log-line .timestamp {
-    color: #059669;
+    color: hsl(var(--emerald-fg));
     margin-right: 1ch;
     white-space: nowrap;
   }
 
   .log-line .location {
-    color: #6366f1;
+    color: hsl(var(--indigo-fg-soft));
     margin-right: 1ch;
     white-space: nowrap;
   }
 
   .log-line .message {
-    color: #111827;
+    color: hsl(var(--content-strong));
     word-break: break-word;
     white-space: pre-wrap;
   }
 
   .log-line .log-prefix {
-    color: #6366f1;
+    color: hsl(var(--indigo-fg-soft));
     font-weight: 500;
   }
 
   .log-line .log-rest {
-    color: #111827;
+    color: hsl(var(--content-strong));
     word-break: break-word;
     white-space: pre-wrap;
   }
@@ -487,11 +496,11 @@ export function LogFilter({
     <div>
       <style nonce={getNonce()}>{logStyles}</style>
       <div
-        className="logs-container whitespace-pre-wrap break-all font-mono text-sm text-gray-900"
+        className="logs-container whitespace-pre-wrap break-all font-mono text-sm text-content-strong"
         aria-label="job-logs"
       >
         {isLoading ? (
-          <div className="flex items-center justify-center py-8 text-gray-500">
+          <div className="flex items-center justify-center py-8 text-content-tertiary">
             <svg
               className="animate-spin h-5 w-5 mr-2"
               xmlns="http://www.w3.org/2000/svg"
@@ -557,7 +566,7 @@ export function TimestampWithTooltip({ date }) {
       content={fullLocalTimestamp}
       className="text-sm text-muted-foreground"
     >
-      <span className="border-b border-dotted border-gray-400 cursor-help">
+      <span className="border-b border-dotted border-line-stronger cursor-help">
         {displayText}
       </span>
     </CustomTooltip>
@@ -682,7 +691,7 @@ export const JobStatusBadges = ({ jobCounts, getStatusStyle }) => {
             className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${style}`}
           >
             <span>{status}</span>
-            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+            <span className="text-xs bg-surface/50 px-1.5 py-0.5 rounded">
               {count}
             </span>
           </span>
@@ -696,7 +705,7 @@ export const InfraBadges = ({ replicaInfo }) => {
   const infraCounts = getInfraSummary(replicaInfo);
 
   if (Object.keys(infraCounts).length === 0) {
-    return <span className="text-gray-500 text-sm">-</span>;
+    return <span className="text-content-tertiary text-sm">-</span>;
   }
 
   const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
@@ -735,7 +744,7 @@ export const InfraBadges = ({ replicaInfo }) => {
         return (
           <span
             key={cloudWithRegion}
-            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
+            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-tint text-blue-fg-strong"
           >
             {shouldTruncate ? (
               <NonCapitalizedTooltip
@@ -747,7 +756,7 @@ export const InfraBadges = ({ replicaInfo }) => {
             ) : (
               <span>{cloudWithRegion}</span>
             )}
-            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+            <span className="text-xs bg-surface/50 px-1.5 py-0.5 rounded">
               {count}
             </span>
           </span>
@@ -771,11 +780,11 @@ export const renderPoolLink = (poolName, poolHash, poolsData) => {
     return (
       <div className="flex items-center space-x-2">
         <NonCapitalizedTooltip content="This pool is running" placement="top">
-          <div className="w-2 h-2 bg-green-700 rounded-full"></div>
+          <div className="w-2 h-2 bg-green-solid-hover rounded-full"></div>
         </NonCapitalizedTooltip>
         <Link
           href={`/jobs/pools/${poolName}`}
-          className="text-gray-700 hover:text-blue-600 hover:underline"
+          className="text-content hover:text-blue-fg hover:underline"
         >
           {poolName}
         </Link>
@@ -787,7 +796,7 @@ export const renderPoolLink = (poolName, poolHash, poolsData) => {
   return (
     <div className="flex items-center space-x-2">
       <NonCapitalizedTooltip content="This pool is terminated" placement="top">
-        <div className="w-2 h-2 bg-gray-800"></div>
+        <div className="w-2 h-2 bg-gray-800 dark:bg-gray-400"></div>
       </NonCapitalizedTooltip>
       <span>
         {poolName} ({shortHash})

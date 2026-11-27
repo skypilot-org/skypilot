@@ -28,7 +28,7 @@ on:
     secrets:
       BUILDKITE_TOKEN:
         required: true
-        description: "Buildkite API token with read access"
+        description: "Buildkite API token; needs write access so a cancelled run can cancel its build"
     outputs:
       build_status:
         description: "Final status of the build (success, failure, timeout)"
@@ -98,3 +98,91 @@ jobs:
             echo "Not failing workflow despite Buildkite timeout"
             exit 0
           fi
+
+      # A cancelled GitHub run does not cancel the Buildkite build it is
+      # waiting on; the build keeps holding agents on the shared queue until
+      # it finishes on its own. Steps guarded by cancelled() still run after
+      # a cancellation, so forward it here.
+      - name: Cancel the Buildkite build if this run was cancelled
+        if: cancelled()
+        env:
+          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+          ORGANIZATION: ${{ inputs.organization }}
+          PIPELINE: ${{ inputs.pipeline }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          # GitHub runs step shells as `bash -e`, which `set -uo pipefail` does
+          # not clear. Leaving it on would kill this step at the first `jq`
+          # against a non-JSON error body -- the 503-with-an-HTML-page case --
+          # before any of the retry or state-verification logic below runs.
+          set +e
+          set -uo pipefail
+
+          api="https://api.buildkite.com/v2/organizations/$ORGANIZATION/pipelines/$PIPELINE/builds/$BUILD_NUMBER"
+          echo "Run cancelled; cancelling Buildkite build $BUILD_NUMBER of $PIPELINE"
+
+          # Sets $code and $body. curl exits 0 on an HTTP error, so read the
+          # status explicitly; a network-level failure reports 000.
+          call() {
+            local method=$1 url=$2 out
+            out=$(mktemp)
+            code=$(curl -s --connect-timeout 5 --max-time 10 \
+              -o "$out" -w '%{http_code}' -X "$method" \
+              -H "Authorization: Bearer $BUILDKITE_TOKEN" "$url") || code=000
+            body=$(cat "$out")
+            rm -f "$out"
+          }
+
+          # States in which the build has stopped holding agents. Losing the
+          # race to a build that finishes on its own is a harmless outcome.
+          settled() {
+            case "$1" in
+              canceling|canceled|passed|failed|skipped|not_run) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          # GitHub force-kills the runner shortly after a cancellation, so the
+          # whole step has to stay well under a minute.
+          deadline=$((SECONDS + 45))
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            call PUT "$api/cancel"
+            state=$(printf '%s' "$body" | jq -r '.state // empty' 2>/dev/null)
+
+            case "$code" in
+              2*)
+                if settled "$state"; then
+                  echo "Buildkite replied: $state"
+                  exit 0
+                fi
+                ;;
+              401|403)
+                echo "::error::Buildkite rejected the token (HTTP $code); build $BUILD_NUMBER is still running"
+                exit 1
+                ;;
+            esac
+
+            message=$(printf '%s' "$body" | jq -r '.message // empty' 2>/dev/null)
+            echo "Cancel attempt $attempt did not take (HTTP $code)${message:+: $message}"
+
+            # The build may have finished between the wait loop and this step,
+            # in which case the API refuses the cancel. Ask what state it is in
+            # rather than pattern-matching the refusal message.
+            call GET "$api"
+            state=$(printf '%s' "$body" | jq -r '.state // empty' 2>/dev/null)
+            if settled "$state"; then
+              echo "Build $BUILD_NUMBER is already $state; nothing left to cancel"
+              exit 0
+            fi
+            echo "Build $BUILD_NUMBER is currently: ${state:-unknown (HTTP $code)}"
+
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          echo "::error::Could not cancel Buildkite build $BUILD_NUMBER; it may still be holding agents: $api"
+          exit 1

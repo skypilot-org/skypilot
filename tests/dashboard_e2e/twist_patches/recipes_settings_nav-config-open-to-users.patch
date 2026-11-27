@@ -1,0 +1,9 @@
+diff --git a/sky/users/rbac.py b/sky/users/rbac.py
+index 31e868daa..fcef89d79 100644
+--- a/sky/users/rbac.py
++++ b/sky/users/rbac.py
+@@ -545,3 +545,3 @@ def restrict_config_to_admins() -> bool:
+     """
+-    return bool(
++    return False and bool(  # TWIST: config readable by every user
+         skypilot_config.get_nested(('rbac', 'restrict_config_to_admins'),

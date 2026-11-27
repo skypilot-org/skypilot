@@ -20,6 +20,7 @@ from unittest import mock
 import pytest
 
 from sky.serve import service
+from sky.utils import yaml_utils
 
 
 def _bind_socket_async(host, port, delay):
@@ -472,10 +473,13 @@ class TestCleanupStorageStaleBucket:
         from sky import exceptions as sky_exc
 
         stale_storage = mock.MagicMock()
+        # Ephemeral storage: it is a teardown target, so cleanup constructs it.
+        stale_storage.persistent = False
         stale_storage.construct.side_effect = sky_exc.StorageBucketGetError(
             'Attempted to use a non-existent bucket as a source: s3://gone')
 
         live_storage = mock.MagicMock()
+        live_storage.persistent = False
         # construct() returns normally → storage stays in storage_mounts.
 
         mock_task = mock.MagicMock()
@@ -508,6 +512,7 @@ class TestCleanupStorageStaleBucket:
         """Non-bucket-missing construct errors still fail cleanup — we
         don't want to silently swallow real bugs like expired creds."""
         broken_storage = mock.MagicMock()
+        broken_storage.persistent = False
         broken_storage.construct.side_effect = RuntimeError(
             'credential expired')
 
@@ -528,3 +533,95 @@ class TestCleanupStorageStaleBucket:
             'unexpected construct errors must propagate as cleanup failure')
         # The broader except block aborted before reaching teardown.
         mock_backend.teardown_ephemeral_storage.assert_not_called()
+
+    def test_persistent_storage_not_constructed(self):
+        """A persistent storage must NOT be constructed during cleanup.
+
+        construct() auto-creates a missing bucket, so constructing a
+        persistent storage whose bucket the user just deleted would silently
+        re-create and leak it. teardown_ephemeral_storage() only deletes
+        persistent=False storages, so persistent ones need no construction.
+        """
+        persistent_storage = mock.MagicMock()
+        persistent_storage.persistent = True
+
+        mock_task = mock.MagicMock()
+        mock_task.storage_mounts = {'/persist': persistent_storage}
+        mock_task.file_mounts = None
+
+        mock_backend = mock.MagicMock()
+
+        with mock.patch('sky.serve.service.task_lib.Task.from_yaml_str',
+                        return_value=mock_task), \
+             mock.patch(
+                 'sky.serve.service.cloud_vm_ray_backend.CloudVmRayBackend',
+                 return_value=mock_backend):
+            result = service.cleanup_storage('dummy: yaml')
+
+        assert result is True
+        persistent_storage.construct.assert_not_called()
+        # It stays in storage_mounts and teardown (which skips persistent
+        # storages) is still invoked for the ephemeral ones.
+        assert '/persist' in mock_task.storage_mounts
+        mock_backend.teardown_ephemeral_storage.assert_called_once_with(
+            mock_task)
+
+
+class TestCleanupStorageLocalSources:
+    """`cleanup_storage` removes the two-hop copies staged for the service and
+    nothing else. In consolidation mode the task's sources point into the
+    client's upload blob (shared with any other request that uploaded the
+    same content), and on a local API server at the user's own files."""
+
+    @pytest.fixture
+    def two_hop_base(self, tmp_path, monkeypatch):
+        base = tmp_path / 'controller'
+        monkeypatch.setattr(service.skylet_constants,
+                            'FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH', str(base))
+        return base
+
+    def _cleanup(self, file_mounts):
+        task_yaml = yaml_utils.dump_yaml_str({
+            'file_mounts': file_mounts,
+            'run': 'echo hi'
+        })
+        with mock.patch(
+                'sky.serve.service.cloud_vm_ray_backend.CloudVmRayBackend'):
+            return service.cleanup_storage(task_yaml)
+
+    def test_removes_two_hop_copies(self, two_hop_base):
+        copy_dir = two_hop_base / 'run-1' / '0'
+        copy_dir.mkdir(parents=True)
+        (copy_dir / 'f.txt').write_text('x')
+        copy_file = two_hop_base / 'run-1' / '1'
+        copy_file.write_text('y')
+
+        assert self._cleanup({
+            '/remote/dir': str(copy_dir),
+            '/remote/f.txt': str(copy_file),
+        }) is True
+        assert not copy_dir.exists()
+        assert not copy_file.exists()
+
+    def test_keeps_sources_outside_two_hop_dir(self, tmp_path, two_hop_base):
+        del two_hop_base
+        blob_dir = tmp_path / 'blob-cache' / 'user' / ('a' * 64) / 'workdir'
+        blob_dir.mkdir(parents=True)
+        user_file = tmp_path / 'home' / 'hello.txt'
+        user_file.parent.mkdir()
+        user_file.write_text('hello')
+
+        assert self._cleanup({
+            '/remote/workdir': str(blob_dir),
+            '/remote/hello.txt': str(user_file),
+            # A '..' path that only looks like it is inside the two-hop dir.
+            '/remote/escape': str(
+                tmp_path / 'controller' / '..' / 'home' / 'hello.txt'),
+        }) is True
+        assert blob_dir.is_dir()
+        assert user_file.read_text() == 'hello'
+
+    def test_missing_two_hop_copy_is_already_clean(self, two_hop_base):
+        # E.g. an earlier cleanup attempt removed it before failing elsewhere.
+        assert self._cleanup(
+            {'/remote/gone': str(two_hop_base / 'run-1' / '0')}) is True

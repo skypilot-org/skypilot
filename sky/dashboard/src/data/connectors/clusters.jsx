@@ -3,6 +3,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import { apiClient } from '@/data/connectors/client';
+import {
+  fetchListInPages,
+  MIN_LIST_CURSOR_API_VERSION,
+  sendRequest,
+  syncPageSize,
+} from '@/data/connectors/syncCalls';
 import { ENDPOINT } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
@@ -101,12 +107,57 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
+// The clusters /status returns for `body`. When the server answers sync calls
+// and takes the cluster cursor, they are fetched as sync calls of its maximum
+// size, newest launch first, then by name.
+async function fetchClusterStatus(body) {
+  const pageSize = await syncPageSize(MIN_LIST_CURSOR_API_VERSION);
+  const names = body.cluster_names;
+  if (
+    pageSize !== null &&
+    names?.length > 0 &&
+    names.length <= pageSize &&
+    // The server expands a glob pattern to every cluster it matches.
+    !names.some((name) => /[*?[\]]/.test(name))
+  ) {
+    // One page holds every named cluster.
+    return apiClient.fetch('/status', { ...body, limit: pageSize });
+  }
+  if (pageSize !== null) {
+    const launchedAt = (row) => row.launched_at || 0;
+    const clusters = await fetchListInPages({
+      path: '/status',
+      pageSize,
+      sendPage: (cursor, size) =>
+        sendRequest(
+          (headers) =>
+            apiClient.fetchImmediate(
+              '/status',
+              {
+                ...body,
+                limit: size,
+                after_launched_at: cursor?.launchedAt ?? null,
+                after_name: cursor?.name ?? null,
+              },
+              'POST',
+              { headers }
+            ),
+          { limit: size, fallback: false }
+        ),
+      cursorOf: (row) => ({ launchedAt: launchedAt(row), name: row.name }),
+    });
+    if (clusters !== null) return clusters;
+  }
+  // A list call without `limit` is not answered as a sync call.
+  return apiClient.fetch('/status', body, 'POST', { sync: false });
+}
+
 export async function getClusters({
   clusterNames = null,
   allUsers = true,
 } = {}) {
   try {
-    const clusters = await apiClient.fetch('/status', {
+    const clusters = await fetchClusterStatus({
       cluster_names: clusterNames,
       all_users: allUsers,
       include_credentials: false,
@@ -161,6 +212,7 @@ export async function getClusters({
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
+        workspace_name: cluster.workspace_name || cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
@@ -238,6 +290,24 @@ export async function getClusterHistory(
         cloud = cluster.resources.cloud;
       }
 
+      // Mirror `InfraInfo.formatted_str()`: prefer the zone over the region
+      // for the infra display, EXCEPT for Slurm, where the zone is the
+      // partition — partition names commonly collide across Slurm clusters,
+      // so show the cluster name (region) instead. Falls back to the region
+      // when the cluster was launched in a cloud without zones (or the
+      // record predates zone capture in the history DB).
+      let regionOrZone =
+        (cloud === 'Slurm' ? cluster.region : cluster.zone) ||
+        cluster.region ||
+        cluster.zone ||
+        '';
+      // For SSH Node Pools, strip the 'ssh-' prefix from region display
+      // to avoid redundant "SSH (ssh-poolname)" showing as "SSH (poolname)",
+      // matching the active-cluster connector.
+      if (cloud === 'SSH' && regionOrZone.startsWith('ssh-')) {
+        regionOrZone = regionOrZone.substring(4);
+      }
+
       // Get user name - need to look up from user_hash if needed
       let user_name = cluster.user_name || '-';
 
@@ -252,9 +322,9 @@ export async function getClusterHistory(
         user_hash: cluster.user_hash,
         cluster_hash: cluster.cluster_hash,
         cloud: cloud,
-        region: '',
-        infra: cloud,
-        full_infra: cloud,
+        region: cluster.region || '',
+        infra: regionOrZone ? `${cloud} (${regionOrZone})` : cloud,
+        full_infra: regionOrZone ? `${cloud} (${regionOrZone})` : cloud,
         resources_str: cluster.resources_str,
         resources_str_full: cluster.resources_str_full,
         time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
@@ -264,6 +334,10 @@ export async function getClusterHistory(
         workspace: cluster.workspace || 'default',
         autostop: -1,
         last_event: cluster.last_event,
+        // Why a terminated cluster went away, for the Details column.
+        details: cluster.status
+          ? null
+          : cluster.last_event || 'No termination reason recorded.',
         to_down: false,
         cluster_name_on_cloud: null,
         node_names: cluster.node_names || null,
@@ -456,6 +530,25 @@ export async function getClusterJobs({ clusterName, workspace }) {
   } catch (error) {
     console.error('Error fetching cluster jobs:', error);
     throw error;
+  }
+}
+
+// Returns {task_yaml, entrypoint, submitted_at} for a cluster job, or null when
+// none was recorded (jobs submitted by an older API server, or a server that
+// does not have the endpoint yet).
+export async function getClusterJobSpec({ clusterName, jobId, workspace }) {
+  try {
+    const spec = await apiClient.fetch('/cluster_job_spec', {
+      cluster_name: clusterName,
+      job_id: Number(jobId),
+      override_skypilot_config: {
+        active_workspace: workspace || 'default',
+      },
+    });
+    return spec && !Array.isArray(spec) ? spec : null;
+  } catch (error) {
+    console.error('Error fetching cluster job spec:', error);
+    return null;
   }
 }
 

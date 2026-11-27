@@ -320,6 +320,18 @@ class Cloud:
     def is_same_cloud(self, other: 'Cloud') -> bool:
         return isinstance(other, self.__class__)
 
+    def __eq__(self, other: object) -> bool:
+        # Exact-type equality, deliberately stricter than is_same_cloud():
+        # is_same_cloud() is isinstance-based and asymmetric under
+        # inheritance (Kubernetes().is_same_cloud(SSH()) is True, the
+        # reverse is False), which would violate the __eq__ contract and
+        # make dict/set behavior order-dependent. Cloud objects carry no
+        # instance state, so the type is the whole identity.
+        return type(self) is type(other)
+
+    def __hash__(self) -> int:
+        return hash(type(self))
+
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
@@ -482,6 +494,13 @@ class Cloud:
         """
         if resources.is_launchable():
             self._check_instance_type_accelerators_combination(resources)
+        if ((resources.accelerator_args or {}).get('multi_host') and
+                self.canonical_name() != 'kubernetes'):
+            return resources_utils.FeasibleResources(
+                resources_list=[],
+                fuzzy_candidate_list=[],
+                hint='`accelerator_args.multi_host` is only supported on '
+                'Kubernetes.')
         resources_required_features = resources.get_required_cloud_features()
         if num_nodes > 1:
             resources_required_features.add(

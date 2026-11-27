@@ -25,6 +25,7 @@ import {
   persistPageSize,
 } from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
+import { getCurrentUserInfo } from '@/data/connectors/client';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
@@ -42,8 +43,29 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
+import {
+  TimestampWithTooltip,
+  LastUpdatedTimestamp,
+  NonCapitalizedTooltip as Tooltip,
+  formatSize,
+} from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import {
+  TruncatedDetails,
+  ExpandedDetailsRow,
+  isDetailsToggle,
+} from '@/components/elements/TruncatedDetails';
+import {
+  FilterDropdown,
+  Filters,
+  filterData,
+} from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
@@ -54,6 +76,39 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
+
+// The filterable properties, declared once. `key` is the URL parameter and the
+// `valueList` key for the typeahead; `label` is what lands in
+// `filter.property`, which `evaluateCondition` lowercases to look up the field
+// on each volume.
+const VOLUME_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'workspace', label: 'Workspace', kind: 'text' },
+  { key: 'status', label: 'Status', kind: 'enum', multi: true },
+  { key: 'infra', label: 'Infra', kind: 'text' },
+  { key: 'type', label: 'Type', kind: 'enum', multi: true },
+  { key: 'user', label: 'User', kind: 'text' },
+];
+
+const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label, multi }) => ({
+  label,
+  value: key,
+  multi: multi ?? false,
+}));
+
+// Properties whose values are alternatives rather than extra conditions: two
+// Status chips mean "either", every other property replaces.
+const OR_PROPERTIES = VOLUME_FILTER_SCHEMA.filter((e) => e.multi === true).map(
+  (e) => e.label
+);
+const MULTI_VALUE_LABELS = new Set(OR_PROPERTIES);
+
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
 
 export function Volumes() {
   const router = useRouter();
@@ -67,6 +122,8 @@ export function Volumes() {
   const [showPurgeUI, setShowPurgeUI] = useState(false);
   const [purgeConfirmed, setPurgeConfirmed] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
+  // A k8s-hostpath volume with cleanup wipes its host path on every node.
+  const [cleanupHostPath, setCleanupHostPath] = useState(true);
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
   const [activeTab, setActiveTab] = useState('volumes');
@@ -76,10 +133,19 @@ export function Volumes() {
   const handleTabChange = useCallback(
     (tab) => {
       setActiveTab(tab);
-      const query = tab === 'volumes' ? {} : { tab };
-      router.replace({ pathname: router.pathname, query }, undefined, {
-        shallow: true,
-      });
+      // Keep whatever else the address bar carries -- the filter params are
+      // written straight to history, so `router.query` may not have caught up
+      // and rebuilding the query from it would drop them.
+      router.replace(
+        hrefWithQueryKey(
+          router.pathname,
+          window.location.search,
+          'tab',
+          tab === 'volumes' ? undefined : tab
+        ),
+        undefined,
+        { shallow: true }
+      );
     },
     [router]
   );
@@ -114,7 +180,13 @@ export function Volumes() {
     setDeleteError(null);
     setShowPurgeUI(false);
     setPurgeConfirmed(false);
+    setCleanupHostPath(true);
   };
+
+  const wipesHostPath =
+    volumeToDelete?.type === 'k8s-hostpath' &&
+    !!volumeToDelete?.config?.cleanup_on_deletion;
+  const noCleanup = wipesHostPath && !cleanupHostPath;
 
   const handleDeleteVolumeConfirm = async () => {
     if (!volumeToDelete) return;
@@ -123,9 +195,11 @@ export function Volumes() {
     setDeleteError(null);
 
     try {
-      const result = await deleteVolume(volumeToDelete.name);
+      const result = await deleteVolume(volumeToDelete.name, { noCleanup });
       if (!result.success) {
-        throw new Error(result.msg);
+        throw Object.assign(new Error(result.msg), {
+          forbidden: result.forbidden,
+        });
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
@@ -146,9 +220,14 @@ export function Volumes() {
     setDeleteError(null);
 
     try {
-      const result = await deleteVolume(volumeToDelete.name, { purge: true });
+      const result = await deleteVolume(volumeToDelete.name, {
+        purge: true,
+        noCleanup,
+      });
       if (!result.success) {
-        throw new Error(result.msg);
+        throw Object.assign(new Error(result.msg), {
+          forbidden: result.forbidden,
+        });
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
@@ -202,8 +281,8 @@ export function Volumes() {
               <button
                 className={`leading-none mr-6 pb-2 px-1 border-b-2 ${
                   activeTab === 'volumes'
-                    ? 'text-sky-blue border-sky-500'
-                    : 'text-gray-500 hover:text-gray-700 border-transparent'
+                    ? 'text-brand border-sky-solid-soft'
+                    : 'text-content-tertiary hover:text-content border-transparent'
                 }`}
                 onClick={() => handleTabChange('volumes')}
               >
@@ -216,12 +295,7 @@ export function Volumes() {
               />
             </>
           ) : (
-            <Link
-              href="/volumes"
-              className="text-sky-blue hover:underline leading-none"
-            >
-              Volumes
-            </Link>
+            <span className="text-content leading-none">Volumes</span>
           )}
         </div>
         {activeTab === 'volumes' && (
@@ -229,16 +303,20 @@ export function Volumes() {
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+                <span className="ml-2 text-content-tertiary text-sm">
+                  Loading...
+                </span>
               </div>
             )}
             {!loading && lastFetchedTime && (
-              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              <div className="max-lg:hidden lg:flex lg:items-center">
+                <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              </div>
             )}
             <button
               onClick={handleRefresh}
               disabled={loading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              className="text-brand hover:text-brand-bright flex items-center"
             >
               <RotateCwIcon className="h-4 w-4 mr-1.5" />
               {!isMobile && <span>Refresh</span>}
@@ -282,7 +360,7 @@ export function Volumes() {
                     <>
                       Remove &quot;
                       {volumeToDelete?.name || 'this volume'}&quot; from
-                      SkyPilot records. The underlying volume will not be
+                      SkyPilot records. The underlying volume may not be
                       deleted.
                     </>
                   ) : (
@@ -296,9 +374,9 @@ export function Volumes() {
               </DialogHeader>
 
               {!showPurgeUI && volumeToDelete?.config?.use_existing && (
-                <div className="bg-sky-50 border border-sky-200 rounded-md p-3 my-3 flex items-start gap-2">
-                  <AlertTriangleIcon className="w-4 h-4 text-sky-600 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-sky-900">
+                <div className="bg-sky-tint border border-sky-line rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-sky-fg mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-sky-fg-strongest">
                     This volume was imported from an existing{' '}
                     {volumeToDelete?.type === 'k8s-pvc' ? 'PVC' : 'resource'}.
                     Deleting it only removes it from SkyPilot
@@ -306,7 +384,7 @@ export function Volumes() {
                     volumeToDelete?.name_on_cloud ? (
                       <>
                         ; the underlying PVC{' '}
-                        <code className="bg-sky-100 px-1 rounded">
+                        <code className="bg-sky-tint-strong px-1 rounded">
                           {volumeToDelete.name_on_cloud}
                         </code>
                         {volumeToDelete.namespace &&
@@ -314,7 +392,7 @@ export function Volumes() {
                             <>
                               {' '}
                               in namespace{' '}
-                              <code className="bg-sky-100 px-1 rounded">
+                              <code className="bg-sky-tint-strong px-1 rounded">
                                 {volumeToDelete.namespace}
                               </code>
                             </>
@@ -328,6 +406,28 @@ export function Volumes() {
                 </div>
               )}
 
+              {wipesHostPath && (
+                <div className="bg-amber-tint border border-amber-line rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-fg mt-0.5 flex-shrink-0" />
+                  <label className="text-sm text-amber-fg-stronger flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cleanupHostPath}
+                      onChange={(e) => setCleanupHostPath(e.target.checked)}
+                      disabled={deleteLoading}
+                      className="h-4 w-4 cursor-pointer mt-0.5 flex-shrink-0"
+                    />
+                    <span>
+                      Also delete everything under{' '}
+                      <code className="bg-amber-tint-strong px-1 rounded">
+                        {volumeToDelete?.config?.host_path}
+                      </code>{' '}
+                      on every node
+                    </span>
+                  </label>
+                </div>
+              )}
+
               {!showPurgeUI && (
                 <ErrorDisplay
                   error={deleteError}
@@ -337,9 +437,9 @@ export function Volumes() {
               )}
 
               {showPurgeUI && (
-                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 my-3 flex items-start gap-2">
-                  <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-amber-800 space-y-2">
+                <div className="bg-amber-tint border border-amber-line rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-fg mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-fg-stronger space-y-2">
                     <p className="m-0">
                       Removing the SkyPilot entry means this volume will no
                       longer appear here, but{' '}
@@ -347,7 +447,7 @@ export function Volumes() {
                       volumeToDelete?.name_on_cloud ? (
                         <>
                           the Kubernetes PVC{' '}
-                          <code className="bg-amber-100 px-1 rounded">
+                          <code className="bg-amber-tint-strong px-1 rounded">
                             {volumeToDelete.name_on_cloud}
                           </code>
                           {volumeToDelete.namespace &&
@@ -355,14 +455,14 @@ export function Volumes() {
                               <>
                                 {' '}
                                 in namespace{' '}
-                                <code className="bg-amber-100 px-1 rounded">
+                                <code className="bg-amber-tint-strong px-1 rounded">
                                   {volumeToDelete.namespace}
                                 </code>
                               </>
                             )}{' '}
                           may still exist and continue consuming resources.
                           Delete it manually with{' '}
-                          <code className="bg-amber-100 px-1 rounded">
+                          <code className="bg-amber-tint-strong px-1 rounded">
                             kubectl delete pvc
                             {volumeToDelete.namespace &&
                             volumeToDelete.namespace !== '-'
@@ -380,13 +480,13 @@ export function Volumes() {
                         </>
                       )}
                     </p>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-start gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={purgeConfirmed}
                         onChange={(e) => setPurgeConfirmed(e.target.checked)}
                         disabled={purgeLoading}
-                        className="cursor-pointer"
+                        className="h-4 w-4 cursor-pointer mt-0.5 flex-shrink-0"
                       />
                       <span>
                         I understand force removal may not delete the underlying
@@ -418,12 +518,13 @@ export function Volumes() {
                           ? 'Retry Delete'
                           : 'Delete'}
                     </Button>
-                    {deleteError && (
+                    {/* Force removal is refused just the same. */}
+                    {deleteError && !deleteError.forbidden && (
                       <Button
                         variant="outline"
                         onClick={() => setShowPurgeUI(true)}
                         disabled={deleteLoading}
-                        className="border-amber-600 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                        className="border-amber-solid text-amber-fg-strong hover:bg-amber-tint hover:text-amber-fg-stronger"
                       >
                         Force remove
                       </Button>
@@ -442,7 +543,7 @@ export function Volumes() {
                     <Button
                       onClick={handlePurgeVolumeConfirm}
                       disabled={!purgeConfirmed || purgeLoading}
-                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                      className="bg-amber-solid hover:bg-amber-solid-hover text-white"
                     >
                       {purgeLoading ? 'Removing...' : 'Force Remove'}
                     </Button>
@@ -462,7 +563,7 @@ export function Volumes() {
   );
 }
 
-function VolumesTable({
+export function VolumesTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
@@ -471,6 +572,37 @@ function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
+  // Names for the Workspace column, and which workspaces the user may delete
+  // volumes from.
+  const { isWorkspaceWritable, workspacesConfig, loaded } =
+    useWorkspacesConfig();
+  // Only an admin may delete a k8s-hostpath volume. Unknown (null) leaves
+  // delete enabled; the server still enforces it. The cached lookup keeps
+  // this page from adding a /users/role call.
+  const [isAdmin, setIsAdmin] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUserInfo().then((info) => {
+      if (!cancelled && info?.role) setIsAdmin(info.role === 'admin');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Rows carry the workspace name, which filters and sorting go by; older
+  // servers send only the id.
+  const rows = useMemo(
+    () =>
+      data.map((volume) => ({
+        ...volume,
+        workspace_name:
+          volume.workspace_name ||
+          getWorkspaceName(workspacesConfig, volume.workspace),
+      })),
+    [data, workspacesConfig]
+  );
+  // Filters live in the URL, keyed by name, so a filtered view is shareable.
+  const { filters, setFilters } = useUrlFilterState(VOLUME_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -487,6 +619,26 @@ function VolumesTable({
       10
     )
   );
+  // Held at table level so at most one row is expanded at a time.
+  const [expandedRowId, setExpandedRowId] = useState(null);
+  const expandedRowRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        expandedRowId &&
+        expandedRowRef.current &&
+        !expandedRowRef.current.contains(event.target) &&
+        !isDetailsToggle(event.target)
+      ) {
+        setExpandedRowId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [expandedRowId]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -510,10 +662,60 @@ function VolumesTable({
     }
   }, [setLoading, onDataChange]);
 
+  // Suggestions shown in the filter dropdown, keyed by PROPERTY_OPTIONS value.
+  const valueList = useMemo(() => {
+    const uniq = (getValue) => [
+      ...new Set(rows.map(getValue).filter((value) => value && value !== '-')),
+    ];
+    return {
+      name: uniq((volume) => volume.name),
+      workspace: uniq((volume) => volume.workspace_name),
+      status: uniq((volume) => volume.status),
+      infra: uniq((volume) => volume.infra),
+      type: uniq((volume) => volume.type),
+      user: uniq((volume) => volume.user_name),
+    };
+  }, [rows]);
+
+  const filteredData = useMemo(() => {
+    if (filters.length === 0) {
+      return rows;
+    }
+    // `User` filters against `user_name`; alias it so the shared filter can
+    // resolve the property name to a field.
+    return filterData(
+      rows.map((volume) => ({ ...volume, user: volume.user_name })),
+      filters,
+      { orProperties: OR_PROPERTIES }
+    );
+  }, [rows, filters]);
+
+  const pluginColumns = useTableColumns('volumes');
+
+  // A plugin column whose value is not a field on the volume sorts by the
+  // value it computes instead. Matched by the clicked column, not by key, so a
+  // plugin reusing a built-in key does not take over the built-in column.
+  const sortColumn = sortConfig.columnId
+    ? pluginColumns.find((col) => col.id === sortConfig.columnId)
+    : undefined;
+  const sortAccessor = sortColumn?.header.sortValue || sortConfig.key;
+  const subscribeSortValue = sortColumn?.header.sortValueSubscribe;
+
+  // The values a plugin's sortValue reads can change without the volumes
+  // changing; re-sort when the plugin says so.
+  const [sortValueVersion, setSortValueVersion] = useState(0);
+  useEffect(() => {
+    if (!subscribeSortValue) return undefined;
+    return subscribeSortValue(() => setSortValueVersion((v) => v + 1));
+  }, [subscribeSortValue]);
+
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
-    return sortData(data, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig]);
+    return sortData(filteredData, sortAccessor, sortConfig.direction);
+    // sortValueVersion is not read here; it is a dependency so the rows are
+    // re-sorted when the plugin's values change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredData, sortAccessor, sortConfig.direction, sortValueVersion]);
 
   // Expose fetchData to parent component
   useEffect(() => {
@@ -547,21 +749,26 @@ function VolumesTable({
     };
   }, [refreshInterval, fetchData, preloadingComplete]);
 
-  // Reset to first page when data changes
+  // Reset to first page when the data or the active filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [data.length]);
+  }, [data.length, filters]);
 
-  const requestSort = (key) => {
+  // columnId names the plugin column that was clicked; built-in headers pass
+  // none.
+  const isSortedBy = (key, columnId) =>
+    sortConfig.key === key && sortConfig.columnId === columnId;
+
+  const requestSort = (key, columnId) => {
     let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+    if (isSortedBy(key, columnId) && sortConfig.direction === 'ascending') {
       direction = 'descending';
     }
-    setSortConfig({ key, direction });
+    setSortConfig({ key, columnId, direction });
   };
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
+  const getSortDirection = (key, columnId) => {
+    if (isSortedBy(key, columnId)) {
       return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
     }
     return '';
@@ -590,10 +797,33 @@ function VolumesTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  const formatSize = (size) => {
-    if (size == null) return '-';
-    if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
-    return `${size}Gi`;
+  // A volume reports the capacity it actually has, so a resize that has not
+  // landed yet is invisible in the size alone. Show where it is heading, with
+  // the server's explanation of what it is waiting for -- the same text the
+  // details column shows, when that one is free.
+  const renderSize = (volume) => {
+    const size = formatSize(volume.size);
+    if (!volume.resize_status || volume.resize_target_size == null) {
+      return size;
+    }
+    // Both sizes are whole GiB, so a resize smaller than that -- or one whose
+    // new space has landed while the state has not cleared -- would render an
+    // arrow pointing at the size it already shows. The reason still reaches
+    // the user through the details column.
+    if (Number(volume.resize_target_size) <= Number(volume.size)) {
+      return size;
+    }
+    const target = formatSize(volume.resize_target_size);
+    return (
+      <Tooltip content={volume.resize_message}>
+        {/* nowrap: the column is narrow, and a size broken across three lines
+            reads worse than a wider column. */}
+        <span className="whitespace-nowrap">
+          {size}
+          <span className="text-content-tertiary"> &rarr; {target}</span>
+        </span>
+      </Tooltip>
+    );
   };
 
   const formatTimestamp = (timestamp) => {
@@ -606,11 +836,24 @@ function VolumesTable({
     }
   };
 
-  const pluginColumns = useTableColumns('volumes');
+  // Volumes are usable most of the time, so a column of dashes would be noise.
+  // Judge over the whole dataset, not the current page or filter, so the column
+  // does not come and go while paging.
+  //
+  // One cell, so a volume with both an error and a resize shows the error: it
+  // is the one that says the volume is unusable. The volume's own page has
+  // room and shows both -- deliberately, not by oversight.
+  const volumeDetails = (volume) =>
+    volume.error_message || volume.resize_message || null;
+
+  const anyVolumeHasDetails = useMemo(
+    () => data.some((volume) => volumeDetails(volume)),
+    [data]
+  );
 
   const sortableHeader = (label, sortKey) => (
     <TableHead
-      className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
       onClick={() => requestSort(sortKey)}
     >
       {label}
@@ -627,9 +870,24 @@ function VolumesTable({
         <TableCell>
           <Link
             href={`/volumes/${encodeURIComponent(volume.name)}`}
-            className="text-blue-600"
+            className="text-blue-fg"
           >
             {volume.name}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'workspace',
+      order: 5,
+      renderHeader: () => sortableHeader('Workspace', 'workspace_name'),
+      renderCell: (volume) => (
+        <TableCell>
+          <Link
+            href="/workspaces"
+            className="text-content hover:text-blue-fg hover:underline"
+          >
+            {volume.workspace_name}
           </Link>
         </TableCell>
       ),
@@ -657,7 +915,7 @@ function VolumesTable({
       id: 'size',
       order: 30,
       renderHeader: () => sortableHeader('Size', 'size'),
-      renderCell: (volume) => <TableCell>{formatSize(volume.size)}</TableCell>,
+      renderCell: (volume) => <TableCell>{renderSize(volume)}</TableCell>,
     },
     {
       id: 'user_name',
@@ -694,23 +952,73 @@ function VolumesTable({
         </TableCell>
       ),
     },
+    // What the status means: a CSI provisioner's own words on why the volume is
+    // not ready, which until now only a tooltip on the badge revealed. Last
+    // before the actions, as in the jobs table: the text is wide, and it reads
+    // as an aside rather than a property of the volume.
+    ...(anyVolumeHasDetails
+      ? [
+          {
+            id: 'details',
+            order: 999,
+            renderHeader: () => <TableHead>Details</TableHead>,
+            renderCell: (volume) => (
+              <TableCell>
+                {volumeDetails(volume) ? (
+                  <TruncatedDetails
+                    text={volumeDetails(volume)}
+                    rowId={volume.name}
+                    expandedRowId={expandedRowId}
+                    setExpandedRowId={setExpandedRowId}
+                  />
+                ) : (
+                  '-'
+                )}
+              </TableCell>
+            ),
+          },
+        ]
+      : []),
     {
       id: 'actions',
       order: 1000,
       renderHeader: () => <TableHead>Actions</TableHead>,
-      renderCell: (volume) => (
-        <TableCell>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDeleteVolume(volume)}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-            title="Delete volume"
-          >
-            <Trash2Icon className="w-4 h-4" />
-          </Button>
-        </TableCell>
-      ),
+      renderCell: (volume) => {
+        // The server refuses to delete a volume in a workspace the user can
+        // only read.
+        const writable = isWorkspaceWritable(volume.workspace);
+        // Until the workspaces load, delete is disabled without a reason.
+        const readOnly = loaded && !writable;
+        const adminOnly = volume.type === 'k8s-hostpath' && isAdmin === false;
+        return (
+          <TableCell>
+            {/* Also on a wrapper: a disabled button shows no tooltip. The
+                wrapper is inline-block so it covers the whole button. */}
+            <span
+              className="inline-block"
+              title={
+                readOnly
+                  ? 'Read-only: you are not a member of this volume’s workspace'
+                  : adminOnly
+                    ? 'Only an admin can delete k8s-hostpath volumes'
+                    : undefined
+              }
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDeleteVolume(volume)}
+                disabled={!writable || adminOnly}
+                className="text-red-fg hover:text-red-fg-strong hover:bg-red-tint"
+                title="Delete volume"
+                aria-label="Delete volume"
+              >
+                <Trash2Icon className="w-4 h-4" />
+              </Button>
+            </span>
+          </TableCell>
+        );
+      },
     },
   ];
 
@@ -720,7 +1028,7 @@ function VolumesTable({
     isPlugin: true,
     renderHeader: () => {
       const baseClasses = col.header.sortKey
-        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-gray-50'
+        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover'
         : 'whitespace-nowrap';
       const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
       return (
@@ -728,12 +1036,14 @@ function VolumesTable({
           className={className}
           onClick={
             col.header.sortKey
-              ? () => requestSort(col.header.sortKey)
+              ? () => requestSort(col.header.sortKey, col.id)
               : undefined
           }
         >
           {col.header.label}
-          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          {col.header.sortKey
+            ? getSortDirection(col.header.sortKey, col.id)
+            : ''}
         </TableHead>
       );
     },
@@ -752,8 +1062,46 @@ function VolumesTable({
   );
   const totalColSpan = visibleColumns.length;
 
+  // Default filter input and active-filter chips.
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      placeholder="Filter volumes"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="w-full sm:w-auto max-w-xl">
+          <PluginSlot
+            name="volumes.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: PROPERTY_OPTIONS,
+              valueList,
+              placeholder: 'Filter volumes',
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
+          />
+        </div>
+      </div>
+      <PluginSlot
+        name="volumes.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        wrapperClassName="mb-2"
+        fallback={
+          filters.length > 0 ? <div className="mb-2">{filterChips}</div> : null
+        }
+      />
+
       <Card>
         <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
@@ -769,7 +1117,7 @@ function VolumesTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-content-tertiary"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -779,20 +1127,39 @@ function VolumesTable({
                 </TableRow>
               ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((volume) => (
-                  <TableRow key={volume.name}>
-                    {visibleColumns.map((col) =>
-                      React.cloneElement(col.renderCell(volume), {
-                        key: col.id,
-                      })
+                  <React.Fragment key={volume.name}>
+                    <TableRow>
+                      {visibleColumns.map((col) =>
+                        React.cloneElement(col.renderCell(volume), {
+                          key: col.id,
+                        })
+                      )}
+                    </TableRow>
+                    {/* A volume can become ready while its reason is
+                        expanded, taking the column with it. */}
+                    {expandedRowId === volume.name && volumeDetails(volume) && (
+                      <ExpandedDetailsRow
+                        text={volumeDetails(volume)}
+                        colSpan={totalColSpan}
+                        innerRef={expandedRowRef}
+                      />
                     )}
-                  </TableRow>
+                  </React.Fragment>
                 ))
               ) : (
                 <EmptyTableState
                   colSpan={totalColSpan}
                   icon={<VolumeIcon className="w-5 h-5" />}
-                  title="No volumes found"
-                  description="Create a volume to mount storage in your clusters and jobs"
+                  title={
+                    filters.length > 0
+                      ? 'No matching volumes'
+                      : 'No volumes found'
+                  }
+                  description={
+                    filters.length > 0
+                      ? 'Try removing or loosening a filter'
+                      : 'Create a volume to mount storage in your clusters and jobs'
+                  }
                 />
               )}
             </TableBody>
@@ -801,8 +1168,8 @@ function VolumesTable({
       </Card>
 
       {/* Pagination controls */}
-      {data.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+      {sortedData.length > 0 && (
+        <div className="flex justify-end items-center py-2 px-4 text-sm text-content">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
@@ -821,7 +1188,7 @@ function VolumesTable({
                 </select>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                  className="h-4 w-4 text-content-tertiary absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -836,8 +1203,8 @@ function VolumesTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -845,7 +1212,7 @@ function VolumesTable({
                 size="icon"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-content-tertiary h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -867,7 +1234,7 @@ function VolumesTable({
                 size="icon"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-content-tertiary h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -924,7 +1291,7 @@ function UsedByCell({ clusters, pods }) {
           {isCluster ? (
             <Link
               href={`/clusters/${encodeURIComponent(item)}`}
-              className="text-sky-blue hover:underline"
+              className="text-brand hover:underline"
             >
               {item}
             </Link>
@@ -938,7 +1305,7 @@ function UsedByCell({ clusters, pods }) {
         <>
           ,{' '}
           <span
-            className="text-sky-blue cursor-pointer underline"
+            className="text-brand cursor-pointer underline"
             onClick={handleClick}
             style={{ userSelect: 'none' }}
           >
@@ -957,7 +1324,7 @@ function UsedByCell({ clusters, pods }) {
                   {isCluster ? (
                     <Link
                       href={`/clusters/${encodeURIComponent(item)}`}
-                      className="text-sky-blue hover:underline"
+                      className="text-brand hover:underline"
                     >
                       {item}
                     </Link>

@@ -6,12 +6,14 @@
 Installation
 ============
 
+SkyPilot can be set up with the steps below, or you can ask your AI agent (Claude Code, Codex, etc.) to do it for you:
+
+.. code-block:: text
+
+   Read https://docs.skypilot.ai/en/latest/getting-started/installation.html.md and set up SkyPilot for me, including the SkyPilot skill.
+
 Install SkyPilot
 ----------------
-
-.. tip::
-
-   To use SkyPilot with AI agent (Claude Code, Codex, etc.), install :ref:`SkyPilot Skill <skill>` to give your agent full SkyPilot expertise.
 
 SkyPilot supports installation with ``uv`` or ``pip``.
 
@@ -67,6 +69,16 @@ SkyPilot supports installation with ``uv`` or ``pip``.
       # install dependencies for the clouds you want to use
       pip install "skypilot[kubernetes,aws,gcp]"
 
+.. note::
+
+  ``pip install skypilot`` installs the SkyPilot client only, which can connect
+  to a :ref:`remote API server <sky-api-server-remote>`.
+
+  To run SkyPilot on your own machine, which starts a local API server, install
+  it with the clouds you want to use, e.g.
+  ``pip install "skypilot[kubernetes,aws,gcp]"``. Every cloud extra includes the
+  API server; to install the API server without any cloud, use
+  ``pip install "skypilot[server]"``.
 
 .. dropdown:: Install SkyPilot from nightly build or source
 
@@ -136,6 +148,21 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
+.. _install-skill:
+
+Install SkyPilot skill
+----------------------
+
+The :ref:`SkyPilot skill <skill>` teaches your AI agent (Claude Code, Codex, etc.) how to launch clusters, run jobs, and serve models with SkyPilot.
+
+Just tell your agent:
+
+.. code-block:: text
+
+   Fetch and follow https://docs.skypilot.ai/en/latest/getting-started/skill.html.md to install the SkyPilot skill.
+
+Restart the agent afterwards so it loads the skill.
+
 Run locally or connect to a remote API server
 ---------------------------------------------
 
@@ -194,9 +221,27 @@ If your team has set up a :ref:`SkyPilot remote API server <sky-api-server>`, co
 
 .. code-block:: shell
 
-  sky api login
+  sky api login -e <API_SERVER_ENDPOINT>
 
 There is no need to install any dependencies locally.
+
+.. tip::
+
+  On a machine without a browser (an SSH session, a container, or an AI agent), add ``--no-browser``:
+
+  .. code-block:: shell
+
+    # AI agents: run this in the background, then show the printed URL to the
+    # user right away. It blocks until they click Authorize (up to 5 minutes).
+    sky api login -e <API_SERVER_ENDPOINT> --no-browser
+
+  SkyPilot prints a URL. Open it in a browser on any device and click **Authorize**; the command finishes once you do.
+
+  If it times out, run it again. If it instead prints a ``/token`` URL and asks you to paste a token (older API servers), open that URL, copy the token, and pass it on stdin:
+
+  .. code-block:: shell
+
+    echo <TOKEN> | sky api login -e <API_SERVER_ENDPOINT> --no-browser
 
 See :ref:`sky-api-server-connect` for more details.
 
@@ -225,6 +270,7 @@ This will produce a summary like:
     Azure: enabled
     OCI: enabled
     Lambda: enabled
+    Modal: enabled
     Nebius: enabled
     RunPod: enabled
     Paperspace: enabled
@@ -377,8 +423,8 @@ Slurm
 
 .. note::
 
-    Slurm support is under active development. We'd love to hear from you —
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
+    Have questions or feedback on running SkyPilot with Slurm? We'd love to
+    hear from you — please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 SkyPilot can run workloads on Slurm clusters. The only requirement is SSH access to a Slurm login node.
 
@@ -1016,6 +1062,23 @@ The :code:`~/.oci/config` file should contain the following fields:
   # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
   key_file=~/.oci/oci_api_key.pem
 
+Profiles created by :code:`oci session authenticate` (session-token authentication, the usual choice for federated / SSO logins) are supported too. Such a profile has no :code:`user`; instead it carries :code:`security_token_file` and a session :code:`key_file` (with that key's :code:`fingerprint`), and SkyPilot signs requests with the session token just like :code:`oci --auth security_token` does. The CLI writes absolute paths, for example:
+
+.. code-block:: text
+
+  [DEFAULT]
+  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  key_file=/home/username/.oci/sessions/DEFAULT/oci_api_key.pem
+  tenancy=ocid1.tenancy.oc1..aaaaaaaa
+  region=us-sanjose-1
+  security_token_file=/home/username/.oci/sessions/DEFAULT/token
+
+There is no need to edit these paths: when the files are under your home directory, SkyPilot copies them to the same place under the home directory on the cluster and adjusts the paths in the copied config.
+
+Session tokens expire after about an hour. Run :code:`oci session refresh --profile <name>` (or :code:`oci session authenticate` again) before launching; :code:`sky check oci` reports an expired token. The token is copied to the cluster together with the config and is not refreshed there, so operations the cluster runs on its own behalf stop working once that copy has expired: autostop, and, for a :ref:`managed jobs <managed-jobs>` or :ref:`SkyServe <sky-serve>` controller, launching, recovering and tearing down OCI clusters. SkyPilot warns when a controller is launched with such a profile; use an API-key profile for long-running controllers.
+
+To use a profile other than :code:`DEFAULT`, set :code:`oci_config_profile` in :code:`~/.sky/config.yaml` (see below).
+
 By default, the provisioned nodes will be in the root `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`__. To specify the `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`_ other than root, create/edit the file :code:`~/.sky/config.yaml`, put the compartment's OCID there, as the following:
 
 .. code-block:: text
@@ -1024,6 +1087,8 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
     region_configs:
       default:
         compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+        # Optional: the ~/.oci/config profile to use (defaults to DEFAULT).
+        oci_config_profile: DEFAULT
 
 OCI also offers `Object Storage <https://www.oracle.com/cloud/storage/object-storage/>`__, which supports both a native API and an `S3-compatible API <https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm>`__.
 SkyPilot can download/upload data to OCI buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up OCI Object Storage, first create a `Customer Secret Key <https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/managingcredentials.htm#create-secret-key>`_ from the OCI console.
@@ -1104,6 +1169,190 @@ Go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambd
 
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
+Modal
+~~~~~
+
+`Modal <https://modal.com/>`__ runs workloads in Modal Functions. Each SkyPilot
+cluster on Modal is one Modal Function call, with one container per node.
+Multi-node clusters use Modal's `multi-node clusters
+<https://modal.com/docs/guide/multi-node-clusters>`__.
+
+Install the necessary dependencies for Modal.
+
+.. note::
+
+  Modal support requires Python >= 3.10.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # From stable release
+      uv pip install "skypilot[modal]"
+      # From nightly build
+      uv pip install "skypilot-nightly[modal]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # From stable release
+      uv tool install --with pip "skypilot[modal]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[modal]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # From stable release
+      pip install "skypilot[modal]"
+      # From nightly build
+      pip install "skypilot-nightly[modal]"
+      # From source
+      pip install -e ".[modal]"
+
+Configure Modal credentials with the Modal CLI:
+
+.. code-block:: shell
+
+  modal token new
+
+Alternatively, set token credentials in the environment:
+
+.. code-block:: shell
+
+  export MODAL_TOKEN_ID=<your_token_id>
+  export MODAL_TOKEN_SECRET=<your_token_secret>
+
+SkyPilot records the active Modal Environment when creating a cluster. Activate
+the same Environment when managing that cluster.
+
+Verify the setup:
+
+.. code-block:: shell
+
+  sky check modal
+
+Minimal CPU task:
+
+.. code-block:: yaml
+
+  resources:
+    cloud: modal
+
+  run: |
+    echo "Hello from Modal on SkyPilot"
+    python -V
+
+Use the standard ``cpus`` and ``memory`` fields to size Modal nodes.
+SkyPilot represents each Modal physical core as two vCPUs. Modal currently
+supports 0.25--128 SkyPilot vCPUs and 0.125--336 GiB of memory; SkyPilot uses
+the selected values as both the Modal request and limit. Without ``cpus`` and
+``memory``, a node gets 4 vCPUs and 16 GiB, and a GPU node gets 4 vCPUs and
+16 GiB per GPU (``H100:8`` runs on 32 vCPUs and 128 GiB).
+
+GPU task. Modal's GPU containers are always preemptible, so SkyPilot offers
+Modal GPUs as spot only: set ``use_spot: true`` (``--use-spot``).
+
+.. code-block:: yaml
+
+  resources:
+    cloud: modal
+    accelerators: H100:1
+    use_spot: true
+
+  run: |
+    nvidia-smi
+
+CPU-only clusters can be either. On-demand (the default) runs non-preemptible,
+at Modal's non-preemptible CPU and memory rate; with ``use_spot: true`` the
+cluster is preemptible, at Modal's list rate (a third of it).
+
+You can also run the examples in ``examples/modal/hello.yaml`` and
+``examples/modal/gpu.yaml``.
+
+Modal Volumes can be created with SkyPilot volumes and mounted into a Modal
+cluster:
+
+.. code-block:: shell
+
+  sky volumes apply --name cache --infra modal --type modal-volume
+
+.. code-block:: yaml
+
+  resources:
+    cloud: modal
+
+  volumes:
+    /cache:
+      name: cache
+
+  run: |
+    echo "hello" > /cache/hello.txt
+    sync /cache
+
+To use a Modal Volume that already exists, add ``--use-existing``. Deleting
+such a volume with ``sky volumes delete`` removes only SkyPilot's record of it;
+the Modal Volume and its data are kept.
+
+SkyPilot ``secrets:`` work on Modal the same way as other VM clouds; they are
+exported for setup and run commands and redacted from display paths.
+Your Modal token is not copied to Modal clusters: commands on a cluster
+authenticate to Modal as the cluster's own container, like code in any Modal
+Function.
+
+Autodown is supported with ``--down``:
+
+.. code-block:: shell
+
+  sky launch -c modal-auto --infra modal --down --idle-minutes-to-autostop 10 task.yaml
+
+SkyPilot storage mounts in ``MOUNT`` mode are translated to Modal
+``CloudBucketMount`` at cluster launch for S3, Cloudflare R2, and GCS
+buckets. ``MOUNT_CACHED`` is not supported on Modal.
+
+Current limitations:
+
+- Multi-node clusters need GPUs and must use all 8 GPUs of each node, for
+  example ``--gpus H100:8 --num-nodes 2 --use-spot``. Modal limits them to 32
+  nodes, and
+  your Modal workspace's GPU limit must cover the whole cluster.
+- Spot clusters (all GPU clusters) can be preempted by Modal. A preempted
+  cluster is terminated, not restarted: use :ref:`managed jobs <managed-jobs>`
+  to recover long-running work.
+- A cluster lives at most 24 hours (Modal's maximum Function timeout). If it
+  exits, times out, or is terminated from Modal, launch a new SkyPilot
+  cluster.
+- ``disk_size`` is not applied: Modal sets the container's disk.
+- Modal bills CPU per physical core, which SkyPilot counts as 2 vCPUs. A
+  ``4CPU--16GB`` instance is 2 Modal cores, so the processes on it (and Ray)
+  see 2 CPUs, not 4. A task that asks for more CPUs than that still runs. A
+  request for less than one core (``--cpus`` below 2) is rounded up to one core.
+- ``sky stop`` / ``sky start`` and stop/resume semantics are not supported; use
+  ``sky down``.
+- Managed jobs can run on Modal clusters, but the jobs and SkyServe
+  controllers cannot be hosted on Modal.
+- Modal Volumes do not have a SkyPilot ``size`` setting. Persist writes with
+  ``sync <mount-path>`` before tearing down the cluster.
+- S3 bucket mounts use a copy of the AWS credentials taken when the cluster is
+  launched. Temporary credentials (SSO, an assumed role) stop working on the
+  mount when they expire; use long-lived credentials for clusters that outlive
+  them.
+- Modal GCS bucket mounts require HMAC credentials in
+  ``GOOGLE_ACCESS_KEY_ID`` and ``GOOGLE_ACCESS_KEY_SECRET``, set in the
+  environment of the API server (not of the client). All GCS mounts use them.
+- Bucket mounts give Modal a copy of the API server's bucket credentials. S3
+  mounts are therefore refused when ``aws.remote_identity`` is not
+  ``LOCAL_CREDENTIALS``.
+- Docker images are supported through public registry image references such as
+  ``image_id: docker:ubuntu:22.04``. Private registry credentials are not wired
+  through Modal Secrets yet.
 
 Paperspace |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1191,6 +1440,7 @@ Install the necessary dependencies for Vast.
     .. code-block:: shell
 
       # SkyPilot requires 3.7 <= python <= 3.13.
+      # Vast is not part of "skypilot[all]"; install the vast extra explicitly.
       # From stable release
       pip install "skypilot[vast]"
       # From nightly build

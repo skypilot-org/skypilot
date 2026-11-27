@@ -685,6 +685,67 @@ def test_kueue_skipped_when_cluster_not_using_kueue(tmp_path, k8s_apis):
     k8s_apis.custom.list_cluster_custom_object.assert_not_called()
 
 
+def _kai_pods(*names):
+    """Pods carrying the queue label the template renders for a KAI queue."""
+    pods = _pods(*names)
+    for pod in pods.items:
+        pod.metadata.labels['kai.scheduler/queue'] = 'team-queue'
+    return pods
+
+
+def test_kai_pod_group_dumped_for_kai_cluster(tmp_path, k8s_apis):
+    k8s_apis.core.list_namespaced_pod.return_value = _kai_pods('c-head')
+    k8s_apis.custom.get_namespaced_custom_object.return_value = {
+        'metadata': {
+            'name': 'cluster-abc',
+            'managedFields': [{
+                'manager': 'kai'
+            }],
+        }
+    }
+
+    errors = _run(tmp_path)
+
+    assert not errors
+    path = tmp_path / 'kai' / 'podgroups.yaml'
+    assert yaml_utils.read_yaml(str(path)) == {
+        'metadata': {
+            'name': 'cluster-abc'
+        }
+    }
+    k8s_apis.custom.get_namespaced_custom_object.assert_called_once()
+    assert k8s_apis.custom.get_namespaced_custom_object.call_args.args == (
+        'scheduling.run.ai', 'v2alpha2', 'ns', 'podgroups', 'cluster-abc')
+
+
+def test_kai_absent_pod_group_is_not_an_error(tmp_path, k8s_apis):
+    k8s_apis.core.list_namespaced_pod.return_value = _kai_pods('c-head')
+    k8s_apis.custom.get_namespaced_custom_object.side_effect = (
+        _FakeApiException(status=404))
+
+    assert not _run(tmp_path)
+    assert not (tmp_path / 'kai').exists()
+
+
+def test_kai_pod_group_failure_is_recorded(tmp_path, k8s_apis):
+    k8s_apis.core.list_namespaced_pod.return_value = _kai_pods('c-head')
+    k8s_apis.custom.get_namespaced_custom_object.side_effect = (
+        _FakeApiException(status=500))
+
+    errors = _run(tmp_path)
+
+    assert [error['resource'] for error in errors
+           ] == ['kubernetes/kai/podgroups']
+
+
+def test_kai_skipped_when_cluster_not_using_kai(tmp_path, k8s_apis):
+    k8s_apis.core.list_namespaced_pod.return_value = _pods('c-head')
+
+    assert not _run(tmp_path)
+    assert not (tmp_path / 'kai').exists()
+    k8s_apis.custom.get_namespaced_custom_object.assert_not_called()
+
+
 def test_pod_list_failure_is_recorded(tmp_path, k8s_apis):
     # A non-connection error (e.g. a transient/unexpected failure) is recorded,
     # but the context is still reachable, so the dump continues for everything

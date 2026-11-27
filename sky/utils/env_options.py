@@ -46,6 +46,11 @@ class Options(enum.Enum):
     # compute target via `allowed_contexts: 'all'`.
     ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER = (
         'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER', True)
+    # Subtract the memory of the server worker processes, and of the
+    # consolidation-mode controllers, before sizing the executor pools. Without
+    # it the pools are sized against total memory and the permanent processes
+    # can add up to more memory than the server has.
+    MEMORY_AWARE_WORKER_SIZING = ('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         super().__init__()

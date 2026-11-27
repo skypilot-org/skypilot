@@ -2,7 +2,9 @@
 
 import contextlib
 import dataclasses
+import functools
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -11,12 +13,15 @@ import pathlib
 import tempfile
 import time
 import typing
-from typing import Dict, Generator, Iterable, Optional, Tuple
+from typing import (Any, Callable, Dict, Generator, Iterable, List, Optional,
+                    Set, Tuple, TypeVar)
 import uuid
 import zipfile
 
+import colorama
 import filelock
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
@@ -25,10 +30,13 @@ from sky.data import storage_utils
 from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -45,17 +53,10 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+F = TypeVar('F', bound=Callable[..., Any])
+
 # The chunk size for downloading the logs from the API server.
 _DOWNLOAD_CHUNK_BYTES = 8192
-# The chunk size for the zip file to be uploaded to the API server. We split
-# the zip file into chunks to avoid network issues for large request body that
-# can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
-# As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MB
-# (not 100MiB; 100MB = 100,000,000 bytes):
-# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
-# We use 95MB to leave headroom for HTTP headers and request overhead.
-_UPLOAD_CHUNK_BYTES = 95 * 1000 * 1000
-
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
 _FILE_UPLOAD_LOCK_DIR = '~/.sky/locks/file_uploads'
@@ -184,6 +185,9 @@ class UploadChunkParams:
     file_path: str
     upload_logger: logging.Logger
     log_file: str
+    # Read in the caller's thread: chunks upload on worker threads, which do
+    # not see the caller's `sdk.impersonate()` context.
+    auth_headers: Dict[str, str]
     # For backward compatibility
     # TODO(aylei): remove this and always use /upload_v2 after 0.14.0
     endpoint: str = '/upload'
@@ -201,7 +205,6 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
 
     server_url = server_common.get_server_url()
     max_attempts = 3
-    sa_headers = service_account_auth.get_service_account_headers()
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
             response = params.client.post(
@@ -212,11 +215,12 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                     'chunk_index': str(params.chunk_index),
                     'total_chunks': str(params.total_chunks),
                 },
-                content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
+                content=FileChunkIterator(f,
+                                          server_constants.UPLOAD_CHUNK_BYTES,
                                           params.chunk_index),
                 headers={
                     'Content-Type': 'application/octet-stream',
-                    **sa_headers,
+                    **params.auth_headers,
                 },
                 cookies=server_common.get_api_cookie_jar())
             if response.status_code == 200:
@@ -407,7 +411,8 @@ def upload_mounts_to_api_server(
                         status: rich_utils.GeneralStatus,
                         upload_logger: logging.Logger):
             zip_file_size = os.path.getsize(zip_file_path)
-            total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
+            total_chunks = int(
+                math.ceil(zip_file_size / server_constants.UPLOAD_CHUNK_BYTES))
             timeout = httpx.Timeout(None, read=180.0)
             status.update(
                 ux_utils.spinner_message(
@@ -416,6 +421,7 @@ def upload_mounts_to_api_server(
                     is_local=True))
 
             upload_completed = False
+            auth_headers = service_account_auth.get_service_account_headers()
             with httpx.Client(timeout=timeout) as client:
                 total_retries = 3
                 for retry in range(total_retries):
@@ -427,6 +433,7 @@ def upload_mounts_to_api_server(
                                           zip_file_path,
                                           upload_logger,
                                           log_file,
+                                          auth_headers,
                                           endpoint=endpoint)
                         for chunk_index in range(total_chunks)
                     ]
@@ -476,6 +483,7 @@ def upload_mounts_to_api_server(
                         params={
                             'user_hash': common_utils.get_user_hash(),
                             'blob_id': blob_id,
+                            'size_bytes': os.path.getsize(temp_zip_file.name),
                         })
                     if resp.status_code != 200:
                         raise RuntimeError(f'Failed to check blob existence: '
@@ -506,3 +514,203 @@ def upload_mounts_to_api_server(
         if use_v2:
             return dag, blob_id
     return dag, None
+
+
+def raise_exception_object_on_client(e: BaseException) -> None:
+    """Raise the exception object on the client."""
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stacktrace = getattr(e, 'stacktrace', str(e))
+        logger.error('=== Traceback on SkyPilot API Server ===\n'
+                     f'{stacktrace}')
+    with ux_utils.print_exception_no_traceback():
+        raise e
+
+
+def request_result(request_id: str, status_code: int, body: Any,
+                   text: Callable[[], str]) -> Any:
+    """The result of a request from an /api/get response, or raises its error.
+
+    text returns the raw response body, for the error message.
+    """
+    request_task = None
+    if status_code == 200 and body is not None:
+        request_task = requests_lib.Request.decode(
+            payloads.RequestPayload(**body))
+    elif status_code == 500:
+        try:
+            request_task = requests_lib.Request.decode(
+                payloads.RequestPayload(**body.get('detail')))
+            logger.debug(f'Got request with error: {request_task.name}')
+        except Exception:  # pylint: disable=broad-except
+            request_task = None
+    if request_task is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to get request {request_id}: '
+                               f'{status_code} {text()}')
+    error = request_task.get_error()
+    if error is not None:
+        raise_exception_object_on_client(error['object'])
+    if request_task.status == requests_lib.RequestStatus.CANCELLED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.RequestCancelled(
+                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
+                f'({request_task.request_id}) is cancelled by another process.'
+                f'{colorama.Style.RESET_ALL}')
+    return request_task.get_return_value()
+
+
+def sync_page_size(limit: Optional[int], min_api_version: int) -> Optional[int]:
+    """The page size to fetch a list in as sync calls, or None for one call.
+
+    A list is paged when the server answers sync calls up to a smaller `limit`
+    than asked for (None asks for all of it) and is at least
+    `min_api_version`, so it takes the list's cursor.
+    """
+    max_limit = rest.get_sync_call_max_limit()
+    if max_limit is None or (limit is not None and limit <= max_limit):
+        return None
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version is None or remote_api_version < min_api_version:
+        return None
+    return max_limit
+
+
+def fetch_in_pages(
+    send: Callable[[Any, int], server_common.RequestId],
+    page_size: int,
+    read_page: Callable[[Any, Any], Optional[Tuple[List[Any], int, Any]]],
+    merge: Callable[[Any, List[Any]], Any],
+    limit: Optional[int] = None,
+) -> Optional[server_common.RequestId]:
+    """Fetches a list as sync calls of up to page_size items each.
+
+    send(cursor, size) sends one page; the first cursor is None.
+    read_page(value, cursor) returns the rows of the page sent with `cursor`,
+    how many items they count as against the page size and `limit`, and the
+    cursor of the next page. It returns None when it cannot read the value,
+    or when the page is not the one after `cursor`: something on the way
+    dropped the cursor and sent an earlier page again. merge(first_value,
+    rows) builds the result from the first page's value and the rows of every
+    page.
+
+    The list ends at the first empty page or when `limit` items are fetched.
+
+    Returns a request id that carries the combined result, or the request id
+    of a page that failed. Returns None when a page is not answered in its
+    response, read_page returns None, or the server refuses the cursor with
+    QueueCursorNotSupportedError; the caller then fetches the list in one
+    call.
+    """
+    rows: List[Any] = []
+    fetched = 0
+    cursor: Any = None
+    first_value: Any = None
+    while True:
+        size = page_size
+        if limit is not None:
+            size = min(size, limit - fetched)
+        request_id = send(cursor, size)
+        if request_id.sync_response is None:
+            return None
+        status_code, payload = request_id.sync_response
+        if status_code != 200:
+            return None if _is_cursor_refused(payload) else request_id
+        value = json.loads(payload['return_value'])
+        page = read_page(value, cursor)
+        if page is None:
+            return None
+        if first_value is None:
+            first_value = value
+        page_rows, count, cursor = page
+        rows.extend(page_rows)
+        fetched += count
+        # A short page does not end the list: the server can drop rows after
+        # applying its limit, e.g. records that fail validation.
+        if count == 0 or (limit is not None and fetched >= limit):
+            break
+    request_id.sync_response = (200, {
+        **payload, 'return_value': json.dumps(merge(first_value, rows))
+    })
+    return request_id
+
+
+def fetch_list_in_pages(
+    send: Callable[[Any, int], server_common.RequestId], page_size: int,
+    cursor_of: Callable[[Dict[str, Any]], Any],
+    key_of: Callable[[Dict[str, Any]],
+                     Any]) -> Optional[server_common.RequestId]:
+    """fetch_in_pages for a request that returns a list of rows.
+
+    cursor_of(row) is the cursor after that row; key_of(row) identifies the
+    row. A page that repeats a row was not sent after its cursor.
+    """
+    # Rows are checked for repeats, not for their order after the cursor: the
+    # server orders names in its database collation, which the client cannot
+    # reproduce.
+    seen: Set[Any] = set()
+
+    def read_page(value: Any,
+                  cursor: Any) -> Optional[Tuple[List[Any], int, Any]]:
+        del cursor  # Repeats are checked against every page.
+        if not isinstance(value, list):
+            return None
+        keys = [key_of(row) for row in value]
+        if len(set(keys)) != len(keys) or not seen.isdisjoint(keys):
+            return None
+        seen.update(keys)
+        return value, len(value), cursor_of(value[-1]) if value else None
+
+    return fetch_in_pages(send, page_size, read_page, lambda _, rows: rows)
+
+
+def _is_cursor_refused(error_body: Any) -> bool:
+    """Whether a sync call failed with QueueCursorNotSupportedError."""
+    try:
+        error = json.loads(error_body['detail']['error'])
+        return error['type'] == exceptions.QueueCursorNotSupportedError.__name__
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def return_sync_call_result(func: F) -> F:
+    """Returns the result a sync call already carries instead of calling func.
+
+    func takes `request_id` and optionally `follow`; with follow=False it
+    returns None, as streaming without following does.
+    """
+    signature = inspect.signature(func)
+
+    def _answer(args, kwargs) -> Tuple[bool, Any]:
+        """(True, result) when the server answered the call in its response."""
+        bound = signature.bind_partial(
+            *args,
+            **{k: v for k, v in kwargs.items() if k in signature.parameters})
+        request_id = bound.arguments.get('request_id')
+        sync_response = getattr(request_id, 'sync_response', None)
+        if sync_response is None:
+            return False, None
+        if not bound.arguments.get('follow', True):
+            return True, None
+        status_code, body = sync_response
+        return True, request_result(str(request_id), status_code, body,
+                                    lambda: str(body))
+
+    if inspect.iscoroutinefunction(inspect.unwrap(func)):
+
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            answered, result = _answer(args, kwargs)
+            if answered:
+                return result
+            return await func(*args, **kwargs)
+
+        return typing.cast(F, async_wrapper)
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        answered, result = _answer(args, kwargs)
+        if answered:
+            return result
+        return func(*args, **kwargs)
+
+    return typing.cast(F, wrapper)

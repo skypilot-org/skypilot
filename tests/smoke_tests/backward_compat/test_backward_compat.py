@@ -171,7 +171,12 @@ class TestBackwardCompatibility:
             # the base env to match so quicktest-core --kubernetes works.
             # TODO: Remove once the base version tested against also
             # pins `kubernetes<36.0.0`.
-            'uv pip install "kubernetes<36.0.0"')
+            'uv pip install "kubernetes<36.0.0" && '
+            # FastAPI 0.145.0 rejects the unused `prefix` argument that
+            # older API servers pass to FastAPI(), so they exit on start.
+            # TODO: Remove once the base version tested against no longer
+            # passes `prefix`.
+            'uv pip install "fastapi<0.145"')
 
         # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
         # Old SkyPilot versions lack ConnectionError/ReadTimeoutError handling
@@ -540,9 +545,26 @@ class TestBackwardCompatibility:
             f'echo "$s" | grep -E "Job .* logs: "',
         ]
 
+        # Restart a job that finished in the old version. Its spec was stored
+        # by the old version, and the controller still runs the old version
+        # (it is upgraded on the next launch), so the new server reads the
+        # spec from an old controller. The new job's name must not contain
+        # managed_job_name, so the counts below are unchanged.
+        restart_name = f'rs-{managed_job_name[::-1]}'
+        restart_commands = [
+            f'sky jobs launch -y -d --restart {managed_job_name}-old-1 '
+            f'-n {restart_name}',
+            wait_for_status(restart_name, [sky.ManagedJobStatus.SUCCEEDED]),
+            # By ID: `sky jobs logs -n` only finds running jobs.
+            f'id=$(sky jobs queue | awk \'$3 == "{restart_name}" '
+            f'{{print $1}}\'); echo "id=$id"; [ -n "$id" ] && '
+            f'result="$(sky jobs logs --no-follow $id)"; '
+            f'echo "$result"; echo "$result" | grep hi',
+        ]
+
         # Combine all commands
         current_commands = (common_initial_commands + sync_down_commands +
-                            version_specific_commands)
+                            restart_commands + version_specific_commands)
 
         # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
         # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
@@ -585,7 +607,9 @@ class TestBackwardCompatibility:
             *self._switch_to_current(*current_commands),
             check_controller_process_count,
         ]
-        teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
+        teardown = (f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n '
+                    f'{managed_job_name}* -y; sky jobs cancel -n '
+                    f'{restart_name} -y')
         self.run_compatibility_test(managed_job_name, commands, teardown)
 
     def test_serve_deployment(self, generic_cloud: str):
@@ -659,6 +683,30 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # `--infra` against a server that predates it. The client refuses
+            # before sending, because a dropped infra filter would answer with
+            # jobs on *other* infra -- right-looking and wrong. Once the base
+            # release carries the filter, the same call has to work instead,
+            # so the assertion follows the base's API version rather than
+            # expiring the day this ships.
+            (f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs queue --infra {generic_cloud} 2>&1)" || true; '
+             'echo "$s" && echo "$s" | grep -i "not supported by your API '
+             'server"' if
+             self.BASE_API_VERSION < constants.MIN_JOBS_INFRA_FILTER_API_VERSION
+             else f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs queue --infra {generic_cloud})" && '
+             f'echo "$s" && echo "$s" | grep {job_name}'),
+            # `sky jobs launch --restart`: a server that predates it is
+            # refused by the client with an upgrade hint. Once the base
+            # release has it, restarting the finished job has to work.
+            (f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs launch -y -d --restart {job_name} 2>&1)" || true; '
+             'echo "$s" && echo "$s" | grep "is introduced after the remote '
+             'server version"'
+             if self.BASE_API_VERSION < constants.MIN_JOBS_RESTART_API_VERSION
+             else f'{self.ACTIVATE_CURRENT} && '
+             f'sky jobs launch -y -d --restart {job_name} -n {job_name}-rs'),
             # sync-down: new client, old server. Verifies the server still
             # writes downloaded logs under the path the client expects to
             # rewrite (api_server_user_logs_dir_prefix); regression check
@@ -696,7 +744,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky serve down {cluster_name}-0 -y',
         ]
 
-        teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+        teardown = (f'{self.ACTIVATE_BASE} && sky jobs cancel -y -n '
+                    f'{job_name}-rs; sky down {cluster_name} -y && '
+                    f'sky serve down {cluster_name}* -y')
 
         if generic_cloud == 'kubernetes':
             commands.extend([
@@ -939,6 +989,12 @@ class TestBackwardCompatibility:
                 # Use volume in current version
                 f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
                 f'sky volumes ls | grep "{volume_name}"',
+                # `apply` above only started provisioning; the launch below
+                # mounts the volume and is refused with VolumeNotReadyError
+                # until the claim binds. Waited for on the current side, the
+                # one that does the mounting.
+                f'{self.ACTIVATE_CURRENT} && '
+                f'{smoke_tests_utils.get_cmd_wait_until_volume_is_ready(volume_name)}',
                 # Launch new task with volume
                 f'{self.ACTIVATE_CURRENT} && sky launch -y -c {cluster_name} --infra k8s {task_yaml_path}',
                 f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',

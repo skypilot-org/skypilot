@@ -220,6 +220,17 @@ Environment variables for ``setup``
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
+   * - ``SKYPILOT_JOB_RANK``
+     - Rank (an integer ID from 0 to :code:`num_jobs-1`) of this job among the jobs
+       submitted by a single ``sky jobs launch --num-jobs`` command. ``0`` when
+       ``--num-jobs`` is not used. Available only for :ref:`managed jobs <managed-jobs>`.
+       Read more :ref:`here <num-jobs>`.
+     - 0
+   * - ``SKYPILOT_NUM_JOBS``
+     - Total number of jobs submitted by the ``sky jobs launch`` command, i.e., the
+       value of ``--num-jobs`` (``1`` if not given). Available only for
+       :ref:`managed jobs <managed-jobs>`. Read more :ref:`here <num-jobs>`.
+     - 10
 
 Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
 
@@ -279,3 +290,14 @@ Environment variables for ``run``
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
+   * - ``SKYPILOT_JOB_RANK``
+     - Rank (an integer ID from 0 to :code:`num_jobs-1`) of this job among the jobs
+       submitted by a single ``sky jobs launch --num-jobs`` command. Use it to
+       partition work across the jobs. ``0`` when ``--num-jobs`` is not used.
+       Available only for :ref:`managed jobs <managed-jobs>`. Read more :ref:`here <num-jobs>`.
+     - 0
+   * - ``SKYPILOT_NUM_JOBS``
+     - Total number of jobs submitted by the ``sky jobs launch`` command, i.e., the
+       value of ``--num-jobs`` (``1`` if not given). Available only for
+       :ref:`managed jobs <managed-jobs>`. Read more :ref:`here <num-jobs>`.
+     - 10

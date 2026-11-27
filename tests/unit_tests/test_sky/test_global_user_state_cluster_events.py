@@ -1,6 +1,9 @@
 """Unit tests for cluster_event accessors in global_user_state."""
 import time
 
+import sqlalchemy
+from sqlalchemy import orm
+
 from sky import global_user_state
 from sky.skylet import constants
 from sky.utils import status_lib
@@ -148,6 +151,33 @@ def test_get_last_event_of_type_multiple(tmp_path, monkeypatch):
         event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     )
     assert result == {h1: 'a-new', h2: 'b-only'}
+
+
+def test_get_last_event_of_type_multiple_chunks_large_sets(
+        tmp_path, monkeypatch):
+    """More hashes than one IN clause may hold are queried in chunks and
+    merged, so a large pool's status does not exceed SQLite's bind limit."""
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    expected = {}
+    for i in range(5):
+        name = f'c{i}'
+        cluster_hash = _add_cluster(name)
+        for t, reason in ((1, f'{name}-old'), (2, f'{name}-new')):
+            global_user_state.add_cluster_event(
+                name,
+                new_status=None,
+                reason=reason,
+                event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+                transitioned_at=t,
+            )
+        expected[cluster_hash] = f'{name}-new'
+
+    result = global_user_state.get_last_cluster_event_of_type_multiple(
+        set(expected),
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    )
+    assert result == expected
 
 
 def test_get_clusters_marks_launching_init(tmp_path, monkeypatch):
@@ -336,3 +366,134 @@ def test_get_cluster_events_multiple_types_merged_and_ordered(
     assert global_user_state.get_cluster_events(
         cluster_name=None, cluster_hash=cluster_hash, event_type=both,
         limit=2) == ['Launching (pulling)', 'Cluster provisioned']
+
+
+def test_latest_cluster_events_batched(tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    for name in ('c-a', 'c-b', 'c-c'):
+        _add_cluster(name)
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    # Explicit transitioned_at: no sleeping for the 1s timestamp resolution.
+    global_user_state.add_cluster_event('c-a',
+                                        None,
+                                        'Launching (pending: Resources)',
+                                        progress,
+                                        transitioned_at=1000)
+    global_user_state.add_cluster_event('c-a',
+                                        None,
+                                        'Launching (pending: QOSGrpGRES)',
+                                        progress,
+                                        transitioned_at=2000)
+    # A different type on c-b must not be picked up by a progress-only query.
+    global_user_state.add_cluster_event(
+        'c-b',
+        status_lib.ClusterStatus.INIT,
+        'init',
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        transitioned_at=1500)
+
+    events = global_user_state.get_latest_cluster_events(
+        ['c-a', 'c-b', 'c-c', 'missing'], [progress])
+    assert events == {'c-a': ('Launching (pending: QOSGrpGRES)', 2000)}
+    # Both types requested: c-b's status change is returned with its stamp.
+    both = global_user_state.get_latest_cluster_events(
+        ['c-a', 'c-b'],
+        [progress, global_user_state.ClusterEventType.STATUS_CHANGE])
+    assert both == {
+        'c-a': ('Launching (pending: QOSGrpGRES)', 2000),
+        'c-b': ('init', 1500),
+    }
+    assert not global_user_state.get_latest_cluster_events([], [progress])
+    assert not global_user_state.get_latest_cluster_events(['c-a'], [])
+
+
+def test_latest_cluster_events_ties_are_stable(tmp_path, monkeypatch):
+    """transitioned_at is whole seconds and the table has no insertion order,
+    so two events written inside one second need a second sort key for the
+    answer to be stable at all. *Which* of the two wins is the database's
+    collation, so it is deliberately not asserted -- see the ordering comment
+    in get_latest_cluster_events.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('c-a')
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    reasons = {'Launching (one thing)', 'Launching (another thing)'}
+    for reason in reasons:
+        global_user_state.add_cluster_event('c-a',
+                                            None,
+                                            reason,
+                                            progress,
+                                            transitioned_at=1000)
+    seen = {
+        global_user_state.get_latest_cluster_events(['c-a'], [progress])['c-a']
+        for _ in range(5)
+    }
+    assert len(seen) == 1
+    reason, transitioned_at = seen.pop()
+    assert reason in reasons
+    assert transitioned_at == 1000
+
+
+def test_latest_cluster_events_chunks_the_name_list(tmp_path, monkeypatch):
+    """SQLite caps a statement at 999 bound parameters. Unchunked, a
+    deployment with that many clusters provisioning at once raised -- and the
+    caller swallows the error, so *every* cluster lost its launch reason
+    rather than the excess.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    names = []
+    for i in range(5):
+        name = f'chunk-{i}'
+        _add_cluster(name)
+        names.append(name)
+        global_user_state.add_cluster_event(name,
+                                            None,
+                                            f'Launching (pending: r{i})',
+                                            progress,
+                                            transitioned_at=1000 + i)
+    events = global_user_state.get_latest_cluster_events(names, [progress])
+    # Every cluster answered, across three batches of at most two names.
+    assert events == {
+        f'chunk-{i}': (f'Launching (pending: r{i})', 1000 + i) for i in range(5)
+    }
+
+
+def test_duplicate_event_is_skipped_before_reading_the_cluster(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    cluster_hash = _add_cluster('c')
+    status_change = global_user_state.ClusterEventType.STATUS_CHANGE
+
+    def add(reason: str) -> None:
+        global_user_state.add_cluster_event('c',
+                                            status_lib.ClusterStatus.UP,
+                                            reason,
+                                            status_change,
+                                            nop_if_duplicate=True)
+
+    add('All nodes up.')
+    statements = []
+    engine = global_user_state._db_manager.get_engine()
+
+    def record(conn, cursor, statement, *args):
+        del conn, cursor, args
+        statements.append(statement)
+
+    sqlalchemy.event.listen(engine, 'before_cursor_execute', record)
+    try:
+        add('All nodes up.')
+    finally:
+        sqlalchemy.event.remove(engine, 'before_cursor_execute', record)
+    # The cluster's hash and its last event; nothing else.
+    assert len(statements) == 2, statements
+
+    table = global_user_state.cluster_event_table
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(table.c.reason, table.c.starting_status,
+                              table.c.ending_status).where(
+                                  table.c.cluster_hash == cluster_hash,
+                                  table.c.type == status_change.value)).all()
+    assert [tuple(r) for r in rows] == [('All nodes up.', 'INIT', 'UP')]

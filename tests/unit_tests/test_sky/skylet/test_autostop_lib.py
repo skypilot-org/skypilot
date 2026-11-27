@@ -7,9 +7,14 @@ import pytest
 from sky.skylet import autostop_lib
 
 
-def _fake_proc(pid, terminal=None):
+def _fake_proc(pid, terminal=None, name=None, cmdline=None):
     proc = mock.MagicMock()
-    proc.info = {'pid': pid, 'terminal': terminal}
+    proc.info = {
+        'pid': pid,
+        'name': name,
+        'terminal': terminal,
+        'cmdline': cmdline,
+    }
     proc.pid = pid
     return proc
 
@@ -60,6 +65,48 @@ class TestHasActiveSshSessions:
         monkeypatch.setattr(psutil, 'Process', lambda pid: proc_for_pid)
 
         assert autostop_lib.has_active_ssh_sessions() is True
+
+    def test_returns_true_when_pty_ancestor_is_dropbear(self, monkeypatch):
+        """A PTY-backed Dropbear session remains supported."""
+        dropbear = mock.MagicMock()
+        dropbear.name.return_value = 'dropbear'
+
+        monkeypatch.setattr(psutil._psposix.get_terminal_map, 'cache_clear',
+                            mock.MagicMock())
+        _patch_process_iter(monkeypatch,
+                            [_fake_proc(pid=1234, terminal='/dev/pts/0')])
+
+        proc_for_pid = mock.MagicMock()
+        proc_for_pid.parents.return_value = [dropbear]
+        monkeypatch.setattr(psutil, 'Process', lambda pid: proc_for_pid)
+
+        assert autostop_lib.has_active_ssh_sessions() is True
+
+    def test_returns_true_for_dropbear_session_without_host_pty(
+            self, monkeypatch):
+        monkeypatch.setattr(psutil._psposix.get_terminal_map, 'cache_clear',
+                            mock.MagicMock())
+        _patch_process_iter(monkeypatch, [
+            _fake_proc(pid=1234,
+                       terminal=None,
+                       name='dropbear',
+                       cmdline=['dropbear', '-2', 'root'])
+        ])
+
+        assert autostop_lib.has_active_ssh_sessions() is True
+
+    def test_returns_false_for_dropbear_listener_without_session(
+            self, monkeypatch):
+        monkeypatch.setattr(psutil._psposix.get_terminal_map, 'cache_clear',
+                            mock.MagicMock())
+        _patch_process_iter(monkeypatch, [
+            _fake_proc(pid=1234,
+                       terminal=None,
+                       name='dropbear',
+                       cmdline=['dropbear', '-F', '-s', '-R'])
+        ])
+
+        assert autostop_lib.has_active_ssh_sessions() is False
 
     def test_returns_false_when_no_pty_processes(self, monkeypatch):
         monkeypatch.setattr(psutil._psposix.get_terminal_map, 'cache_clear',

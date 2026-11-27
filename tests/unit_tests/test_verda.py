@@ -11,6 +11,7 @@ from sky import clouds
 from sky.adaptors.verda import Instance
 from sky.adaptors.verda import InstanceStatus
 from sky.adaptors.verda import VerdaClient
+from sky.catalog.data_fetchers import fetch_verda
 from sky.clouds import verda
 
 
@@ -310,3 +311,65 @@ class TestVerdaClientInstanceCreation:
             client.instance_create({})
 
         assert "Can't connect to Verda Cloud" in str(exc_info.value)
+
+
+def test_fetch_verda_keeps_catalog_when_no_gpu_is_available(monkeypatch):
+    """When every GPU type is sold out, the fetcher keeps the existing
+    catalog instead of writing one without GPU rows."""
+    cpu = {
+        'instance_type': 'CPU.4V.16G',
+        'cpu': {
+            'number_of_cores': 4
+        },
+        'memory': {
+            'size_in_gigabytes': 16
+        },
+        'price_per_hour': 0.048,
+    }
+    gpu = {
+        'instance_type': '1H100.80S.30V',
+        'cpu': {
+            'number_of_cores': 30
+        },
+        'memory': {
+            'size_in_gigabytes': 120
+        },
+        'gpu': {
+            'number_of_gpus': 1
+        },
+        'gpu_memory': {
+            'size_in_gigabytes': 80
+        },
+        'model': 'H100',
+        'price_per_hour': 2.19,
+    }
+    monkeypatch.setenv('VERDA_CLIENT_ID', 'id')
+    monkeypatch.setenv('VERDA_CLIENT_SECRET', 'secret')
+    monkeypatch.setattr(fetch_verda, '_get_oauth_token', lambda *_: 'token')
+    monkeypatch.setattr(fetch_verda, '_fetch_instance_types',
+                        lambda *_: [cpu, gpu])
+
+    def available(*instance_types):
+        return {t: {'FIN-03': (True, False)} for t in instance_types}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'vms.csv'
+
+        # No existing file: the CPU-only catalog is written.
+        monkeypatch.setattr(fetch_verda, '_build_availability_map',
+                            lambda *_: available('CPU.4V.16G'))
+        fetch_verda.create_catalog(str(path))
+        assert '1H100.80S.30V' not in path.read_text()
+
+        # A GPU is available: the catalog is replaced.
+        monkeypatch.setattr(fetch_verda, '_build_availability_map',
+                            lambda *_: available('CPU.4V.16G', '1H100.80S.30V'))
+        fetch_verda.create_catalog(str(path))
+        with_gpu = path.read_text()
+        assert '1H100.80S.30V,1H100.80S.30V,30.0,120.0,H100,1.0' in with_gpu
+
+        # All GPUs sold out: the catalog with the GPU row is kept.
+        monkeypatch.setattr(fetch_verda, '_build_availability_map',
+                            lambda *_: available('CPU.4V.16G'))
+        fetch_verda.create_catalog(str(path))
+        assert path.read_text() == with_gpu

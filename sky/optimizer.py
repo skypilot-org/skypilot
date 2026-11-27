@@ -15,7 +15,6 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
@@ -240,7 +239,9 @@ class Optimizer:
         topo_order: List[task_lib.Task],
         minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
-        quiet: bool = False
+        quiet: bool = False,
+        earlier_unreachable_errors: Optional[Dict[task_lib.Task,
+                                                  List[Exception]]] = None,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
@@ -248,6 +249,11 @@ class Optimizer:
         The estimated run time of a task running on a resource is given by
         `task.estimate_runtime(resources)` or 1 hour by default.
         The estimated cost is `task.num_nodes * resources.get_cost(runtime)`.
+
+        Args:
+            earlier_unreachable_errors: For tasks with ordered resources, the
+                unreachable errors of the choices tried before the one in the
+                task, reported if the task has no launchable resources.
         """
         # Cost/time of running the task on the resources.
         # node -> {resources -> cost/time}
@@ -295,10 +301,15 @@ class Optimizer:
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 (launchable_resources, cloud_candidates, fuzzy_candidates,
-                 resource_hints) = (_fill_in_launchable_resources(
+                 resource_hints,
+                 unreachable_errors) = (_fill_in_launchable_resources(
                      task=node,
                      blocked_resources=blocked_resources,
                      quiet=quiet))
+                if earlier_unreachable_errors:
+                    unreachable_errors = (
+                        earlier_unreachable_errors.get(node, []) +
+                        unreachable_errors)
                 node_to_candidate_map[node] = cloud_candidates
                 # Has to call the printing after the launchable resources are
                 # computed, because the missing fields of the resources are
@@ -410,10 +421,22 @@ class Optimizer:
                 resource_hints_string = (
                     f'Hint: Check Per Resource Hint\n{hints_formatted}'
                     if hints_formatted else '')
+                if unreachable_errors:
+                    # The same context is checked once per requested resource.
+                    unreachable_errors = list(
+                        {str(e): e for e in unreachable_errors}.values())
+                    unreachable_str = '\n'.join(
+                        f'{indent_prefix}{e}' for e in unreachable_errors)
+                    summary = (
+                        'No reachable infra has resources satisfying the '
+                        f'request: {node_resources_reprs}.\nInfra that could '
+                        f'not be reached:\n{unreachable_str}')
+                else:
+                    summary = (f'{source_hint.capitalize()} does not contain '
+                               'any instances satisfying the request: '
+                               f'{node_resources_reprs}.')
                 error_msg = (
-                    f'{source_hint.capitalize()} does not contain any '
-                    f'instances satisfying the request: '
-                    f'{node_resources_reprs}.'
+                    f'{summary}'
                     f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky gpus list{reset} '
@@ -422,7 +445,11 @@ class Optimizer:
                     'enabled clouds.\n'
                     f'{resource_hints_string}')
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(error_msg)
+                    # Unreachable infra is carried as failover history so
+                    # that callers retry instead of failing the request as
+                    # infeasible.
+                    raise exceptions.ResourcesUnavailableError(
+                        error_msg, failover_history=unreachable_errors)
         return node_to_cost_map, node_to_candidate_map
 
     @staticmethod
@@ -1066,7 +1093,14 @@ class Optimizer:
 
         if not quiet:
             logger.info(
-                f'Optimizing JobGroup "{dag.name}" with {len(tasks)} jobs')
+                f'Optimizing Job Group "{dag.name}" with {len(tasks)} jobs')
+
+        # Spec-level validation of the user's infra pins against
+        # inter_connection (no catalog lookups). May persist an
+        # unset -> off networking degradation on the dag.
+        if _validate_inter_connection_pins(dag, quiet):
+            return Optimizer._optimize_independent(dag, minimize,
+                                                   blocked_resources, quiet)
 
         # Find common infrastructure for all tasks in the JobGroup
         return Optimizer._optimize_same_infra(dag, minimize, blocked_resources,
@@ -1109,14 +1143,14 @@ class Optimizer:
 
         for task in tasks:
             # Get launchable resources for this task
-            launchable_resources, _, _, _ = (_fill_in_launchable_resources(
+            launchable_resources, _, _, _, _ = (_fill_in_launchable_resources(
                 task, blocked_resources=blocked_resources, quiet=quiet))
 
             if not any(launchable_resources.values()):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(
                         f'No resources available for job "{task.name}" '
-                        f'in JobGroup "{dag.name}"')
+                        f'in Job Group "{dag.name}"')
 
             # Build cloud -> launchable resources mapping (with regions)
             cloud_launchables: _PerCloudCandidates = collections.defaultdict(
@@ -1125,16 +1159,59 @@ class Optimizer:
                 for res in launchable_list:
                     if res.cloud is not None:
                         cloud_launchables[res.cloud].append(res)
+
+            if dag.inter_connection is True:
+                # In-group networking is only supported on Kubernetes, so
+                # explicitly requiring it constrains this task's
+                # candidates to Kubernetes before the common-infra
+                # intersection below ever sees other clouds.
+                kubernetes_launchables: _PerCloudCandidates = (
+                    collections.defaultdict(
+                        list, {
+                            cloud: res_list
+                            for cloud, res_list in cloud_launchables.items()
+                            if str(cloud).lower() == 'kubernetes'
+                        }))
+                if not any(kubernetes_launchables.values()):
+                    # Pure feasibility: user-ask contradictions (pins
+                    # excluding Kubernetes) were already rejected by
+                    # _validate_inter_connection_pins before placement.
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(
+                            f'Job Group "{dag.name}" sets '
+                            '`inter_connection: true`, which requires '
+                            'in-group networking, only supported on '
+                            f'Kubernetes, but job "{task.name}" has no '
+                            'feasible Kubernetes placement.')
+                cloud_launchables = kubernetes_launchables
+
             task_launchables[task] = cloud_launchables
 
         # Step 2: Find common cloud+region combinations
         common_infras = Optimizer._find_common_infras(task_launchables)
 
         if not common_infras:
-            # If no common infra, fallback to independent optimization
+            if dag.inter_connection_enabled():
+                # The group requires in-group networking (the default),
+                # which needs all jobs co-located on one infrastructure.
+                # No single infrastructure can host every job, so fail
+                # fast instead of silently spreading the group.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(
+                        f'No single infrastructure can host all jobs in '
+                        f'Job Group "{dag.name}", and in-group networking '
+                        '(inter_connection, enabled by default) requires '
+                        'all jobs to be co-located. Set '
+                        '`inter_connection: false` to allow jobs to be '
+                        'placed on different infrastructures without '
+                        'hostname connectivity, or pin each job\'s infra '
+                        'explicitly.')
+            # inter_connection: false — cross-infra placement is allowed;
+            # place each job independently.
             if not quiet:
-                logger.warning('No common infrastructure found for all jobs. '
-                               'Falling back to independent optimization.')
+                logger.info(f'No common infrastructure for all jobs in '
+                            f'Job Group "{dag.name}"; placing jobs '
+                            'independently (inter_connection: false).')
             return Optimizer._optimize_independent(dag, minimize,
                                                    blocked_resources, quiet)
 
@@ -1142,6 +1219,22 @@ class Optimizer:
         best_infra = Optimizer._select_best_infra(
             common_infras, task_launchables, tasks,
             minimize == common.OptimizeTarget.COST)
+
+        if (dag.inter_connection is None and
+                str(best_infra[0]).lower() != 'kubernetes'):
+            # In-group networking is only supported on Kubernetes, and the
+            # group is placed elsewhere. Explicit `inter_connection: true`
+            # can never get here (its candidates are filtered to
+            # Kubernetes above); unset degrades to no networking, with a
+            # warning. Persist the degradation so downstream consumers
+            # (the jobs controller) skip all networking machinery.
+            logger.warning(
+                f'Job group "{dag.name}" is placed on {best_infra[0]}; '
+                'in-group service discovery (hostname-based networking) '
+                'is only supported on Kubernetes, so tasks cannot reach '
+                'each other by hostname. Set `inter_connection: false` '
+                'to silence this warning.')
+            dag.inter_connection = False
 
         if not quiet:
             cloud, region = best_infra
@@ -1172,26 +1265,49 @@ class Optimizer:
                 if str(cand_cloud) == cloud_name:
                     matching_cloud = cand_cloud
                     break
-            if matching_cloud is None:
-                continue
+            # Unreachable by construction: best_infra came from the
+            # intersection _find_common_infras computed over these same
+            # candidates (both sides match clouds by str()); user
+            # infeasibility exits in Step 2. If this fires, the
+            # intersection logic and this lookup have drifted apart.
+            # Restructuring _find_common_infras to return the per-task
+            # matches would make this assert unnecessary.
+            assert matching_cloud is not None, (
+                f'Job {task.name!r} has no candidate matching the selected '
+                f'cloud {cloud_name!r}; its candidate clouds are '
+                f'{sorted(str(c) for c in candidates.keys())}. Likely a bug '
+                'in _find_common_infras or in how candidate clouds are '
+                'matched by name.')
 
             # Find resources in this cloud+region
+            matched_resources = None
             for resources in candidates[matching_cloud]:
                 if resources.region == region:
-                    # Set best_resources on the task
-                    task.best_resources = resources
-                    # Also set resources override to ensure the constraint
-                    # persists through YAML serialization to the controller.
-                    # Without this, the controller would re-optimize each
-                    # task independently, placing them on different infras.
-                    override_params: Dict[str, Any] = {}
-                    if resources.cloud is not None:
-                        override_params['cloud'] = resources.cloud
-                    if resources.region is not None:
-                        override_params['region'] = resources.region
-                    if override_params:
-                        task.set_resources_override(override_params)
+                    matched_resources = resources
                     break
+            # Same invariant as above, at region granularity.
+            candidate_regions = sorted(
+                {str(r.region) for r in candidates[matching_cloud]})
+            assert matched_resources is not None, (
+                f'Job {task.name!r} has no candidate in the selected region '
+                f'{cloud_name}/{region}; its candidate regions in that cloud '
+                f'are {candidate_regions}. Likely a bug in '
+                '_find_common_infras or in how candidate regions are '
+                'matched.')
+
+            # Set best_resources on the task
+            task.best_resources = matched_resources
+            # Also set resources override to ensure the constraint
+            # persists through YAML serialization to the controller.
+            # Without this, the controller would re-optimize each
+            # task independently, placing them on different infras.
+            override_params: Dict[str, Any] = {}
+            if matched_resources.cloud is not None:
+                override_params['cloud'] = matched_resources.cloud
+            if matched_resources.region is not None:
+                override_params['region'] = matched_resources.region
+            if override_params:
+                task.set_resources_override(override_params)
 
         # Step 5: Print optimizer table for job groups
         if not quiet and len(tasks) > 1:
@@ -1328,6 +1444,15 @@ class Optimizer:
         if len(common_infras) == 1:
             return common_infras[0]
 
+        # The scoring loop below keeps the FIRST of equal-score options
+        # (strict '<'), and equal scores are the norm on Kubernetes where
+        # every context costs 0.0 - so the input order is a tie-breaker.
+        # common_infras comes from a set intersection; sort so ties (and
+        # the last-resort [0] fallback) don't ride set iteration order.
+        common_infras = sorted(common_infras,
+                               key=lambda infra:
+                               (str(infra[0]).lower(), infra[1] or ''))
+
         # Estimate total cost/time for each infra
         best_infra: Optional[Tuple[clouds.Cloud, Optional[str]]] = None
         best_score = float('inf')
@@ -1430,6 +1555,8 @@ class Optimizer:
 
         graph = dag.get_graph()
         local_dag = copy.deepcopy(dag) if has_resources_ordered else dag
+        earlier_unreachable_errors: Dict[
+            task_lib.Task, List[Exception]] = collections.defaultdict(list)
         for task_id in range(len(dag.tasks)):
             task = dag.tasks[task_id]
             if isinstance(task.resources, list):
@@ -1446,20 +1573,24 @@ class Optimizer:
                     # instead of the original loop variable.
                     assert len(local_task.resources) == 1, local_task.resources
                     requested_resources = list(local_task.resources)[0]
-                    launchable_resources_map, _, _, _ = (
-                        _fill_in_launchable_resources(
-                            task=local_task,
-                            blocked_resources=blocked_resources,
-                            quiet=False))
+                    (launchable_resources_map, _, _, _,
+                     unreachable_errors) = (_fill_in_launchable_resources(
+                         task=local_task,
+                         blocked_resources=blocked_resources,
+                         quiet=False))
                     if launchable_resources_map.get(requested_resources, []):
                         break
+                    earlier_unreachable_errors[local_task].extend(
+                        unreachable_errors)
 
         local_graph = local_dag.get_graph()
         local_topo_order = list(nx.topological_sort(local_graph))
         local_node_to_cost_map, local_node_to_candidate_map = (
-            Optimizer._estimate_nodes_cost_or_time(local_topo_order,
-                                                   minimize_cost,
-                                                   blocked_resources))
+            Optimizer._estimate_nodes_cost_or_time(
+                local_topo_order,
+                minimize_cost,
+                blocked_resources,
+                earlier_unreachable_errors=earlier_unreachable_errors))
         if local_dag.is_chain():
             local_best_plan, best_total_objective = Optimizer._optimize_by_dp(
                 local_topo_order, local_node_to_cost_map, minimize_cost)
@@ -1577,11 +1708,8 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         clouds_to_check_again = list(clouds_need_recheck -
                                      global_disabled_clouds)
         if len(clouds_to_check_again) > 0:
-            sky_check.check_capability(
-                sky_cloud.CloudCapability.COMPUTE,
-                quiet=True,
-                clouds=clouds_to_check_again,
-                workspace=skypilot_config.get_active_workspace())
+            sky_check.recheck_clouds(sky_cloud.CloudCapability.COMPUTE,
+                                     clouds_to_check_again)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
@@ -1668,13 +1796,154 @@ def _check_specified_regions(task: task_lib.Task) -> None:
                 raise exceptions.ResourcesUnavailableError(msg)
 
 
+def _get_task_pin_sets(
+        task: task_lib.Task) -> Tuple[Optional[Set[str]], Optional[Set[str]]]:
+    """Return the exact placement constraint sets a task's pins express.
+
+    A task's resource options are alternatives (OR semantics): the task
+    can run anywhere any option allows. A task therefore only has an
+    exactly-enumerable constraint set at a given granularity when EVERY
+    option is pinned at that granularity; one flexible option means the
+    task can escape any conflict at that granularity.
+
+    Returns:
+        (cloud_pins, infra_pins):
+        cloud_pins: the exact set of cloud names the task can run on, or
+            None if any option leaves the cloud unspecified (or the task
+            has no resource options) - the task is flexible across
+            clouds.
+        infra_pins: the exact set of 'cloud/region' infras the task can
+            run on, or None if any option leaves cloud or region
+            unspecified - the task is flexible at least within a cloud
+            (e.g. any_of: [k8s/ctxA, k8s]).
+    """
+    cloud_pins: Set[str] = set()
+    infra_pins: Optional[Set[str]] = set()
+    for resource in task.resources:
+        if resource.cloud is None:
+            return None, None
+        cloud_pins.add(str(resource.cloud))
+        if resource.region is None:
+            infra_pins = None
+        elif infra_pins is not None:
+            infra_pins.add(f'{resource.cloud}/{resource.region}')
+    if not cloud_pins:
+        # No resource options at all: no constraints expressed.
+        return None, None
+    return cloud_pins, infra_pins
+
+
+def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
+    """Validate a JobGroup's infra pins against its inter_connection.
+
+    Spec-level validation only: reads the pins the user wrote and the
+    inter_connection setting, no catalog lookups. Feasibility (whether a
+    pinned infra actually exists and fits each job) is checked later by
+    the common-infra search.
+
+    Checks, in order:
+    - `inter_connection: true` + a job whose options pin only
+      non-Kubernetes clouds: contradiction (in-group networking is only
+      supported on Kubernetes) -> error.
+    - Pinned jobs share no common infra option, at cloud or cloud/region
+      granularity: the placement is deliberately cross-infra, so the
+      common-infra search can never succeed. Error when networking is
+      explicitly required; degrade networking to off (persisted on the
+      dag) with a warning when unset; allowed silently when false.
+
+    Returns:
+        True when the group's pins are deliberately cross-infra and each
+        job must be placed independently; False when the common-infra
+        search should run.
+    """
+    # Gather everything first -- each job's pins, any job pinned off
+    # Kubernetes, and whether the pins conflict -- then branch on the
+    # inter_connection value exactly once per case below.
+    pinned_task_clouds: Dict[str, Set[str]] = {}
+    pinned_task_infras: Dict[str, Set[str]] = {}
+    for task in dag.tasks:
+        cloud_pins, infra_pins = _get_task_pin_sets(task)
+        if cloud_pins is not None:
+            pinned_task_clouds[str(task.name)] = cloud_pins
+        if infra_pins is not None:
+            pinned_task_infras[str(task.name)] = infra_pins
+
+    # First job whose options pin only non-Kubernetes clouds, if any
+    # (in-group networking is Kubernetes-only).
+    non_k8s_pin: Optional[Tuple[str, Set[str]]] = next(
+        ((task_name, cloud_pins)
+         for task_name, cloud_pins in pinned_task_clouds.items()
+         if not any(cloud.lower() == 'kubernetes' for cloud in cloud_pins)),
+        None)
+
+    clouds_conflict = (len(pinned_task_clouds) > 1 and
+                       not set.intersection(*pinned_task_clouds.values()))
+    infras_conflict = (len(pinned_task_infras) > 1 and
+                       not set.intersection(*pinned_task_infras.values()))
+    pins_conflict = clouds_conflict or infras_conflict
+    pins_desc = ''
+    if pins_conflict:
+        # Show each job's own pins so the user can see exactly which jobs
+        # disagree, at the granularity that conflicted.
+        conflicting_pins = (pinned_task_infras
+                            if infras_conflict else pinned_task_clouds)
+        pins_desc = '; '.join(f'{name}: {sorted(pins)}'
+                              for name, pins in conflicting_pins.items())
+
+    if dag.inter_connection is True:
+        # Explicitly required networking: both a non-Kubernetes pin and
+        # conflicting pins are user-ask contradictions -> error.
+        if non_k8s_pin is not None:
+            task_name, cloud_pins = non_k8s_pin
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    f'Job Group "{dag.name}" sets '
+                    '`inter_connection: true`, which requires '
+                    'in-group networking, only supported on '
+                    f'Kubernetes, but job "{task_name}" pins '
+                    f'non-Kubernetes infra ({sorted(cloud_pins)}). '
+                    'Remove the non-Kubernetes infra pins, or set '
+                    '`inter_connection: false` if the jobs do not '
+                    'need to reach each other by hostname.')
+        if pins_conflict:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    f'Jobs in Job Group "{dag.name}" pin infrastructures '
+                    f'with no common option ({pins_desc}), but '
+                    '`inter_connection: true` requires in-group networking, '
+                    'which does not work across infrastructures. Unify the '
+                    'infra pins, or set `inter_connection: false` if the '
+                    'jobs do not need to reach each other by hostname.')
+        return False
+
+    if not pins_conflict:
+        return False
+
+    # Deliberately cross-infra pins: place each job independently.
+    if dag.inter_connection is None:
+        logger.warning(
+            f'Jobs in Job Group "{dag.name}" pin infrastructures with no '
+            f'common option ({pins_desc}); in-group networking will not '
+            'be set up and jobs cannot reach each other by hostname. Set '
+            '`inter_connection: false` to silence this warning.')
+        # Persist the degradation so downstream consumers (the jobs
+        # controller) skip all networking machinery: without this, the
+        # controller would inject the (fatal) networking wait for a
+        # placement where hostnames can never resolve.
+        dag.inter_connection = False
+    elif not quiet:
+        logger.info(f'Jobs in Job Group "{dag.name}" pin different '
+                    'infrastructures; optimizing each job independently.')
+    return True
+
+
 def _fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates, List[str], Dict[resources_lib.Resources,
-                                                List[str]]]:
+                                                List[str]], List[Exception]]:
     """Fills in the launchable resources for the task.
 
     Returns:
@@ -1685,6 +1954,8 @@ def _fill_in_launchable_resources(
         Sorted list of fuzzy candidates (alternative GPU names).
         Dict mapping requested Resources and a list of hints for why the
           resource is unavailable if so.
+        Errors of the locations that were skipped because they could not be
+          reached.
     Raises:
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
@@ -1699,6 +1970,7 @@ def _fill_in_launchable_resources(
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(list)
     resource_hints: Dict[resources_lib.Resources,
                          List[str]] = collections.defaultdict(list)
+    unreachable_errors: List[Exception] = []
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
@@ -1724,6 +1996,7 @@ def _fill_in_launchable_resources(
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
                 resource_hints[resources].append(feasible_resources.hint)
+            unreachable_errors.extend(feasible_resources.unreachable_errors)
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
@@ -1789,7 +2062,7 @@ def _fill_in_launchable_resources(
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
     return launchable, cloud_candidates, list(
-        sorted(all_fuzzy_candidates)), resource_hints
+        sorted(all_fuzzy_candidates)), resource_hints, unreachable_errors
 
 
 # Expose optimize_job_group as a module-level function

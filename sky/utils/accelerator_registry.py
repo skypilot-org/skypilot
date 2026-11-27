@@ -1,4 +1,5 @@
 """Accelerator registry."""
+import re
 import typing
 from typing import List, Optional
 
@@ -88,8 +89,8 @@ def canonicalize_accelerator_name(accelerator: str,
     if cloud is not None:
         cloud_str = str(cloud)
 
-    # TPU names are always lowercase.
-    if accelerator.lower().startswith('tpu-'):
+    # TPU names are always lowercase: tpu-v6e-8, tpu-v6e-slice, tpu7x.
+    if re.match(r'^tpu[-0-9]', accelerator.lower()):
         return accelerator.lower()
 
     # Common case: do not read the catalog files.

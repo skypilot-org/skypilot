@@ -59,6 +59,7 @@ def format_storage_table(storages: List[responses.StorageRecord],
         'NAME',
         'UPDATED',
         'STORE',
+        'WORKSPACE',
         'COMMAND',
         'STATUS',
     ])
@@ -77,6 +78,8 @@ def format_storage_table(storages: List[responses.StorageRecord],
             log_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row.store]),
+            # WORKSPACE
+            row.workspace_name or row.workspace or '-',
             # COMMAND,
             command,
             # STATUS
@@ -160,6 +163,12 @@ class VolumeTable(abc.ABC):
             size = f'{size}Gi'
         else:
             size = '-'
+        # A volume reports the capacity it has now, so a resize that has not
+        # landed yet is invisible in the size alone. The message column says
+        # what it is waiting for, but only this says how big it is getting.
+        target = row.get('resize_target_size')
+        if row.get('resize_status') and _is_larger(target, row.get('size')):
+            size = f'{size} -> {target}Gi'
         usedby_str = '-'
         usedby_clusters = row.get('usedby_clusters')
         usedby_pods = row.get('usedby_pods')
@@ -180,7 +189,7 @@ class VolumeTable(abc.ABC):
             infra,
             size,
             row.get('user_name', '-'),
-            row.get('workspace', '-'),
+            row.get('workspace_name') or row.get('workspace', '-'),
             log_utils.human_duration(row.get('launched_at', 0)),
             row.get('status', ''),
             last_attached_at_str,
@@ -203,14 +212,37 @@ class VolumeTable(abc.ABC):
         raise NotImplementedError
 
 
+def _is_larger(target: Optional[str], size: Optional[str]) -> bool:
+    """Whether a resize is heading somewhere the recorded size does not show.
+
+    Both are whole gibibytes, so a resize smaller than that -- or one whose new
+    space has landed while the state has not cleared -- reads as no resize.
+    """
+    try:
+        return (target is not None and size is not None and
+                int(target) > int(size))
+    except ValueError:
+        return False
+
+
+def _volume_message(row: responses.VolumeRecord) -> str:
+    """What the MESSAGE column says about a volume.
+
+    One cell, so a volume with both an error and a resize in flight shows the
+    error: it is the one that says the volume is unusable. The dashboard's
+    details column picks the same way.
+    """
+    return row.get('error_message') or row.get('resize_message') or ''
+
+
 class PVCVolumeTable(VolumeTable):
     """The PVC volume table."""
 
     def __init__(self,
                  volumes: List[responses.VolumeRecord],
                  show_all: bool = False):
-        # Check if any volume has an error before creating the table
-        self._has_errors = any(row.get('error_message') for row in volumes)
+        # Check if any volume has something to say before creating the table
+        self._has_messages = any(_volume_message(row) for row in volumes)
         super().__init__(volumes, show_all)
 
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
@@ -218,7 +250,7 @@ class PVCVolumeTable(VolumeTable):
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
-        #   (+ MESSAGE if any volume is not ready)
+        #   (+ MESSAGE if any volume has something to say)
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
@@ -234,8 +266,8 @@ class PVCVolumeTable(VolumeTable):
                 'ACCESS_MODE',
                 'MESSAGE',
             ]
-        elif self._has_errors:
-            # Show MESSAGE column even without show_all if there are issues
+        elif self._has_messages:
+            # Show MESSAGE column even without show_all if there is one
             columns = columns + ['MESSAGE']
 
         table = log_utils.create_table(columns)
@@ -253,17 +285,17 @@ class PVCVolumeTable(VolumeTable):
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))
-                # Add error message
-                error_msg = row.get('error_message', '')
-                table_row.append(error_msg if error_msg else '-')
-            elif self._has_errors:
-                # Show error message even without show_all if there are errors
-                error_msg = row.get('error_message', '')
-                # Truncate error message for display
-                if error_msg:
-                    error_msg = common_utils.truncate_long_string(
-                        error_msg, constants.ERROR_MESSAGE_TRUNC_LENGTH)
-                table_row.append(error_msg if error_msg else '-')
+                # Add the message
+                message = _volume_message(row)
+                table_row.append(message if message else '-')
+            elif self._has_messages:
+                # Show the message even without show_all if there is one
+                message = _volume_message(row)
+                # Truncate the message for display
+                if message:
+                    message = common_utils.truncate_long_string(
+                        message, constants.ERROR_MESSAGE_TRUNC_LENGTH)
+                table_row.append(message if message else '-')
 
             self.table.add_row(table_row)
 
@@ -331,6 +363,17 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
+class ModalVolumeTable(RunPodVolumeTable):
+    """The Modal volume table: the same columns as RunPod's.
+
+    Modal Volumes have no size, so SIZE shows '-'.
+    """
+
+    def format(self) -> str:
+        """Format the Modal volume table for display."""
+        return 'Modal Volumes:\n' + str(self.table)
+
+
 def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
@@ -367,6 +410,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()
+        elif volume_type == volume.VolumeType.MODAL_VOLUME.value:
+            modal_table = ModalVolumeTable(volume_list, show_all)
+            table_str += modal_table.format()
     if table_str:
         return table_str
     else:

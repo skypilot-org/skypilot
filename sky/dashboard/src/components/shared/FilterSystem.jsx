@@ -13,13 +13,10 @@ export const evaluateCondition = (item, filter) => {
 
   if (!value) return true; // skip empty filters
 
-  // Global search: check all values
-  if (!property) {
-    const strValue = value.toLowerCase();
-    return Object.values(item).some((val) =>
-      val?.toString().toLowerCase().includes(strValue)
-    );
-  }
+  // A filter without a property cannot be evaluated. The decoders drop these
+  // before they reach the filter list, so this is a guard, not a code path:
+  // skip the filter rather than throwing on the lookup below.
+  if (!property) return true;
 
   const propertyLower = property.toLowerCase();
 
@@ -29,6 +26,29 @@ export const evaluateCondition = (item, filter) => {
     const itemValue = (item.full_infra || item.infra)?.toString().toLowerCase();
     const filterValue = value.toString().toLowerCase();
 
+    switch (operator) {
+      case '=':
+        return itemValue === filterValue;
+      case ':':
+        return itemValue?.includes(filterValue);
+      default:
+        return true;
+    }
+  }
+
+  // Workspace filters are typed against names; `workspace` is the id, which
+  // matches only exactly (a legacy workspace's old name), as on the server.
+  if (propertyLower === 'workspace') {
+    const itemValue = (item.workspace_name || item.workspace)
+      ?.toString()
+      .toLowerCase();
+    const filterValue = value.toString().toLowerCase();
+    if (
+      (operator === '=' || operator === ':') &&
+      item.workspace?.toString().toLowerCase() === filterValue
+    ) {
+      return true;
+    }
     switch (operator) {
       case '=':
         return itemValue === filterValue;
@@ -70,28 +90,41 @@ export const evaluateCondition = (item, filter) => {
   }
 };
 
-// Main filter function
-export const filterData = (data, filters) => {
-  if (filters.length === 0) {
+// Main filter function.
+//
+// Filters on different properties always narrow each other (AND). Filters on
+// the *same* property AND too, unless the caller names that property in
+// `options.orProperties` -- then its values are alternatives (OR), which is
+// what a multi-valued filter like `?status=RUNNING,STOPPED` means.
+//
+// The default is AND so that pages which have not adopted the schema keep their
+// existing behaviour. Note that key/value filters such as Labels want AND even
+// when they repeat: `team:ml` plus `env:prod` reads as an intersection.
+export const filterData = (data, filters, options = {}) => {
+  if (!filters || filters.length === 0) {
     return data;
   }
 
-  return data.filter((item) => {
-    let result = null;
+  const orProperties = new Set(
+    (options.orProperties || []).map((p) => String(p).toLowerCase())
+  );
 
-    for (let i = 0; i < filters.length; i++) {
-      const filter = filters[i];
-      const current = evaluateCondition(item, filter);
-
-      if (result === null) {
-        result = current;
-      } else {
-        result = result && current;
-      }
+  const groups = new Map();
+  for (const filter of filters) {
+    const key = (filter.property || '').toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, []);
     }
+    groups.get(key).push(filter);
+  }
 
-    return result;
-  });
+  return data.filter((item) =>
+    [...groups.entries()].every(([property, group]) =>
+      orProperties.has(property)
+        ? group.some((f) => evaluateCondition(item, f))
+        : group.every((f) => evaluateCondition(item, f))
+    )
+  );
 };
 
 // URL parameter handling utilities
@@ -103,7 +136,7 @@ export const updateURLParams = (router, filters) => {
   let values = [];
 
   filters.map((filter, _index) => {
-    properties.push(filter.property.toLowerCase() ?? '');
+    properties.push((filter.property ?? '').toLowerCase());
     operators.push(filter.operator);
     values.push(filter.value);
   });
@@ -138,20 +171,20 @@ export const updateFiltersByURLParams = (router, propertyMap) => {
 
   const length = Array.isArray(properties) ? properties.length : 1;
 
-  if (length === 1) {
-    filters.push({
-      property: propertyMap.get(properties),
-      operator: operators,
-      value: values,
-    });
-  } else {
-    for (let i = 0; i < length; i++) {
-      filters.push({
-        property: propertyMap.get(properties[i]),
-        operator: operators[i],
-        value: values[i],
-      });
+  for (let i = 0; i < length; i++) {
+    const rawProperty = length === 1 ? properties : properties[i];
+    const property = propertyMap.get(rawProperty);
+    // A property the page does not know about cannot be filtered on. Drop it:
+    // keeping it would render a chip labeled `undefined` that filters nothing
+    // it claims to, and a URL is user-editable input, not trusted state.
+    if (!property) {
+      continue;
     }
+    filters.push({
+      property,
+      operator: length === 1 ? operators : operators[i],
+      value: length === 1 ? values : values[i],
+    });
   }
 
   return filters;
@@ -172,8 +205,15 @@ export const FilterDropdown = ({
   propertyList = [],
   valueList,
   setFilters,
+  // Optional: pages that mirror filter state into the URL themselves (via
+  // useUrlFilterState) pass neither of these.
   updateURLParams,
   onFilterAdd,
+  // Optional: how a chip joins the existing ones. Defaults to appending, which
+  // is what pages without a filter schema expect. A page whose URL can only
+  // carry one value per property passes a helper that replaces instead, so the
+  // chips and the address bar cannot disagree.
+  addFilter,
   placeholder = 'Filter items',
 }) => {
   const inputRef = useRef(null);
@@ -261,16 +301,11 @@ export const FilterDropdown = ({
   const handleOptionSelect = (option) => {
     const property = getPropertyLabel(propertyValue);
     setFilters((prevFilters) => {
-      const updatedFilters = [
-        ...prevFilters,
-        {
-          property,
-          operator: ':',
-          value: option,
-        },
-      ];
+      const updatedFilters = addFilter
+        ? addFilter(prevFilters, property, option)
+        : [...prevFilters, { property, operator: ':', value: option }];
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
       return updatedFilters;
     });
     if (onFilterAdd) onFilterAdd(property, option);
@@ -283,16 +318,11 @@ export const FilterDropdown = ({
     if (e.key === 'Enter' && value.trim() !== '') {
       const property = getPropertyLabel(propertyValue);
       setFilters((prevFilters) => {
-        const updatedFilters = [
-          ...prevFilters,
-          {
-            property,
-            operator: ':',
-            value: value,
-          },
-        ];
+        const updatedFilters = addFilter
+          ? addFilter(prevFilters, property, value)
+          : [...prevFilters, { property, operator: ':', value }];
 
-        updateURLParams(updatedFilters);
+        updateURLParams?.(updatedFilters);
         return updatedFilters;
       });
       if (onFilterAdd) onFilterAdd(property, value);
@@ -305,8 +335,8 @@ export const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible bg-white">
-      <div className="border-r border-gray-300 flex-shrink-0">
+    <div className="flex flex-row border border-line-strong rounded-md overflow-visible bg-surface">
+      <div className="border-r border-line-strong flex-shrink-0">
         <Select
           onValueChange={(val) => {
             setPropertyValue(val);
@@ -317,7 +347,7 @@ export const FilterDropdown = ({
         >
           <SelectTrigger
             aria-label="Filter Property"
-            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm bg-white"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm bg-surface"
           >
             <SelectValue placeholder={propertyList[0]?.label || 'Status'} />
           </SelectTrigger>
@@ -348,7 +378,7 @@ export const FilterDropdown = ({
               setValue('');
               setIsOpen(false);
             }}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-content-faint hover:text-content-secondary"
             title="Clear filter"
             tabIndex={-1}
           >
@@ -370,20 +400,20 @@ export const FilterDropdown = ({
         {isOpen && valueOptions.length > 0 && (
           <div
             ref={dropdownRef}
-            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            className="absolute z-50 mt-1 w-full bg-surface border border-line rounded-md shadow-lg max-h-60 overflow-y-auto"
             style={{ zIndex: 9999 }}
           >
             {valueOptions.map((option, index) => (
               <div
                 key={`${option}-${index}`}
-                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                className={`px-3 py-2 cursor-pointer hover:bg-surface-hover text-sm ${
                   index !== valueOptions.length - 1
-                    ? 'border-b border-gray-100'
+                    ? 'border-b border-line-subtle'
                     : ''
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700">{option}</span>
+                <span className="text-sm text-content">{option}</span>
               </div>
             ))}
           </div>
@@ -400,14 +430,14 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
         (_, _index) => _index !== index
       );
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
 
       return updatedFilters;
     });
   };
 
   const clearFilters = () => {
-    updateURLParams([]);
+    updateURLParams?.([]);
     setFilters([]);
   };
 
@@ -427,7 +457,7 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
             <>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
+                className="rounded-full px-4 py-1 text-sm text-content bg-surface-strong hover:bg-surface-stronger"
               >
                 Clear filters
               </button>
@@ -442,7 +472,7 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 export const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+      <div className="flex items-center text-blue-fg bg-blue-tint-strong px-1 py-1 rounded-full text-sm">
         <div className="flex items-center gap-1 px-2">
           <span>{`${filter.property} `}</span>
           <span>{`${filter.operator} `}</span>
@@ -451,7 +481,7 @@ export const FilterItem = ({ filter, onRemove }) => {
 
         <button
           onClick={() => onRemove()}
-          className="p-0.5 ml-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 ml-1 transform text-content-faint hover:text-content-secondary bg-blue-solid-soft hover:bg-blue-solid rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg

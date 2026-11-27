@@ -14,8 +14,13 @@ def get_fusermount_shim_setup_command(
     sudo = f'{sudo_cmd} ' if sudo_cmd else ''
     command = textwrap.dedent("""
         set -e
-        # Mask fusermount binary before enabling SSH access
-        FUSERMOUNT_PATH=$(which fusermount)
+        # Mask fusermount binary before enabling SSH access.
+        # `command -v` rather than `which`: minimal non-Debian images
+        # (RHEL/UBI/Rocky) do not ship the `which` binary at all. `|| true` so
+        # that a missing fusermount reaches the explicit error below -- without
+        # it, `set -e` aborts on the assignment itself and the pod dies with an
+        # empty log instead of this message.
+        FUSERMOUNT_PATH=$(command -v fusermount || true)
         if [ -z "$FUSERMOUNT_PATH" ]; then
             echo "Error: fusermount binary not found"
             exit 1
@@ -23,7 +28,7 @@ def get_fusermount_shim_setup_command(
         __SUDO__cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
         __SUDO__ln -sf "__SHARED_DIR__/fusermount-shim" "$FUSERMOUNT_PATH"
         # "|| true" because fusermount3 is not always available
-        FUSERMOUNT3_PATH=$(which fusermount3) || true
+        FUSERMOUNT3_PATH=$(command -v fusermount3) || true
         if [ -z "$FUSERMOUNT3_PATH" ]; then
             FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
         fi

@@ -8,6 +8,8 @@ import {
   ENDPOINT,
   VERSION_HEADER,
 } from './constants';
+import { waitForPlugins } from './pluginsReady';
+import { isSyncAnswer, sendRequest } from './syncCalls';
 
 // The server's APIVersionMiddleware uses these headers to (a) negotiate
 // protocol compatibility and (b) populate the `_remote_api_version`
@@ -50,6 +52,7 @@ export async function getCurrentUserInfo() {
         cachedUserInfo = {
           id: data.id || 'local',
           name: data.name || data.id || 'local',
+          role: data.role,
         };
       } else {
         // Not authenticated or error - use 'local' as fallback
@@ -65,32 +68,35 @@ export async function getCurrentUserInfo() {
   return userInfoPromise;
 }
 
-// Wait for plugins that need early initialization (e.g., fetch interceptors)
-// Such plugins are marked with data-requires-early-init="true" and set
-// window.__skyPluginsReady = true when ready
-let pluginsReadyPromise = null;
+// Returns the result carried by an /api/get response.
+async function readRequestResult(path, fetchedData) {
+  if (!fetchedData.ok) {
+    const errorMessage = await getErrorMessageFromResponse(fetchedData);
+    const msg = `API request to get ${path} result failed with status ${fetchedData.status}, error: ${errorMessage}`;
+    throw new Error(msg);
+  }
+  const data = await fetchedData.json();
+  return data.return_value ? JSON.parse(data.return_value) : [];
+}
 
-async function waitForPlugins() {
-  if (window.__skyPluginsReady) return;
-  if (pluginsReadyPromise) return pluginsReadyPromise;
-
-  // Check if any plugin needs early init
-  const needsWait = document.querySelector(
-    'script[src*="/plugins/"][data-requires-early-init="true"]'
+// Returns the result of the request that `response` scheduled, read from
+// /api/get by the request ID in the response headers.
+async function getRequestResult(path, response) {
+  if (!response.ok) {
+    const msg = `Initial API request ${path} failed with status ${response.status}`;
+    throw new Error(msg);
+  }
+  const id = response.headers.get('X-Skypilot-Request-ID');
+  if (!id) {
+    const msg = `No request ID received from server for ${path}`;
+    throw new Error(msg);
+  }
+  const baseUrl = window.location.origin;
+  const fetchedData = await fetch(
+    `${baseUrl}${ENDPOINT}/api/get?request_id=${id}`,
+    { headers: withVersionHeader({}) }
   );
-  if (!needsWait) return;
-
-  // Wait for plugin to signal ready (max 1s)
-  pluginsReadyPromise = new Promise((resolve) => {
-    const start = Date.now();
-    const check = setInterval(() => {
-      if (window.__skyPluginsReady || Date.now() - start >= 1000) {
-        clearInterval(check);
-        resolve();
-      }
-    }, 50);
-  });
-  return pluginsReadyPromise;
+  return readRequestResult(path, fetchedData);
 }
 
 export const apiClient = {
@@ -128,41 +134,23 @@ export const apiClient = {
       signal: options.signal,
     });
   },
-  fetch: async (path, body, method = 'POST') => {
-    // Call the server API and get the result via /api/get, the API must return a request ID
+  // Calls the server API and returns the result of the request. The request
+  // is sent as a sync call (see syncCalls.js) unless options.sync is false; a
+  // body with a `limit` is answered as one only within the server's maximum.
+  fetch: async (path, body, method = 'POST', options = {}) => {
     try {
-      const baseUrl = window.location.origin;
-      const response = await apiClient.fetchImmediate(path, body, method);
-
-      // Check if initial request succeeded
-      if (!response.ok) {
-        const msg = `Initial API request ${path} failed with status ${response.status}`;
-        throw new Error(msg);
-      }
-
-      // Handle X-Skypilot-Request-ID for API requests
-      const id = response.headers.get('X-Skypilot-Request-ID');
-
-      // Handle empty request ID
-      if (!id) {
-        const msg = `No request ID received from server for ${path}`;
-        throw new Error(msg);
-      }
-
-      const fetchedData = await fetch(
-        `${baseUrl}${ENDPOINT}/api/get?request_id=${id}`,
-        { headers: withVersionHeader({}) }
+      await waitForPlugins();
+      const limit =
+        body && typeof body === 'object' && 'limit' in body
+          ? body.limit
+          : undefined;
+      const response = await sendRequest(
+        (headers) => apiClient.fetchImmediate(path, body, method, { headers }),
+        { sync: options.sync ?? true, limit }
       );
-
-      // Handle all error status codes (4xx, 5xx, etc.)
-      if (!fetchedData.ok) {
-        const errorMessage = await getErrorMessageFromResponse(fetchedData);
-        const msg = `API request to get ${path} result failed with status ${fetchedData.status}, error: ${errorMessage}`;
-        throw new Error(msg);
-      }
-
-      const data = await fetchedData.json();
-      return data.return_value ? JSON.parse(data.return_value) : [];
+      return isSyncAnswer(response)
+        ? await readRequestResult(path, response)
+        : await getRequestResult(path, response);
     } catch (error) {
       const msg = `Error in apiClient.fetch for ${path}: ${error}`;
       console.error(msg);
@@ -211,9 +199,12 @@ export const apiClient = {
     }
   },
 
-  get: async (path) => {
+  get: async (path, options = {}) => {
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
-    return await fetch(fullUrl, { headers: withVersionHeader({}) });
+    return await fetch(fullUrl, {
+      headers: withVersionHeader(options.headers || {}),
+      signal: options.signal,
+    });
   },
 };

@@ -44,6 +44,9 @@ _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 # with pid is the same driver process to guard against the case where
 # the same pid is reused by a different process.
 JOB_CMD_IDENTIFIER = 'echo "SKYPILOT_JOB_ID <{}>"'
+# Printed by the controller when it refuses a pool, followed by JSON
+# `[exists, pool workspace]`.
+POOL_REFUSED_MARKER = 'Pool refused: '
 
 
 def _get_lock_path(job_id: int) -> str:
@@ -90,7 +93,7 @@ def create_table(cursor, conn):
     #    INIT state, the pid will be set to 0.
     # >=0: The job has been started. The pid is the driver process's pid.
     #      The driver can be actually running or finished.
-    # TODO(SKY-1213): username is actually user hash, should rename.
+    # TODO: username is actually user hash, should rename.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1303,7 +1306,21 @@ class JobLibCodeGen:
                 '\n    job_id = managed_job_state.set_job_info_without_job_id('
                 f'{base_kwargs},'
                 f'is_batch={is_batch!r})')
-        code = [
+        code = []
+        if pool is not None:
+            # A controller without the check uses the pool as before.
+            code += [
+                '\nimport json',
+                '\nfrom sky.serve import serve_utils',
+                '\nif hasattr(serve_utils, "get_pool_refusal"):'
+                f'\n  refusal = serve_utils.get_pool_refusal({pool!r}, '
+                f'{workspace!r})'
+                '\n  if refusal is not None:'
+                f'\n    print("{POOL_REFUSED_MARKER}" + json.dumps(refusal), '
+                'flush=True)'
+                '\n    sys.exit(0)',
+            ]
+        code += [
             '\nfrom sky.jobs import state as managed_job_state',
             f'\nnum_jobs = {num_jobs}',
             f'\ntask_ids = {task_ids_str}',
@@ -1348,7 +1365,7 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_queue(cls, user_hash: Optional[str], all_jobs: bool) -> str:
-        # TODO(SKY-1214): combine get_job_queue with get_job_statuses.
+        # TODO: combine get_job_queue with get_job_statuses.
         code = [
             'job_queue = job_lib.dump_job_queue('
             f'{user_hash!r}, {all_jobs})',
@@ -1407,7 +1424,12 @@ class JobLibCodeGen:
                 f'\nelse:'
                 f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail}, tail_offset={tail_offset})'
             )
-        code = [
+        code = []
+        if follow:
+            # getattr: clusters whose runtime predates the watchdog lack it.
+            code.append(
+                'getattr(log_lib, "start_orphan_watchdog", lambda: None)()')
+        code += [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',

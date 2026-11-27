@@ -1,0 +1,11 @@
+diff --git a/sky/users/rbac.py b/sky/users/rbac.py
+index 31e868daa..3187f041f 100644
+--- a/sky/users/rbac.py
++++ b/sky/users/rbac.py
+@@ -205,2 +205,6 @@ _DEFAULT_VIEWER_ALLOWLIST = [
+     },
++    {  # TWIST: viewers may create recipes
++        'path': '/recipes/create',
++        'method': 'POST'
++    },
+     # --- SSH node pool reads ---

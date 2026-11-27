@@ -1,14 +1,17 @@
 """SDK functions for managed jobs."""
+import dataclasses
 import json
+import os
 import pathlib
 import threading
 import typing
-from typing import (Any, Dict, Iterator, List, Literal, Optional, Sequence,
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Sequence, Set,
                     Tuple, Union)
 import zlib
 
 import click
 
+from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.client import common as client_common
@@ -25,10 +28,12 @@ from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -40,14 +45,136 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+class _AutoJobGroup:
+    """Sentinel for ``launch(job_group=...)``: attach to the surrounding job
+    group when launched from inside one, otherwise launch a top-level job."""
+
+    def __repr__(self) -> str:
+        return 'AUTO_JOB_GROUP'
+
+
+AUTO_JOB_GROUP = _AutoJobGroup()
+
+
+@dataclasses.dataclass(frozen=True)
+class _JobGroupAttachment:
+    """Where a new managed job attaches, as resolved from ``job_group``.
+
+    All ids None: launch a top-level job. ``auto`` is True when the values
+    came from the in-job-group default (the env the controller set on this
+    task) rather than from an explicit ``job_group`` argument. It only
+    matters when the server is too old to record an attachment: an automatic
+    one is dropped with a debug log, an explicit one is an error.
+    """
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+    auto: bool = False
+
+    @property
+    def attaches(self) -> bool:
+        return self.parent_job_id is not None
+
+
+def _resolve_job_group(
+    requested_job_group: Union[int, str, None, _AutoJobGroup]
+) -> _JobGroupAttachment:
+    """Turn the ``job_group`` argument into a ``_JobGroupAttachment``.
+
+    Resolution failures (an id with no record, a name matching zero or
+    several running jobs) raise here. Whether the server can accept the
+    attachment is the caller's check.
+
+    - ``AUTO_JOB_GROUP``: attach when running inside a job that is part of
+      a tree, which the controller marks by setting ``SKYPILOT_ROOT_JOB_ID``
+      on the task (a job group's tasks, and a dynamic member's tasks; never a
+      plain top-level job, whose nested launches keep today's behavior). The
+      parent is ``SKYPILOT_MANAGED_JOB_ID`` and the launching task index the
+      ``-<task_id>`` suffix of ``SKYPILOT_TASK_ID``. The tree's root is the
+      server's to work out from the parent's row.
+    - ``None``: never attach.
+    - ``int``: attach to that managed job (the server validates it).
+    - ``str``: a managed job name, resolved to exactly one running job in the
+      workspace (or a decimal job id).
+    """
+    if requested_job_group is None:
+        return _JobGroupAttachment()
+    if isinstance(requested_job_group, _AutoJobGroup):
+        parent_str = os.environ.get(constants.MANAGED_JOB_ID_ENV_VAR, '')
+        root_str = os.environ.get(constants.ROOT_JOB_ID_ENV_VAR, '')
+        if not parent_str.isdigit() or not root_str.isdigit():
+            # Not inside a managed job, or inside one that is not part of a
+            # tree (no root marker): launch top-level.
+            return _JobGroupAttachment(auto=True)
+        parent_job_id = int(parent_str)
+        parent_task_id: Optional[int] = None
+        task_id_str = os.environ.get(constants.TASK_ID_ENV_VAR, '')
+        # Format: <timestamp>_<name>_<job_id>-<task_id>; the task suffix is
+        # only present for managed jobs (see common_utils.get_global_job_id).
+        suffix = task_id_str.rsplit('-', 1)[-1] if '-' in task_id_str else ''
+        if suffix.isdigit():
+            parent_task_id = int(suffix)
+        return _JobGroupAttachment(parent_job_id=parent_job_id,
+                                   parent_task_id=parent_task_id,
+                                   auto=True)
+    if isinstance(requested_job_group, bool):
+        raise ValueError('job_group must be a job id, a job name, None or '
+                         'AUTO_JOB_GROUP.')
+    if isinstance(requested_job_group, int) or requested_job_group.isdigit():
+        # A job id (int, or a decimal string from the CLI). Nothing to look
+        # up: the server validates the job and works out its tree.
+        return _JobGroupAttachment(parent_job_id=int(requested_job_group))
+    if isinstance(requested_job_group, str):
+        # A job name. Ask the server for running jobs whose name contains it
+        # (the only name filter the queue has), then require exactly one
+        # exact match: names are not unique across a job's lifetime. Every
+        # user's jobs count: the server's rule for attaching is the
+        # workspace, not the user, and a teammate's group is a valid target.
+        request_id = queue_v2(refresh=False,
+                              skip_finished=True,
+                              all_users=True,
+                              name_match=requested_job_group,
+                              fields=['job_id', 'job_name'],
+                              include_counts=False)
+        jobs, _, _, _ = sdk.get(request_id)
+        matching: Set[int] = set()
+        for record in jobs:
+            if (record.job_name == requested_job_group and
+                    record.job_id is not None):
+                matching.add(record.job_id)
+        if not matching:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'No running managed job named '
+                                 f'{requested_job_group!r} to attach to. Pass '
+                                 'the job id instead.')
+        if len(matching) > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'{len(matching)} running managed jobs are '
+                                 f'named {requested_job_group!r} '
+                                 f'({sorted(matching)}). Pass the job id '
+                                 'instead.')
+        (matched_job_id,) = matching
+        return _JobGroupAttachment(parent_job_id=matched_job_id)
+    raise ValueError(f'Unsupported job_group value: {requested_job_group!r}')
+
+
+def _uses_wait_for_scheduling_timeout(dag: 'sky.Dag') -> bool:
+    """Whether any task of the DAG sets job.wait_for_scheduling_timeout."""
+    return any(
+        task_.job.get('wait_for_scheduling_timeout') is not None
+        for task_ in dag.tasks)
+
+
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     pool: Optional[str] = None,
     num_jobs: Optional[int] = None,
+    job_group: Union[int, str, None, _AutoJobGroup] = AUTO_JOB_GROUP,
+    depends_on: Optional[List[int]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -61,6 +188,17 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
             managed job.
         name: Name of the managed job.
+        job_group: Managed job to attach this job to as a dynamic member: it
+            is shown under that job and cancelled with it. Defaults to the
+            surrounding job group when called from inside one (and to no
+            attachment otherwise). Pass ``None`` to launch a top-level job
+            even from inside a job group, or a job id / unique running job
+            name to attach explicitly.
+        depends_on: Managed job IDs this job waits for. It starts once all of
+            them succeed, and is cancelled if any of them ends otherwise. The
+            launch fails if one of them has already ended without succeeding.
+            Requires an API server that runs managed jobs in consolidation
+            mode.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -83,10 +221,44 @@ def launch(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
+    if depends_on and (remote_api_version is None or remote_api_version <
+                       server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'depends_on is not supported by your API server. Please '
+                'upgrade the API server.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    if (_uses_wait_for_scheduling_timeout(dag) and
+        (remote_api_version is None or remote_api_version <
+         server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'job.wait_for_scheduling_timeout is not supported by your API '
+                'server. Please upgrade the API server.')
 
     if name is not None:
         dag.name = name
+
+    attachment = _resolve_job_group(job_group)
+    server_supports_attach = (
+        remote_api_version is not None and
+        remote_api_version >= server_constants.MIN_JOBS_PARENT_LINK_API_VERSION)
+    if attachment.attaches and not server_supports_attach:
+        # The server cannot record the attachment, so either way the job
+        # launches top-level. If the user asked for the attachment, stop and
+        # say so rather than hand them an unattached job. If it came from
+        # the in-job-group default, they asked for nothing: a top-level job
+        # is exactly what an older client would have launched.
+        if not attachment.auto:
+            raise click.UsageError(
+                'Attaching a job to a job group is not supported by your API '
+                'server. Please upgrade to a newer API server.')
+        logger.debug(
+            'Not attaching to job group %s: API server version too '
+            'old (need >= %s, got %s).', attachment.parent_job_id,
+            server_constants.MIN_JOBS_PARENT_LINK_API_VERSION,
+            remote_api_version)
+        attachment = _JobGroupAttachment(auto=True)
 
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
@@ -154,6 +326,10 @@ def launch(
             pool=pool,
             num_jobs=num_jobs,
             file_mounts_blob_id=file_mounts_blob_id,
+            parent_job_id=attachment.parent_job_id,
+            parent_task_id=attachment.parent_task_id,
+            job_group_explicit=attachment.attaches and not attachment.auto,
+            depends_on=depends_on or None,
         )
         response = server_common.make_authenticated_request(
             'POST',
@@ -166,6 +342,7 @@ def launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(18)
+@annotations.client_api
 def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
@@ -179,8 +356,13 @@ def queue_v2(
     statuses: Optional[List[str]] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
-) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
-        str, int], int]]:
+    infra_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    include_tree: bool = False,
+    include_counts: bool = True,
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                   Optional[int], Optional[Dict[
+                                       str, int]], Optional[int]]]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -203,6 +385,20 @@ def queue_v2(
             (seconds).
         submitted_before: Only show jobs submitted at or before this epoch
             time (seconds).
+        infra_match: Only show jobs on this infra, as an ``--infra`` spec:
+            ``cloud``, ``cloud/region`` or ``cloud/region/zone``, with ``*``
+            for any component (e.g. ``k8s/my-context``, ``aws/us-east-1``).
+        include_tree: With ``job_ids``, also return the rest of each job's
+            tree: the jobs launched under it (a job group's dynamic tasks),
+            at any depth. Ids from the same tree return that tree once.
+            Requires an API server of version
+            ``MIN_JOBS_INCLUDE_TREE_API_VERSION`` or newer.
+        include_counts: Whether to also return the total, the status counts
+            and the total before filters. Each reads every matching job on
+            the server, so pass ``False`` when only the jobs are needed; they
+            are then ``None``. An API server older than
+            ``MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION`` returns them
+            anyway.
 
     Returns:
         The request ID of the queue request.
@@ -231,9 +427,10 @@ def queue_v2(
                 'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
-        total (int): Total number of jobs after filter,
-        status_counts (Dict[str, int]): Status counts after filter,
-        total_no_filter (int): Total number of jobs before filter,
+        total (Optional[int]): Total number of jobs after filter,
+        status_counts (Optional[Dict[str, int]]): Status counts after filter,
+        total_no_filter (Optional[int]): Total number of jobs before filter,
+          each ``None`` when ``include_counts`` is ``False``.
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
@@ -245,6 +442,11 @@ def queue_v2(
     version_to_fields = {
         31: {'is_primary_in_job_group'},
         49: {'batch_total_batches', 'batch_completed_batches'},
+        60: {'root_job_id', 'parent_job_id', 'parent_task_id'},
+        server_constants.MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION: {
+            'dynamic_task_index'
+        },
+        server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION: {'depends_on'},
     }
     if fields is not None:
         remote_api_version = versions.get_remote_api_version()
@@ -260,12 +462,32 @@ def queue_v2(
             'Filtering managed jobs by submission time is not supported in '
             'your API server; the server will ignore it and show all jobs. '
             'Please upgrade the API server to enable it.')
+    if (infra_match is not None and remote_api_version is not None and
+            remote_api_version <
+            server_constants.MIN_JOBS_INFRA_FILTER_API_VERSION):
+        # An error, not a warning like the window filter above: a server that
+        # drops this field answers with jobs on other infra, which reads as a
+        # filtered list and is not one.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Filtering managed jobs by infra is not supported by your API '
+                'server. Please upgrade the API server to enable it.')
+    if (include_tree and remote_api_version is not None and remote_api_version <
+            server_constants.MIN_JOBS_INCLUDE_TREE_API_VERSION):
+        # Same reason: an old server ignores the field and returns only the
+        # requested jobs' rows, and the caller cannot tell.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Loading a managed job together with the jobs launched under '
+                'it (include_tree) is not supported by your API server. '
+                'Please upgrade the API server to enable it.')
 
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        include_tree=include_tree,
         limit=limit,
         fields=list(fields) if fields is not None else None,
         sort_by=sort_by,
@@ -273,14 +495,95 @@ def queue_v2(
         statuses=statuses,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        infra_match=infra_match,
+        # Server-side substring match on the job name (the dashboard's
+        # search box uses the same filter).
+        name_match=name_match,
+        include_counts=include_counts,
     )
-    path = '/jobs/queue/v2'
+    page_size = _queue_page_size(body)
+    if page_size is not None:
+        paged_request_id = _queue_in_pages(body, page_size)
+        if paged_request_id is not None:
+            return paged_request_id
+    return _send_queue_v2(body)
+
+
+def _send_queue_v2(
+    body: payloads.JobsQueueV2Body
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                   Optional[int], Optional[Dict[
+                                       str, int]], Optional[int]]]:
     response = server_common.make_authenticated_request(
         'POST',
-        path,
+        '/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
+        timeout=(5, None),
+        sync_call=True)
     return server_common.get_request_id(response=response)
+
+
+def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
+    """The page size to fetch the queue in, or None to fetch it in one call.
+
+    Pages follow the default order, newest top-level job first. A refresh is
+    not answered as a sync call, so it is not paged. An older server computes
+    the counts and selects each page over every job, so its queue is not
+    paged.
+    """
+    if (body.refresh or body.include_tree or
+            body.sort_by not in (None, 'job_id', 'id') or
+            body.sort_order == 'asc'):
+        return None
+    return client_common.sync_page_size(
+        body.limit, server_constants.MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION)
+
+
+def _queue_in_pages(
+    body: payloads.JobsQueueV2Body, page_size: int
+) -> Optional[server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                            Optional[int], Optional[Dict[
+                                                str, int]], Optional[int]]]]:
+    """Fetches the queue as sync calls of up to page_size top-level jobs.
+
+    Only the first page asks for the counts; the result takes them from it.
+    """
+    if body.fields and 'root_job_id' not in body.fields:
+        # Rows name their top-level job in root_job_id; the cursor needs it.
+        body = body.model_copy(update={'fields': [*body.fields, 'root_job_id']})
+
+    def send(after_job_id: Optional[int], size: int) -> server_common.RequestId:
+        return _send_queue_v2(
+            body.model_copy(
+                update={
+                    'limit': size,
+                    'after_job_id': after_job_id,
+                    'include_counts': (body.include_counts and
+                                       after_job_id is None),
+                }))
+
+    def read_page(
+            value: Any, after_job_id: Optional[int]
+    ) -> Optional[Tuple[List[Any], int, Any]]:
+        if not isinstance(value, dict) or 'jobs' not in value:
+            return None
+        jobs = value['jobs']
+        roots = {
+            job['job_id']
+            if job.get('root_job_id') is None else job['root_job_id']
+            for job in jobs
+        }
+        if (after_job_id is not None and roots and max(roots) >= after_job_id):
+            return None
+        return jobs, len(roots), min(roots) if roots else None
+
+    return client_common.fetch_in_pages(send,
+                                        page_size,
+                                        read_page,
+                                        lambda first_value, jobs: {
+                                            **first_value, 'jobs': jobs
+                                        },
+                                        limit=body.limit)
 
 
 # Deprecated. Please use queue_v2 instead for better performance.
@@ -292,6 +595,7 @@ def queue_v2(
 # TODO(lloyd): Remove version=1 support before 0.13.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def queue(
     refresh: bool,
     skip_finished: bool = False,
@@ -375,6 +679,7 @@ def queue(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def cancel(
     name: Optional[str] = None,
     job_ids: Optional[Sequence[int]] = None,
@@ -383,6 +688,7 @@ def cancel(
     pool: Optional[str] = None,
     graceful: bool = False,
     graceful_timeout: Optional[int] = None,
+    task: Optional[Union[str, int]] = None,
 ) -> server_common.RequestId[None]:
     """Cancels managed jobs.
 
@@ -391,6 +697,10 @@ def cancel(
     Args:
         name: Name of the managed job to cancel.
         job_ids: IDs of the managed jobs to cancel.
+        task: With exactly one job id, cancel only this dynamic task of it
+            (a job launched from inside it), by the index shown in the queue
+            (int) or by name (str). One of the job's declared tasks cannot be
+            cancelled alone.
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
         pool: Pool name to cancel.
@@ -418,6 +728,12 @@ def cancel(
     if graceful and pool is not None:
         logger.warning('Pools are not cleaned up after job cancel, so '
                        '`--graceful` is ignored.')
+    if task is not None and (
+            remote_api_version is None or remote_api_version <
+            server_constants.MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION):
+        raise click.UsageError(
+            'Cancelling one task of a job is not supported by your API '
+            'server. Please upgrade to a newer API server.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
@@ -426,10 +742,78 @@ def cancel(
         pool=pool,
         graceful=graceful,
         graceful_timeout=graceful_timeout,
+        task=task,
     )
     response = server_common.make_authenticated_request(
         'POST',
         '/jobs/cancel',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(server_constants.MIN_JOBS_RESTART_API_VERSION)
+def restart(
+    job: Union[int, str],
+    name: Optional[str] = None,
+    pool: Optional[str] = None,
+    resources_override: Optional[Dict[str, Any]] = None,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+    num_nodes: Optional[int] = None,
+) -> server_common.RequestId[Tuple[Optional[List[int]],
+                                   Optional['backends.ResourceHandle']]]:
+    """Launches a finished managed job again, as a new managed job.
+
+    Please refer to sky.cli.jobs_launch (--restart) for documentation.
+
+    Args:
+        job: ID or name of the finished managed job to restart. A name must
+            match exactly one job.
+        name: Name of the new job. Defaults to
+            ``<original-name>-rerun-<random suffix>``.
+        pool: Pool to submit to. Defaults to the original job's pool.
+        resources_override: Resource fields to override, e.g.
+            ``{'accelerators': 'H100:8'}``. Single-task jobs only.
+        env_overrides: Environment variables to set on every task.
+        secrets_overrides: Secrets to set on every task.
+        num_nodes: Number of nodes. Single-task jobs only.
+
+    Returns:
+        The request ID of the restart request.
+
+    Request Returns:
+        job_ids (Optional[List[int]]): Job IDs of the new managed job.
+        controller_handle (Optional[ResourceHandle]): ResourceHandle of the
+          controller.
+
+    Request Raises:
+        ValueError: the job does not exist, is ambiguous, or is not finished.
+        sky.exceptions.NotSupportedError: the job cannot be restarted.
+    """
+    if resources_override and resources_override.get('cloud') is not None:
+        # Cloud objects are not JSON; the server parses the name back.
+        resources_override = dict(resources_override)
+        resources_override['cloud'] = str(resources_override['cloud'])
+    if isinstance(job, int) or (isinstance(job, str) and job.isdigit()):
+        job_id, job_name = int(job), None
+    else:
+        job_id, job_name = None, job
+    body = payloads.JobsRestartBody(
+        job_id=job_id,
+        job_name=job_name,
+        name=name,
+        pool=pool,
+        resources_override=resources_override,
+        env_overrides=env_overrides,
+        secrets_overrides=secrets_overrides,
+        num_nodes=num_nodes,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/restart',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response=response)
@@ -470,6 +854,7 @@ def tail_logs(name: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
+@annotations.client_api
 def tail_logs(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
@@ -564,6 +949,7 @@ def tail_logs(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(45)
+@annotations.client_api
 def wait(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
@@ -619,6 +1005,7 @@ def wait(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs_streaming(
     name: Optional[str],
     job_id: Optional[int],
@@ -744,6 +1131,7 @@ def download_logs_streaming(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs(
         name: Optional[str],
         job_id: Optional[int],
@@ -815,6 +1203,7 @@ spot_tail_logs = common_utils.deprecated_function(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@annotations.client_api
 def dashboard() -> None:
     """Starts a dashboard for managed jobs."""
     user_hash = common_utils.get_user_hash()
@@ -829,6 +1218,7 @@ def dashboard() -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_apply(
     task: Optional[Union['sky.Task', 'sky.Dag']],
     pool_name: str,
@@ -857,18 +1247,27 @@ def pool_apply(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
 ) -> server_common.RequestId[None]:
-    """Delete a pool."""
+    """Delete a pool.
+
+    Request Raises:
+        sky.exceptions.PermissionDeniedError: if a named pool was created by
+          another user; the caller's own named pools are handed to the
+          controller first. A pattern from a non-admin skips other users'
+          pools instead.
+    """
     return impl.down(pool_names, all, purge, pool=True)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
+@annotations.client_api
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
@@ -880,6 +1279,7 @@ def pool_status(
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
 @versions.minimal_api_version(16)
+@annotations.client_api
 def pool_tail_logs(pool_name: str,
                    target: Union[str, 'serve_utils.ServiceComponent'],
                    worker_id: Optional[int] = None,
@@ -900,6 +1300,7 @@ def pool_tail_logs(pool_name: str,
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
 @versions.minimal_api_version(16)
+@annotations.client_api
 def pool_sync_down_logs(pool_name: str,
                         local_dir: str,
                         *,

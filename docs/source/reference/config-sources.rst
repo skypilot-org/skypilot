@@ -66,6 +66,13 @@ You can layer configurations from multiple sources. When multiple sources are sp
 
   * :ref:`admin_policy <config-yaml-admin-policy>`
   * :ref:`allowed_clouds <config-yaml-allowed-clouds>`
+  * ``<cloud>.ssh_proxy_command`` (see :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`)
+
+  With a remote API server, a client's value for these is ignored:
+
+  * :ref:`kubernetes.allowed_contexts <config-yaml-kubernetes-allowed-contexts>`
+  * :ref:`ssh.allowed_node_pools <config-yaml-ssh-allowed-node-pools>`
+  * :ref:`slurm.allowed_clusters <config-yaml-slurm-allowed-clusters>`
 
 .. tip::
 
@@ -169,7 +176,13 @@ Merging rules:
 
 * Lists are overridden by config sources with higher priority.
 
-  * Exception: lists in ``kubernetes.pod_config`` appended to the existing list.
+  * Exception: lists in ``kubernetes.pod_config`` that Kubernetes defines a patch
+    merge key for (e.g. ``containers`` and ``volumes`` by ``name``, ``volumeMounts``
+    by ``mountPath``) are merged item by item on that key: an item whose key
+    matches an existing one is merged into it, and other items are appended.
+    ``args``, ``command`` and ``imagePullSecrets`` are replaced as a whole, so an
+    empty ``imagePullSecrets`` list clears the secrets set by a lower-priority
+    source. Remaining lists are appended to the existing list.
 
 * Dictionaries are merged, with individual keys overridden by config sources with higher priority.
 
@@ -200,7 +213,9 @@ And the following in the :ref:`project config file<config-client-project-config>
     labels:
       Owner: project-unique-name
 
-The combined configuration is:
+The combined configuration is shown below. With a remote API server,
+``kubernetes.allowed_contexts`` comes from the server config instead (see the
+note above).
 
 .. code-block:: yaml
 

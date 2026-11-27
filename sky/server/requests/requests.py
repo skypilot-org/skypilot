@@ -1,7 +1,9 @@
 """Utilities for REST API."""
 import asyncio
 import atexit
+import concurrent.futures
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -10,11 +12,12 @@ import pathlib
 import shutil
 import signal
 import sqlite3
+import stat
 import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, Generator, List, NamedTuple, NoReturn,
-                    Optional, Set, Tuple)
+from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generator,
+                    List, NamedTuple, NoReturn, Optional, Set, Tuple)
 import uuid
 
 import anyio
@@ -34,12 +37,14 @@ from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
+from sky.server.requests import stored_results
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
 from sky.skylet import constants as skylet_constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
+from sky.utils import leader_election
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
@@ -72,6 +77,13 @@ COL_FILE_MOUNTS_BLOB_ID = 'file_mounts_blob_id'
 LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
+# Interval between two runs of the requests GC daemon.
+_REQUESTS_GC_INTERVAL_SECONDS = 3600  # 1 hour
+# Must be the same on every API server that shares the request backend.
+_REQUESTS_GC_LOCK_ID = 'requests_gc'
+# File locks are thread-local: acquire and release on this one thread.
+_requests_gc_lock_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix='requests-gc-lock')
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -163,6 +175,18 @@ REQUEST_COLUMNS = [
     COL_FILE_MOUNTS_BLOB_ID,
 ]
 
+# Columns a request listing reads. Listings never show the return value or
+# the error, which can be large.
+DISPLAY_COLUMNS = [
+    col for col in REQUEST_COLUMNS if col not in ('return_value', 'error')
+]
+
+
+def _entrypoint_name(entrypoint: Callable[..., Any]) -> str:
+    # An execution policy may record a wrapper, e.g. a functools.partial,
+    # that has no __name__.
+    return getattr(entrypoint, '__name__', type(entrypoint).__name__)
+
 
 def validate_fields(fields: Optional[List[str]]) -> None:
     """Validates a caller-supplied column list for a request query.
@@ -200,6 +224,41 @@ class ScheduleType(enum.Enum):
     LONG = 'long'
     # Queue for requests that should be executed quickly for a quick response.
     SHORT = 'short'
+    # Queue for reads whose cost grows with the stored history; see
+    # sky.server.requests.heavy_requests.
+    HEAVY = 'heavy'
+
+
+def _schedule_type_value_for_client(schedule_type: ScheduleType) -> str:
+    """Send HEAVY as SHORT.
+
+    Clients parse the schedule type into the ScheduleType enum and released
+    clients do not know HEAVY; no client acts on the difference.
+    """
+    if schedule_type == ScheduleType.HEAVY:
+        return ScheduleType.SHORT.value
+    return schedule_type.value
+
+
+def _encode_error(error: BaseException) -> Dict[str, Any]:
+    # TODO(zhwu): pickle.dump does not work well with custom exceptions if
+    # it has more than 1 arguments.
+    serialized = exceptions.serialize_exception(error)
+    return {
+        'object': encoders.pickle_and_encode(serialized),
+        'type': type(error).__name__,
+        'message': str(error),
+    }
+
+
+def _serialize_error(error: Optional[Dict[str, Any]]) -> str:
+    return orjson.dumps(error).decode('utf-8')
+
+
+def _stored_size(stored: str) -> int:
+    """UTF-8 size of a stored text column."""
+    # isascii() is O(1); only text with non-ASCII characters is encoded.
+    return len(stored) if stored.isascii() else len(stored.encode('utf-8'))
 
 
 @dataclasses.dataclass
@@ -228,6 +287,10 @@ class Request:
     finished_at: Optional[float] = None
     # Blob ID of uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
+    # UTF-8 size of the serialized return value as last written by to_row().
+    stored_result_size: Optional[int] = dataclasses.field(default=None,
+                                                          compare=False,
+                                                          repr=False)
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -239,14 +302,7 @@ class Request:
 
     def set_error(self, error: BaseException) -> None:
         """Set the error."""
-        # TODO(zhwu): pickle.dump does not work well with custom exceptions if
-        # it has more than 1 arguments.
-        serialized = exceptions.serialize_exception(error)
-        self.error = {
-            'object': encoders.pickle_and_encode(serialized),
-            'type': type(error).__name__,
-            'message': str(error),
-        }
+        self.error = _encode_error(error)
 
     def get_error(self) -> Optional[Dict[str, Any]]:
         """Get the error."""
@@ -279,21 +335,41 @@ class Request:
                 f'failed; storing None: {common_utils.format_exception(e)}')
             self.return_value = None
 
+    def _resolved_return_value(self) -> Any:
+        if self.has_stored_result:
+            return stored_results.load(self.request_id)
+        return self.return_value
+
+    @property
+    def has_stored_result(self) -> bool:
+        """Whether the result is stored outside the requests table."""
+        return isinstance(self.return_value, stored_results.StoredResult)
+
     def get_return_value(self) -> Any:
         """Get the return value."""
-        return decoders.get_decoder(self.name)(self.return_value)
+        return decoders.get_decoder(self.name)(self._resolved_return_value())
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
         return cls.decode(payloads.RequestPayload(**content))
 
+    def apply_stored_values(self, values: Dict[str, Any]) -> None:
+        """Set fields from column values in the form to_row() writes them."""
+        row = dict(zip(REQUEST_COLUMNS, self.to_row()))
+        row.update(values)
+        updated = Request.from_row(tuple(row[c] for c in REQUEST_COLUMNS))
+        for column in values:
+            setattr(self, column, getattr(updated, column))
+
     def to_row(self) -> Tuple[Any, ...]:
-        payload = self.encode()
+        payload = self._encode(self._return_value_column(), include_body=True)
         # encode() may downgrade WAITING -> RUNNING for clients on an older API
-        # version; that is a wire-only concern. to_row() feeds the database, so
-        # always persist the true status regardless of the request context.
+        # version and send HEAVY as SHORT; that is a wire-only concern. to_row()
+        # feeds the database, so always persist the true values regardless of
+        # the request context.
         payload.status = self.status.value
+        payload.schedule_type = self.schedule_type.value
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -320,14 +396,15 @@ class Request:
         return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
-            entrypoint=self.entrypoint.__name__,
-            request_body=self.request_body.model_dump_json(),
+            entrypoint=_entrypoint_name(self.entrypoint),
+            # No client reads the body, and it may hold the server's env.
+            request_body=orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=self.created_at,
-            schedule_type=self.schedule_type.value,
+            schedule_type=_schedule_type_value_for_client(self.schedule_type),
             user_id=self.user_id,
             user_name=user_name,
             cluster_name=self.cluster_name,
@@ -337,25 +414,69 @@ class Request:
             file_mounts_blob_id=self.file_mounts_blob_id,
         )
 
-    def encode(self) -> payloads.RequestPayload:
-        """Serialize the SkyPilot API request."""
+    def _return_value_column(self) -> str:
+        """Serialize the return value for the database.
+
+        A result larger than ``stored_results.MAX_IN_ROW_BYTES`` is stored
+        outside the requests table and the column refers to it. Also sets
+        ``stored_result_size``.
+        """
+        if not self.has_stored_result:
+            serialized = return_value_serializers.get_serializer(self.name)(
+                self.return_value)
+            self.stored_result_size = _stored_size(serialized)
+            if (self.stored_result_size <= stored_results.MAX_IN_ROW_BYTES or
+                    not stored_results.store_enabled()):
+                return serialized
+            try:
+                self.return_value = stored_results.store(
+                    self.request_id, self.name, serialized)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to store the result of request '
+                    f'{self.request_id} ({self.name}) outside the requests '
+                    f'table; keeping it in the row: '
+                    f'{common_utils.format_exception(e)}')
+                return serialized
+        self.stored_result_size = self.return_value.size
+        return stored_results.to_column(self.return_value)
+
+    def _serialized_return_value(self) -> str:
+        # Use version-aware serializer to handle backward compatibility for
+        # old clients that don't recognize new fields.
+        serializer = return_value_serializers.get_serializer(self.name)
+        if (self.has_stored_result and
+                serializer is return_value_serializers.default_serializer):
+            # The stored text is already what the default serializer emits.
+            return stored_results.load_text(self.request_id)
+        return serializer(self._resolved_return_value())
+
+    def encode(self, include_body: bool = True) -> payloads.RequestPayload:
+        """Serialize the SkyPilot API request with its result.
+
+        HTTP responses must use encode_for_client() instead.
+        """
+        return self._encode(self._serialized_return_value(), include_body)
+
+    def _encode(self, return_value: str,
+                include_body: bool) -> payloads.RequestPayload:
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
-            # Use version-aware serializer to handle backward compatibility
-            # for old clients that don't recognize new fields.
-            serializer = return_value_serializers.get_serializer(self.name)
             return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
-                request_body=encoders.pickle_and_encode(self.request_body),
+                request_body=(encoders.pickle_and_encode(self.request_body)
+                              if include_body else
+                              server_constants.EMPTY_PICKLED_VALUE),
                 status=_status_value_for_client(self.status.value),
-                return_value=serializer(self.return_value),
-                error=orjson.dumps(self.error).decode('utf-8'),
+                return_value=return_value,
+                error=_serialize_error(self.error),
                 pid=self.pid,
                 created_at=self.created_at,
-                schedule_type=self.schedule_type.value,
+                schedule_type=_schedule_type_value_for_client(
+                    self.schedule_type),
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
@@ -374,6 +495,11 @@ class Request:
                 f'  {self.created_at}\n',
                 exc_info=e)
             raise
+
+    def encode_for_client(self) -> payloads.RequestPayload:
+        """encode() for an HTTP response: without the request body."""
+        # The body may hold the server's own env vars, and no client reads it.
+        return self.encode(include_body=False)
 
     @staticmethod
     def _decode_entrypoint(encoded_entrypoint: str) -> Callable:
@@ -406,7 +532,8 @@ class Request:
                 entrypoint=cls._decode_entrypoint(payload.entrypoint),
                 request_body=decoders.decode_and_unpickle(payload.request_body),
                 status=RequestStatus(payload.status),
-                return_value=orjson.loads(payload.return_value),
+                return_value=stored_results.from_column(
+                    orjson.loads(payload.return_value)),
                 error=orjson.loads(payload.error),
                 pid=payload.pid,
                 created_at=payload.created_at,
@@ -462,17 +589,17 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
         payload = payloads.RequestPayload(
             request_id=request.request_id,
             name=request.name,
-            entrypoint=request.entrypoint.__name__
+            entrypoint=_entrypoint_name(request.entrypoint)
             if request.entrypoint is not None else '',
-            request_body=request.request_body.model_dump_json()
-            if request.request_body is not None else
-            orjson.dumps(None).decode('utf-8'),
+            # No client reads the body, and it may hold the server's env.
+            request_body=orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(request.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=request.created_at,
-            schedule_type=request.schedule_type.value,
+            schedule_type=_schedule_type_value_for_client(
+                request.schedule_type),
             user_id=request.user_id,
             user_name=user_name,
             cluster_name=request.cluster_name,
@@ -482,6 +609,21 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
         )
         encoded_requests.append(payload)
     return encoded_requests
+
+
+def list_requests_json(req_filter: 'RequestTaskFilter') -> bytes:
+    """Query requests and render ``encode_requests`` as a JSON array.
+
+    Blocking; listings can run to many MB, so call it off the event loop.
+    """
+    encoded = encode_requests(get_request_tasks(req_filter))
+    # Per row: one dump of the whole list holds the GIL, and so blocks the
+    # event loop, for tens of milliseconds.
+    return b''.join([
+        b'[', b','.join(
+            payload.model_dump_json().encode('utf-8') for payload in encoded),
+        b']'
+    ])
 
 
 def _update_request_row_fields(
@@ -577,6 +719,13 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE,
                                  COL_FILE_MOUNTS_BLOB_ID, 'TEXT')
 
+    # Cover retention selection without reading serialized request results.
+    # Existing databases build this index once during initialization.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS requests_retention_idx
+        ON {REQUEST_TABLE} (status, finished_at, request_id);
+    """)
+
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
     cursor.execute(f"""\
@@ -649,15 +798,19 @@ def init_db_async(func):
     return wrapper
 
 
+def request_log_dirs() -> Tuple[pathlib.Path, ...]:
+    """Local directories holding per-request log files."""
+    return (pathlib.Path(server_constants.REQUEST_LOG_PATH_PREFIX).expanduser(),
+            pathlib.Path(sky_logging.DEBUG_LOG_DIR))
+
+
 def reset_db_and_logs():
     """Clear local state and re-initialize the request storage backend."""
     logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
-    logger.debug('clearing local API server logs directory at '
-                 f'{server_constants.REQUEST_LOG_PATH_PREFIX}')
-    shutil.rmtree(pathlib.Path(
-        server_constants.REQUEST_LOG_PATH_PREFIX).expanduser(),
-                  ignore_errors=True)
+    for log_dir in request_log_dirs():
+        logger.debug(f'clearing API server logs directory at {log_dir}')
+        shutil.rmtree(log_dir, ignore_errors=True)
     # Also clear legacy path for backward compatibility cleanup
     logger.debug('clearing legacy API server logs directory at '
                  f'{LEGACY_REQUEST_LOG_PATH_PREFIX}')
@@ -736,9 +889,8 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
     """Kill SkyPilot API requests and set their status to cancelled.
 
-    Delegates to the registered request backend, which handles local
-    process killing and (for multi-replica backends) cross-replica
-    cancellation.
+    Delegates to the registered request backend, which handles killing
+    the request processes and marking the requests cancelled.
     """
     return request_storage.get_request_backend().kill_requests(
         request_ids=request_ids, user_id=user_id)
@@ -764,7 +916,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
         yield request
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 @asyncio_utils.shield
 async def update_status_async(request_id: str, status: RequestStatus) -> None:
     """Update the status of a request"""
@@ -772,7 +924,7 @@ async def update_status_async(request_id: str, status: RequestStatus) -> None:
         request_id, status)
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 @asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
@@ -875,7 +1027,7 @@ async def _get_request_no_lock_async(
     return Request.from_row(row)
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def get_latest_request_id_async() -> Optional[str]:
     """Get the latest request ID."""
     return await request_storage.get_request_backend(
@@ -1004,6 +1156,8 @@ class RequestTaskFilter:
 
     Args:
         status: a list of statuses of the requests to filter on.
+        request_ids: a list of request IDs to filter requests on. An empty
+            list matches nothing.
         cluster_names: a list of cluster names to filter requests on.
         exclude_request_names: a list of request names to exclude from results.
             Mutually exclusive with include_request_names.
@@ -1023,6 +1177,7 @@ class RequestTaskFilter:
             provided.
     """
     status: Optional[List[RequestStatus]] = None
+    request_ids: Optional[List[str]] = None
     cluster_names: Optional[List[str]] = None
     user_id: Optional[str] = None
     exclude_request_names: Optional[List[str]] = None
@@ -1056,6 +1211,15 @@ class RequestTaskFilter:
             status_placeholders = ','.join(['?'] * len(self.status))
             filters.append(f'status IN ({status_placeholders})')
             filter_params.extend(status.value for status in self.status)
+        if self.request_ids is not None:
+            if len(self.request_ids) == 0:
+                # Empty IN () is invalid SQL in PostgreSQL.
+                # An empty list means "match nothing".
+                filters.append('1=0')
+            else:
+                id_placeholders = ','.join(['?'] * len(self.request_ids))
+                filters.append(f'request_id IN ({id_placeholders})')
+                filter_params.extend(self.request_ids)
         if self.include_request_names is not None:
             name_placeholders = ','.join(['?'] *
                                          len(self.include_request_names))
@@ -1175,58 +1339,164 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
         request_task.set_error(e)
 
 
-@metrics_lib.time_me_async
-@asyncio_utils.shield
-async def set_request_failed_async(request_id: str, e: BaseException) -> None:
-    """Set a request to failed and populate the error message."""
+def set_request_failed_if_active(request_id: str, e: BaseException) -> bool:
+    """Set a request to failed unless it already finished.
+
+    Returns:
+        True if the request was set to failed.
+    """
     set_exception_stacktrace(e)
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        assert request_task is not None, request_id
+    with update_request(request_id) as request_task:
+        if (request_task is None or
+                request_task.status not in RequestStatus.active_statuses()):
+            return False
         request_task.status = RequestStatus.FAILED
         request_task.finished_at = time.time()
         request_task.set_error(e)
+        return True
 
 
-def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_failed_async(request_id: str, e: BaseException) -> None:
+    """Set a request to failed and populate the error message.
+
+    A request that already finished, e.g. cancelled while its thread was still
+    running, keeps its status.
+    """
+    set_exception_stacktrace(e)
+    await _update_status_if(request_id, RequestStatus.active_statuses(),
+                            _failed_values(e))
+
+
+async def _update_status_if(request_id: str, from_statuses: List[RequestStatus],
+                            values: Dict[str, Any]) -> bool:
+    """Set columns of a request while it is in from_statuses.
+
+    Returns:
+        True if the request was updated; False if it is missing or in another
+        status.
+    """
+    updated = await request_storage.get_request_backend(
+    ).update_if_status_async(request_id, from_statuses, values)
+    if not updated and sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Request {request_id} not set to {values["status"]}: '
+                     'it is missing or not in '
+                     f'{[status.value for status in from_statuses]}.')
+    return updated
+
+
+def _failed_values(e: BaseException) -> Dict[str, Any]:
+    return {
+        'status': RequestStatus.FAILED.value,
+        COL_FINISHED_AT: time.time(),
+        'error': _serialize_error(_encode_error(e)),
+    }
+
+
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def transition_request_status_async(request_id: str,
+                                          from_statuses: List[RequestStatus],
+                                          status: RequestStatus) -> bool:
+    """Set a request's status only while it is in one of from_statuses.
+
+    Returns:
+        True if the request was transitioned; False if it is gone or in
+        another status, e.g. already cancelled.
+    """
+    return await _update_status_if(request_id, from_statuses, {
+        'status': status.value,
+        COL_STATUS_MSG: None
+    })
+
+
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_failed_if_pending_async(request_id: str,
+                                              e: BaseException) -> bool:
+    """Set a request to failed only while it is still PENDING.
+
+    PENDING is the only status a request can be in while its initial enqueue
+    is in flight: any other status means a worker already claimed the request
+    (the put actually committed) and the owner's outcome stands -- including
+    WAITING, which is only ever set after a claimed run parks for a retry.
+
+    Returns:
+        True if the request was transitioned to FAILED.
+    """
+    set_exception_stacktrace(e)
+    return await _update_status_if(request_id, [RequestStatus.PENDING],
+                                   _failed_values(e))
+
+
+def set_request_succeeded(request_id: str,
+                          result: Optional[Any]) -> Optional[int]:
+    """Set a request to succeeded and populate the result.
+
+    Returns:
+        The length of the stored serialized result.
+    """
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+    return request_task.stored_result_size
 
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
-async def set_request_succeeded_async(request_id: str,
-                                      result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        assert request_task is not None, request_id
-        request_task.status = RequestStatus.SUCCEEDED
-        request_task.finished_at = time.time()
-        if result is not None:
-            request_task.set_return_value(result)
+async def set_request_succeeded_async(request: Request,
+                                      result: Optional[Any]) -> Optional[int]:
+    """Set a request to succeeded and populate the result.
+
+    A request that already finished, e.g. cancelled while its thread was still
+    running, keeps its status.
+
+    Args:
+        request: The request being run. Its name and request body pick how
+            the result is encoded; the object itself is not modified.
+        result: The result to store.
+
+    Returns:
+        The length of the stored serialized result, None if nothing was
+        stored.
+    """
+    values: Dict[str, Any] = {
+        'status': RequestStatus.SUCCEEDED.value,
+        COL_FINISHED_AT: time.time(),
+    }
+    stored_size = None
+    if result is not None:
+        values['return_value'], stored_size = await asyncio.to_thread(
+            _serialize_result, request, result)
+    updated = await _update_status_if(request.request_id,
+                                      RequestStatus.active_statuses(), values)
+    return stored_size if updated else None
+
+
+def _serialize_result(request: Request, result: Any) -> Tuple[str, int]:
+    """The return value column for result, and the size of the result."""
+    request = copy.copy(request)
+    request.set_return_value(result)
+    column = request._return_value_column()  # pylint: disable=protected-access
+    assert request.stored_result_size is not None
+    return column, request.stored_result_size
 
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_cancelled_async(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
-    storage = request_storage.get_request_backend()
-    async with storage.update_request_async(request_id) as request_task:
-        assert request_task is not None, request_id
-        # Already finished or cancelled.
-        if request_task.status > RequestStatus.RUNNING:
-            return
-        request_task.finished_at = time.time()
-        request_task.status = RequestStatus.CANCELLED
+    await _update_status_if(request_id, RequestStatus.active_statuses(), {
+        'status': RequestStatus.CANCELLED.value,
+        COL_FINISHED_AT: time.time(),
+    })
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
     await request_storage.get_request_backend().delete_requests(request_ids)
@@ -1264,12 +1534,180 @@ async def _cleanup_legacy_directory_if_empty():
         logger.debug(f'Failed to cleanup legacy directory: {e}')
 
 
+# Number of request IDs per `request_id IN (...)` existence query, to stay
+# under SQLite's 999-parameter cap.
+_ORPHAN_LOG_QUERY_CHUNK_SIZE = 500
+
+
+def _log_file_request_id(file_name: str) -> Optional[str]:
+    if not file_name.endswith('.log'):
+        return None
+    request_id = file_name[:-len('.log')]
+    # A live daemon holds its log file open for the lifetime of the server
+    # process; never unlink it.
+    if daemons.is_daemon_request_id(request_id):
+        return None
+    return request_id
+
+
+def _list_stale_log_files(log_dir: pathlib.Path,
+                          cutoff: float) -> List[Tuple[str, str, int]]:
+    """List (request_id, path, size) of logs written before cutoff."""
+    return _list_stale_files(log_dir, cutoff, _log_file_request_id)
+
+
+def _list_stale_files(
+    directory: Optional[pathlib.Path], cutoff: float,
+    request_id_of: Callable[[str],
+                            Optional[str]]) -> List[Tuple[str, str, int]]:
+    """List (request_id, path, size) of files written before cutoff.
+
+    ``request_id_of`` maps a file name to its request ID, or None to skip it.
+    """
+    if directory is None or not directory.is_dir():
+        return []
+    stale = []
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            request_id = request_id_of(entry.name)
+            if request_id is None:
+                continue
+            try:
+                # os.stat, not DirEntry.stat: see _prune_sky_logs in
+                # sky/server/server.py for why.
+                st = os.stat(entry.path, follow_symlinks=False)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode) or st.st_mtime >= cutoff:
+                continue
+            stale.append((request_id, entry.path, st.st_size))
+    return stale
+
+
+def _unlink_log_files(files: List[Tuple[str, int]]) -> Tuple[int, int]:
+    """Unlink (path, size) pairs; returns (files removed, bytes removed)."""
+    removed_files = 0
+    removed_bytes = 0
+    for path, size in files:
+        try:
+            os.unlink(path)
+        except OSError:
+            continue
+        removed_files += 1
+        removed_bytes += size
+    return removed_files, removed_bytes
+
+
+async def _clean_orphan_request_files() -> None:
+    """Delete request log files and stored results whose row is already gone.
+
+    When several API server instances share one database, each writes its
+    request logs to local disk, so the row-driven cleanup above only reaches
+    the files that sit on the instance running it. A file left behind on
+    another instance outlives the row that names it, after which nothing on
+    the database side can enumerate it. A stored result is also left behind
+    when its writer dies between storing it and recording it in the row.
+
+    A file with no row is already garbage — it cannot be read back through
+    the API — so the age cutoff is a grace period against reading a
+    directory while a request is being recorded, not a retention period.
+    """
+    cutoff = time.time() - bs.GC_GRACE_SECONDS
+    listings = await asyncio.gather(
+        *[
+            asyncio.to_thread(_list_stale_log_files, log_dir, cutoff)
+            for log_dir in request_log_dirs()
+        ],
+        asyncio.to_thread(_list_stale_files, stored_results.results_dir(),
+                          cutoff, stored_results.request_id_of))
+    # A request writes one file per log directory, so group by request ID to
+    # ask the database about each one once.
+    stale: Dict[str, List[Tuple[str, int]]] = {}
+    for listing in listings:
+        for request_id, path, size in listing:
+            stale.setdefault(request_id, []).append((path, size))
+
+    request_ids = list(stale)
+    removed_files = 0
+    removed_bytes = 0
+    for start in range(0, len(request_ids), _ORPHAN_LOG_QUERY_CHUNK_SIZE):
+        batch = request_ids[start:start + _ORPHAN_LOG_QUERY_CHUNK_SIZE]
+        live = {
+            req.request_id for req in await get_request_tasks_async(
+                req_filter=RequestTaskFilter(request_ids=batch,
+                                             fields=['request_id']))
+        }
+        orphans = [
+            log_file for request_id in batch if request_id not in live
+            for log_file in stale[request_id]
+        ]
+        if not orphans:
+            continue
+        batch_files, batch_bytes = await asyncio.to_thread(
+            _unlink_log_files, orphans)
+        removed_files += batch_files
+        removed_bytes += batch_bytes
+    if removed_files:
+        logger.info(f'Cleaned up {removed_files} orphan request file(s), '
+                    f'{removed_bytes} bytes freed')
+
+
+_StillLeading = Callable[[], Awaitable[bool]]
+
+
+async def _always_leading() -> bool:
+    return True
+
+
+def _try_lead_requests_gc() -> Optional[leader_election.LeaderElector]:
+    elector = leader_election.get_elector(_REQUESTS_GC_LOCK_ID)
+    return elector if elector.try_acquire() else None
+
+
+@contextlib.asynccontextmanager
+async def _requests_gc_role() -> AsyncIterator[Optional[_StillLeading]]:
+    """Yield a check that this server still deletes expired requests.
+
+    Servers that share the request backend take turns: while one of them
+    holds the role, the others get None instead of deleting the same rows.
+    """
+    if not request_storage.get_request_backend().shared_across_servers:
+        yield _always_leading
+        return
+    loop = asyncio.get_running_loop()
+    elector = await loop.run_in_executor(_requests_gc_lock_executor,
+                                         _try_lead_requests_gc)
+    if elector is None:
+        yield None
+        return
+    renewed_at = time.monotonic()
+
+    async def still_leading() -> bool:
+        nonlocal renewed_at
+        if time.monotonic() - renewed_at < elector.renew_interval_seconds:
+            return True
+        if not await loop.run_in_executor(_requests_gc_lock_executor,
+                                          elector.renew):
+            return False
+        renewed_at = time.monotonic()
+        return True
+
+    try:
+        yield still_leading
+    finally:
+        await loop.run_in_executor(_requests_gc_lock_executor, elector.release)
+
+
 async def clean_finished_requests_with_retention(retention_seconds: int,
-                                                 batch_size: int = 1000):
+                                                 batch_size: int = 100):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
-    from the database and cleans up their associated log files.
+    from the database and cleans up their associated log files. It then sweeps
+    the log directories for files that no longer have a request row at all.
+
+    When several servers share the request backend, only one of them deletes
+    rows at a time; the others skip to the orphan file sweep.
 
     For backward compatibility, it also cleans up log files from the legacy
     path (~/sky_logs/api_server/requests/) to handle server upgrades.
@@ -1283,13 +1721,39 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
+    if batch_size <= 0:
+        raise ValueError('batch_size must be positive')
+    async with _requests_gc_role() as still_leading:
+        if still_leading is None:
+            logger.info('Skipped deleting finished requests: another API '
+                        'server is deleting them.')
+        else:
+            await _delete_expired_requests(retention_seconds, batch_size,
+                                           still_leading)
+
+    # Try to clean up the legacy directory if it's empty
+    # TODO Remove this on or after v0.15.0
+    await _cleanup_legacy_directory_if_empty()
+
+    await _clean_orphan_request_files()
+
+
+async def _delete_expired_requests(retention_seconds: int, batch_size: int,
+                                   still_leading: _StillLeading) -> None:
+    """Delete expired finished requests and their log files on this server.
+
+    Stops early once ``still_leading`` reports that another server may have
+    taken over the deletion.
+    """
+    # Do not expand the retention window while draining a backlog.
+    cutoff = time.time() - retention_seconds
+    started = time.monotonic()
     debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
             req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
-                                         finished_before=time.time() -
-                                         retention_seconds,
+                                         finished_before=cutoff,
                                          limit=batch_size,
                                          fields=['request_id']))
         if len(reqs) == 0:
@@ -1321,19 +1785,21 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
             break
-
-    # Try to clean up the legacy directory if it's empty
-    # TODO Remove this on or after v0.15.0
-    await _cleanup_legacy_directory_if_empty()
+        if not await still_leading():
+            logger.warning('Stopped deleting finished requests: this server '
+                           'no longer holds the requests GC role.')
+            break
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
     logger.info(f'Cleaned up {total_deleted} finished requests '
-                f'older than {retention_seconds} seconds')
+                f'older than {retention_seconds} seconds '
+                f'in {time.monotonic() - started:.3f}s')
 
 
 async def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
+    await asyncio_utils.sleep_startup_jitter('requests GC daemon')
     while True:
         logger.info('Running requests GC daemon...')
         # Use the latest config.
@@ -1351,9 +1817,10 @@ async def requests_gc_daemon():
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error running requests GC daemon: {e}'
                          f'traceback: {traceback.format_exc()}')
-        # Run the daemon at most once every hour to avoid too frequent
-        # cleanup.
-        await asyncio.sleep(max(retention_seconds, 3600))
+        # Fixed, and deliberately independent of the retention window: the
+        # interval controls how much accumulates between passes, not how long
+        # anything is kept.
+        await asyncio.sleep(_REQUESTS_GC_INTERVAL_SECONDS)
 
 
 def _cleanup():
@@ -1393,14 +1860,24 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             if request is not None:
                 _add_or_update_request_no_lock(request)
 
-    @contextlib.asynccontextmanager
-    async def update_request_async(self, request_id: str):
-        _ensure_db_initialized()
+    @init_db_async
+    @asyncio_utils.shield
+    async def update_if_status_async(self, request_id: str,
+                                     from_statuses: List[RequestStatus],
+                                     values: Dict[str, Any]) -> bool:
+        assert _DB is not None
+        assert set(values) <= set(REQUEST_COLUMNS), values
+        set_clause = ', '.join(f'{column}=?' for column in values)
+        status_placeholders = ', '.join('?' * len(from_statuses))
+        sql = (f'UPDATE {REQUEST_TABLE} SET {set_clause} '
+               f'WHERE request_id=? AND status IN ({status_placeholders}) '
+               'RETURNING request_id')
+        params = (*values.values(), request_id,
+                  *(status.value for status in from_statuses))
+        # update_request() reads and writes back the whole row under this lock.
         async with filelock.AsyncFileLock(request_lock_path(request_id)):
-            request = await _get_request_no_lock_async(request_id)
-            yield request
-            if request is not None:
-                await _add_or_update_request_no_lock_async(request)
+            row = await _DB.execute_get_returning_value_async(sql, params)
+        return row is not None
 
     @init_db_async
     @asyncio_utils.shield
@@ -1506,21 +1983,46 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         return [Request.from_row(row) for row in rows]
 
     @init_db_async
-    @init_db_async
     async def delete_requests(self, request_ids: List[str]) -> None:
         if not request_ids:
             return
         assert _DB is not None
-        placeholders = ','.join(['?'] * len(request_ids))
-        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-            logger.debug(f'Start deleting requests {request_ids}')
-        try:
-            await _DB.execute_and_commit_async(
-                f'DELETE FROM {REQUEST_TABLE} '
-                f'WHERE request_id IN ({placeholders})', tuple(request_ids))
-        finally:
-            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                logger.debug(f'End deleting requests {request_ids}')
+        # Large serialized results make row count alone an insufficient budget.
+        # An oversized row is indivisible and must be deleted on its own.
+        max_rows = 32
+        max_bytes = 8 * 1024 * 1024
+        size_sql = ' + '.join(f'COALESCE(length(CAST({column} AS BLOB)), 0)'
+                              for column in ('return_value', 'request_body',
+                                             'error', 'entrypoint'))
+        for offset in range(0, len(request_ids), max_rows):
+            ids = request_ids[offset:offset + max_rows]
+            placeholders = ','.join('?' for _ in ids)
+            # Return only sizes to Python, and release the read transaction
+            # before acquiring a writer lock.
+            async with _DB.execute_fetchall_async(
+                f'SELECT request_id, {size_sql} FROM {REQUEST_TABLE} '
+                f'WHERE request_id IN ({placeholders})', ids) as rows:
+                pending = list(rows)
+            while pending:
+                batch: List[str] = []
+                payload_bytes = 0
+                while pending:
+                    request_id, size = pending[0]
+                    if batch and payload_bytes + size > max_bytes:
+                        break
+                    pending.pop(0)
+                    batch.append(request_id)
+                    payload_bytes += size
+                placeholders = ','.join('?' for _ in batch)
+                started = time.monotonic()
+                await _DB.execute_and_commit_async(
+                    f'DELETE FROM {REQUEST_TABLE} '
+                    f'WHERE request_id IN ({placeholders})', batch)
+                logger.debug(f'Request GC batch rows={len(batch)} '
+                             f'payload_bytes={payload_bytes} '
+                             f'duration_s={time.monotonic() - started:.3f}')
+                # Commit first, then let other API processes acquire the lock.
+                await asyncio.sleep(0.05)
 
     # --- Status updates ---
 
@@ -1563,6 +2065,12 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 if not _should_kill_request(request_id, request_record):
                     continue
                 assert request_record is not None
+                # When a user_id scope is given, only cancel requests owned by
+                # that user. Without this, an explicit request_ids list would
+                # bypass the scope entirely and let a caller cancel another
+                # user's request.
+                if (user_id is not None and request_record.user_id != user_id):
+                    continue
                 if request_record.pid is not None:
                     logger.debug(
                         f'Killing request process {request_record.pid}')

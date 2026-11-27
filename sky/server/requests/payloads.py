@@ -103,6 +103,14 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # The auth DB deadline is a server-side setting: the server derives the
+    # timeouts it puts on its own users upsert from it, so a client must not
+    # be able to supply it.
+    env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS, None)
+    # The user to act as is sent in a header and only applies to this client's
+    # own requests. Forwarded, it would make any request the server or a
+    # controller later sends with a service account token act as that user.
+    env_vars.pop(constants.IMPERSONATE_USER_ENV_VAR, None)
     # Remove the in-cluster context name - this is only meaningful for the
     # local Kubernetes environment and should not be forwarded to the server,
     # which has its own cluster context configuration.
@@ -170,6 +178,36 @@ class RequestBody(BasePayload):
     # client-specific code. `None` means the request arrived without
     # the header — i.e. an old client.
     client_api_version: Optional[int] = None
+    # The access level this request needs on the caller's *active* workspace
+    # ('read' or 'write'), classified server-side in `prepare_request_async`
+    # from the dispatched endpoint. Like `client_api_version` above, it exists
+    # because the worker process that runs the request cannot see the
+    # dispatch-context ContextVar it is derived from. Clients do NOT populate
+    # this field — whatever they send is overwritten server-side. `None` means
+    # the request was not classified (e.g. an internal daemon tick); the
+    # worker-side gate then requires 'write'. See
+    # `sky.server.requests.workspace_access`.
+    workspace_access: Optional[str] = None
+    # Whether the request came from loopback, i.e. the local API server or a
+    # controller calling its own server. Set server-side in
+    # `stamp_request_body`, like `workspace_access`; a client-sent value is
+    # overwritten. The default is False, so a body that is constructed but
+    # never stamped (a future code path) is treated as remote (fail closed). A
+    # body pickled before this field existed has no such attribute, so a reader
+    # using `getattr(body, 'from_loopback', None)` sees None, not this default,
+    # and keeps the pre-upgrade (loopback) behavior; see `stamp_request_body`
+    # and the override logic in `executor.py`.
+    from_loopback: bool = False
+    # The account that made an impersonated call, which usage metrics
+    # attribute the request to. Set server-side in `stamp_request_body`; a
+    # client-sent value is overwritten.
+    impersonator_id: Optional[str] = None
+    impersonator_name: Optional[str] = None
+    # Whether the server authenticated the caller, so the users row and its
+    # role exist and the worker need not upsert them. Set server-side in
+    # `stamp_request_body`; a client-sent value is overwritten. Relies on every
+    # middleware that sets `request.state.auth_user` ensuring both first.
+    authenticated: bool = False
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -204,6 +242,11 @@ class RequestBody(BasePayload):
         kwargs.pop('override_skypilot_config_path')
         kwargs.pop('file_mounts_blob_id')
         kwargs.pop('client_api_version', None)
+        kwargs.pop('workspace_access', None)
+        kwargs.pop('from_loopback', None)
+        kwargs.pop('authenticated', None)
+        kwargs.pop('impersonator_id', None)
+        kwargs.pop('impersonator_name', None)
         return kwargs
 
     @property
@@ -306,7 +349,9 @@ class LaunchBody(RequestBody):
     quiet_optimizer: bool = False
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
-    disable_controller_check: bool = False
+    # No disable_controller_check here: the Kubernetes service account is
+    # chosen by the controller-name prefix, so only in-process callers may
+    # skip that check. Old clients still send it; extra='ignore' drops it.
     # When True, resize the existing cluster to the num_nodes specified in
     # the task instead of performing a normal launch.
     resize: bool = False
@@ -337,8 +382,6 @@ class LaunchBody(RequestBody):
             'is_launched_by_jobs_controller')
         kwargs['_is_launched_by_sky_serve_controller'] = kwargs.pop(
             'is_launched_by_sky_serve_controller')
-        kwargs['_disable_controller_check'] = kwargs.pop(
-            'disable_controller_check')
         kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
         kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs
@@ -386,6 +429,11 @@ class StatusBody(RequestBody):
     summary_response: bool = False
     # Include the cluster handle in the response
     include_handle: bool = True
+    # A page of at most `limit` clusters, newest launch first. The cursor is the
+    # `launched_at` and `name` of the last cluster of the previous page.
+    limit: Optional[int] = None
+    after_launched_at: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class StartBody(RequestBody):
@@ -413,6 +461,12 @@ class QueueBody(RequestBody):
     cluster_name: str
     skip_finished: bool = False
     all_users: bool = False
+
+
+class ClusterJobSpecBody(RequestBody):
+    """The request body for the cluster job spec endpoint."""
+    cluster_name: str
+    job_id: int
 
 
 class CancelBody(RequestBody):
@@ -565,11 +619,27 @@ class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
     purge: bool = False
+    # Keep a k8s-hostpath volume's files even if it was registered with
+    # cleanup_on_deletion.
+    no_cleanup: bool = False
 
 
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
     refresh: bool = False
+    # None means every volume, so a client that predates this field and never
+    # sends it keeps getting the whole listing.
+    volume_names: Optional[List[str]] = None
+    # A page of at most `limit` volumes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
+
+
+class StorageListBody(RequestBody):
+    """The request body for the storage list endpoint."""
+    # A page of at most `limit` storages by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
 
 class VolumeValidateBody(RequestBody):
@@ -606,6 +676,16 @@ class JobsLaunchBody(RequestBody):
     name: Optional[str]
     pool: Optional[str] = None
     num_jobs: Optional[int] = None
+    # The managed job (and task within it) this job is launched from, when it
+    # should join that job as a dynamic member. None for top-level jobs.
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+    # True when the caller asked for the attachment (an explicit job_group);
+    # False when it came from the in-job-group default. Decides whether a
+    # server that cannot record attachments errors or launches top-level.
+    job_group_explicit: bool = False
+    # Managed jobs this job waits for.
+    depends_on: Optional[List[int]] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -619,6 +699,20 @@ class JobsLaunchBody(RequestBody):
         # terminal.
         kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
+
+
+class JobsRestartBody(RequestBody):
+    """The request body for the jobs restart endpoint."""
+    # Exactly one of job_id and job_name names the job to restart.
+    job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    name: Optional[str] = None
+    pool: Optional[str] = None
+    # Resources.copy() kwargs, with `cloud` as a string.
+    resources_override: Optional[Dict[str, Any]] = None
+    env_overrides: Optional[List[Tuple[str, str]]] = None
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None
+    num_nodes: Optional[int] = None
 
 
 class JobsQueueBody(RequestBody):
@@ -635,12 +729,30 @@ class JobsQueueV2Body(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+    # With `job_ids`, also return the rest of each job's tree: the jobs
+    # launched under it, at any depth. Servers older than
+    # MIN_JOBS_INCLUDE_TREE_API_VERSION ignore this field, so the client
+    # checks the server version before sending it.
+    include_tree: bool = False
     user_match: Optional[str] = None
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
     pool_match: Optional[str] = None
+    # `--infra` spec to filter on. Servers older than
+    # MIN_JOBS_INFRA_FILTER_API_VERSION drop this field silently, so the
+    # client checks the server version before sending it.
+    infra_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
+    # Cursor: with `limit`, return the page of top-level jobs after this one
+    # in job id order. Servers older than MIN_JOBS_QUEUE_CURSOR_API_VERSION
+    # ignore this field, so the client checks the server version first.
+    after_job_id: Optional[int] = None
+    # Whether to compute total, total_no_filter, status_counts and
+    # infra_options; each reads every matching job. Without it they come back
+    # as None. Servers older than MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION
+    # ignore this field and compute them.
+    include_counts: bool = True
     statuses: Optional[List[str]] = None
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
@@ -662,6 +774,9 @@ class JobsCancelBody(RequestBody):
     pool: Optional[str] = None
     graceful: bool = False
     graceful_timeout: Optional[int] = None
+    # With exactly one job id: cancel only this dynamic task of it (index as
+    # shown in the queue, or name). int for the index, str for the name.
+    task: Optional[Union[str, int]] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -725,6 +840,9 @@ class ServeUpBody(RequestBody):
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
         kwargs['task'] = dag.tasks[0]
+        # Pass the blob id through so that a consolidation-mode controller can
+        # re-resolve the blob when it launches replicas.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
@@ -887,6 +1005,9 @@ class JobsPoolApplyBody(RequestBody):
             kwargs['task'] = dag.tasks[0]
         else:
             kwargs['task'] = None
+        # Pass the blob id through so that a consolidation-mode controller can
+        # re-resolve the blob when it launches workers.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
@@ -931,6 +1052,10 @@ class UpdateWorkspaceBody(RequestBody):
     """The request body for updating a specific workspace configuration."""
     workspace_name: str = ''  # Will be set from path parameter
     config: Dict[str, Any]
+    # The workspace config the update was based on. When set, the update is
+    # rejected with WorkspaceConfigConflictError if the workspace no longer
+    # holds it (compared under the config lock).
+    expected_config: Optional[Dict[str, Any]] = None
 
 
 class CreateWorkspaceBody(RequestBody):
@@ -1063,6 +1188,9 @@ class GetJobEventsBody(RequestBody):
     """The request body for the get job task events endpoint."""
     job_id: int
     task_id: Optional[int] = None
+    # Task name or id, resolved server-side. Mirrors the `task` argument of
+    # `sky jobs logs`; `task_id` stays for callers that already have the id.
+    task: Optional[Union[str, int]] = None
     limit: Optional[int] = 10  # Default to 10 most recent task events
     # When True, merge in launch-progress events from the job's underlying
     # cluster (e.g. image pulling) so the timeline shows provisioning
@@ -1082,6 +1210,9 @@ class RecipeListBody(RequestBody):
     my_recipes_only: bool = False
     recipe_type: Optional[
         str] = None  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
+    # A page of at most `limit` recipes by name, after `after_name`.
+    limit: Optional[int] = None
+    after_name: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

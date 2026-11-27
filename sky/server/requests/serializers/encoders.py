@@ -1,5 +1,5 @@
 """Encoders for the REST API return values."""
-# TODO(SKY-1211): we should evaluate that if we can move our return values to
+# TODO: we should evaluate that if we can move our return values to
 # pydantic models, so we can take advantage of model_dump_json of pydantic,
 # instead of implementing our own handlers.
 import base64
@@ -101,7 +101,7 @@ def encode_status(
     return response
 
 
-@register_encoder('launch', 'exec', 'jobs.launch')
+@register_encoder('launch', 'exec', 'jobs.launch', 'jobs.restart')
 def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:
@@ -161,19 +161,25 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
 @register_encoder('jobs.queue_v2')
 def encode_jobs_queue_v2(
         jobs_or_tuple) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
-    # Support returning either a plain jobs list or a (jobs, total) tuple
-    status_counts: Dict[str, int] = {}
+    # Support returning either a plain jobs list or a (jobs, total) tuple.
+    # In a tuple the counts are None when the request skipped them.
+    status_counts: Optional[Dict[str, int]] = {}
+    # The 4-tuple is still accepted: a plugin runner pinned to the older
+    # signature returns one, and it simply carries no infra options.
+    infra_options: Optional[List[str]] = []
     if isinstance(jobs_or_tuple, tuple):
         if len(jobs_or_tuple) == 2:
             jobs, total = jobs_or_tuple
             total_no_filter = total
         elif len(jobs_or_tuple) == 4:
             jobs, total, status_counts, total_no_filter = jobs_or_tuple
+        elif len(jobs_or_tuple) == 5:
+            (jobs, total, status_counts, total_no_filter,
+             infra_options) = jobs_or_tuple
         else:
             raise ValueError(f'Invalid jobs tuple: {jobs_or_tuple}')
     else:
         jobs = jobs_or_tuple
-        total = None
     # exclude_unset: fields the server never populated (because the request's
     # ``fields`` filter excluded them) are omitted from the payload instead of
     # being emitted as explicit nulls. Requests without a ``fields`` filter
@@ -183,13 +189,14 @@ def encode_jobs_queue_v2(
     ]
     for job in jobs_dict:
         job['status'] = job['status'].value
-    if total is None:
+    if not isinstance(jobs_or_tuple, tuple):
         return jobs_dict
     return {
         'jobs': jobs_dict,
         'total': total,
         'total_no_filter': total_no_filter,
-        'status_counts': status_counts
+        'status_counts': status_counts,
+        'infra_options': infra_options,
     }
 
 
@@ -218,12 +225,10 @@ def encode_jobs_pool_status(
 @register_encoder('cost_report')
 def encode_cost_report(
         cost_report: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # core.cost_report returns resources already encoded by encode_resources.
     for cluster_report in cost_report:
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
-        if 'resources' in cluster_report:
-            cluster_report['resources'] = encode_resources(
-                cluster_report['resources'])
     return cost_report
 
 

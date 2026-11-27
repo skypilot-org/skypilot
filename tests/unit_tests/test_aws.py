@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from sky import exceptions
 from sky import logs
 from sky import resources
 from sky import skypilot_config
@@ -206,8 +207,299 @@ def test_run_instances_tags_resumed_instance_volumes():
     }
 
 
+# Verbatim from AWS: credentials allowed to tag instances but not volumes.
+_VOLUME_TAG_DENIED_MSG = (
+    'You are not authorized to perform this operation. User: '
+    'arn:aws:iam::123456789012:user/restricted is not authorized to perform: '
+    'ec2:CreateTags on resource: arn:aws:ec2:us-east-1:123456789012:volume/* '
+    'because no identity-based policy allows the ec2:CreateTags action.')
+# Verbatim from AWS: credentials that may not launch instances at all. Same
+# error code, different action -- the fallback must not confuse the two.
+_RUN_INSTANCES_DENIED_MSG = (
+    'You are not authorized to perform this operation. User: '
+    'arn:aws:iam::123456789012:user/restricted is not authorized to perform: '
+    'ec2:RunInstances on resource: '
+    'arn:aws:ec2:us-east-1:123456789012:instance/* because no identity-based '
+    'policy allows the ec2:RunInstances action.')
+# Verbatim from AWS: credentials that may tag volumes but not instances. Same
+# code AND same action as the volume refusal -- only the resource differs, and
+# dropping the volume tags cannot help here.
+_INSTANCE_TAG_DENIED_MSG = (
+    'You are not authorized to perform this operation. User: '
+    'arn:aws:iam::123456789012:user/restricted is not authorized to perform: '
+    'ec2:CreateTags on resource: '
+    'arn:aws:ec2:us-east-1:123456789012:instance/* because no identity-based '
+    'policy allows the ec2:CreateTags action.')
+
+
+def _unauthorized(message: str, operation: str = 'RunInstances'):
+    return aws_instance.aws.botocore_exceptions().ClientError(
+        error_response={
+            'Error': {
+                'Code': 'UnauthorizedOperation',
+                'Message': message,
+            }
+        },
+        operation_name=operation,
+    )
+
+
+def _fail_fast_mock(region='us-east-1'):
+    ec2_fail_fast = MagicMock()
+    ec2_fail_fast.meta.client.meta.region_name = region
+    return ec2_fail_fast
+
+
+def _launch(ec2_fail_fast, cluster_name='cluster', enforce_volume_tags=False):
+    return aws_instance._create_instances(
+        ec2_fail_fast=ec2_fail_fast,
+        cluster_name=cluster_name,
+        node_config={
+            'SubnetIds': ['subnet-123'],
+            'SecurityGroupIds': ['sg-123'],
+            'InstanceType': 'm5.large',
+        },
+        tags={'Owner': 'alice'},
+        count=1,
+        associate_public_ip_address=True,
+        max_efa_interfaces=0,
+        enforce_volume_tags=enforce_volume_tags,
+    )
+
+
+def test_create_instances_retries_without_volume_tags_when_denied():
+    """A launch must survive credentials that cannot tag volumes.
+
+    AWS refuses the whole RunInstances call in that case, so the launch cannot
+    just continue -- it has to be reissued without the volume tags.
+    """
+    ec2_fail_fast = _fail_fast_mock()
+    ec2_fail_fast.create_instances.side_effect = [
+        _unauthorized(_VOLUME_TAG_DENIED_MSG),
+        ['instance'],
+    ]
+
+    assert _launch(ec2_fail_fast) == ['instance']
+    assert ec2_fail_fast.create_instances.call_count == 2
+
+    first, second = ec2_fail_fast.create_instances.call_args_list
+    assert {spec['ResourceType'] for spec in first.kwargs['TagSpecifications']
+           } == {'instance', 'volume'}
+    # Only the volume tags are given up; the instance stays tagged, so the
+    # cluster is still discoverable.
+    assert [
+        spec['ResourceType'] for spec in second.kwargs['TagSpecifications']
+    ] == ['instance']
+    keys = {
+        tag['Key']
+        for spec in second.kwargs['TagSpecifications']
+        for tag in spec['Tags']
+    }
+    assert provision_constants.TAG_RAY_CLUSTER_NAME in keys
+
+
+def test_create_instances_costs_nothing_when_tagging_is_permitted():
+    """Credentials that may tag volumes must see no extra API call.
+
+    The fallback lives in an exception handler, so the permitted path has to
+    stay a single RunInstances -- exactly as before this behaviour existed.
+    """
+    ec2_fail_fast = _fail_fast_mock()
+    ec2_fail_fast.create_instances.side_effect = [['instance']]
+
+    assert _launch(ec2_fail_fast) == ['instance']
+    assert ec2_fail_fast.create_instances.call_count == 1
+    assert {
+        spec['ResourceType'] for spec in
+        ec2_fail_fast.create_instances.call_args.kwargs['TagSpecifications']
+    } == {'instance', 'volume'}
+
+
+def test_create_instances_does_not_swallow_launch_permission_error():
+    """UnauthorizedOperation for RunInstances itself must surface as-is.
+
+    It shares the error code with the volume-tag denial, so keying off the
+    code alone would silently retry a launch that can never succeed.
+    """
+    ec2_fail_fast = _fail_fast_mock()
+    ec2_fail_fast.create_instances.side_effect = _unauthorized(
+        _RUN_INSTANCES_DENIED_MSG)
+
+    with pytest.raises(RuntimeError):
+        _launch(ec2_fail_fast)
+
+    # Retried across subnets, but never with the volume tags removed.
+    for call in ec2_fail_fast.create_instances.call_args_list:
+        assert {
+            spec['ResourceType'] for spec in call.kwargs['TagSpecifications']
+        } == {'instance', 'volume'}
+
+
+@pytest.mark.parametrize(
+    ('enforce_tags', 'should_fail'),
+    [
+        # Nothing asked for: volumes are tagged when allowed, given up when
+        # not.
+        (None, False),
+        ([], False),
+        # Instance tagging is already required -- a refusal to tag instances
+        # is never swallowed -- so naming it says nothing about volumes.
+        (['instance'], False),
+        # Volume tagging demanded, in either order.
+        (['volume'], True),
+        (['instance', 'volume'], True),
+        (['volume', 'instance'], True),
+    ])
+def test_enforce_tags_config_shapes(enforce_tags, should_fail):
+    """Every accepted `aws.enforce_tags` value resolves to the right behaviour.
+
+    Goes through run_instances so the config is read the way provisioning
+    reads it, rather than re-implementing the lookup in the test.
+    """
+    provider_config = {'use_internal_ips': False}
+    if enforce_tags is not None:
+        provider_config['enforce_tags'] = enforce_tags
+
+    mock_ec2 = MagicMock()
+    mock_ec2.meta.client.meta.region_name = 'us-east-1'
+    mock_ec2.instances.filter.return_value = []
+
+    created = SimpleNamespace(id='i-new',
+                              placement={'AvailabilityZone': 'us-east-1a'},
+                              tags=[])
+    mock_ec2_fail_fast = _fail_fast_mock()
+    mock_ec2_fail_fast.create_instances.side_effect = [
+        _unauthorized(_VOLUME_TAG_DENIED_MSG),
+        [created],
+    ]
+
+    provision_config = provision_common.ProvisionConfig(
+        provider_config=provider_config,
+        authentication_config={},
+        docker_config={},
+        node_config={
+            'SubnetIds': ['subnet-123'],
+            'SecurityGroupIds': ['sg-123'],
+            'InstanceType': 'm5.large',
+        },
+        count=1,
+        tags={'Owner': 'alice'},
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=None,
+    )
+
+    with patch.object(aws_instance,
+                      '_default_ec2_resource',
+                      return_value=mock_ec2), patch.object(
+                          aws_instance.aws,
+                          'resource',
+                          return_value=mock_ec2_fail_fast):
+        if should_fail:
+            with pytest.raises(exceptions.InvalidCloudCredentials):
+                aws_instance.run_instances(region='us-east-1',
+                                           cluster_name='cluster',
+                                           cluster_name_on_cloud='cluster',
+                                           config=provision_config)
+            # Enforcement must never retry with the volume tags stripped.
+            for call in mock_ec2_fail_fast.create_instances.call_args_list:
+                assert {
+                    spec['ResourceType']
+                    for spec in call.kwargs['TagSpecifications']
+                } == {'instance', 'volume'}
+        else:
+            record = aws_instance.run_instances(region='us-east-1',
+                                                cluster_name='cluster',
+                                                cluster_name_on_cloud='cluster',
+                                                config=provision_config)
+            assert record.created_instance_ids == ['i-new']
+            # Degraded: reissued without the volume tags.
+            assert [
+                spec['ResourceType'] for spec in mock_ec2_fail_fast.
+                create_instances.call_args.kwargs['TagSpecifications']
+            ] == ['instance']
+
+
+def test_create_instances_enforced_volume_tags_fail_the_launch():
+    """`aws.enforce_tags: [volume]` turns the refusal into a failure.
+
+    Compliance deployments need a guarantee, not a warning buried in a log,
+    so the launch must stop rather than quietly produce untagged volumes.
+    """
+    ec2_fail_fast = _fail_fast_mock()
+    ec2_fail_fast.create_instances.side_effect = _unauthorized(
+        _VOLUME_TAG_DENIED_MSG)
+
+    with pytest.raises(exceptions.InvalidCloudCredentials) as excinfo:
+        _launch(ec2_fail_fast, enforce_volume_tags=True)
+
+    message = str(excinfo.value)
+    assert 'aws.enforce_tags' in message
+    assert 'ec2:CreateTags' in message
+    # Never retried without the volume tags: that is the thing being enforced.
+    for call in ec2_fail_fast.create_instances.call_args_list:
+        assert {
+            spec['ResourceType'] for spec in call.kwargs['TagSpecifications']
+        } == {'instance', 'volume'}
+
+
+def test_enforced_volume_tags_do_not_affect_a_permitted_launch():
+    ec2_fail_fast = _fail_fast_mock()
+    ec2_fail_fast.create_instances.side_effect = [['instance']]
+
+    assert _launch(ec2_fail_fast, enforce_volume_tags=True) == ['instance']
+    assert ec2_fail_fast.create_instances.call_count == 1
+
+
+def test_create_instances_does_not_swallow_instance_tag_denial():
+    """A refusal to tag *instances* must not be read as a volume problem.
+
+    It carries the same code and the same `ec2:CreateTags` action as the
+    volume refusal; only the resource differs. Dropping the volume tags
+    cannot help, so mistaking it would report the wrong cause and then fail
+    again anyway.
+    """
+    ec2_fail_fast = _fail_fast_mock()
+    ec2_fail_fast.create_instances.side_effect = _unauthorized(
+        _INSTANCE_TAG_DENIED_MSG)
+
+    with pytest.raises(RuntimeError):
+        _launch(ec2_fail_fast)
+
+    # Retried across subnets, but never with the volume tags stripped.
+    for call in ec2_fail_fast.create_instances.call_args_list:
+        assert {
+            spec['ResourceType'] for spec in call.kwargs['TagSpecifications']
+        } == {'instance', 'volume'}
+
+
+def test_volume_tagging_is_retried_on_every_launch():
+    """The refusal must not be cached across launches.
+
+    Caching it would leave volumes untagged after someone grants the missing
+    permission, until the API server happened to be restarted.
+    """
+    first = _fail_fast_mock()
+    first.create_instances.side_effect = [
+        _unauthorized(_VOLUME_TAG_DENIED_MSG),
+        ['instance'],
+    ]
+    _launch(first)
+
+    # A later launch in the same process asks for volume tags again, so a
+    # permission granted in the meantime takes effect immediately.
+    second = _fail_fast_mock()
+    second.create_instances.side_effect = [['instance']]
+    _launch(second, cluster_name='cluster2')
+    assert second.create_instances.call_count == 1
+    assert {
+        spec['ResourceType'] for spec in
+        second.create_instances.call_args.kwargs['TagSpecifications']
+    } == {'instance', 'volume'}
+
+
 @patch.object(aws_instance, 'logger')
 def test_run_instances_volume_tag_failure_does_not_abort_resume(mock_logger):
+    """Resuming must not fail because the volumes cannot be tagged."""
     stopped_instance = SimpleNamespace(
         id='i-stopped',
         state={'Name': 'stopped'},
@@ -229,15 +521,7 @@ def test_run_instances_volume_tag_failure_does_not_abort_resume(mock_logger):
 
     def create_tags_side_effect(**kwargs):
         if kwargs['Resources'] == ['vol-1']:
-            raise aws_instance.aws.botocore_exceptions().ClientError(
-                error_response={
-                    'Error': {
-                        'Code': 'UnauthorizedOperation',
-                        'Message': 'not allowed',
-                    }
-                },
-                operation_name='CreateTags',
-            )
+            raise _unauthorized(_VOLUME_TAG_DENIED_MSG, 'CreateTags')
         return {}
 
     mock_ec2.meta.client.create_tags.side_effect = create_tags_side_effect
@@ -267,11 +551,10 @@ def test_run_instances_volume_tag_failure_does_not_abort_resume(mock_logger):
                                             cluster_name_on_cloud='cluster',
                                             config=provision_config)
 
+    # The resume succeeded and the refusal was reported, not raised.
     assert record.resumed_instance_ids == ['i-stopped']
-    mock_logger.warning.assert_any_call(
-        'Failed to update tags for resumed AWS volumes '
-        "['vol-1']: An error occurred (UnauthorizedOperation) when calling "
-        'the CreateTags operation: not allowed')
+    assert any('Volumes will not be tagged' in str(call)
+               for call in mock_logger.warning.call_args_list)
 
 
 def test_usable_subnets(monkeypatch):

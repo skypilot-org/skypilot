@@ -24,6 +24,9 @@ workdir: ~/my-task-code
 
 num_nodes: 4
 
+job:
+  wait_for_scheduling_timeout: 2h
+
 resources:
   # Infra to use. Click to see schema and example values.
   infra: aws
@@ -183,6 +186,52 @@ A task can set this to a smaller value than the size of a cluster.
 
 ```yaml
 num_nodes: 4
+
+```
+
+
+### ``job``
+
+Lifecycle settings for managed jobs (optional).
+
+Only `sky jobs launch` reads this section; `sky launch` and `sky exec`
+ignore it. In a pipeline or job group,
+each task can set its own `job` section.
+
+```yaml
+job:
+  wait_for_scheduling_timeout: 2h
+
+```
+
+
+### ``job.wait_for_scheduling_timeout``
+
+Cancel the managed job if the task has not started running within this long
+of being submitted (optional; defaults to no limit, i.e. keep retrying until
+resources are found).
+
+Format: a positive duration with an optional unit suffix: `s` (seconds),
+`m` (minutes), `h` (hours), `d` (days), `w` (weeks), e.g. `90s`,
+`30m`, `2h`. A plain integer is treated as seconds.
+
+The clock starts at the task's `SUBMITTED` time and covers launch
+retries, backoff and waiting in a Kubernetes scheduler's queue (e.g., Kueue).
+It is the only bound on a wait for Kueue admission, unless
+kubernetes.kueue.admission_timeout
+is set explicitly. It covers only the initial wait: once the task has started,
+a later recovery does not re-arm it. In a pipeline or job group, each task has
+its own clock, and any task exceeding its timeout cancels the whole job.
+
+The job then ends `CANCELLED`, as with `sky jobs cancel`, and the
+reason is shown in `sky jobs queue`. The timeout is checked every 30
+seconds, including across controller restarts; when many jobs time out
+together, they are cancelled a few at a time over the next checks. See
+jobs-wait-for-scheduling-timeout for an example.
+
+```yaml
+job:
+  wait_for_scheduling_timeout: 2h
 
 ```
 
@@ -369,7 +418,7 @@ resources:
 
 ### ``resources.accelerator_args``
 
-Additional accelerator metadata (optional); only used for TPU node and TPU VM.
+Additional accelerator metadata (optional); only used for TPUs.
 
 Example usage:
 
@@ -388,6 +437,15 @@ resources:
   accelerator_args:
     tpu_name: mytpu
     tpu_vm: false
+```
+
+- To request a TPU v6e multi-host slice of 8 chips (two 4-chip VMs on one `2x4` slice) on GKE instead of one 8-chip VM. Only supported with `tpu-v6e-8` on Kubernetes. Larger slices (`tpu-v6e-16` and up) are always multi-host and do not need it:
+
+```yaml
+resources:
+  accelerators: tpu-v6e-8
+  accelerator_args:
+    multi_host: true
 ```
 
 By default, the value for `runtime_version` is decided based on which is requested and should work for either case. If passing in an incompatible version, GCP will throw an error during provisioning.
@@ -1042,7 +1100,8 @@ See Nested SkyPilot from managed jobs for details.
 
 ### ``volumes``
 
-SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to volumes on Kubernetes for more details.
+SkyPilot supports managed persistent and ephemeral volumes on Kubernetes, plus host path bind mounts for Slurm containers.
+Refer to volumes on Kubernetes for managed volume details.
 
 Example:
 
@@ -1053,8 +1112,27 @@ volumes:
   # Ephemeral volume
   /mnt/cache:
     size: 100Gi
-
 ```
+
+For Slurm tasks using Pyxis/Enroot, mount an existing absolute host path directly:
+
+```yaml
+resources:
+  cloud: slurm
+  image_id: docker:ubuntu:24.04
+
+volumes:
+  /data:
+    host_path: /shared/datasets
+    mode: ro  # Optional; defaults to ro. Use rw for a writable mount.
+```
+
+Host and container paths must use safe POSIX path characters.
+Host paths may contain simple environment variable expansions such as `$SLURM_JOB_ID`.
+
+Administrators can also declare cluster-wide binds applied to every containerized job; see
+slurm.container_mounts.
+
 
 
 ### ``file_mounts``

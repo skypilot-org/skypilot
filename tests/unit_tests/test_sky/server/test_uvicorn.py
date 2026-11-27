@@ -1,0 +1,199 @@
+# pylint: disable=protected-access
+"""Unit tests for per-worker SO_REUSEPORT binding in sky.server.uvicorn.
+
+These verify the opt-in gating of `_reuse_port_enabled` (env var values,
+uds/fd listeners, platform support) and the socket-level behavior of
+`_bind_reuse_port_socket` (SO_REUSEPORT is set, multiple binds on the same
+address succeed, bind failure exits instead of raising, spawned children do
+not inherit the socket).
+"""
+
+import asyncio
+import socket
+import sys
+
+import pytest
+import uvicorn as uvicorn_lib
+
+from sky.server import uvicorn
+from sky.skylet import constants
+from sky.utils import asyncio_utils
+
+_HAS_SO_REUSEPORT = hasattr(socket, 'SO_REUSEPORT')
+
+
+def _config(**kwargs) -> uvicorn_lib.Config:
+    kwargs.setdefault('host', '127.0.0.1')
+    kwargs.setdefault('port', 0)
+    kwargs.setdefault('workers', 2)
+    return uvicorn_lib.Config('dummy:app', **kwargs)
+
+
+@pytest.fixture(name='on_linux')
+def on_linux_fixture(monkeypatch):
+    """Pretend to run on Linux, the only platform the feature is enabled on."""
+    monkeypatch.setattr(sys, 'platform', 'linux')
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+def test_reuse_port_disabled_by_default(monkeypatch, on_linux):
+    """Without the env var set, the feature is off (opt-in)."""
+    del on_linux
+    monkeypatch.delenv(constants.ENV_VAR_SERVER_REUSE_PORT, raising=False)
+    assert not uvicorn._reuse_port_enabled(_config())
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+@pytest.mark.parametrize('value', ['1', 'true', 'yes', 'TRUE', 'Yes'])
+def test_reuse_port_enabled_values(monkeypatch, on_linux, value):
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, value)
+    assert uvicorn._reuse_port_enabled(_config())
+
+
+@pytest.mark.parametrize('value', ['0', 'false', 'no', '', 'enable'])
+def test_reuse_port_disabled_values(monkeypatch, on_linux, value):
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, value)
+    assert not uvicorn._reuse_port_enabled(_config())
+
+
+def test_reuse_port_disabled_for_uds_and_fd(monkeypatch, on_linux):
+    """SO_REUSEPORT only applies to TCP host/port listeners."""
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
+    assert not uvicorn._reuse_port_enabled(_config(uds='/tmp/skypilot.sock'))
+    assert not uvicorn._reuse_port_enabled(_config(fd=3))
+
+
+def test_reuse_port_disabled_without_platform_support(monkeypatch, on_linux):
+    """On platforms without SO_REUSEPORT the flag is a no-op."""
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
+    monkeypatch.delattr(socket, 'SO_REUSEPORT', raising=False)
+    assert not uvicorn._reuse_port_enabled(_config())
+
+
+@pytest.mark.parametrize('platform', ['darwin', 'freebsd13', 'win32'])
+def test_reuse_port_disabled_off_linux(monkeypatch, platform):
+    """macOS/BSD expose SO_REUSEPORT but send all connections to one socket."""
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
+    assert not uvicorn._reuse_port_enabled(_config())
+
+
+@pytest.mark.parametrize('workers', [None, 1])
+def test_reuse_port_disabled_for_single_worker(monkeypatch, on_linux, workers):
+    """One worker has nothing to balance against, and keeps the EADDRINUSE
+    guard that SO_REUSEPORT would drop."""
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
+    assert not uvicorn._reuse_port_enabled(_config(workers=workers))
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+def test_bind_reuse_port_socket_allows_multiple_binds():
+    """Two workers can bind the same address, and SO_REUSEPORT is set."""
+    sock1 = uvicorn._bind_reuse_port_socket(_config())
+    try:
+        port = sock1.getsockname()[1]
+        # A second bind on the same (host, port) must succeed, which is
+        # exactly what restarted/parallel workers do.
+        sock2 = uvicorn._bind_reuse_port_socket(_config(port=port))
+        try:
+            for sock in (sock1, sock2):
+                assert sock.getsockopt(socket.SOL_SOCKET,
+                                       socket.SO_REUSEPORT) != 0
+                assert sock.getsockname()[1] == port
+                assert not sock.get_inheritable()
+        finally:
+            sock2.close()
+    finally:
+        sock1.close()
+
+
+# Prints the port of the listening socket at fd argv[1], or 'absent'.
+_CHILD_FD_PROBE = '\n'.join([
+    'import socket',
+    'import sys',
+    'try:',
+    '    sock = socket.socket(fileno=int(sys.argv[1]))',
+    'except OSError:',
+    '    print("absent")',
+    'else:',
+    '    print(sock.getsockname()[1])',
+    '    sock.detach()',
+])
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+def test_bind_reuse_port_socket_not_inherited_by_spawned_child():
+    """A child spawned by a worker does not hold the worker's listener.
+
+    `spawn_without_fork` passes every inheritable fd to the child. A child
+    that held a worker's listener would keep it in the SO_REUSEPORT group
+    after the worker exits, and the kernel would keep routing new
+    connections to a queue that no worker accepts.
+    """
+    sock = uvicorn._bind_reuse_port_socket(_config())
+    try:
+        sock.listen()
+
+        async def spawn_probe():
+            return await asyncio_utils.spawn_without_fork(
+                [sys.executable, '-c', _CHILD_FD_PROBE,
+                 str(sock.fileno())])
+
+        proc = asyncio.run(spawn_probe())
+        out, _ = proc.communicate(timeout=60)
+    finally:
+        sock.close()
+    assert out.decode().strip() == 'absent'
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+def test_bind_reuse_port_socket_exits_on_bind_failure():
+    """Bind failure (port held by a non-reuseport socket) exits the process.
+
+    This is the fail-fast path the parent relies on at startup; in a worker
+    it matches ``uvicorn.Config.bind_socket`` behavior (exit and let the
+    supervisor handle it) instead of leaking a traceback.
+    """
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        blocker.bind(('127.0.0.1', 0))
+        blocker.listen(1)
+        port = blocker.getsockname()[1]
+        with pytest.raises(SystemExit):
+            uvicorn._bind_reuse_port_socket(_config(port=port))
+    finally:
+        blocker.close()
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+def test_run_resolves_ephemeral_port(monkeypatch, on_linux):
+    """port=0 is resolved in the parent before workers bind their own sockets.
+
+    Workers bind independently, so an unresolved port 0 would put every worker
+    on a different ephemeral port and no single endpoint would reach the pool.
+    """
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
+    captured = {}
+
+    class _FakeMultiprocess:
+
+        def __init__(self, config, target, sockets):
+            del target
+            captured['port'] = config.port
+            captured['sockets'] = sockets
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr(uvicorn, 'SlowStartMultiprocess', _FakeMultiprocess)
+    config = _config(port=0, workers=2)
+    uvicorn.run(config)
+    assert captured['sockets'] == []
+    assert captured['port'] != 0
+    assert config.port == captured['port']

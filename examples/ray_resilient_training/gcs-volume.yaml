@@ -1,0 +1,10 @@
+name: ray-gcs-rocksdb
+type: k8s-pvc
+infra: kubernetes
+size: 20Gi
+
+config:
+  # Embedded RocksDB permits exactly one GCS writer. A recovered head waits
+  # for the previous pod to release the claim before mounting it.
+  access_mode: ReadWriteOncePod
+  # storage_class_name: <durable-storage-class>

@@ -1,19 +1,41 @@
 """Constants for the database schemas."""
+from __future__ import annotations
 
 import contextlib
 import logging
 import os
 import threading
+import typing
 from typing import Optional
 
-from alembic import command as alembic_command
-from alembic.config import Config
-from alembic.runtime import migration
 import filelock
-import sqlalchemy
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.utils.db import sqlalchemy_deps
+
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+if typing.TYPE_CHECKING:
+    import alembic.command as alembic_command
+    import alembic.config as _alembic_config
+    import alembic.runtime.migration as migration
+    import sqlalchemy
+else:
+    alembic_command = adaptors_common.LazyImport('alembic.command',
+                                                 import_error_message=_SA_MSG)
+    # alembic.config.Config is a class - LazyImport module then Config attr
+    _alembic_config = adaptors_common.LazyImport('alembic.config',
+                                                 import_error_message=_SA_MSG)
+    migration = adaptors_common.LazyImport('alembic.runtime.migration',
+                                           import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+
+
+def _alembic_config_cls():
+    return _alembic_config.Config
+
 
 logger = sky_logging.init_logger(__name__)
 
@@ -30,15 +52,15 @@ DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 _alembic_thread_lock = threading.Lock()
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '020'  # add is_managed column to cluster_history
+GLOBAL_USER_STATE_VERSION = '028'  # storage user_hash and workspace
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '022'  # add emergency recovery columns
+SPOT_JOBS_VERSION = '032'  # job_info tree-root indexes
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'
-SERVE_VERSION = '003'  # add controller_ip column to services
+SERVE_VERSION = '006'  # add workspace column to services
 SERVE_LOCK_PATH = f'~/.sky/locks/.{SERVE_DB_NAME}.lock'
 
 SKYPILOT_CONFIG_DB_NAME = 'sky_config_db'
@@ -50,7 +72,7 @@ KV_CACHE_VERSION = '001'  # initial kv_cache table for AWS AMIs
 KV_CACHE_LOCK_PATH = f'~/.sky/locks/.{KV_CACHE_DB_NAME}.lock'
 
 RECIPES_DB_NAME = 'recipes_db'
-RECIPES_VERSION = '001'
+RECIPES_VERSION = '002'
 RECIPES_LOCK_PATH = f'~/.sky/locks/.{RECIPES_DB_NAME}.lock'
 
 
@@ -84,7 +106,7 @@ def get_alembic_config(engine: sqlalchemy.engine.Engine,
         alembic_ini_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             'setup_files', 'alembic.ini')
-    alembic_cfg = Config(alembic_ini_path, ini_section=section)
+    alembic_cfg = _alembic_config.Config(alembic_ini_path, ini_section=section)
 
     # Override the database URL to match SkyPilot's current connection
     # Use render_as_string to get the full URL with password

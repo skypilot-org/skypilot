@@ -26,6 +26,7 @@ import {
   getWorkspaces,
 } from '@/data/connectors/workspaces';
 import dashboardCache from '@/lib/cache';
+import { getWorkspaceName } from '@/hooks/useWorkspacesConfig';
 
 const FOOTER_BUTTON_CLASS = 'min-w-[80px]';
 
@@ -34,20 +35,20 @@ const FOOTER_BUTTON_CLASS = 'min-w-[80px]';
  * Both the user-role batch and the workspace batch endpoints return the
  * shape { succeeded: [...], failed: [{ <key>, error }] }.
  */
-function ResultSummary({ result, idKey, idLabel }) {
+function ResultSummary({ result, idKey, idLabel, formatId = (id) => id }) {
   if (!result) return null;
   const succeeded = result.succeeded || [];
   const failed = result.failed || [];
   return (
     <div className="space-y-3 py-2 text-sm">
-      <div className="text-gray-700">
-        <span className="font-medium text-green-600">
+      <div className="text-content">
+        <span className="font-medium text-green-fg">
           {succeeded.length} succeeded
         </span>
         {failed.length > 0 && (
           <>
             {', '}
-            <span className="font-medium text-red-600">
+            <span className="font-medium text-red-fg">
               {failed.length} failed
             </span>
           </>
@@ -55,19 +56,19 @@ function ResultSummary({ result, idKey, idLabel }) {
         .
       </div>
       {failed.length > 0 && (
-        <div className="border border-gray-200 rounded-md max-h-48 overflow-y-auto">
-          <div className="px-3 py-2 text-xs font-medium text-gray-700 border-b border-gray-200 bg-gray-50">
+        <div className="border border-line rounded-md max-h-48 overflow-y-auto">
+          <div className="px-3 py-2 text-xs font-medium text-content border-b border-line bg-surface-subtle">
             Failures
           </div>
-          <ul className="divide-y divide-gray-100">
+          <ul className="divide-y divide-line-subtle">
             {failed.map((f, i) => (
-              <li key={i} className="px-3 py-2 text-xs text-gray-700">
-                <span className="font-mono text-gray-500">
-                  {idLabel}={f[idKey]}
+              <li key={i} className="px-3 py-2 text-xs text-content">
+                <span className="font-mono text-content-tertiary">
+                  {idLabel}={formatId(f[idKey])}
                 </span>
                 {/* whitespace-pre-wrap renders the \n in server error
                     messages as actual line breaks. */}
-                <span className="ml-2 text-red-600 whitespace-pre-wrap">
+                <span className="ml-2 text-red-fg whitespace-pre-wrap">
                   {f.error}
                 </span>
               </li>
@@ -87,21 +88,21 @@ ResultSummary.propTypes = {
 
 function SelectedUsersPanel({ selectedUsers, includeRole = false }) {
   return (
-    <div className="border border-gray-200 rounded-md">
-      <div className="px-3 py-2 text-xs font-medium text-gray-700 border-b border-gray-200 bg-gray-50">
+    <div className="border border-line rounded-md">
+      <div className="px-3 py-2 text-xs font-medium text-content border-b border-line bg-surface-subtle">
         {includeRole
           ? 'Affected users'
           : `Selected users (${selectedUsers.length})`}
       </div>
-      <div className="max-h-32 overflow-y-auto divide-y divide-gray-100">
+      <div className="max-h-32 overflow-y-auto divide-y divide-line-subtle">
         {selectedUsers.map((u) => (
           <div
             key={u.userId}
-            className="px-3 py-1.5 text-xs text-gray-700 truncate"
+            className="px-3 py-1.5 text-xs text-content truncate"
           >
             {u.usernameDisplay || u.userId}
             {includeRole && (
-              <span className="text-gray-400"> ({u.role || '-'})</span>
+              <span className="text-content-faint"> ({u.role || '-'})</span>
             )}
           </div>
         ))}
@@ -170,7 +171,7 @@ export function BatchRoleDialog({ open, onClose, selectedUsers }) {
               <div className="grid gap-2">
                 <label
                   htmlFor="batch-role-select"
-                  className="text-sm font-medium text-gray-700"
+                  className="text-sm font-medium text-content"
                 >
                   New role
                 </label>
@@ -188,11 +189,12 @@ export function BatchRoleDialog({ open, onClose, selectedUsers }) {
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <SelectedUsersPanel selectedUsers={selectedUsers} includeRole />
-              {error && <div className="text-sm text-red-600">{error}</div>}
+              {error && <div className="text-sm text-red-fg">{error}</div>}
             </div>
             <DialogFooter>
               <Button
@@ -207,7 +209,7 @@ export function BatchRoleDialog({ open, onClose, selectedUsers }) {
                 variant="default"
                 onClick={handleApply}
                 disabled={submitting}
-                className={`bg-sky-600 text-white hover:bg-sky-700 ${FOOTER_BUTTON_CLASS}`}
+                className={`bg-sky-solid text-white hover:bg-sky-solid-hover ${FOOTER_BUTTON_CLASS}`}
               >
                 {submitting ? (
                   <>
@@ -294,8 +296,13 @@ function WorkspacePickerDialog({
   const privateWorkspaces = useMemo(() => {
     return Object.entries(workspaces)
       .filter(([, cfg]) => cfg && cfg.private)
-      .map(([name, cfg]) => ({ name, config: cfg }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map(([name, cfg]) => ({
+        // `name` is the workspace id; `label` is what users see.
+        name,
+        label: getWorkspaceName(workspaces, name),
+        config: cfg,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }, [workspaces]);
 
   // Returns the subset of selectedUsers already listed in this
@@ -365,18 +372,18 @@ function WorkspacePickerDialog({
           <>
             <div className="flex flex-col gap-4 py-2">
               {loadingWorkspaces && (
-                <div className="flex items-center text-sm text-gray-500">
+                <div className="flex items-center text-sm text-content-tertiary">
                   <CircularProgress size={14} className="mr-2" />
                   Loading workspaces...
                 </div>
               )}
               {!loadingWorkspaces && loadError && (
-                <div className="text-sm text-red-600">{loadError}</div>
+                <div className="text-sm text-red-fg">{loadError}</div>
               )}
               {!loadingWorkspaces &&
                 !loadError &&
                 privateWorkspaces.length === 0 && (
-                  <div className="text-sm text-gray-600 border border-gray-200 rounded-md px-3 py-2 bg-gray-50">
+                  <div className="text-sm text-content-secondary border border-line rounded-md px-3 py-2 bg-surface-subtle">
                     No private workspaces are configured. Allowed users only
                     apply to private workspaces.
                   </div>
@@ -384,8 +391,8 @@ function WorkspacePickerDialog({
               {!loadingWorkspaces &&
                 !loadError &&
                 privateWorkspaces.length > 0 && (
-                  <div className="border border-gray-200 rounded-md max-h-64 overflow-y-auto">
-                    {privateWorkspaces.map(({ name, config }) => {
+                  <div className="border border-line rounded-md max-h-64 overflow-y-auto">
+                    {privateWorkspaces.map(({ name, label, config }) => {
                       const isChecked = picked.has(name);
                       const currentMembers = computeCurrentMembers(config);
                       // currentMembers is `selectedUsers.filter(...)` so the
@@ -410,7 +417,7 @@ function WorkspacePickerDialog({
                       return (
                         <label
                           key={name}
-                          className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 cursor-pointer"
+                          className="flex items-start gap-3 px-3 py-2 hover:bg-surface-hover border-b border-line-subtle last:border-b-0 cursor-pointer"
                         >
                           <input
                             type="checkbox"
@@ -420,18 +427,18 @@ function WorkspacePickerDialog({
                             disabled={submitting}
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm text-gray-700 truncate">
-                              {name}
+                            <div className="text-sm text-content truncate">
+                              {label}
                             </div>
                             {variant === 'remove' && (
-                              <div className="text-xs text-gray-500 mt-0.5">
+                              <div className="text-xs text-content-tertiary mt-0.5">
                                 {currentMembers.length === 0
                                   ? 'No selected user is in this workspace (no-op).'
                                   : `Will remove: ${fmt(currentMembers)}`}
                               </div>
                             )}
                             {variant === 'add' && (
-                              <div className="text-xs text-gray-500 mt-0.5">
+                              <div className="text-xs text-content-tertiary mt-0.5">
                                 {addHint}
                               </div>
                             )}
@@ -442,7 +449,7 @@ function WorkspacePickerDialog({
                   </div>
                 )}
               <SelectedUsersPanel selectedUsers={selectedUsers} />
-              {error && <div className="text-sm text-red-600">{error}</div>}
+              {error && <div className="text-sm text-red-fg">{error}</div>}
             </div>
             <DialogFooter>
               <Button
@@ -474,7 +481,7 @@ function WorkspacePickerDialog({
                   variant="default"
                   onClick={handleApply}
                   disabled={submitting || picked.size === 0}
-                  className={`bg-sky-600 text-white hover:bg-sky-700 ${FOOTER_BUTTON_CLASS}`}
+                  className={`bg-sky-solid text-white hover:bg-sky-solid-hover ${FOOTER_BUTTON_CLASS}`}
                 >
                   {submitting ? (
                     <>
@@ -495,6 +502,7 @@ function WorkspacePickerDialog({
               result={result}
               idKey="workspace_name"
               idLabel="workspace"
+              formatId={(id) => getWorkspaceName(workspaces, id)}
             />
             <DialogFooter>
               <Button

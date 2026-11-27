@@ -1,5 +1,8 @@
+import copy
+
 import pytest
 
+from sky import exceptions
 from sky.utils import config_utils
 
 
@@ -215,6 +218,200 @@ def test_merge_k8s_configs_with_image_pull_secrets():
     assert len(base_config['imagePullSecrets']) == 1
     assert base_config['imagePullSecrets'][0]['name'] == 'secret2'
     assert base_config['imagePullSecrets'][0]['namespace'] == 'test'
+
+
+def test_merge_k8s_configs_image_pull_secrets_empty_override_clears():
+    """An empty override list clears the inherited secrets."""
+    base_config = {'imagePullSecrets': [{'name': 'regcred'}]}
+
+    config_utils.merge_k8s_configs(base_config, {'imagePullSecrets': []})
+    assert base_config['imagePullSecrets'] == []
+
+
+def test_merge_k8s_configs_image_pull_secrets_multiple():
+    """More than one secret in the override replaces the base list."""
+    base_config = {'imagePullSecrets': [{'name': 'regcred'}]}
+    override_config = {
+        'imagePullSecrets': [{
+            'name': 'secret1'
+        }, {
+            'name': 'secret2'
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+    assert base_config['imagePullSecrets'] == [{
+        'name': 'secret1'
+    }, {
+        'name': 'secret2'
+    }]
+
+
+def test_merge_k8s_configs_image_pull_secrets_empty_base():
+    """An empty base list must not be indexed into."""
+    base_config = {'imagePullSecrets': []}
+
+    config_utils.merge_k8s_configs(base_config,
+                                   {'imagePullSecrets': [{
+                                       'name': 'regcred'
+                                   }]})
+    assert base_config['imagePullSecrets'] == [{'name': 'regcred'}]
+
+
+@pytest.mark.parametrize(
+    'key,base_value,override_value',
+    [
+        ('containers', {
+            'name': 'ray-node'
+        }, [{
+            'name': 'other'
+        }]),
+        ('tolerations', 'oops', [{
+            'key': 'a'
+        }]),
+        # An atomic field is exempt only for a list override: a dict override
+        # recurses into the base, so it still needs a dict there.
+        ('imagePullSecrets', [{
+            'name': 'regcred'
+        }], {
+            'name': 'other'
+        }),
+        ('imagePullSecrets', [{
+            'name': 'regcred'
+        }], 'oops'),
+    ],
+    ids=[
+        'keyed-list-over-dict-base',
+        'appended-list-over-scalar-base',
+        'dict-over-atomic-list-base',
+        'scalar-over-list-base',
+    ])
+def test_merge_k8s_configs_rejects_shape_mismatch(key, base_value,
+                                                  override_value):
+    """A dict/list/scalar mismatch is user input, not an internal error.
+
+    Nested pod_config content is not type-checked by the schema, so these
+    shapes reach the merge and used to raise a bare AssertionError/TypeError
+    or silently replace the whole field.
+    """
+    base_config = {key: base_value}
+
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError, match=key):
+        config_utils.merge_k8s_configs(base_config, {key: override_value})
+
+
+def test_merge_k8s_configs_atomic_list_ignores_base_shape():
+    """An atomic list replaces the base, so its shape is irrelevant."""
+    base_config = {'imagePullSecrets': {'name': 'regcred'}}
+
+    config_utils.merge_k8s_configs(base_config,
+                                   {'imagePullSecrets': [{
+                                       'name': 'other'
+                                   }]})
+    assert base_config['imagePullSecrets'] == [{'name': 'other'}]
+
+
+@pytest.mark.parametrize('base_value', [{'runAsUser': 0}, [{'key': 'a'}], 'x'])
+def test_merge_k8s_configs_null_override_clears(base_value):
+    """An explicit null replaces the value, whatever shape the base has.
+
+    Kubernetes reads a null field as absent, so this is how a config clears a
+    subtree inherited from a lower-priority source.
+    """
+    base_config = {'securityContext': base_value}
+
+    config_utils.merge_k8s_configs(base_config, {'securityContext': None})
+    assert base_config == {'securityContext': None}
+
+
+@pytest.mark.parametrize('key,override_value', [
+    ('securityContext', {
+        'runAsUser': 0
+    }),
+    ('containers', [{
+        'name': 'x'
+    }]),
+    ('tolerations', [{
+        'key': 'a'
+    }]),
+    ('imagePullSecrets', [{
+        'name': 'regcred'
+    }]),
+    ('runtimeClassName', 'nvidia'),
+    ('securityContext', None),
+])
+def test_merge_k8s_configs_adds_key_missing_from_base(key, override_value):
+    """A key the base does not have is added as-is, whatever its shape.
+
+    The shape check only applies to keys present on both sides, so it must not
+    reject a field that only the higher-priority config sets.
+    """
+    base_config = {'unrelated': 1}
+
+    config_utils.merge_k8s_configs(base_config, {key: override_value})
+    assert base_config == {'unrelated': 1, key: override_value}
+
+
+def test_merge_k8s_configs_allows_scalar_override():
+    """Only container/scalar mismatches are rejected, not scalar retyping."""
+    base_config = {'runtimeClassName': 'nvidia', 'replicas': 1}
+
+    config_utils.merge_k8s_configs(base_config, {
+        'runtimeClassName': 'gvisor',
+        'replicas': '2'
+    })
+    assert base_config == {'runtimeClassName': 'gvisor', 'replicas': '2'}
+
+
+def test_merge_k8s_configs_self_merge_keyed_lists_are_idempotent():
+    """Self-merging must not duplicate items in lists with a patch merge key.
+
+    Lists without a patch merge key are appended by design, so they are
+    excluded here; callers that may self-merge must avoid it themselves.
+    """
+    pod_config = {
+        'metadata': {
+            'annotations': {
+                'existing': 'annotation'
+            }
+        },
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'env': [{
+                    'name': 'FOO',
+                    'value': 'bar'
+                }],
+                'args': ['--flag'],
+            }],
+            'volumes': [{
+                'name': 'vol',
+                'emptyDir': {}
+            }],
+            'imagePullSecrets': [{
+                'name': 'regcred'
+            }],
+        },
+    }
+    expected = copy.deepcopy(pod_config)
+
+    config_utils.merge_k8s_configs(pod_config, copy.deepcopy(pod_config))
+    assert pod_config == expected
+
+
+def test_merge_k8s_configs_self_merge_with_empty_image_pull_secrets():
+    """Self-merge of a config that clears imagePullSecrets must not raise."""
+    pod_config = {
+        'spec': {
+            'containers': [{
+                'imagePullPolicy': 'IfNotPresent'
+            }],
+            'imagePullSecrets': [],
+        }
+    }
+
+    config_utils.merge_k8s_configs(pod_config, copy.deepcopy(pod_config))
+    assert pod_config['spec']['imagePullSecrets'] == []
 
 
 def test_config_override_with_allowed_keys():
@@ -1015,3 +1212,349 @@ def test_merge_k8s_configs_claims_merged_by_name():
     assert len(claims) == 3
     assert names == ['roce-claim', 'cd', 'extra-claim']
     assert len(names) == len(set(names))
+
+
+def test_redact_sensitive_values() -> None:
+    """Secret values are hidden from a config that is about to be logged."""
+    token = 'sky_eyJhbGciOiJIUzI1NiJ9.payload.signature'
+    config = {
+        'api_server': {
+            'endpoint': 'https://api.example.com',
+            'service_account_token': token,
+        },
+        'db': 'postgresql://user:hunter2@host:5432/state',
+        'active_workspace': 'default',
+        'logs': {
+            'aws': {
+                'credentials_file': '~/.aws/credentials'
+            }
+        },
+    }
+    original = copy.deepcopy(config)
+
+    redacted = config_utils.redact_sensitive_values(config)
+
+    assert redacted['api_server'][
+        'service_account_token'] == config_utils.REDACTED_VALUE
+    assert redacted['db'] == config_utils.REDACTED_VALUE
+    # Non-secrets survive, including a field that merely names a credential
+    # file rather than holding one.
+    assert redacted['api_server']['endpoint'] == 'https://api.example.com'
+    assert redacted['active_workspace'] == 'default'
+    assert redacted['logs']['aws']['credentials_file'] == '~/.aws/credentials'
+    # The caller still needs the real values, so the input is untouched.
+    assert config == original
+
+
+def test_redact_sensitive_values_docker_login_lists() -> None:
+    """A docker login password is hidden inside any_of / ordered entries."""
+    config = {
+        'jobs': {
+            'controller': {
+                'resources': {
+                    '_docker_login_config': {
+                        'username': 'u',
+                        'password': 'direct',
+                    },
+                    'any_of': [
+                        {
+                            '_docker_login_config': {
+                                'password': 'in-any-of'
+                            }
+                        },
+                        {
+                            'infra': 'aws'
+                        },
+                    ],
+                    'ordered': [{
+                        '_docker_login_config': {
+                            'password': 'in-ordered'
+                        }
+                    }],
+                }
+            }
+        }
+    }
+
+    redacted = config_utils.redact_sensitive_values(config)
+
+    resources = redacted['jobs']['controller']['resources']
+    assert resources['_docker_login_config'][
+        'password'] == config_utils.REDACTED_VALUE
+    assert resources['any_of'][0]['_docker_login_config'][
+        'password'] == config_utils.REDACTED_VALUE
+    assert resources['ordered'][0]['_docker_login_config'][
+        'password'] == config_utils.REDACTED_VALUE
+    # The username is not a secret and identifies which login was used.
+    assert resources['_docker_login_config']['username'] == 'u'
+    # An entry without a docker login is left alone.
+    assert resources['any_of'][1] == {'infra': 'aws'}
+
+
+def test_redact_sensitive_values_absent_and_empty() -> None:
+    """Redaction neither invents keys nor trips over missing ones."""
+    assert config_utils.redact_sensitive_values(None) == {}
+    assert config_utils.redact_sensitive_values({}) == {}
+
+    # An unset secret stays unset, so a redaction marker never implies that a
+    # value was configured.
+    config = {'api_server': {'service_account_token': None}}
+    assert config_utils.redact_sensitive_values(config) == {
+        'api_server': {
+            'service_account_token': None
+        }
+    }
+
+    # Paths that do not exist are simply skipped.
+    assert config_utils.redact_sensitive_values(
+        {'kubernetes': {
+            'autoscaler': 'karpenter'
+        }}) == {
+            'kubernetes': {
+                'autoscaler': 'karpenter'
+            }
+        }
+
+
+def test_register_sensitive_config_paths() -> None:
+    """A plugin-registered path is redacted like a built-in one."""
+    original = list(config_utils.SENSITIVE_CONFIG_PATHS)
+    try:
+        config_utils.register_sensitive_config_paths([
+            ('my_plugin', 'api_key'),
+            ('my_plugin', 'endpoints', '*', 'token'),
+        ])
+        config = {
+            'my_plugin': {
+                'api_key': 'plugin-secret',
+                'name': 'keep-me',
+                'endpoints': {
+                    'east': {
+                        'token': 'east-secret',
+                        'url': 'https://east.example.com',
+                    },
+                },
+            },
+        }
+
+        redacted = config_utils.redact_sensitive_values(config)
+
+        plugin = redacted['my_plugin']
+        assert plugin['api_key'] == config_utils.REDACTED_VALUE
+        assert plugin['endpoints']['east'][
+            'token'] == config_utils.REDACTED_VALUE
+        assert plugin['name'] == 'keep-me'
+        assert plugin['endpoints']['east']['url'] == 'https://east.example.com'
+    finally:
+        config_utils.SENSITIVE_CONFIG_PATHS[:] = original
+
+
+def test_dump_redacted_yaml() -> None:
+    """The log-facing serializer hides secrets and keeps the rest readable."""
+    dumped = config_utils.dump_redacted_yaml({
+        'api_server': {
+            'endpoint': 'https://api.example.com',
+            'service_account_token': 'sky_eyJhbGciOiJIUzI1NiJ9.canary.sig',
+        },
+    })
+
+    assert 'canary' not in dumped
+    assert 'service_account_token: <redacted>' in dumped
+    assert 'endpoint: https://api.example.com' in dumped
+    assert config_utils.dump_redacted_yaml(None) == '{}\n'
+
+
+_TPU_NAME_FROM_POD = {
+    'name': 'TPU_NAME',
+    'valueFrom': {
+        'fieldRef': {
+            'fieldPath': 'metadata.name'
+        }
+    }
+}
+_FROM_CONFIG_MAP = {'configMapKeyRef': {'name': 'cm', 'key': 'tpu-name'}}
+
+
+def _merged_env(base_item, *override_items):
+    base = {'spec': {'containers': [{'name': 'c', 'env': [base_item]}]}}
+    for item in override_items:
+        config_utils.merge_k8s_configs(
+            base, {'spec': {
+                'containers': [{
+                    'name': 'c',
+                    'env': [item]
+                }]
+            }})
+    return base['spec']['containers'][0]['env']
+
+
+@pytest.mark.parametrize(
+    'override, expected',
+    [
+        # A literal replaces the template's downward-API source.
+        ({
+            'value': 'custom'
+        }, {
+            'value': 'custom'
+        }),
+        # A different source replaces it rather than merging into one
+        # valueFrom with two sources.
+        ({
+            'valueFrom': _FROM_CONFIG_MAP
+        }, {
+            'valueFrom': _FROM_CONFIG_MAP
+        }),
+        # An empty literal is still an override (Kubernetes accepts it).
+        ({
+            'value': ''
+        }, {
+            'value': ''
+        }),
+        # Naming the var without a source keeps the template's.
+        ({}, {
+            'valueFrom': _TPU_NAME_FROM_POD['valueFrom']
+        }),
+    ])
+def test_merge_k8s_configs_env_override_replaces_source(override, expected):
+    env = _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD),
+                      dict(name='TPU_NAME', **override))
+    assert env == [dict(name='TPU_NAME', **expected)]
+
+
+def test_merge_k8s_configs_env_value_from_replaces_literal():
+    env = _merged_env({
+        'name': 'X',
+        'value': '1'
+    }, {
+        'name': 'X',
+        'valueFrom': _FROM_CONFIG_MAP
+    })
+    assert env == [{'name': 'X', 'valueFrom': _FROM_CONFIG_MAP}]
+
+
+def test_merge_k8s_configs_env_layered_overrides_last_source_wins():
+    """Global pod_config then task-level override, as the layers apply."""
+    env = _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+        'name': 'TPU_NAME',
+        'valueFrom': _FROM_CONFIG_MAP
+    }, {
+        'name': 'TPU_NAME',
+        'value': 'task'
+    })
+    assert env == [{'name': 'TPU_NAME', 'value': 'task'}]
+
+
+def test_merge_k8s_configs_env_same_kind_value_from_still_deep_merges():
+    """Adding a field to an existing source keeps the rest of it."""
+    env = _merged_env(
+        {
+            'name': 'S',
+            'valueFrom': {
+                'secretKeyRef': {
+                    'name': 's',
+                    'key': 'k'
+                }
+            }
+        }, {
+            'name': 'S',
+            'valueFrom': {
+                'secretKeyRef': {
+                    'optional': True
+                }
+            }
+        })
+    assert env == [{
+        'name': 'S',
+        'valueFrom': {
+            'secretKeyRef': {
+                'name': 's',
+                'key': 'k',
+                'optional': True
+            }
+        }
+    }]
+
+
+def test_merge_k8s_configs_env_rule_applies_to_init_containers():
+    base = {
+        'spec': {
+            'initContainers': [{
+                'name': 'init',
+                'env': [copy.deepcopy(_TPU_NAME_FROM_POD)]
+            }]
+        }
+    }
+    config_utils.merge_k8s_configs(
+        base, {
+            'spec': {
+                'initContainers': [{
+                    'name': 'init',
+                    'env': [{
+                        'name': 'TPU_NAME',
+                        'value': 'custom'
+                    }]
+                }]
+            }
+        })
+    assert base['spec']['initContainers'][0]['env'] == [{
+        'name': 'TPU_NAME',
+        'value': 'custom'
+    }]
+
+
+def test_merge_k8s_configs_env_malformed_value_from_still_rejected():
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError):
+        _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+            'name': 'TPU_NAME',
+            'valueFrom': 'oops'
+        })
+
+
+def test_merge_k8s_configs_env_empty_value_from_is_a_no_op():
+    env = _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+        'name': 'TPU_NAME',
+        'valueFrom': {}
+    })
+    assert env == [_TPU_NAME_FROM_POD]
+
+
+@pytest.mark.parametrize('base_container', [{
+    'name': 'c',
+    'env': []
+}, {
+    'name': 'c'
+}],
+                         ids=['base-has-env', 'base-lacks-env'])
+def test_merge_k8s_configs_does_not_mutate_override_layers(base_container):
+    """An item appended from one layer must not be changed by a later one."""
+    first = {
+        'spec': {
+            'containers': [{
+                'name': 'c',
+                'env': [{
+                    'name': 'NEW',
+                    'valueFrom': _FROM_CONFIG_MAP
+                }]
+            }]
+        }
+    }
+    first_before = copy.deepcopy(first)
+    base = {'spec': {'containers': [copy.deepcopy(base_container)]}}
+    config_utils.merge_k8s_configs(base, first)
+    config_utils.merge_k8s_configs(
+        base, {
+            'spec': {
+                'containers': [{
+                    'name': 'c',
+                    'env': [{
+                        'name': 'NEW',
+                        'value': 'x'
+                    }]
+                }]
+            }
+        })
+    assert first == first_before
+    assert base['spec']['containers'][0]['env'] == [{
+        'name': 'NEW',
+        'value': 'x'
+    }]

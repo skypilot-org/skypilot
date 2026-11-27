@@ -74,28 +74,17 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    # 2.0.16 introduced create_async_engine(async_creator=...), which we
-    # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
-    'sqlalchemy>=2.0.16',
-    'psycopg2-binary',
-    'aiosqlite',
-    'asyncpg',
-    # Required by sqlalchemy.ext.asyncio which is used in
-    # sky/utils/db/db_utils.py
-    'greenlet',
-    # TODO(hailong): These three dependencies should be removed after we make
-    # the client-side actually not importing them.
-    'casbin',
-    'sqlalchemy_adapter',
-    # Required for API server metrics
+    # Required for API server metrics (client dashboards also scrape locally).
     'prometheus_client>=0.8.0',
+    # bcrypt/passlib/pyjwt stay in install_requires: client login and token
+    # helpers import them. The DB/ORM stack is server-only (see
+    # server_dependencies).
     'passlib',
     'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
     'paramiko',
     'types-paramiko',
-    'alembic>=1.8.0',
     # aiohttp 3.13.3+ required for CVE-2025-69223
     'aiohttp>=3.13.3',
     'anyio',
@@ -116,19 +105,30 @@ GRPC = 'grpcio>=1.63.0'
 PROTOBUF = 'protobuf>=5.29.6, < 7.0.0'
 
 server_dependencies = [
-    # TODO: Some of these dependencies are also specified in install_requires,
-    # so they are redundant here. We should figure out if they are only needed
-    # on the server (should remove from install_requires), or if they are needed
-    # on the client (should remove from here).
+    # SQLAlchemy / DB stack: API server and controllers only. Client / CLI /
+    # programmatic SDK installs must not require SQLAlchemy 2 (blocks users
+    # pinned to SQLAlchemy 1.4). Install via `pip install 'skypilot[server]'`
+    # or any cloud extra (cloud extras already append this list).
+    # 2.0.16 introduced create_async_engine(async_creator=...), which we
+    # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
+    'sqlalchemy>=2.0.16',
+    'psycopg2-binary',
+    'aiosqlite',
+    'asyncpg',
+    # Required by sqlalchemy.ext.asyncio which is used in
+    # sky/utils/db/db_utils.py
+    'greenlet',
+    'alembic>=1.8.0',
     'casbin',
     'sqlalchemy_adapter',
+    # Also listed in install_requires where the client needs them; kept here
+    # so `skypilot[server]` alone is a complete server install.
     'passlib',
     'pyjwt',
     'aiohttp',
     'anyio',
     GRPC,
     PROTOBUF,
-    'aiosqlite',
 ]
 
 local_ray = [
@@ -211,7 +211,15 @@ cloud_dependencies: Dict[str, List[str]] = {
     ],
     'ibm': [
         'ibm-cloud-sdk-core',
-        'ibm-vpc',
+        # ibm-vpc<=0.25.0 ship only an sdist whose setup.py imports
+        # pkg_resources, which no longer exists in the setuptools that build
+        # isolation installs. Every ibm-vpc release needs python-dateutil<3,
+        # while ibm-cloud-sdk-core>=3.28.1 (required by
+        # ibm-platform-services>=0.77.2) needs python-dateutil>=3. While
+        # resolving that conflict, uv can step back through ibm-vpc down to
+        # 0.25.0 and fail to build it. 0.26.3 is the first release with a
+        # wheel.
+        'ibm-vpc>=0.26.3',
         'ibm-platform-services>=0.48.0',
         'ibm-cos-sdk',
     ] + local_ray,
@@ -232,11 +240,10 @@ cloud_dependencies: Dict[str, List[str]] = {
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,
     'ssh': kubernetes_dependencies,
-    # For the container registry auth api. Reference:
-    # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     'runpod': [
-        # For the container registry auth api. Reference:
-        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+        # Pods, templates and registry credentials go through the REST API v2
+        # in sky/adaptors/runpod.py. The SDK reads the API key from
+        # ~/.runpod/config.toml and serves the spot pod GraphQL mutation.
         'runpod>=1.6.1',
         # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
         # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli
@@ -269,27 +276,34 @@ cloud_dependencies: Dict[str, List[str]] = {
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        # 0.4.1 fails with "attached to a different loop".
-        'nebius>=0.3.59,<0.4',
+        # 0.6.12 adds explicit spot price-taking in Compute instance specs.
+        'nebius>=0.6.12',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
     'mithril': [],  # No dependencies needed for mithril
+    # modal.clustered (multi-node) is exported since 1.6.0.
+    'modal': ['modal>=1.6.0; python_version>="3.10"'],
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': ['python-hostlist'],
+    # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
+    'slurm': [],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(cloud_dependencies)
+# Vast is opt-in (`pip install "skypilot[vast]"`): its SDK brings a large
+# dependency tree that most installations never use.
+clouds_for_all.remove('vast')
 
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
     clouds_for_all.remove('seeweb')
+    clouds_for_all.remove('modal')
     # latest ibm-cloud-sdk-core installation fails on Python 3.9,
     # so we remove it from the [all] installation.
     clouds_for_all.remove('ibm')
@@ -298,9 +312,6 @@ if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
     # that require ray.
     clouds_for_all -= set(clouds_with_ray)
-    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
-    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
-    clouds_for_all.remove('vast')
 
 cloud_extras = {
     cloud: dependencies + server_dependencies
@@ -310,8 +321,11 @@ cloud_extras = {
 extras_require: Dict[str, List[str]] = {
     # Include server_dependencies with each cloud.
     **cloud_extras,
-    'all': list(set().union(*[cloud_extras[cloud] for cloud in clouds_for_all])
-               ),
+    # Sorted so every build lists [all] in the same order. Set order changes
+    # with each build's string-hash seed, and the resolver's outcome can
+    # depend on requirement order.
+    'all': sorted(
+        set().union(*[cloud_extras[cloud] for cloud in clouds_for_all])),
     'remote': remote,
     'server': server_dependencies,
 }

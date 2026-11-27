@@ -303,11 +303,11 @@ class TestSkyWorkspaceInfoCommand(unittest.TestCase):
         self.assertIn(exceptions.WorkspaceAmbiguousError.recovery_hint(),
                       result.output)
         # The hint must follow the tree, not be embedded in it.
-        accessible_idx = result.output.index('Accessible:')
+        writable_idx = result.output.index('Writable:')
         hint_idx = result.output.index('sky workspace use')
         self.assertLess(
-            accessible_idx, hint_idx,
-            'Recovery hint must come AFTER the tree (`Accessible:` row),'
+            writable_idx, hint_idx,
+            'Recovery hint must come AFTER the tree (`Writable:` row),'
             ' otherwise the tree alignment breaks visually.')
 
     def test_no_access_source_renders_note_without_extra_hint(self):
@@ -327,11 +327,41 @@ class TestSkyWorkspaceInfoCommand(unittest.TestCase):
             result = self.runner.invoke(command.cli, ['workspace', 'info'])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn('Source: no-access', result.output)
-        self.assertIn('Accessible: (none)', result.output)
+        self.assertIn('Writable: (none)', result.output)
         self.assertIn('User alice (alice) has no accessible workspaces.',
                       result.output)
         # No appended recovery paragraph — the note already says it all.
         self.assertNotIn('sky workspace use', result.output)
+
+    def test_read_only_workspaces_are_listed_apart_from_writable(self):
+        """`accessible` means writable; read-only-visible workspaces get their
+        own row.
+
+        Conflating the two is what the separate row exists to prevent: a user
+        who can only *see* a workspace would otherwise read `accessible` as
+        "somewhere I can launch", which is exactly the state that fails at
+        launch time.
+        """
+        payload = {
+            'workspace': 'team-a',
+            'source': 'read-only',
+            'note': 'read-only access only: reads land here, but launching '
+                    'requires membership of a writable workspace',
+            'preferred': None,
+            'accessible': [],
+            'read_only': ['team-a', 'team-b'],
+        }
+        with mock.patch.object(sdk, 'get_user_workspace', return_value=payload):
+            result = self.runner.invoke(command.cli, ['workspace', 'info'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('Writable: (none)', result.output)
+        self.assertIn("Read-only: 'team-a', 'team-b'", result.output)
+        # Writable stays above read-only, and read-only closes the tree.
+        self.assertLess(result.output.index('Writable:'),
+                        result.output.index('Read-only:'))
+        # Asserted as the literal the user sees: INDENT_LAST_SYMBOL carries ANSI
+        # dim codes that click strips when the output is not a tty.
+        self.assertIn('└── Read-only:', result.output)
 
     def test_permission_denied_source_does_not_append_generic_hint(self):
         """For permission-denied the `note` already names the specific

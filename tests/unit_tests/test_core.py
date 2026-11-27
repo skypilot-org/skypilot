@@ -6,6 +6,7 @@ from sky import admin_policy as sky_admin_policy
 from sky import clouds
 from sky import core
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
@@ -13,6 +14,7 @@ from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
+from sky.workspaces import constants as workspace_constants
 
 
 @mock.patch('sky.backends.backend_utils.check_cluster_available')
@@ -81,6 +83,8 @@ def test_status_best_effort(mock_get_clusters) -> None:
         include_credentials=False,
         summary_response=False,
         include_handle=True,
+        limit=None,
+        after=None,
     )
     assert len(core.status()) == 1
     # Verify logging shows 0 cleaned requests
@@ -104,7 +108,29 @@ class TestEnabledCloudsWorkspacePermission:
             with pytest.raises(exceptions.PermissionDeniedError,
                                match='no access'):
                 core.enabled_clouds(workspace='restricted')
-        mock_check.assert_called_once_with(mock_user, 'restricted')
+        mock_check.assert_called_once_with(
+            mock_user,
+            'restricted',
+            action=workspace_constants.WORKSPACE_ACTION_READ,
+            workspace_ref=None)
+
+    @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
+                return_value=[])
+    @mock.patch('sky.core.workspaces_core.check_workspace_permission')
+    def test_checks_at_read_level(self, mock_check, _):
+        """Reporting a workspace's enabled clouds is a read.
+
+        Checking at write level would deny a workspace the caller can
+        legitimately see (read-only visibility for non-members) and, via
+        `enabled_clouds_batch`, fail the whole fan-out.
+        """
+        mock_user = models.User(id='user-1', name='User1')
+        with mock.patch('sky.core.common_utils.get_current_user',
+                        return_value=mock_user), \
+             mock.patch('sky.core.skypilot_config.local_active_workspace_ctx'):
+            core.enabled_clouds(workspace='read-only-ws')
+        assert mock_check.call_args.kwargs['action'] == (
+            workspace_constants.WORKSPACE_ACTION_READ)
 
     @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
                 return_value=[])
@@ -677,6 +703,99 @@ def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
         sdk.launch(task, cluster_name='my-cluster', resize=False)
 
 
+@pytest.mark.parametrize('api_version', [None, 24, 56])
+def test_sdk_validate_slurm_host_path_errors_on_old_server(
+        api_version, monkeypatch):
+    """sdk.validate should error for host_path volumes if remote API
+    version < 57."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+    with sky.Dag() as dag:
+        dag.add(task)
+
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='Slurm host_path volumes'):
+        sdk.validate(dag)
+
+
+def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
+    """sdk.validate should pass the guard for host_path volumes when remote
+    API version >= 57. We short-circuit the server request with a sentinel
+    so reaching it proves the guard didn't raise."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 57)
+    sentinel = RuntimeError('reached server request')
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=sentinel))
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+
+    with sky.Dag() as dag:
+        dag.add(task)
+    with pytest.raises(RuntimeError, match='reached server request'):
+        sdk.validate(dag)
+
+
+def _tpu_multi_host_dag():
+    import sky
+    task = sky.Task(resources=sky.Resources(
+        accelerators='tpu-v6e-8', accelerator_args={'multi_host': True}))
+    with sky.Dag() as dag:
+        dag.add(task)
+    return dag
+
+
+@pytest.mark.parametrize('api_version', [None, 24, 68])
+def test_sdk_validate_tpu_multi_host_errors_on_old_server(
+        api_version, monkeypatch):
+    """sdk.validate and sdk.optimize should error for
+    accelerator_args.multi_host if the remote API version < 69."""
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=RuntimeError('reached server request')))
+    dag = _tpu_multi_host_dag()
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='accelerator_args.multi_host'):
+        sdk.validate(dag)
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='accelerator_args.multi_host'):
+        sdk.optimize(dag)
+
+
+def test_sdk_validate_tpu_multi_host_allowed_on_new_server(monkeypatch):
+    """With API version >= 69 the guard passes and the request is sent."""
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 69)
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=RuntimeError('reached server request')))
+    with pytest.raises(RuntimeError, match='reached server request'):
+        sdk.validate(_tpu_multi_host_dag())
+
+
 def test_launch_body_accepts_resize_field():
     """New server should accept resize=True in the request body."""
     from sky.server.requests import payloads
@@ -767,11 +886,14 @@ def _run_launch_confirm(sdk_mod,
                         sky_mod,
                         cluster_name='my-cluster',
                         num_nodes=3,
-                        resize=True):
+                        resize=True,
+                        resources=None):
     dag = sky_mod.Dag()
     with dag:
         task = sky_mod.Task(run='echo hi')
         task.num_nodes = num_nodes
+        if resources is not None:
+            task.set_resources(resources)
     request_options = sky_admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=None,
@@ -832,6 +954,51 @@ def test_launch_confirm_resize_noop(monkeypatch):
     assert len(calls) == 1
     msg = calls[0]
     assert 'already has 3 node' in msg
+    assert 'no-op' in msg
+
+
+def _multi_host_slice(sky_mod):
+    # tpu-v6e-8 as a 2x4 slice: two cluster nodes (pods) per task node.
+    return sky_mod.Resources(infra='k8s/ctx',
+                             accelerators='tpu-v6e-8',
+                             accelerator_args={'multi_host': True})
+
+
+def test_launch_confirm_resize_multi_host_counts_slices(monkeypatch):
+    """The record counts pods; the prompt shows task nodes (slices), the unit
+    of num_nodes."""
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 2,  # One 2x4 slice.
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod,
+                        sky_mod,
+                        num_nodes=2,
+                        resources=_multi_host_slice(sky_mod))
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'from 1 to 2 node' in msg
+    assert 'scale up' in msg
+
+
+def test_launch_confirm_resize_multi_host_same_size_is_noop(monkeypatch):
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 2,  # One 2x4 slice.
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod,
+                        sky_mod,
+                        num_nodes=1,
+                        resources=_multi_host_slice(sky_mod))
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'already has 1 node' in msg
     assert 'no-op' in msg
 
 
@@ -927,3 +1094,34 @@ def test_tail_logs_reraises_when_reader_finds_nothing(
     with mock.patch('sky.logs.get_log_reader', return_value=reader):
         with pytest.raises(exceptions.ClusterDoesNotExist):
             core.tail_logs('test-cluster', job_id=7)
+
+
+def test_down_graceful_tolerates_missing_command_runners(monkeypatch) -> None:
+    """A graceful ``down`` must still tear the cluster down when the
+    provisioner cannot produce command runners.
+
+    Some provisioners have no exec access into the instances, so
+    ``get_command_runners()`` raises. If that propagates, ``down()`` aborts
+    before ``teardown()`` and the cluster's resources are leaked.
+    """
+    handle = mock.MagicMock(spec=CloudVmRayResourceHandle)
+    handle.get_command_runners.side_effect = RuntimeError(
+        'provisioner does not support command runners')
+    backend = mock.MagicMock(spec=CloudVmRayBackend)
+
+    monkeypatch.setattr(global_user_state, 'get_handle_from_cluster_name',
+                        lambda name: handle)
+    monkeypatch.setattr(core.backend_utils, 'get_backend_from_handle',
+                        lambda h: backend)
+    monkeypatch.setattr(core.usage_lib,
+                        'record_cluster_name_for_current_operation',
+                        lambda name: None)
+    monkeypatch.setattr(core, '_maybe_run_down_hooks',
+                        lambda *args, **kwargs: None)
+
+    core.down('test-cluster', graceful=True)
+
+    handle.get_command_runners.assert_called_once()
+    backend.teardown.assert_called_once_with(handle,
+                                             terminate=True,
+                                             purge=False)
