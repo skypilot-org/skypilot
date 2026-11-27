@@ -1,5 +1,6 @@
 """Unit tests for the SDK fetching the cluster, storage and volume lists in
 pages."""
+import fnmatch
 import json
 from typing import Any, Callable, Dict, List, Optional
 from unittest import mock
@@ -67,9 +68,12 @@ class _Server:
         limit = args.get('limit')
         if limit is None or int(limit) > 2:
             return _response({'X-Skypilot-Request-ID': request_id})
+        names = args.get('cluster_names')
         rows = [
             row for row in self.rows
-            if self.ignores_cursor or self.after(row, args)
+            if (self.ignores_cursor or self.after(row, args)) and
+            (names is None or any(
+                fnmatch.fnmatchcase(row['name'], name) for name in names))
         ]
         page = [
             row for row in rows[:int(limit)] if row['name'] not in self.dropped
@@ -172,6 +176,20 @@ class TestStatus:
         request_id = _call(sdk.status, server)
         assert _rows(request_id) == ['a-new', 'd-mid', 'b-old', 'e-unknown']
 
+    def test_named_clusters_are_one_sync_call(self):
+        server = _cluster_server()
+        request_id = _call(sdk.status, server, cluster_names=['a-new', 'b-old'])
+        assert [
+            (c['json']['limit'], c['json']['after_name']) for c in server.calls
+        ] == [(2, None)]
+        assert server.calls[0]['json']['cluster_names'] == ['a-new', 'b-old']
+        assert _rows(request_id) == ['a-new', 'b-old']
+
+    def test_a_name_pattern_is_paged(self):
+        server = _cluster_server()
+        _call(sdk.status, server, cluster_names=['*'])
+        assert len(server.calls) == 4
+
     @pytest.mark.parametrize('refresh', [
         common.StatusRefreshMode.AUTO,
         common.StatusRefreshMode.FORCE,
@@ -217,6 +235,28 @@ class TestStorageLs:
             'after_name': 'n-b'
         }, None]
         assert request_id == 'req-3'
+
+    def test_pages_in_the_server_collation(self):
+        # A database collation that ignores case orders n-C after n-b, while
+        # byte order puts it before.
+        rows = [{'name': name} for name in ('n-C', 'n-a', 'n-b')]
+
+        def after(row, params):
+            return params.get('after_name') is None or (
+                row['name'].lower() > params['after_name'].lower())
+
+        server = _Server(rows, lambda row: row['name'].lower(), after)
+        request_id = _call(sdk.storage_ls, server)
+        assert [c['params'] for c in server.calls] == [{
+            'limit': 2
+        }, {
+            'limit': 2,
+            'after_name': 'n-b'
+        }, {
+            'limit': 2,
+            'after_name': 'n-C'
+        }]
+        assert _rows(request_id) == ['n-a', 'n-b', 'n-C']
 
     def test_queued_page_falls_back_to_one_call(self, monkeypatch):
         monkeypatch.setattr(rest, '_sync_call_max_limit', 3)

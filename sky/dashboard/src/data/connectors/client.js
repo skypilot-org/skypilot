@@ -8,6 +8,8 @@ import {
   ENDPOINT,
   VERSION_HEADER,
 } from './constants';
+import { waitForPlugins } from './pluginsReady';
+import { isSyncAnswer, sendRequest } from './syncCalls';
 
 // The server's APIVersionMiddleware uses these headers to (a) negotiate
 // protocol compatibility and (b) populate the `_remote_api_version`
@@ -66,36 +68,8 @@ export async function getCurrentUserInfo() {
   return userInfoPromise;
 }
 
-// Wait for plugins that need early initialization (e.g., fetch interceptors)
-// Such plugins are marked with data-requires-early-init="true" and set
-// window.__skyPluginsReady = true when ready
-let pluginsReadyPromise = null;
-
-async function waitForPlugins() {
-  if (window.__skyPluginsReady) return;
-  if (pluginsReadyPromise) return pluginsReadyPromise;
-
-  // Check if any plugin needs early init
-  const needsWait = document.querySelector(
-    'script[src*="/plugins/"][data-requires-early-init="true"]'
-  );
-  if (!needsWait) return;
-
-  // Wait for plugin to signal ready (max 1s)
-  pluginsReadyPromise = new Promise((resolve) => {
-    const start = Date.now();
-    const check = setInterval(() => {
-      if (window.__skyPluginsReady || Date.now() - start >= 1000) {
-        clearInterval(check);
-        resolve();
-      }
-    }, 50);
-  });
-  return pluginsReadyPromise;
-}
-
 // Returns the result carried by an /api/get response.
-export async function readRequestResult(path, fetchedData) {
+async function readRequestResult(path, fetchedData) {
   if (!fetchedData.ok) {
     const errorMessage = await getErrorMessageFromResponse(fetchedData);
     const msg = `API request to get ${path} result failed with status ${fetchedData.status}, error: ${errorMessage}`;
@@ -107,7 +81,7 @@ export async function readRequestResult(path, fetchedData) {
 
 // Returns the result of the request that `response` scheduled, read from
 // /api/get by the request ID in the response headers.
-export async function getRequestResult(path, response) {
+async function getRequestResult(path, response) {
   if (!response.ok) {
     const msg = `Initial API request ${path} failed with status ${response.status}`;
     throw new Error(msg);
@@ -160,21 +134,23 @@ export const apiClient = {
       signal: options.signal,
     });
   },
-  fetch: async (path, body, method = 'POST') => {
-    // Call the server API and get the result of the request it schedules
+  // Calls the server API and returns the result of the request. The request
+  // is sent as a sync call (see syncCalls.js) unless options.sync is false; a
+  // body with a `limit` is answered as one only within the server's maximum.
+  fetch: async (path, body, method = 'POST', options = {}) => {
     try {
       await waitForPlugins();
-      // A plugin may take over how the result is obtained; it gets the same
-      // building blocks this function uses.
-      if (typeof window.__skyApiFetch === 'function') {
-        return await window.__skyApiFetch(path, body, method, {
-          fetchImmediate: apiClient.fetchImmediate,
-          getRequestResult,
-          readRequestResult,
-        });
-      }
-      const response = await apiClient.fetchImmediate(path, body, method);
-      return await getRequestResult(path, response);
+      const limit =
+        body && typeof body === 'object' && 'limit' in body
+          ? body.limit
+          : undefined;
+      const response = await sendRequest(
+        (headers) => apiClient.fetchImmediate(path, body, method, { headers }),
+        { sync: options.sync ?? true, limit }
+      );
+      return isSyncAnswer(response)
+        ? await readRequestResult(path, response)
+        : await getRequestResult(path, response);
     } catch (error) {
       const msg = `Error in apiClient.fetch for ${path}: ${error}`;
       console.error(msg);
@@ -227,7 +203,7 @@ export const apiClient = {
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
     return await fetch(fullUrl, {
-      headers: withVersionHeader({}),
+      headers: withVersionHeader(options.headers || {}),
       signal: options.signal,
     });
   },

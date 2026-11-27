@@ -62,7 +62,8 @@ describe('getManagedJobs and include_tree', () => {
     await getManagedJobs({ jobIDs: ['122'], includeTree: true });
     expect(apiClient.post).toHaveBeenCalledWith(
       '/jobs/queue/v2',
-      expect.objectContaining({ job_ids: ['122'], include_tree: true })
+      expect.objectContaining({ job_ids: ['122'], include_tree: true }),
+      expect.anything()
     );
   });
 

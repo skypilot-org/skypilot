@@ -3,6 +3,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import { apiClient } from '@/data/connectors/client';
+import {
+  fetchListInPages,
+  MIN_LIST_CURSOR_API_VERSION,
+  sendRequest,
+  syncPageSize,
+} from '@/data/connectors/syncCalls';
 import { ENDPOINT } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
@@ -101,12 +107,57 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
+// The clusters /status returns for `body`. When the server answers sync calls
+// and takes the cluster cursor, they are fetched as sync calls of its maximum
+// size, newest launch first, then by name.
+async function fetchClusterStatus(body) {
+  const pageSize = await syncPageSize(MIN_LIST_CURSOR_API_VERSION);
+  const names = body.cluster_names;
+  if (
+    pageSize !== null &&
+    names?.length > 0 &&
+    names.length <= pageSize &&
+    // The server expands a glob pattern to every cluster it matches.
+    !names.some((name) => /[*?[\]]/.test(name))
+  ) {
+    // One page holds every named cluster.
+    return apiClient.fetch('/status', { ...body, limit: pageSize });
+  }
+  if (pageSize !== null) {
+    const launchedAt = (row) => row.launched_at || 0;
+    const clusters = await fetchListInPages({
+      path: '/status',
+      pageSize,
+      sendPage: (cursor, size) =>
+        sendRequest(
+          (headers) =>
+            apiClient.fetchImmediate(
+              '/status',
+              {
+                ...body,
+                limit: size,
+                after_launched_at: cursor?.launchedAt ?? null,
+                after_name: cursor?.name ?? null,
+              },
+              'POST',
+              { headers }
+            ),
+          { limit: size, fallback: false }
+        ),
+      cursorOf: (row) => ({ launchedAt: launchedAt(row), name: row.name }),
+    });
+    if (clusters !== null) return clusters;
+  }
+  // A list call without `limit` is not answered as a sync call.
+  return apiClient.fetch('/status', body, 'POST', { sync: false });
+}
+
 export async function getClusters({
   clusterNames = null,
   allUsers = true,
 } = {}) {
   try {
-    const clusters = await apiClient.fetch('/status', {
+    const clusters = await fetchClusterStatus({
       cluster_names: clusterNames,
       all_users: allUsers,
       include_credentials: false,

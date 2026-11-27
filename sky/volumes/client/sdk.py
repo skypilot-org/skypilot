@@ -176,8 +176,7 @@ def ls(
             return server_common.get_request_id(response)
 
         paged_request_id = client_common.fetch_list_in_pages(
-            send, page_size, lambda row: row['name'],
-            lambda row, after_name: row['name'] > after_name)
+            send, page_size, lambda row: row['name'], lambda row: row['name'])
         if paged_request_id is not None:
             return paged_request_id
     response = server_common.make_authenticated_request(
