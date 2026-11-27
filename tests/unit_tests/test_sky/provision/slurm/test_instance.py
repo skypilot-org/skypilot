@@ -2026,3 +2026,8 @@ def test_allocation_exit_code_without_system_python(tmp_path, has_database):
                             check=True)
     assert result.stdout.strip() == '0'
     assert result.stderr == ''
+
+
+def test_srun_on_node_does_not_propagate_login_limits():
+    argv = shlex.split(instance._srun_on_node('123', 'node1', 'true'))
+    assert argv[:2] == ['srun', '--propagate=NONE']

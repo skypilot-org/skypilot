@@ -913,7 +913,7 @@ def _stop_skylet_script(skypilot_runtime_dir: str) -> str:
 
 def _srun_on_node(job_id: str, node: str, script: str) -> str:
     """Build an srun command that runs a script on one allocated node."""
-    return ('srun --unbuffered --overlap --chdir=/tmp '
+    return ('srun --propagate=NONE --unbuffered --overlap --chdir=/tmp '
             f'--jobid={shlex.quote(job_id)} '
             f'--nodelist={shlex.quote(node)} --nodes=1 --ntasks=1 '
             f'bash -c {shlex.quote(script)}')
@@ -2162,7 +2162,7 @@ def _cache_slurm_allocation_exit_code(
     script = ('set -e\n'
               f'({_allocation_exit_code_script(runtime_dir)}\n'
               f') > {shlex.quote(runtime_dir + ".exitcode." + job_id)}')
-    command = ('srun --unbuffered --overlap --chdir=/tmp '
+    command = ('srun --propagate=NONE --unbuffered --overlap --chdir=/tmp '
                f'--jobid={shlex.quote(job_id)} '
                f'--nodes={len(nodes)} --ntasks-per-node=1 '
                f'bash -c {shlex.quote(script)}')
@@ -2223,10 +2223,11 @@ if [ ! -f {shlex.quote(skypilot_runtime_dir + ".exitcode." + job_id)} ]; then
 fi
 rm -rf -- {shlex.quote(skypilot_runtime_dir)}
 """
-    cleanup_node_cmd = ('srun --unbuffered --overlap --chdir=/tmp '
-                        f'--jobid={shlex.quote(job_id)} '
-                        f'--nodes={len(nodes)} --ntasks-per-node=1 '
-                        f'bash -c {shlex.quote(cleanup_node_script)}')
+    cleanup_node_cmd = (
+        'srun --propagate=NONE --unbuffered --overlap --chdir=/tmp '
+        f'--jobid={shlex.quote(job_id)} '
+        f'--nodes={len(nodes)} --ntasks-per-node=1 '
+        f'bash -c {shlex.quote(cleanup_node_script)}')
     _run_on_login_node(
         login_node_runner, shlex.split(cleanup_node_cmd),
         'Failed to clean up the Slurm allocation before cancellation.')

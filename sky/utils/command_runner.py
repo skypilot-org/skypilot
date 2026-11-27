@@ -2396,8 +2396,9 @@ class SlurmCommandRunner(SlurmLoginNodeCommandRunner):
 job_id=$(echo "$1" | cut -d+ -f1)
 node_list=$(echo "$1" | cut -d+ -f2)
 shift
-exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
-    --jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 "$@"
+exec {ssh_command} srun --propagate=NONE --unbuffered --quiet --overlap \\
+    {extra_srun_args} --jobid="$job_id" --nodelist="$node_list" \\
+    --nodes=1 --ntasks=1 "$@"
 """
             encoded_info = f'{self.job_id}+{self.slurm_node}'
             with tempfile.NamedTemporaryFile(mode='w',
@@ -2426,7 +2427,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                    f'{common_utils.exception_to_string(e)}')
             return
 
-        rsync_command = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+        rsync_command = ('srun --propagate=NONE --unbuffered --quiet --overlap '
+                         '--chdir=/tmp '
                          f'{extra_srun_args}'
                          f'--jobid={shlex.quote(self.job_id)} '
                          f'--nodelist={shlex.quote(self.slurm_node)} '
@@ -2484,7 +2486,10 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                          f'{cmd}')
             extra_srun_args = ''
 
-        srun_cmd = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+        # --propagate=NONE: srun runs on the login node, whose resource
+        # limits (e.g. a low `ulimit -u`) must not be copied into the step.
+        srun_cmd = ('srun --propagate=NONE --unbuffered --quiet --overlap '
+                    '--chdir=/tmp '
                     f'--jobid={self.job_id} '
                     f'--nodelist={self.slurm_node} '
                     f'--nodes=1 --ntasks=1 {extra_srun_args}'

@@ -482,6 +482,8 @@ class TestSlurmCommandRunnerUserImpersonation:
         assert argv[:7] == [
             'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
         ]
+        # Login-node resource limits must not be copied into the step.
+        assert '--propagate=NONE' in argv
         assert argv[-3:-1] == ['bash', '-c']
         assert argv[-1].endswith('printf "%s" "a b; $(id)"')
 
@@ -495,6 +497,7 @@ class TestSlurmCommandRunnerUserImpersonation:
         assert argv[:7] == [
             'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
         ]
+        assert '--propagate=NONE' in argv
         assert argv[-1] == 'rsync'
         assert 'bash' not in argv
 

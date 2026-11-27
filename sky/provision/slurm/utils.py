@@ -1587,6 +1587,7 @@ def srun_sshd_command(
             'socat STDIO TCP:127.0.0.1:$PORT')
         return shlex.join([
             'srun',
+            '--propagate=NONE',
             '--chdir=/tmp',
             '--overlap',
             '--quiet',
@@ -1609,6 +1610,7 @@ def srun_sshd_command(
     # Non-container: OpenSSH sshd
     return shlex.join([
         'srun',
+        '--propagate=NONE',
         '--chdir=/tmp',
         '--quiet',
         '--unbuffered',
