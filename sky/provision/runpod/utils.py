@@ -92,7 +92,21 @@ def _construct_registry_auth_name(cluster_name: str) -> str:
 
 
 def _list_pods() -> List[Dict[str, Any]]:
-    return runpod.rest_list('/pods', 'pods')
+    # The GET /pods list endpoint omits ssh.direct and runtime.ports for
+    # performance; only GET /pods/{id} returns the full detail needed for
+    # SSH readiness detection. Fetch individual details for RUNNING pods so
+    # that _parse_pod can populate ssh_port.
+    pods = runpod.rest_list('/pods', 'pods')
+    result = []
+    for pod in pods:
+        if pod.get('status') == 'RUNNING':
+            try:
+                pod = runpod.rest_request(
+                    'GET', f"/pods/{runpod.path_segment(pod['id'])}")
+            except Exception:  # pylint: disable=broad-except
+                pass
+        result.append(pod)
+    return result
 
 
 def _list_templates() -> List[Dict[str, Any]]:
