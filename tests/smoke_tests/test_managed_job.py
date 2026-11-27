@@ -393,8 +393,8 @@ def test_managed_jobs_restart(generic_cloud: str):
     The first restart happens after the jobs controller has stopped (it is
     given a one-minute autostop), as when restarting a job from yesterday:
     like `sky jobs launch`, the restart must start the controller again.
-    Without a separate controller (consolidation mode) there is nothing to
-    stop, and that step is a no-op.
+    Without a separate controller (consolidation mode), or on Kubernetes and
+    RunPod, where the controller does not autostop, that step is a no-op.
     """
     name = smoke_tests_utils.get_cluster_name()
     orig = f'{name}-orig'
@@ -429,7 +429,10 @@ def test_managed_jobs_restart(generic_cloud: str):
 
     # A shared remote API server's controller serves other tests too.
     wait_controller_stopped = 'echo "Shared API server: controller left up"'
-    if not smoke_tests_utils.is_non_docker_remote_api_server():
+    if generic_cloud in ('kubernetes', 'runpod'):
+        wait_controller_stopped = (
+            f'echo "Controller on {generic_cloud} does not autostop"')
+    elif not smoke_tests_utils.is_non_docker_remote_api_server():
         wait_controller_stopped = (
             'c=$(sky status -u | awk \'/^sky-jobs-controller-/ '
             '{print $1; exit}\'); '
@@ -480,6 +483,7 @@ def test_managed_jobs_restart(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # Restarts the API server.
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_restart_needs_write_access_like_cancel(
