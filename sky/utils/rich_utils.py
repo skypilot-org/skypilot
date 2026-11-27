@@ -1,4 +1,5 @@
 """Rich status spinner utils."""
+import codecs
 import contextlib
 import contextvars
 import enum
@@ -304,6 +305,58 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     return _NoOpConsoleStatus()
 
 
+# ------------------------- Stream framing helpers ------------------------- #
+class _RichStatusLineDecoder:
+    """Keep transport chunk boundaries from losing UTF-8 text or final logs."""
+
+    def __init__(self) -> None:
+        self._decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+        self._last_line = ''
+
+    def decode(self, chunk: bytes, final: bool = False) -> Iterator[str]:
+        text = self._decoder.decode(chunk, final=final)
+        lines = text.splitlines(keepends=True)
+        if lines:
+            lines[0] = self._last_line + lines[0]
+            self._last_line = lines[-1]
+            # Keep CR progress updates immediate, as in the existing readers.
+            if not self._last_line.strip(' ').endswith(('\r', '\n')):
+                lines = lines[:-1]
+            else:
+                self._last_line = ''
+            yield from lines
+        if final and self._last_line:
+            yield self._last_line
+            self._last_line = ''
+
+
+def _iter_rich_status_lines(response: 'requests.Response') -> Iterator[str]:
+    """Flush buffered diagnostics only after normal transport EOF."""
+    decoder = _RichStatusLineDecoder()
+    # iter_lines strips line endings, breaking CR progress rendering.
+    for chunk in response.iter_content(chunk_size=None):
+        if chunk is None:
+            return
+        yield from decoder.decode(chunk)
+    yield from decoder.decode(b'', final=True)
+
+
+async def _iter_rich_status_lines_async(
+        response: 'aiohttp.ClientResponse') -> typing.AsyncIterator[str]:
+    """Use the same framing without treating cancellation as normal EOF."""
+    decoder = _RichStatusLineDecoder()
+    async for chunk, _ in response.content.iter_chunks():
+        if chunk is None:
+            return
+        for line in decoder.decode(chunk):
+            yield line
+    for line in decoder.decode(b'', final=True):
+        yield line
+
+
+# ------------------------------------------------------------------------- #
+
+
 def decode_rich_status(
         response: 'requests.Response',
         relay_rich_status: bool = False) -> Iterator[Optional[str]]:
@@ -321,121 +374,60 @@ def decode_rich_status(
     """
     decoding_status = None
     try:
-        last_line = ''
-        # Buffer to store incomplete UTF-8 bytes between chunks
-        undecoded_buffer = b''
-
-        # Iterate over the response content in chunks. We do not use iter_lines
-        # because it will strip the trailing newline characters, causing the
-        # progress bar ending with `\r` becomes a pyramid.
-        for chunk in response.iter_content(chunk_size=None):
-            if chunk is None:
-                return
-
-            # Append the new chunk to any leftover bytes from previous iteration
-            current_bytes = undecoded_buffer + chunk
-            undecoded_buffer = b''
-
-            # Try to decode the combined bytes
-            try:
-                encoded_msg = current_bytes.decode('utf-8')
-            except UnicodeDecodeError as e:
-                # Check if this is potentially an incomplete sequence at the end
-                if e.start > 0:
-                    # Decode the valid part
-                    encoded_msg = current_bytes[:e.start].decode('utf-8')
-
-                    # Check if the remaining bytes are likely a partial char
-                    # or actually invalid UTF-8
-                    remaining_bytes = current_bytes[e.start:]
-                    if len(remaining_bytes) < 4:  # Max UTF-8 char is 4 bytes
-                        # Likely incomplete - save for next chunk
-                        undecoded_buffer = remaining_bytes
-                    else:
-                        # Likely invalid - replace with replacement character
-                        encoded_msg += remaining_bytes.decode('utf-8',
-                                                              errors='replace')
-                        undecoded_buffer = b''
-                else:
-                    # Error at the very beginning of the buffer - invalid UTF-8
-                    encoded_msg = current_bytes.decode('utf-8',
-                                                       errors='replace')
-                    undecoded_buffer = b''
-
-            lines = encoded_msg.splitlines(keepends=True)
-
-            # Skip processing if lines is empty to avoid IndexError
-            if not lines:
+        for line in _iter_rich_status_lines(response):
+            if line.endswith('\r\n'):
+                # Replace `\r\n` with `\n`, as printing a line ends with
+                # `\r\n` in linux will cause the line to be empty.
+                line = line[:-2] + '\n'
+            is_payload, decoded_line = message_utils.decode_payload(
+                line, raise_for_mismatch=False)
+            if not is_payload:
+                yield line
+                continue
+            control, encoded_status = Control.decode(decoded_line)
+            if control is None:
                 continue
 
-            # Append any leftover text from previous chunk to first line
-            lines[0] = last_line + lines[0]
-            last_line = lines[-1]
-            # If the last line is not ended with `\r` or `\n` (with ending
-            # spaces stripped), it means the last line is not a complete line.
-            # We keep the last line in the buffer and continue.
-            if (not last_line.strip(' ').endswith('\r') and
-                    not last_line.strip(' ').endswith('\n')):
-                lines = lines[:-1]
-            else:
-                # Reset the buffer for the next line, as the last line is a
-                # complete line.
-                last_line = ''
-
-            for line in lines:
-                if line.endswith('\r\n'):
-                    # Replace `\r\n` with `\n`, as printing a line ends with
-                    # `\r\n` in linux will cause the line to be empty.
-                    line = line[:-2] + '\n'
-                is_payload, decoded_line = message_utils.decode_payload(
-                    line, raise_for_mismatch=False)
-                if not is_payload:
+            if control == Control.RETRY:
+                raise exceptions.RequestInterruptedError(
+                    'Streaming interrupted. Please retry.')
+            if relay_rich_status:
+                # Forward the encoded payload verbatim instead of rendering
+                # it locally. Heartbeats are control-plane only and are not
+                # relayed (they would bloat the log), but we still yield
+                # None for them so `stream_response` advances its progress
+                # counter and the `retry_transient_errors` decorator sees
+                # forward progress during quiet provisioning phases.
+                if control != Control.HEARTBEAT:
                     yield line
-                    continue
-                control, encoded_status = Control.decode(decoded_line)
-                if control is None:
-                    continue
-
-                if control == Control.RETRY:
-                    raise exceptions.RequestInterruptedError(
-                        'Streaming interrupted. Please retry.')
-                if relay_rich_status:
-                    # Forward the encoded payload verbatim instead of rendering
-                    # it locally. Heartbeats are control-plane only and are not
-                    # relayed (they would bloat the log), but we still yield
-                    # None for them so `stream_response` advances its progress
-                    # counter and the `retry_transient_errors` decorator sees
-                    # forward progress during quiet provisioning phases.
-                    if control != Control.HEARTBEAT:
-                        yield line
-                    else:
-                        yield None
-                    continue
-                # control is not None, i.e. it is a rich status control message.
-                if threading.current_thread() is not threading.main_thread():
-                    yield None
-                    continue
-                if control == Control.INIT:
-                    decoding_status = client_status(encoded_status)
                 else:
-                    if decoding_status is None:
-                        # status may not be initialized if a user use --tail for
-                        # sky api logs.
-                        continue
-                    assert decoding_status is not None, (
-                        f'Rich status not initialized: {line}')
-                    if control == Control.UPDATE:
-                        decoding_status.update(encoded_status)
-                    elif control == Control.STOP:
-                        decoding_status.stop()
-                    elif control == Control.EXIT:
-                        decoding_status.__exit__(None, None, None)
-                    elif control == Control.START:
-                        decoding_status.start()
-                    elif control == Control.HEARTBEAT:
-                        # Heartbeat is not displayed to the user, so we do not
-                        # need to update the status.
-                        pass
+                    yield None
+                continue
+            # control is not None, i.e. it is a rich status control message.
+            if threading.current_thread() is not threading.main_thread():
+                yield None
+                continue
+            if control == Control.INIT:
+                decoding_status = client_status(encoded_status)
+            else:
+                if decoding_status is None:
+                    # status may not be initialized if a user use --tail for
+                    # sky api logs.
+                    continue
+                assert decoding_status is not None, (
+                    f'Rich status not initialized: {line}')
+                if control == Control.UPDATE:
+                    decoding_status.update(encoded_status)
+                elif control == Control.STOP:
+                    decoding_status.stop()
+                elif control == Control.EXIT:
+                    decoding_status.__exit__(None, None, None)
+                elif control == Control.START:
+                    decoding_status.start()
+                elif control == Control.HEARTBEAT:
+                    # Heartbeat is not displayed to the user, so we do not
+                    # need to update the status.
+                    pass
     finally:
         if decoding_status is not None:
             decoding_status.__exit__(None, None, None)
@@ -455,105 +447,47 @@ async def decode_rich_status_async(
     """
     decoding_status = None
     try:
-        last_line = ''
-        # Buffer to store incomplete UTF-8 bytes between chunks
-        undecoded_buffer = b''
-
-        # Iterate over the response content in chunks
-        async for chunk, _ in response.content.iter_chunks():
-            if chunk is None:
-                return
-
-            # Append the new chunk to any leftover bytes from previous iteration
-            current_bytes = undecoded_buffer + chunk
-            undecoded_buffer = b''
-
-            # Try to decode the combined bytes
-            try:
-                encoded_msg = current_bytes.decode('utf-8')
-            except UnicodeDecodeError as e:
-                # Check if this is potentially an incomplete sequence at the end
-                if e.start > 0:
-                    # Decode the valid part
-                    encoded_msg = current_bytes[:e.start].decode('utf-8')
-
-                    # Check if the remaining bytes are likely a partial char
-                    # or actually invalid UTF-8
-                    remaining_bytes = current_bytes[e.start:]
-                    if len(remaining_bytes) < 4:  # Max UTF-8 char is 4 bytes
-                        # Likely incomplete - save for next chunk
-                        undecoded_buffer = remaining_bytes
-                    else:
-                        # Likely invalid - replace with replacement character
-                        encoded_msg += remaining_bytes.decode('utf-8',
-                                                              errors='replace')
-                        undecoded_buffer = b''
-                else:
-                    # Error at the very beginning of the buffer - invalid UTF-8
-                    encoded_msg = current_bytes.decode('utf-8',
-                                                       errors='replace')
-                    undecoded_buffer = b''
-
-            lines = encoded_msg.splitlines(keepends=True)
-
-            # Skip processing if lines is empty to avoid IndexError
-            if not lines:
+        async for line in _iter_rich_status_lines_async(response):
+            if line.endswith('\r\n'):
+                # Replace `\r\n` with `\n`, as printing a line ends with
+                # `\r\n` in linux will cause the line to be empty.
+                line = line[:-2] + '\n'
+            is_payload, decoded_line = message_utils.decode_payload(
+                line, raise_for_mismatch=False)
+            if not is_payload:
+                yield line
+                continue
+            control, encoded_status = Control.decode(decoded_line)
+            if control is None:
                 continue
 
-            lines[0] = last_line + lines[0]
-            last_line = lines[-1]
-            # If the last line is not ended with `\r` or `\n` (with ending
-            # spaces stripped), it means the last line is not a complete line.
-            # We keep the last line in the buffer and continue.
-            if (not last_line.strip(' ').endswith('\r') and
-                    not last_line.strip(' ').endswith('\n')):
-                lines = lines[:-1]
+            if control == Control.RETRY:
+                raise exceptions.RequestInterruptedError(
+                    'Streaming interrupted. Please retry.')
+            # control is not None, i.e. it is a rich status control message.
+            # In async context, we'll handle rich status controls normally
+            # since async typically runs in main thread
+            if control == Control.INIT:
+                decoding_status = client_status(encoded_status)
             else:
-                # Reset the buffer for the next line, as the last line is a
-                # complete line.
-                last_line = ''
-
-            for line in lines:
-                if line.endswith('\r\n'):
-                    # Replace `\r\n` with `\n`, as printing a line ends with
-                    # `\r\n` in linux will cause the line to be empty.
-                    line = line[:-2] + '\n'
-                is_payload, decoded_line = message_utils.decode_payload(
-                    line, raise_for_mismatch=False)
-                if not is_payload:
-                    yield line
+                if decoding_status is None:
+                    # status may not be initialized if a user use --tail for
+                    # sky api logs.
                     continue
-                control, encoded_status = Control.decode(decoded_line)
-                if control is None:
-                    continue
-
-                if control == Control.RETRY:
-                    raise exceptions.RequestInterruptedError(
-                        'Streaming interrupted. Please retry.')
-                # control is not None, i.e. it is a rich status control message.
-                # In async context, we'll handle rich status controls normally
-                # since async typically runs in main thread
-                if control == Control.INIT:
-                    decoding_status = client_status(encoded_status)
-                else:
-                    if decoding_status is None:
-                        # status may not be initialized if a user use --tail for
-                        # sky api logs.
-                        continue
-                    assert decoding_status is not None, (
-                        f'Rich status not initialized: {line}')
-                    if control == Control.UPDATE:
-                        decoding_status.update(encoded_status)
-                    elif control == Control.STOP:
-                        decoding_status.stop()
-                    elif control == Control.EXIT:
-                        decoding_status.__exit__(None, None, None)
-                    elif control == Control.START:
-                        decoding_status.start()
-                    elif control == Control.HEARTBEAT:
-                        # Heartbeat is not displayed to the user, so we do not
-                        # need to update the status.
-                        pass
+                assert decoding_status is not None, (
+                    f'Rich status not initialized: {line}')
+                if control == Control.UPDATE:
+                    decoding_status.update(encoded_status)
+                elif control == Control.STOP:
+                    decoding_status.stop()
+                elif control == Control.EXIT:
+                    decoding_status.__exit__(None, None, None)
+                elif control == Control.START:
+                    decoding_status.start()
+                elif control == Control.HEARTBEAT:
+                    # Heartbeat is not displayed to the user, so we do not
+                    # need to update the status.
+                    pass
     finally:
         if decoding_status is not None:
             decoding_status.__exit__(None, None, None)
