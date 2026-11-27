@@ -472,7 +472,7 @@ def outranks(role: str, other: str) -> bool:
             _ROLE_PRECEDENCE.index(least_privileged_role([other])))
 
 
-def _configured_default_role() -> Optional[str]:
+def configured_default_role() -> Optional[str]:
     """`rbac.default_role`, lowercased, or None when unset.
 
     Lowercased: the schema validates `default_role` with
@@ -496,7 +496,7 @@ def get_default_role(authenticated: bool = True) -> str:
     request without authentication (a local API server, a controller's own
     API server) runs as its single user, which must keep admin-only actions.
     """
-    configured = _configured_default_role()
+    configured = configured_default_role()
     if configured is not None:
         return configured
     if authenticated:

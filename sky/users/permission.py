@@ -762,9 +762,10 @@ class PermissionService:
                                bootstrap_admin: bool = False) -> None:
         """Add user role relationship. `role` overrides the default role.
 
-        With `bootstrap_admin`, the user gets admin instead while no human
-        holds admin, so a deployment with no initial admin does not lock
-        everyone out.
+        With `bootstrap_admin` and `rbac.default_role` unset, the user gets
+        admin instead while no human holds admin, so a deployment with no
+        initial admin does not lock everyone out. A configured default is
+        never overridden.
         """
         self._lazy_initialize()
         with _policy_lock():
@@ -788,7 +789,8 @@ class PermissionService:
         user_roles = enforcer.get_roles_for_user(user_id)
         if not user_roles:
             role = role or rbac.get_default_role()
-            if bootstrap_admin and not self._human_admin_exists_no_lock():
+            if (bootstrap_admin and rbac.configured_default_role() is None and
+                    not self._human_admin_exists_no_lock()):
                 logger.warning(f'No authenticated admin exists: user '
                                f'{user_id} becomes the first admin.')
                 role = rbac.RoleName.ADMIN.value
@@ -2116,8 +2118,9 @@ def seed_new_user_role(user_id: str,
     executor's per-request config reload. `add_user_if_not_exists` is a no-op if
     the user already has a role.
 
-    `bootstrap_admin` (only with the default role) makes the user admin when no
-    human admin exists yet; see `add_user_if_not_exists`.
+    `bootstrap_admin` (only with the default role, and only while
+    `rbac.default_role` is unset) makes the user admin when no human admin
+    exists yet; see `add_user_if_not_exists`.
 
     Blocking (config file/DB read + policy lock). Async callers MUST offload it
     via `asyncio.to_thread` so it does not block the event loop.

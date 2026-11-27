@@ -1667,16 +1667,6 @@ def promote_header_user_to_admin_cmd(email: str) -> str:
             f'{assert_header_user_role_cmd(email, "admin")}')
 
 
-def ensure_human_admin_cmd() -> str:
-    """Shell command making sure the local API server has a human admin.
-
-    Until one exists, the first auth-proxy login becomes admin whatever
-    `rbac.default_role` says. Run it before a header identity's first request
-    when that identity must get the default role.
-    """
-    return promote_header_user_to_admin_cmd('smoke-admin@example.com')
-
-
 def _get_controller_pod_name(controller_name: str) -> str:
     return (
         'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'

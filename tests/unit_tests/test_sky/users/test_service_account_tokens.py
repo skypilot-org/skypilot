@@ -221,7 +221,7 @@ class TestDefaultRoleClamp:
         assert self._create_as(mock_perm, mock_token_service, mock_gus,
                                caller_roles) == expected
 
-    @mock.patch('sky.users.rbac._configured_default_role', return_value=None)
+    @mock.patch('sky.users.rbac.configured_default_role', return_value=None)
     @mock.patch('sky.users.server.global_user_state')
     @mock.patch('sky.users.server.token_service')
     @mock.patch('sky.users.server.permission')

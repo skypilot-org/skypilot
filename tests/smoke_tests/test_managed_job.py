@@ -577,7 +577,6 @@ def test_managed_jobs_restart_needs_write_access_like_cancel(
             f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
             # First contact creates both users as non-admins (see the test
             # named above).
-            smoke_tests_utils.ensure_human_admin_cmd(),
             smoke_tests_utils.assert_header_user_role_cmd(owner, 'user'),
             smoke_tests_utils.assert_header_user_role_cmd(viewer, 'user'),
             f'{as_owner}sky check {in_ws} {generic_cloud}',

@@ -1292,10 +1292,10 @@ class TestSeedNewUserRole:
 class TestFirstAdminBootstrap:
     """A login seed may make the first admin.
 
-    Only while no person or service account that can still log in holds
-    admin, and only for a seed that opted in, so a deployment without a usable
-    admin is not locked out and a bulk provisioner cannot hand admin to
-    whoever comes first.
+    Only while `rbac.default_role` is unset and no person or service account
+    that can still log in holds admin, and only for a seed that opted in, so a
+    deployment without a usable admin is not locked out and a bulk provisioner
+    cannot hand admin to whoever comes first.
     """
 
     @pytest.fixture
@@ -1350,17 +1350,16 @@ class TestFirstAdminBootstrap:
         service.add_user_if_not_exists('alice', 'user')
         assert _grouping_rows(service, 'alice') == ['user']
 
-    def test_a_configured_default_still_gets_a_first_admin(
-            self, users, service, monkeypatch):
-        # `default_role: user` with no admin would otherwise lock everyone out.
-        users.update(alice='sso', bob='sso')
+    def test_a_configured_default_is_never_overridden(self, users, service,
+                                                      monkeypatch):
+        # Before the bootstrap existed, a configured `default_role: user`
+        # never produced an admin; it still does not.
+        users.update(alice='sso')
         monkeypatch.setattr(permission.rbac.skypilot_config,
                             'get_nested',
                             lambda keys, default_value=None: 'user')
         service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
-        service.add_user_if_not_exists('bob', 'user', bootstrap_admin=True)
-        assert _grouping_rows(service, 'alice') == ['admin']
-        assert _grouping_rows(service, 'bob') == ['user']
+        assert _grouping_rows(service, 'alice') == ['user']
 
     @pytest.mark.parametrize('admin_type', ['basic', 'sso', 'legacy', 'sa'])
     def test_an_existing_human_admin_stops_it(self, users, tokens, service,

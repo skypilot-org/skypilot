@@ -3541,7 +3541,7 @@ If not specified:
 
 If specified, new users get this role instead. Existing users keep their roles.
 
-Either way, while no user or service account that can still log in holds
+When it is unset and no user or service account that can still log in holds
 ``admin``, the first new user who logs in through an auth proxy or OAuth2 proxy
 gets ``admin``, so a deployment without a usable administrator is not locked
 out. Admins that can no longer log in do not count: basic-auth users once
