@@ -16,6 +16,7 @@ import yaml
 from sky import sky_logging
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import utils as ssh_utils
+from sky.ssh_node_pools.deploy import apparmor
 from sky.ssh_node_pools.deploy import tunnel_utils
 from sky.ssh_node_pools.deploy import utils as deploy_utils
 from sky.utils import rich_utils
@@ -521,6 +522,11 @@ def deploy_single_cluster(cluster_name,
     install_gpu = False
     force_update_status(
         f'Deploying SkyPilot runtime on head node ({head_node}).')
+    install_apparmor_profile(head_node,
+                             ssh_user,
+                             ssh_key,
+                             askpass_block,
+                             use_ssh_config=head_use_ssh_config)
     cmd = f"""
         {askpass_block}
         curl -sfL https://get.k3s.io | K3S_NODE_NAME={head_node} {k3s_ha_exec} sudo -E -A sh - &&
@@ -645,12 +651,6 @@ def deploy_single_cluster(cluster_name,
 
         # If using YAML config with specific worker info
         if worker_hosts and i < len(worker_hosts):
-            if history_workers_info is not None and worker_hosts[
-                    i] in history_workers_info:
-                logger.info(
-                    f'{colorama.Style.DIM}✔ SkyPilot runtime already deployed on worker node {node}. '
-                    f'Skipping...{RESET_ALL}')
-                return node, True, False
             worker_user = worker_hosts[i]['user']
             worker_key = worker_hosts[i]['identity_file']
             worker_password = worker_hosts[i]['password']
@@ -661,6 +661,21 @@ def deploy_single_cluster(cluster_name,
             worker_key = ssh_key
             worker_askpass = askpass_block
             worker_config = worker_use_ssh_config[i]
+
+        # Also on workers deployed before, so that re-running `sky ssh up`
+        # fixes an existing pool.
+        install_apparmor_profile(node,
+                                 worker_user,
+                                 worker_key,
+                                 worker_askpass,
+                                 use_ssh_config=worker_config)
+        if (worker_hosts and i < len(worker_hosts) and
+                history_workers_info is not None and
+                worker_hosts[i] in history_workers_info):
+            logger.info(
+                f'{colorama.Style.DIM}✔ SkyPilot runtime already deployed on worker node {node}. '
+                f'Skipping...{RESET_ALL}')
+            return node, True, False
 
         return start_agent_node(node,
                                 master_addr,
@@ -1226,6 +1241,41 @@ def cleanup_node(node,
     return True
 
 
+def install_apparmor_profile(node,
+                             user,
+                             ssh_key,
+                             askpass_block,
+                             use_ssh_config=False) -> None:
+    """Installs the fixed containerd AppArmor profile if the node needs it.
+
+    Never fails the deploy: on failure, SkyPilot pods on the node fail at
+    launch with an error that explains the cause and the fix.
+    """
+    result = deploy_utils.run_remote(
+        node,
+        apparmor.install_profile_cmd(askpass_block),
+        user,
+        ssh_key,
+        use_ssh_config=use_ssh_config,
+        silent=True)
+    if result is None:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Failed to install the containerd AppArmor '
+            f'fix on node ({node}). If the node runs Ubuntu 26.04, SkyPilot '
+            f'pods on it cannot signal their own processes.{RESET_ALL}')
+    elif apparmor.SKIPPED_MARKER in result:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Found a custom '
+            f'{apparmor.PROFILE_PATH} on node ({node}) that differs from '
+            f'SkyPilot\'s; leaving it in place. If the node denies '
+            f'in-container signals, add the `'
+            f'{apparmor.STACKED_PEER_SIGNAL_RULE}` rule to it.{RESET_ALL}')
+    elif apparmor.INSTALLED_MARKER in result:
+        logger.info(
+            f'{colorama.Style.DIM}Installed the containerd AppArmor fix '
+            f'on node ({node}).{RESET_ALL}')
+
+
 def start_server_node(node,
                       master_addr,
                       k3s_token,
@@ -1238,6 +1288,11 @@ def start_server_node(node,
 
     Returns: (node, success, has_gpu) tuple."""
     logger.info(f'Joining HA server node ({node}).')
+    install_apparmor_profile(node,
+                             user,
+                             ssh_key,
+                             askpass_block,
+                             use_ssh_config=use_ssh_config)
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} \

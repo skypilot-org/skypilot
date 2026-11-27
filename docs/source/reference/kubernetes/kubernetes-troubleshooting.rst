@@ -309,3 +309,114 @@ Next, try running a simple task with a service to verify that SkyPilot can launc
 
 If you are unable to get the endpoint from SkyPilot,
 consider running :code:`kubectl describe services` or :code:`kubectl describe ingress` to debug it.
+
+.. _pods-cannot-signal-their-own-processes:
+
+Pods cannot signal their own processes
+--------------------------------------
+
+**Symptom:** :code:`sky launch` on Kubernetes fails quickly with an error like
+``Pod '...' cannot signal its own processes: the node denied `kill```), or —
+on SkyPilot versions without this check — the launch hangs for a long time at
+runtime provisioning and finally fails with ``rsync timed out`` or
+``connection unexpectedly closed``, even though the cluster and network are
+healthy. Downloads (e.g. :code:`sky logs`) work while uploads hang.
+
+**Cause:** The node runs Ubuntu 26.04 (or sets
+:code:`kernel.apparmor_restrict_unprivileged_unconfined=1`) and a containerd
+older than `2.3.8 <https://github.com/containerd/containerd/pull/14487>`_.
+Processes in the pod are then labeled
+:code:`cri-containerd.apparmor.d//&unconfined`, but containerd's default
+AppArmor profile only allows signals between processes labeled exactly
+:code:`cri-containerd.apparmor.d`, so every :code:`kill()` inside the
+container is denied. The rsync process that syncs your task files into the
+pod waits forever for a signal that never arrives. Job cancellation is
+affected the same way. Verify on the node named in the launch error (pin the
+probe pod to that exact node — a mixed cluster may otherwise schedule it on a
+healthy node, and the hostname label does not always match the reported node
+name):
+
+.. code-block:: bash
+
+    $ kubectl run probe --image=alpine:3.20 --restart=Never \
+        --overrides='{"spec":{"nodeName":"<node>"}}' \
+        -- sleep infinity
+    $ kubectl exec probe -- sh -c 'sleep 60 >/dev/null 2>&1 & kill $!'
+
+On an affected node, the last command prints:
+
+.. code-block:: none
+
+    sh: can't kill pid 7: Permission denied
+
+**Fix (pick one):**
+
+1. On each affected node, install a containerd release that includes the fix
+   (`2.3.8+ <https://github.com/containerd/containerd/pull/14487>`_) **and
+   reboot the node**. Upgrading alone is not enough: containerd keeps an
+   AppArmor profile that is already loaded, so the buggy profile survives the
+   upgrade until the node reboots.
+2. On each affected node, load the fixed profile manually (same content as
+   the containerd 2.3.8 default profile) and keep it in
+   :code:`/etc/apparmor.d/cri-containerd.apparmor.d` so it survives reboots:
+
+   .. code-block:: bash
+
+       $ sudo tee /etc/apparmor.d/cri-containerd.apparmor.d > /dev/null <<'EOF'
+       abi <abi/3.0>,
+       #include <tunables/global>
+
+       profile cri-containerd.apparmor.d flags=(attach_disconnected,mediate_deleted) {
+         #include <abstractions/base>
+
+         network,
+         capability,
+         file,
+         umount,
+         signal (receive) peer=unconfined,
+         signal (receive) peer=runc,
+         signal (receive) peer=crun,
+         signal (send,receive) peer=cri-containerd.apparmor.d,
+         signal (send,receive) peer=cri-containerd.apparmor.d//&unconfined,
+
+         deny @{PROC}/* w,
+         deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+         deny @{PROC}/sys/[^k]** w,
+         deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+         deny @{PROC}/sysrq-trigger rwklx,
+         deny @{PROC}/kcore rwklx,
+         deny mount,
+         deny /sys/[^f]*/** wklx,
+         deny /sys/f[^s]*/** wklx,
+         deny /sys/fs/[^c]*/** wklx,
+         deny /sys/fs/c[^g]*/** wklx,
+         deny /sys/fs/cg[^r]*/** wklx,
+         deny /sys/firmware/** rwklx,
+         deny /sys/devices/virtual/powercap/** wklx,
+         deny /sys/kernel/security/** wklx,
+         ptrace (trace,tracedby,read,readby) peer=cri-containerd.apparmor.d,
+         ptrace (trace,tracedby,read,readby) peer=cri-containerd.apparmor.d//&unconfined,
+       }
+       EOF
+       $ sudo apparmor_parser -r /etc/apparmor.d/cri-containerd.apparmor.d
+
+   This takes effect immediately, including for running pods, and persists
+   across reboots (the profile is loaded before containerd starts, so
+   containerd keeps using it).
+3. Run SkyPilot pods without AppArmor confinement. This needs no node access,
+   but is refused by clusters enforcing the ``baseline`` or stricter
+   `Pod Security Standard <https://kubernetes.io/docs/concepts/security/pod-security-standards/>`_:
+
+   .. code-block:: yaml
+
+       # ~/.sky/config.yaml
+       kubernetes:
+         pod_config:
+           spec:
+             containers:
+               - securityContext:
+                   appArmorProfile:
+                     type: Unconfined
+
+**SSH Node Pools:** :code:`sky ssh up` installs the fixed profile (fix 2) on
+every node automatically; re-run it on an existing pool to fix it.

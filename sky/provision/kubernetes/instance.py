@@ -948,6 +948,103 @@ def _raise_pod_scheduling_errors(
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
 
+# Probe for nodes whose container runtime forbids processes in a container
+# from signaling each other. containerd's default AppArmor profile (before
+# containerd/containerd#14487) only lets peers labeled exactly
+# `cri-containerd.apparmor.d` exchange signals. With
+# kernel.apparmor_restrict_unprivileged_unconfined=1 (the default on Ubuntu
+# 26.04), runc's profile switch becomes a stack, so container processes are
+# labeled `cri-containerd.apparmor.d//&unconfined` and every in-container
+# kill() fails with EACCES. SkyPilot cannot run there: the receiving rsync
+# process never gets the SIGUSR2 that tells it to exit, so the first file sync
+# hangs until its timeout, and job cancellation cannot kill processes either.
+# See skypilot-org/skypilot#10167.
+#
+# The sleep's stdio is detached so that, when kill is denied, the surviving
+# sleep does not hold the exec stream open.
+_SIGNAL_PROBE_DENIED_CODE = 87
+_SIGNAL_PROBE_CMD = ('sleep 60 </dev/null >/dev/null 2>&1 & '
+                     'if kill $! 2>/dev/null; then exit 0; fi; '
+                     'cat /proc/self/attr/current 2>/dev/null; '
+                     f'exit {_SIGNAL_PROBE_DENIED_CODE}')
+_SIGNAL_PROBE_TIMEOUT_SECONDS = 60
+_SIGNAL_DENIED_DOCS_URL = (
+    'https://docs.skypilot.co/en/latest/reference/kubernetes/'
+    'kubernetes-troubleshooting.html#pods-cannot-signal-their-own-processes')
+
+
+def _signal_denied_message(context: Optional[str],
+                           denied: List[Tuple[str, Optional[str], str]]) -> str:
+    """Builds the error for pods whose processes cannot signal each other."""
+    pod_name, node_name, label = denied[0]
+    where = f'Pod {pod_name!r}'
+    if node_name:
+        where += f' on node {node_name!r}'
+    if len(denied) > 1:
+        where += f' (and {len(denied) - 1} more pod(s))'
+    label_str = f' (AppArmor label: {label})' if label else ''
+    # SSH Node Pool contexts are named `ssh-<pool>` (see sky/clouds/ssh.py).
+    if context is not None and context.startswith('ssh-'):
+        fix = ('re-run `sky ssh up` to install the fixed AppArmor profile on '
+               'the nodes')
+    else:
+        fix = ('ask your cluster admin to fix the nodes, or set '
+               '`appArmorProfile: Unconfined` for SkyPilot pods in '
+               '`kubernetes.pod_config`')
+    return (f'{where} cannot signal its own processes: the node denied '
+            f'`kill`{label_str}. SkyPilot needs this for file sync and job '
+            'cancellation. This is a containerd bug on nodes with '
+            '`kernel.apparmor_restrict_unprivileged_unconfined=1`, the '
+            f'default on Ubuntu 26.04. To fix, {fix}. Details: '
+            f'{_SIGNAL_DENIED_DOCS_URL}')
+
+
+def _check_pods_can_signal(namespace: str, context: Optional[str],
+                           pods: List[Any]) -> None:
+    """Fails fast if processes in the pods cannot signal each other.
+
+    Raises:
+        config_lib.KubernetesError: if any pod denies in-container signals.
+    """
+
+    def _probe(pod) -> Optional[Tuple[str, Optional[str], str]]:
+        pod_name = pod.metadata.name
+        runner = command_runner.KubernetesCommandRunner(
+            ((namespace, context), pod_name),
+            container=k8s_constants.RAY_NODE_CONTAINER_NAME)
+        rc, stdout, stderr = runner.run(_SIGNAL_PROBE_CMD,
+                                        require_outputs=True,
+                                        stream_logs=False,
+                                        timeout=_SIGNAL_PROBE_TIMEOUT_SECONDS)
+        if rc == _SIGNAL_PROBE_DENIED_CODE:
+            # `pod` was read before it was scheduled, so re-read it for the
+            # node name. Only on this failure path, so launches pay nothing;
+            # bounded so a stalled API server cannot delay the error we
+            # already have enough information to report.
+            node_name = None
+            try:
+                node_name = kubernetes.core_api(context).read_namespaced_pod(
+                    pod_name,
+                    namespace,
+                    _request_timeout=_POD_POLL_REQUEST_TIMEOUT).spec.node_name
+            except Exception:  # pylint: disable=broad-except
+                pass
+            return pod_name, node_name, stdout.strip()
+        if rc != 0:
+            # The probe itself could not run. Do not fail the launch on it;
+            # the setup steps that follow surface any real problem.
+            logger.debug(f'Signal probe in pod {pod_name!r} returned {rc}: '
+                         f'{stdout}{stderr}')
+        return None
+
+    num_threads = max(1, min(_NUM_THREADS, len(pods)))
+    results = subprocess_utils.run_in_parallel(_probe, pods, num_threads)
+    denied = [r for r in results if r is not None]
+    if denied:
+        raise config_lib.KubernetesError(_signal_denied_message(
+            context, denied))
+
+
 def _raise_command_running_error(message: str, command: str, pod_name: str,
                                  rc: int, stdout: str) -> None:
     if rc == 0:
@@ -2888,6 +2985,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: waiting for pods to be running: '
                  f'{[pod.metadata.name for pod in pods]}')
     _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    _check_pods_can_signal(namespace, context, pods)
     if tpu_vms_per_slice:
         _check_tpu_slices_in_one_node_pool(namespace, context,
                                            cluster_name_on_cloud)
