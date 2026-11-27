@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 73  # managed job restart (`sky jobs launch --restart`)
+API_VERSION = 74  # managed jobs queue `include_counts`
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -73,6 +73,10 @@ MIN_JOBS_QUEUE_CURSOR_API_VERSION = 71
 # recipe list take `limit` and a cursor. An older server ignores them and
 # returns the whole list.
 MIN_LIST_CURSOR_API_VERSION = 72
+# Minimum server API version whose managed-jobs queue takes `include_counts`
+# and selects a page from an index, so fetching the queue in pages costs about
+# what one call for all of it does.
+MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION = 74
 
 # The HTTP header naming the user an admin service account acts as.
 IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'

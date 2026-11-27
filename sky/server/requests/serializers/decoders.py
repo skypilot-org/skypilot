@@ -158,8 +158,8 @@ def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
 @register_decoders('jobs.queue_v2')
 def decode_jobs_queue_v2(
     return_value
-) -> Union[Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int],
-           List[responses.ManagedJobRecord]]:
+) -> Union[Tuple[List[responses.ManagedJobRecord], Optional[int], Optional[Dict[
+        str, int]], Optional[int]], List[responses.ManagedJobRecord]]:
     """Decode jobs queue response.
 
     Supports legacy list, or a dict {jobs, total, total_no_filter,
@@ -171,9 +171,12 @@ def decode_jobs_queue_v2(
     # Case 1: dict shape {jobs, total, total_no_filter, status_counts}
     if isinstance(return_value, dict):
         jobs: List[Dict[str, Any]] = return_value.get('jobs', [])
-        total: int = return_value.get('total', len(jobs))
-        total_no_filter: int = return_value.get('total_no_filter', total)
-        status_counts: Dict[str, int] = return_value.get('status_counts', {})
+        # The counts are None when the request skipped them.
+        total: Optional[int] = return_value.get('total', len(jobs))
+        total_no_filter: Optional[int] = return_value.get(
+            'total_no_filter', total)
+        status_counts: Optional[Dict[str, int]] = return_value.get(
+            'status_counts', {})
         for job in jobs:
             job['status'] = managed_jobs.ManagedJobStatus(job['status'])
         jobs = [responses.ManagedJobRecord(**job) for job in jobs]

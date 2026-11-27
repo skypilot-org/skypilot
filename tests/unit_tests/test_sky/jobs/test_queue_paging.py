@@ -11,7 +11,7 @@ from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 
-_CURSOR_VERSION = server_constants.MIN_JOBS_QUEUE_CURSOR_API_VERSION
+_PAGING_VERSION = server_constants.MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION
 
 
 def _entrypoint():
@@ -84,14 +84,15 @@ class _Server:
         for root in roots[:limit]:
             jobs.append(_job(root, None))
             jobs.extend(_job(member, root) for member in self.trees[root])
+        counts = json['include_counts']
         value = {
             'jobs': jobs,
-            'total': len(self.trees),
-            'total_no_filter': len(self.trees),
+            'total': len(self.trees) if counts else None,
+            'total_no_filter': len(self.trees) if counts else None,
             'status_counts': {
                 'PENDING': len(self.trees)
-            },
-            'infra_options': [],
+            } if counts else None,
+            'infra_options': [] if counts else None,
         }
         return _sync_response(200, _request(request_id, value=value))
 
@@ -113,7 +114,7 @@ def sync_server(monkeypatch):
     monkeypatch.setattr(rest, '_sync_call_max_limit', 2)
 
 
-def _queue_v2(server, api_version=_CURSOR_VERSION, **kwargs):
+def _queue_v2(server, api_version=_PAGING_VERSION, **kwargs):
     raw_queue_v2 = jobs_sdk.queue_v2
     while hasattr(raw_queue_v2, '__wrapped__'):
         raw_queue_v2 = raw_queue_v2.__wrapped__
@@ -178,9 +179,28 @@ class TestPaging:
         assert len(server.bodies) == 1
         assert server.bodies[0]['after_job_id'] is None
 
-    def test_one_call_on_a_server_without_the_cursor(self):
+    def test_only_the_first_page_asks_for_counts(self):
         server = _Server(_TREES)
-        request_id = _queue_v2(server, api_version=_CURSOR_VERSION - 1)
+        request_id = _queue_v2(server)
+        assert [b['include_counts'] for b in server.bodies
+               ] == [True, False, False, False]
+        _, total, status_counts, total_no_filter = sdk.get(request_id)
+        assert (total, status_counts, total_no_filter) == (5, {'PENDING': 5}, 5)
+
+    def test_no_page_asks_for_counts_the_caller_skipped(self):
+        server = _Server(_TREES)
+        request_id = _queue_v2(server, include_counts=False)
+        assert [b['include_counts'] for b in server.bodies
+               ] == [False, False, False, False]
+        jobs, total, status_counts, total_no_filter = sdk.get(request_id)
+        assert len(jobs) == 7
+        assert (total, status_counts, total_no_filter) == (None, None, None)
+
+    def test_one_call_on_a_server_that_counts_on_every_page(self):
+        # It takes the cursor but computes the counts and selects each page
+        # over every job.
+        server = _Server(_TREES)
+        request_id = _queue_v2(server, api_version=_PAGING_VERSION - 1)
         assert [b['limit'] for b in server.bodies] == [None]
         assert request_id == 'req-1'
 

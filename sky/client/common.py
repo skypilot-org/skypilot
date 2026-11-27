@@ -589,8 +589,9 @@ def fetch_in_pages(
     how many items they count as against the page size and `limit`, and the
     cursor of the next page. It returns None when it cannot read the value,
     or when the page is not the one after `cursor`: something on the way
-    dropped the cursor and sent an earlier page again. merge(last_value, rows)
-    builds the result from the last page's value and the rows of every page.
+    dropped the cursor and sent an earlier page again. merge(first_value,
+    rows) builds the result from the first page's value and the rows of every
+    page.
 
     The list ends at the first empty page or when `limit` items are fetched.
 
@@ -603,6 +604,7 @@ def fetch_in_pages(
     rows: List[Any] = []
     fetched = 0
     cursor: Any = None
+    first_value: Any = None
     while True:
         size = page_size
         if limit is not None:
@@ -617,6 +619,8 @@ def fetch_in_pages(
         page = read_page(value, cursor)
         if page is None:
             return None
+        if first_value is None:
+            first_value = value
         page_rows, count, cursor = page
         rows.extend(page_rows)
         fetched += count
@@ -625,7 +629,7 @@ def fetch_in_pages(
         if count == 0 or (limit is not None and fetched >= limit):
             break
     request_id.sync_response = (200, {
-        **payload, 'return_value': json.dumps(merge(value, rows))
+        **payload, 'return_value': json.dumps(merge(first_value, rows))
     })
     return request_id
 

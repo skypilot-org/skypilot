@@ -34,7 +34,8 @@ def _get_managed_job_record(
     request_id = sky.jobs.queue_v2(
         refresh=False,
         job_ids=[managed_job_id],
-        fields=['status', 'batch_total_batches', 'batch_completed_batches'])
+        fields=['status', 'batch_total_batches', 'batch_completed_batches'],
+        include_counts=False)
     records, _, _, _ = sdk.stream_and_get(request_id)
     if not records:
         raise RuntimeError(f'Managed job {managed_job_id} not found')

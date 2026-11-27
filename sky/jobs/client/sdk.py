@@ -133,7 +133,8 @@ def _resolve_job_group(
                               skip_finished=True,
                               all_users=True,
                               name_match=requested_job_group,
-                              fields=['job_id', 'job_name'])
+                              fields=['job_id', 'job_name'],
+                              include_counts=False)
         jobs, _, _, _ = sdk.get(request_id)
         matching: Set[int] = set()
         for record in jobs:
@@ -358,8 +359,10 @@ def queue_v2(
     infra_match: Optional[str] = None,
     name_match: Optional[str] = None,
     include_tree: bool = False,
-) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
-        str, int], int]]:
+    include_counts: bool = True,
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                   Optional[int], Optional[Dict[
+                                       str, int]], Optional[int]]]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -390,6 +393,12 @@ def queue_v2(
             at any depth. Ids from the same tree return that tree once.
             Requires an API server of version
             ``MIN_JOBS_INCLUDE_TREE_API_VERSION`` or newer.
+        include_counts: Whether to also return the total, the status counts
+            and the total before filters. Each reads every matching job on
+            the server, so pass ``False`` when only the jobs are needed; they
+            are then ``None``. An API server older than
+            ``MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION`` returns them
+            anyway.
 
     Returns:
         The request ID of the queue request.
@@ -418,9 +427,10 @@ def queue_v2(
                 'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
-        total (int): Total number of jobs after filter,
-        status_counts (Dict[str, int]): Status counts after filter,
-        total_no_filter (int): Total number of jobs before filter,
+        total (Optional[int]): Total number of jobs after filter,
+        status_counts (Optional[Dict[str, int]]): Status counts after filter,
+        total_no_filter (Optional[int]): Total number of jobs before filter,
+          each ``None`` when ``include_counts`` is ``False``.
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
@@ -489,6 +499,7 @@ def queue_v2(
         # Server-side substring match on the job name (the dashboard's
         # search box uses the same filter).
         name_match=name_match,
+        include_counts=include_counts,
     )
     page_size = _queue_page_size(body)
     if page_size is not None:
@@ -500,8 +511,9 @@ def queue_v2(
 
 def _send_queue_v2(
     body: payloads.JobsQueueV2Body
-) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
-        str, int], int]]:
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                   Optional[int], Optional[Dict[
+                                       str, int]], Optional[int]]]:
     response = server_common.make_authenticated_request(
         'POST',
         '/jobs/queue/v2',
@@ -515,23 +527,26 @@ def _queue_page_size(body: payloads.JobsQueueV2Body) -> Optional[int]:
     """The page size to fetch the queue in, or None to fetch it in one call.
 
     Pages follow the default order, newest top-level job first. A refresh is
-    not answered as a sync call, so it is not paged.
+    not answered as a sync call, so it is not paged. An older server computes
+    the counts and selects each page over every job, so its queue is not
+    paged.
     """
     if (body.refresh or body.include_tree or
             body.sort_by not in (None, 'job_id', 'id') or
             body.sort_order == 'asc'):
         return None
     return client_common.sync_page_size(
-        body.limit, server_constants.MIN_JOBS_QUEUE_CURSOR_API_VERSION)
+        body.limit, server_constants.MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION)
 
 
 def _queue_in_pages(
     body: payloads.JobsQueueV2Body, page_size: int
 ) -> Optional[server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
-                                            int, Dict[str, int], int]]]:
+                                            Optional[int], Optional[Dict[
+                                                str, int]], Optional[int]]]]:
     """Fetches the queue as sync calls of up to page_size top-level jobs.
 
-    The counts in the result come from the last page.
+    Only the first page asks for the counts; the result takes them from it.
     """
     if body.fields and 'root_job_id' not in body.fields:
         # Rows name their top-level job in root_job_id; the cursor needs it.
@@ -539,10 +554,13 @@ def _queue_in_pages(
 
     def send(after_job_id: Optional[int], size: int) -> server_common.RequestId:
         return _send_queue_v2(
-            body.model_copy(update={
-                'limit': size,
-                'after_job_id': after_job_id
-            }))
+            body.model_copy(
+                update={
+                    'limit': size,
+                    'after_job_id': after_job_id,
+                    'include_counts': (body.include_counts and
+                                       after_job_id is None),
+                }))
 
     def read_page(
             value: Any, after_job_id: Optional[int]
@@ -562,8 +580,8 @@ def _queue_in_pages(
     return client_common.fetch_in_pages(send,
                                         page_size,
                                         read_page,
-                                        lambda last_value, jobs: {
-                                            **last_value, 'jobs': jobs
+                                        lambda first_value, jobs: {
+                                            **first_value, 'jobs': jobs
                                         },
                                         limit=body.limit)
 

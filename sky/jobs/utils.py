@@ -3479,6 +3479,7 @@ def dump_managed_job_queue(
     submitted_before: Optional[float] = None,
     include_tree: bool = False,
     after_job_id: Optional[int] = None,
+    include_counts: bool = True,
 ) -> str:
     # Passed by name: this is called from generated code that pins the
     # arguments it knows about, and the parameter list has outgrown the point
@@ -3501,7 +3502,8 @@ def dump_managed_job_queue(
                               sort_by=sort_by,
                               sort_order=sort_order,
                               submitted_after=submitted_after,
-                              submitted_before=submitted_before))
+                              submitted_before=submitted_before,
+                              include_counts=include_counts))
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -3879,6 +3881,7 @@ def get_managed_job_queue(
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
     include_tree: bool = False,
     after_job_id: Optional[int] = None,
+    include_counts: bool = True,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -3908,6 +3911,9 @@ def get_managed_job_queue(
             tree once. The total and the status counts cover the trees.
         after_job_id: With limit, the page of top-level jobs after this one
             in job id order. The total and the status counts ignore it.
+        include_counts: Whether to compute total, total_no_filter,
+            status_counts and infra_options. Each reads every matching job;
+            without it they are None and a page costs only its own rows.
 
     Returns:
         A dictionary containing the managed job queue.
@@ -3936,39 +3942,44 @@ def get_managed_job_queue(
     if fields:
         updated_fields, cluster_handle_required = _update_fields(fields)
 
-    total_no_filter = managed_job_state.get_managed_jobs_total()
+    total_no_filter: Optional[int] = None
+    infra_options: Optional[List[str]] = None
+    status_counts: Optional[Dict[str, int]] = None
+    if include_counts:
+        total_no_filter = managed_job_state.get_managed_jobs_total()
 
-    # The values the dashboard's Infra filter offers. Computed over the same
-    # set the counts are, and without `infra_match`, so picking one option
-    # does not hide the others. See `get_infra_options_with_filters`.
-    infra_options = managed_job_state.get_infra_options_with_filters(
-        job_ids=job_ids,
-        tree_root_ids=tree_root_ids,
-        accessible_workspaces=accessible_workspaces,
-        workspace_match=workspace_match,
-        name_match=name_match,
-        pool_match=pool_match,
-        user_hashes=user_hashes,
-        skip_finished=skip_finished,
-        submitted_after=submitted_after,
-        submitted_before=submitted_before,
-    )
+        # The values the dashboard's Infra filter offers. Computed over the
+        # same set the counts are, and without `infra_match`, so picking one
+        # option does not hide the others. See
+        # `get_infra_options_with_filters`.
+        infra_options = managed_job_state.get_infra_options_with_filters(
+            job_ids=job_ids,
+            tree_root_ids=tree_root_ids,
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            user_hashes=user_hashes,
+            skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
+        )
 
-    status_counts = managed_job_state.get_status_count_with_filters(
-        fields=fields,
-        job_ids=job_ids,
-        tree_root_ids=tree_root_ids,
-        accessible_workspaces=accessible_workspaces,
-        workspace_match=workspace_match,
-        name_match=name_match,
-        pool_match=pool_match,
-        infra_match=infra_match,
-        user_hashes=user_hashes,
-        skip_finished=skip_finished,
-        submitted_after=submitted_after,
-        submitted_before=submitted_before,
-        status_expr=status_expr,
-    )
+        status_counts = managed_job_state.get_status_count_with_filters(
+            fields=fields,
+            job_ids=job_ids,
+            tree_root_ids=tree_root_ids,
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            infra_match=infra_match,
+            user_hashes=user_hashes,
+            skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
+            status_expr=status_expr,
+        )
 
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
         fields=updated_fields,
@@ -3990,6 +4001,7 @@ def get_managed_job_queue(
         sort_by=sort_by,
         sort_order=sort_order,
         status_expr=status_expr,
+        count_total=include_counts,
     )
 
     if cluster_handle_required:
@@ -4987,6 +4999,8 @@ QUEUE_CURSOR_UNSUPPORTED_MESSAGE = (
     'try again after that.')
 # The managed jobs version that first accepted `after_job_id`.
 QUEUE_CURSOR_MANAGED_JOBS_VERSION = 28
+# The managed jobs version that first accepted `include_counts`.
+QUEUE_COUNTS_MANAGED_JOBS_VERSION = 30
 
 
 class ManagedJobCodeGen:
@@ -5042,6 +5056,7 @@ class ManagedJobCodeGen:
         submitted_before: Optional[float] = None,
         include_tree: bool = False,
         after_job_id: Optional[int] = None,
+        include_counts: bool = True,
     ) -> str:
         marker = INFRA_FILTER_UNSUPPORTED_MARKER
         message = INFRA_FILTER_UNSUPPORTED_MESSAGE
@@ -5052,6 +5067,7 @@ class ManagedJobCodeGen:
         cursor_marker = QUEUE_CURSOR_UNSUPPORTED_MARKER
         cursor_message = QUEUE_CURSOR_UNSUPPORTED_MESSAGE
         cursor_version = QUEUE_CURSOR_MANAGED_JOBS_VERSION
+        counts_version = QUEUE_COUNTS_MANAGED_JOBS_VERSION
         code = textwrap.dedent(f"""\
         # An infra filter a controller cannot apply must be an error, not a
         # silently wider answer: unlike every other filter here, dropping it
@@ -5198,6 +5214,9 @@ class ManagedJobCodeGen:
                                 submitted_after={submitted_after!r},
                                 submitted_before={submitted_before!r})
         else:
+            # An older controller computes the counts whatever was asked.
+            _counts = ({{'include_counts': {include_counts!r}}}
+                       if managed_job_version >= {counts_version} else {{}})
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -5216,7 +5235,8 @@ class ManagedJobCodeGen:
                                 sort_by={sort_by!r},
                                 sort_order={sort_order!r},
                                 submitted_after={submitted_after!r},
-                                submitted_before={submitted_before!r})
+                                submitted_before={submitted_before!r},
+                                **_counts)
         print(job_table, flush=True)
         """)
         return cls._build(code)

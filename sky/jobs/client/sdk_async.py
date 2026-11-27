@@ -67,7 +67,9 @@ async def queue_v2(
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
     include_tree: bool = False,
-) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
+    include_counts: bool = True,
+) -> Tuple[List[responses.ManagedJobRecord], Optional[int], Optional[Dict[
+        str, int]], Optional[int]]:
     """Async version of queue_v2() that gets statuses of managed jobs."""
     request_id = await asyncio.to_thread(sdk.queue_v2,
                                          refresh,
@@ -76,7 +78,8 @@ async def queue_v2(
                                          job_ids,
                                          limit,
                                          fields,
-                                         include_tree=include_tree)
+                                         include_tree=include_tree,
+                                         include_counts=include_counts)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:

@@ -282,9 +282,11 @@ class _DefaultManagedJobRunner:
         sort_order: Optional[str],
         submitted_after: Optional[float],
         submitted_before: Optional[float],
-    ) -> Tuple[List[Dict[str, Any]], int,
-               'managed_job_utils.ManagedJobQueueResultType', int, Dict[
-                   str, int], List[str]]:
+        # Default so a caller on the previous protocol still works.
+        include_counts: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], Optional[int],
+               'managed_job_utils.ManagedJobQueueResultType', Optional[int],
+               Optional[Dict[str, int]], Optional[List[str]]]:
         """Fetch the managed jobs table from the jobs controller.
 
         Returns:
@@ -300,6 +302,8 @@ class _DefaultManagedJobRunner:
               infra_options: The distinct `--infra` specs the filters select,
                   for the dashboard's Infra filter to offer. Empty from a
                   controller that predates the field.
+            Without include_counts, total, total_no_filter, status_counts
+            and infra_options may be None.
         """
         with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
             # By name: the parameter list is long enough that inserting one
@@ -322,7 +326,8 @@ class _DefaultManagedJobRunner:
                 sort_by=sort_by,
                 sort_order=sort_order,
                 submitted_after=submitted_after,
-                submitted_before=submitted_before)
+                submitted_before=submitted_before,
+                include_counts=include_counts)
         with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
             returncode, job_table_payload, stderr = backend.run_on_head(
                 handle,
@@ -1719,7 +1724,8 @@ def queue(refresh: bool,
         skip_finished,
         all_users,
         job_ids,
-        fields=list(managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS))
+        fields=list(managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS),
+        include_counts=False)
 
     return jobs
 
@@ -1745,8 +1751,9 @@ def queue_v2_api(
     submitted_before: Optional[float] = None,
     include_tree: bool = False,
     after_job_id: Optional[int] = None,
-) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int,
-           List[str]]:
+    include_counts: bool = True,
+) -> Tuple[List[responses.ManagedJobRecord], Optional[int], Optional[Dict[
+        str, int]], Optional[int], Optional[List[str]]]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter, infra_options = queue_v2(
@@ -1768,7 +1775,8 @@ def queue_v2_api(
         sort_by=sort_by,
         sort_order=sort_order,
         submitted_after=submitted_after,
-        submitted_before=submitted_before)
+        submitted_before=submitted_before,
+        include_counts=include_counts)
     if fields:
         # The queue records carry every known column (None for the ones the
         # query didn't select). Callers that pass ``fields`` have declared
@@ -1811,7 +1819,9 @@ def queue_v2(
     submitted_before: Optional[float] = None,
     include_tree: bool = False,
     after_job_id: Optional[int] = None,
-) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int, List[str]]:
+    include_counts: bool = True,
+) -> Tuple[List[Dict[str, Any]], Optional[int], Optional[Dict[str, int]],
+           Optional[int], Optional[List[str]]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
 
@@ -1844,6 +1854,8 @@ def queue_v2(
             filters select, for the dashboard's Infra filter to offer. Empty
             when the jobs controller predates the field, which is not an
             error: the caller falls back to the rows it has.
+        Without include_counts, total, status_counts, total_no_filter and
+        infra_options are not computed and may be None.
     Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
             does not exist.
@@ -1900,6 +1912,11 @@ def queue_v2(
                                            'managed jobs')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
+    no_jobs: Tuple[List[Dict[str, Any]], Optional[int],
+                   Optional[Dict[str, int]], Optional[int],
+                   Optional[List[str]]] = (([], 0, {}, 0,
+                                            []) if include_counts else
+                                           ([], None, None, None, None))
 
     user_hashes: Optional[List[Optional[str]]] = None
     show_jobs_without_user_hash = False
@@ -1912,7 +1929,7 @@ def queue_v2(
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
-            return [], 0, {}, 0, []
+            return no_jobs
         user_hashes = [user.id for user in users]
 
     # Visibility, not usability: read-only workspaces' jobs must be listed. See
@@ -1929,7 +1946,7 @@ def queue_v2(
         # Controllers older than MANAGED_JOBS_VERSION 12 read an empty list as
         # no workspace filter at all.
         if not accessible_workspaces:
-            return [], 0, {}, 0, []
+            return no_jobs
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -1960,6 +1977,7 @@ def queue_v2(
                 page=page,
                 limit=limit,
                 after_job_id=after_job_id,
+                include_counts=include_counts,
                 # Remove None from user_hashes, as the gRPC server uses the
                 # show_jobs_without_user_hash flag instead.
                 user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
@@ -1999,6 +2017,9 @@ def queue_v2(
                     raise exceptions.QueueCursorNotSupportedError(
                         managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
+            if not include_counts:
+                # The response holds zeros for the counts it did not compute.
+                return jobs, None, None, None, None
             return (jobs, response.total, dict(response.status_counts),
                     response.total_no_filter, list(response.infra_options))
         except exceptions.SkyletMethodNotImplementedError:
@@ -2029,6 +2050,9 @@ def queue_v2(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.QueueCursorNotSupportedError(
                 managed_job_utils.QUEUE_CURSOR_UNSUPPORTED_MESSAGE)
+    # A runner that predates include_counts computes the counts anyway.
+    if _runner_accepts(runner.fetch_managed_job_table, 'include_counts'):
+        protocol_kwargs['include_counts'] = include_counts
     fetched = runner.fetch_managed_job_table(
         handle=handle,
         backend=backend,
@@ -2054,7 +2078,7 @@ def queue_v2(
     # that predates the infra options. That costs the dashboard its option list
     # -- it falls back to the rows it has -- and nothing else, so take it
     # rather than fail the whole queue.
-    infra_options: List[str] = []
+    infra_options: Optional[List[str]] = []
     if len(fetched) == 5:
         jobs, total, result_type, total_no_filter, status_counts = fetched
     else:

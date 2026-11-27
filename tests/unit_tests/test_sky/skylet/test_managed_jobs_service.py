@@ -472,6 +472,26 @@ class TestGetJobTable:
         assert [j.job_id for j in response.jobs
                ] == [self.job_ids['job_id3'], self.job_ids['job_id4']]
 
+    def test_get_job_table_include_counts(self):
+        """Counts by default; without include_counts the response leaves them
+        at zero and the jobs are unchanged."""
+        context_mock = mock.Mock()
+        workspaces = managed_jobsv1_pb2.Workspaces(workspaces=['ws1', 'ws2'])
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=workspaces, limit=2), context_mock)
+        assert response.total == 4 and sum(response.status_counts.values()) == 4
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=workspaces,
+                page=1,
+                limit=2,
+                include_counts=False), context_mock)
+        context_mock.abort.assert_not_called()
+        assert len({j.job_id for j in response.jobs}) == 2
+        assert response.total == 0 and response.total_no_filter == 0
+        assert not response.status_counts and not response.infra_options
+
     def test_get_job_table_no_accessible_workspaces(self):
         """Test basic GetJobTable functionality without specified accessible
          workspaces - should return all jobs."""

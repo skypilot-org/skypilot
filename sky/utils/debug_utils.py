@@ -712,7 +712,8 @@ def _get_job_clusters_from_managed_jobs(
     try:
         jobs, _, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
                                                       job_ids=job_ids,
-                                                      all_users=True)
+                                                      all_users=True,
+                                                      include_counts=False)
         job_cluster_names = _managed_job_cluster_names_from_records(jobs)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get job clusters for managed jobs: {e}')

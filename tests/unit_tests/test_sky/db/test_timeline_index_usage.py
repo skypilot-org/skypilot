@@ -17,6 +17,7 @@ import sqlalchemy
 from sqlalchemy import orm
 
 from sky.jobs import state as managed_job_state
+from sky.jobs import state_db
 from sky.skylet import constants as skylet_constants
 from sky.utils.db import db_utils
 
@@ -202,3 +203,31 @@ def test_the_indexes_exclude_rows_the_queries_cannot_return(
                     'SELECT count(*) FROM spot WHERE spot_job_id = 1 '
                     f'AND ({predicate})')).scalar()
         assert stale == 0, f'a pre-upgrade row is indexed by: {predicate}'
+
+
+def _queue_page_queries(user_hashes=None):
+    """The two statements of a queue page: its roots, then its trees' rows."""
+    state = managed_job_state
+    root = state.job_info_tree_root()
+    roots = state.build_managed_jobs_with_filters_query(
+        accessible_workspaces=['default'],
+        user_hashes=user_hashes,
+        page_roots=True).group_by(root).order_by(
+            root.desc()).where(root < 500).limit(100)
+    rows = state.build_managed_jobs_with_filters_query(
+        fields=['job_id', 'status'],
+        accessible_workspaces=['default'],
+        user_hashes=user_hashes).where(root.in_([3, 2, 1]))
+    return roots, rows
+
+
+def test_a_queue_page_walks_a_tree_root_index(tmp_path, monkeypatch):
+    engine = _engine(tmp_path, monkeypatch)
+    for user_hashes in (None, ['user']):
+        for query in _queue_page_queries(user_hashes):
+            plan = _plan(engine, query)
+            assert any(
+                name in plan for name in state_db.TREE_ROOT_INDEXES), plan
+            # The slice and the cursor come off the index, not a sort of
+            # every job.
+            assert 'temp b-tree' not in plan, plan

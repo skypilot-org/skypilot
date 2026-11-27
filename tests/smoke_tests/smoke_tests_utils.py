@@ -1848,7 +1848,8 @@ def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
             sky.jobs.queue_v2(refresh=False,
                               all_users=all_users,
                               job_ids=None if job_id is None else [job_id],
-                              fields=['job_id', 'job_name', 'status']))[0]
+                              fields=['job_id', 'job_name', 'status'],
+                              include_counts=False))[0]
         if job_id is None:
             matches = [j for j in jobs_list if j['job_name'] == job_name]
         else:

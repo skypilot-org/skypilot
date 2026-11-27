@@ -748,6 +748,11 @@ class JobsQueueV2Body(RequestBody):
     # in job id order. Servers older than MIN_JOBS_QUEUE_CURSOR_API_VERSION
     # ignore this field, so the client checks the server version first.
     after_job_id: Optional[int] = None
+    # Whether to compute total, total_no_filter, status_counts and
+    # infra_options; each reads every matching job. Without it they come back
+    # as None. Servers older than MIN_JOBS_QUEUE_INCLUDE_COUNTS_API_VERSION
+    # ignore this field and compute them.
+    include_counts: bool = True
     statuses: Optional[List[str]] = None
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`

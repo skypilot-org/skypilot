@@ -161,11 +161,12 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
 @register_encoder('jobs.queue_v2')
 def encode_jobs_queue_v2(
         jobs_or_tuple) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
-    # Support returning either a plain jobs list or a (jobs, total) tuple
-    status_counts: Dict[str, int] = {}
+    # Support returning either a plain jobs list or a (jobs, total) tuple.
+    # In a tuple the counts are None when the request skipped them.
+    status_counts: Optional[Dict[str, int]] = {}
     # The 4-tuple is still accepted: a plugin runner pinned to the older
     # signature returns one, and it simply carries no infra options.
-    infra_options: List[str] = []
+    infra_options: Optional[List[str]] = []
     if isinstance(jobs_or_tuple, tuple):
         if len(jobs_or_tuple) == 2:
             jobs, total = jobs_or_tuple
@@ -179,7 +180,6 @@ def encode_jobs_queue_v2(
             raise ValueError(f'Invalid jobs tuple: {jobs_or_tuple}')
     else:
         jobs = jobs_or_tuple
-        total = None
     # exclude_unset: fields the server never populated (because the request's
     # ``fields`` filter excluded them) are omitted from the payload instead of
     # being emitted as explicit nulls. Requests without a ``fields`` filter
@@ -189,7 +189,7 @@ def encode_jobs_queue_v2(
     ]
     for job in jobs_dict:
         job['status'] = job['status'].value
-    if total is None:
+    if not isinstance(jobs_or_tuple, tuple):
         return jobs_dict
     return {
         'jobs': jobs_dict,
