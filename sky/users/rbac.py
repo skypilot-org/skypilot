@@ -355,6 +355,31 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'path': '/api/plugins',
         'method': 'GET'
     },
+    # --- API reference (sky/server/api_reference) ---
+    {
+        'path': '/.well-known/api-catalog',
+        'method': 'GET'
+    },
+    {
+        'path': '/.well-known/api-catalog',
+        'method': 'HEAD'
+    },
+    {
+        'path': '/api-reference',
+        'method': 'GET'
+    },
+    {
+        'path': '/api-reference/*',
+        'method': 'GET'
+    },
+    {
+        'path': '/docs',
+        'method': 'GET'
+    },
+    {
+        'path': '/redoc',
+        'method': 'GET'
+    },
 ]
 
 # Endpoints that need no *write* access to the caller's active workspace but

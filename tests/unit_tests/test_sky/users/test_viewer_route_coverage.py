@@ -214,9 +214,9 @@ def _route_pairs():
             if verb in _HTTP_METHODS and verb not in _IGNORED_METHODS:
                 seen.add((path, verb))
     # Safety net: routes registered with ``include_in_schema=False`` are
-    # absent from the OpenAPI schema.  The app has none today, but this is
-    # a security-coverage test -- a future hidden route must not silently
-    # escape a viewer decision.  Recurse the router tree to catch hidden
+    # absent from the OpenAPI schema (e.g. the API reference routes), and a
+    # hidden route must not silently escape a viewer decision.  Recurse the
+    # router tree to catch hidden
     # routes at any nesting depth (a top-level-only scan would miss ones
     # added to a prefixed sub-router under FastAPI >=0.137).
     for full_path, route in _iter_api_routes(app.routes):
@@ -292,9 +292,11 @@ def test_allowlist_entries_match_real_routes():
         method = entry['method']
         if (pattern_path, method) in out_of_tree:
             continue
+        # The route list leaves out HEAD; a HEAD entry targets a GET route.
+        route_method = 'GET' if method == 'HEAD' else method
         matched = False
         for actual_path, actual_method in casbin_pairs:
-            if actual_method != method:
+            if actual_method != route_method:
                 continue
             if casbin_util.key_match2(actual_path, pattern_path):
                 matched = True

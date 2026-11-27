@@ -83,6 +83,7 @@ from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
 from sky.server import websocket_utils
+from sky.server.api_reference import routes as api_reference_rest
 from sky.server.auth import db_lookup
 from sky.server.auth import impersonation
 from sky.server.auth import loopback
@@ -1400,7 +1401,11 @@ class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
             versions.get_local_readable_version())
 
 
-app = fastapi.FastAPI(debug=True, lifespan=lifespan)
+# api_reference serves the documentation pages instead of FastAPI's own.
+app = fastapi.FastAPI(debug=True,
+                      lifespan=lifespan,
+                      docs_url=None,
+                      redoc_url=None)
 # Middleware wraps in the order defined here. E.g., given
 #   app.add_middleware(Middleware1)
 #   app.add_middleware(Middleware2)
@@ -1504,6 +1509,7 @@ app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
 app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
+app.include_router(api_reference_rest.router)
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
@@ -3765,12 +3771,14 @@ async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     # response_model_exclude_unset omits unset fields
     # in the response JSON.
     response_model_exclude_unset=True)
-async def health(request: fastapi.Request) -> responses.APIHealthResponse:
+async def health(request: fastapi.Request,
+                 response: fastapi.Response) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
         responses.APIHealthResponse: The health response.
     """
+    response.headers.append('Link', api_reference_rest.CATALOG_LINK)
     user = request.state.auth_user
     server_status = common.ApiServerStatus.HEALTHY
     if getattr(request.state, 'anonymous_user', False):

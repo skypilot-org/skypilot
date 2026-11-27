@@ -86,5 +86,13 @@
   {
     "query": "our slurmctld keeps dropping nodes into drain state after every reboot and scontrol update doesn't stick. how do I stop slurm from draining them on boot?",
     "should_trigger": false
+  },
+  {
+    "query": "our build pipeline is a Go service and I want it to launch a SkyPilot managed job on our team's API server and poll until it finishes. we can't ship python in that image. how do I call the server directly?",
+    "should_trigger": true
+  },
+  {
+    "query": "how do I write an OpenAPI spec for my own FastAPI service and serve Swagger UI behind a strict CSP?",
+    "should_trigger": false
   }
 ]

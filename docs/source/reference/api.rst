@@ -3,7 +3,7 @@
 Python SDK
 ==========
 
-SkyPilot offers a Python SDK, which is used under the hood by the :ref:`CLI <cli>`.
+SkyPilot offers a Python SDK, which is used under the hood by the :ref:`CLI <cli>`. To call the API server from other languages, use the :ref:`REST API <rest-api>`.
 
 Most SDK calls are **asynchronous and return a future** (``request ID``).
 
