@@ -175,10 +175,11 @@ REQUEST_COLUMNS = [
     COL_FILE_MOUNTS_BLOB_ID,
 ]
 
-# Columns a request listing reads. Listings never show the return value or
-# the error, which can be large.
+# Columns a request listing reads. Listings never show the return value, the
+# error or the request body, which can be large.
 DISPLAY_COLUMNS = [
-    col for col in REQUEST_COLUMNS if col not in ('return_value', 'error')
+    col for col in REQUEST_COLUMNS
+    if col not in ('return_value', 'error', 'request_body')
 ]
 
 
@@ -389,8 +390,10 @@ class Request:
         sent to the client side, especially for the request table could include
         all the requests.
         """
-        assert isinstance(self.request_body,
-                          payloads.RequestBody), (self.name, self.request_body)
+        if self.request_body is not None:
+            assert isinstance(self.request_body,
+                              payloads.RequestBody), (self.name,
+                                                      self.request_body)
         user = global_user_state.get_user(self.user_id)
         user_name = user.name if user is not None else None
         return payloads.RequestPayload(
