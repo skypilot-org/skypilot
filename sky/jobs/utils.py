@@ -140,6 +140,12 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
+# A launch request marked ended may still be unwinding in its worker process.
+_SUBMISSION_END_GRACE_SECONDS = 120
+# A launch request missing from this API server's request store may be running
+# on another API server whose request store is not shared with this one.
+_SUBMISSION_UNSEEN_REQUEST_TIMEOUT_SECONDS = 3600
+
 # Terminal task statuses for which the controller downloads the task's logs
 # from its cluster and records their local path.
 _STATUSES_WITH_PERSISTED_LOGS = (
@@ -922,6 +928,43 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
         return False
 
 
+def _interrupted_submission_reason(
+        job_id: int, created_at: Optional[float],
+        requests: Dict[str, Optional['requests_lib.Request']]) -> Optional[str]:
+    """Why an INACTIVE job can no longer reach the scheduler, else None.
+
+    Only the request that created the job moves it from INACTIVE to WAITING,
+    so once that request has ended the job stays INACTIVE for good.
+
+    Args:
+        job_id: The INACTIVE job.
+        created_at: When the job's first task row was written.
+        requests: Requests already looked up in this pass, by id; the jobs of
+            one launch share a request. Filled in as a side effect.
+    """
+    request_id = managed_job_state.get_submission_request_id(job_id)
+    if request_id is None:
+        return None
+    if request_id not in requests:
+        requests[request_id] = requests_lib.get_request(
+            request_id, fields=['status', 'finished_at'])
+    request = requests[request_id]
+    now = time.time()
+    if request is None:
+        if (created_at is None or
+                now - created_at < _SUBMISSION_UNSEEN_REQUEST_TIMEOUT_SECONDS):
+            return None
+    elif (request.status in requests_lib.RequestStatus.active_statuses() or
+          (request.finished_at is not None and
+           now - request.finished_at < _SUBMISSION_END_GRACE_SECONDS)):
+        return None
+    ended = ('no longer exists'
+             if request is None else f'ended as {request.status.value}')
+    return (f'The job was never submitted: its launch request {request_id} '
+            f'{ended} before the job reached the scheduler. Launch the job '
+            'again.')
+
+
 def update_managed_jobs_statuses(job_id: Optional[int] = None):
     """Update managed job status if the controller process failed abnormally.
 
@@ -985,6 +1028,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # job_id is already terminal, or if job_id is None, there are no jobs
         # that need to be checked.
         return
+    submission_requests: Dict[str, Optional['requests_lib.Request']] = {}
 
     for job_id in job_ids:
         assert job_id is not None
@@ -1027,10 +1071,22 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 # status is FAILED_DRIVER or FAILED.
                 logger.error('Failed to setup the cloud dependencies for '
                              'the managed job.')
-            elif (schedule_state in [
-                    managed_job_state.ManagedJobScheduleState.INACTIVE,
-                    managed_job_state.ManagedJobScheduleState.WAITING,
-            ]):
+            elif (schedule_state ==
+                  managed_job_state.ManagedJobScheduleState.INACTIVE):
+                interrupted = _interrupted_submission_reason(
+                    job_id, tasks[0]['created_at'], submission_requests)
+                if interrupted is not None:
+                    logger.error(f'Job {job_id}: {interrupted}')
+                    managed_job_state.set_failed(
+                        job_id,
+                        task_id=None,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason=interrupted)
+                    scheduler.job_done(job_id, idempotent=True)
+                continue
+            elif (schedule_state ==
+                  managed_job_state.ManagedJobScheduleState.WAITING):
                 # It is expected that the controller hasn't been started yet.
                 continue
             elif (schedule_state ==
@@ -5313,6 +5369,17 @@ class ManagedJobCodeGen:
         # Get controller version
         controller_version = controller_constants.SKYLET_VERSION
         print(f"controller_version:{controller_version}", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def get_job_spec(cls, job_id: int) -> str:
+        """Generate code to print one job's stored spec (DAG YAML)."""
+        code = textwrap.dedent(f"""\
+        from sky.jobs import file_content_utils
+        from sky.utils import message_utils
+        dag_yaml = file_content_utils.get_job_dag_content({job_id!r})
+        print(message_utils.encode_payload(dag_yaml), end="", flush=True)
         """)
         return cls._build(code)
 

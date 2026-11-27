@@ -105,12 +105,16 @@ def _list_accelerators(
                                                                           int]]:
     """List accelerators in SSH-based Kubernetes clusters.
 
-    This is a wrapper around the Kubernetes _list_accelerators function that
-    restricts the contexts to SSH-specific contexts only.
-
-    If region_filter is specified and it's not an SSH context, no results will
-    be returned.
+    Lists the SSH Node Pool contexts allowed by the active workspace through
+    the Kubernetes catalog, each pool with its own entries, like the table
+    output of ``sky gpus list --infra ssh``. If region_filter is specified,
+    only that SSH context is listed, and nothing if it is not an allowed SSH
+    context.
     """
+    # Every allowed SSH context is listed regardless of all_regions: see
+    # kubernetes_catalog.list_accelerators_in_contexts().
+    del all_regions, require_price  # Unused.
+
     # If a specific region is requested, ensure it's an SSH context
     if region_filter is not None and not region_filter.startswith('ssh-'):
         return {}, {}, {}
@@ -118,30 +122,22 @@ def _list_accelerators(
     # Get SSH contexts
     ssh_contexts = ssh.SSH.existing_allowed_contexts()
 
-    # If no contexts found, return empty results
-    if not ssh_contexts:
-        return {}, {}, {}
-
-    # If a region filter is specified and it's not a SSH context return empty
-    # results
-    if region_filter is not None and region_filter not in ssh_contexts:
-        return {}, {}, {}
-
-    # If region_filter is None, use the first context if all_regions is False
-    if region_filter is None and not all_regions and ssh_contexts:
-        # Use the first SSH context if no specific region requested
-        region_filter = ssh_contexts[0]
-
-    # Call the Kubernetes _list_accelerators with the appropriate region filter
-    if realtime:
-        return kubernetes_catalog.list_accelerators_realtime(
-            gpus_only, name_filter, region_filter, quantity_filter,
-            case_sensitive, all_regions, require_price)
+    if region_filter is not None:
+        # If the requested SSH context is not allowed, return empty results
+        contexts = [region_filter] if region_filter in ssh_contexts else []
     else:
-        result = kubernetes_catalog.list_accelerators(
-            gpus_only, name_filter, region_filter, quantity_filter,
-            case_sensitive, all_regions, require_price)
-        return result, {}, {}
+        contexts = ssh_contexts
+
+    result = kubernetes_catalog.list_accelerators_in_contexts(
+        contexts,
+        gpus_only=gpus_only,
+        name_filter=name_filter,
+        quantity_filter=quantity_filter,
+        case_sensitive=case_sensitive,
+        realtime=realtime)
+    if not realtime:
+        return result[0], {}, {}
+    return result
 
 
 def validate_region_zone(

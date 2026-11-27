@@ -316,6 +316,18 @@ class GetAllJobIdsByNameResponse(_message.Message):
     job_ids: _containers.RepeatedScalarFieldContainer[int]
     def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
+class GetJobSpecRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: int
+    def __init__(self, job_id: _Optional[int] = ...) -> None: ...
+
+class GetJobSpecResponse(_message.Message):
+    __slots__ = ("dag_yaml",)
+    DAG_YAML_FIELD_NUMBER: _ClassVar[int]
+    dag_yaml: str
+    def __init__(self, dag_yaml: _Optional[str] = ...) -> None: ...
+
 class CancelJobsRequest(_message.Message):
     __slots__ = ("current_workspace", "user_hash", "all_users", "job_ids", "job_name", "pool_name", "graceful", "graceful_timeout")
     CURRENT_WORKSPACE_FIELD_NUMBER: _ClassVar[int]

@@ -701,6 +701,20 @@ class JobsLaunchBody(RequestBody):
         return kwargs
 
 
+class JobsRestartBody(RequestBody):
+    """The request body for the jobs restart endpoint."""
+    # Exactly one of job_id and job_name names the job to restart.
+    job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    name: Optional[str] = None
+    pool: Optional[str] = None
+    # Resources.copy() kwargs, with `cloud` as a string.
+    resources_override: Optional[Dict[str, Any]] = None
+    env_overrides: Optional[List[Tuple[str, str]]] = None
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None
+    num_nodes: Optional[int] = None
+
+
 class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False

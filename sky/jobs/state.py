@@ -798,7 +798,8 @@ def set_job_info_without_job_id(
         parent_job_id: Optional[int] = None,
         parent_task_id: Optional[int] = None,
         root_job_id: Optional[int] = None,
-        dynamic_task_index: Optional[int] = None) -> int:
+        dynamic_task_index: Optional[int] = None,
+        submission_request_id: Optional[str] = None) -> int:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -830,6 +831,7 @@ def set_job_info_without_job_id(
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id,
             dynamic_task_index=dynamic_task_index,
+            submission_request_id=submission_request_id,
         )
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -2921,6 +2923,16 @@ def set_api_access_token_id(job_id: int, token_id: str) -> None:
             })
         session.execute(upsert_stmt)
         session.commit()
+
+
+@db_retries.retry
+def get_submission_request_id(job_id: int) -> Optional[str]:
+    """The id of the request that created the job, if a launch request did."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        return session.execute(
+            sqlalchemy.select(job_info_table.c.submission_request_id).where(
+                job_info_table.c.spot_job_id == job_id)).scalar()
 
 
 @db_retries.retry

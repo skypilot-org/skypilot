@@ -3249,6 +3249,13 @@ class SkyletClient:
     ) -> 'managed_jobsv1_pb2.CancelJobsResponse':
         return self._managed_jobs_stub.CancelJobs(request, timeout=timeout)
 
+    def get_managed_job_spec(
+        self,
+        request: 'managed_jobsv1_pb2.GetJobSpecRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetJobSpecResponse':
+        return self._managed_jobs_stub.GetJobSpec(request, timeout=timeout)
+
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):

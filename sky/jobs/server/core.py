@@ -6,6 +6,7 @@ import inspect
 import ipaddress
 import os
 import pathlib
+import re
 import shlex
 import sys
 import tempfile
@@ -37,6 +38,7 @@ from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import file_content_utils
 from sky.jobs import runner as managed_job_runner
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -57,6 +59,8 @@ from sky.utils import context as context_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import infra_utils
+from sky.utils import message_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -580,6 +584,8 @@ def _maybe_submit_job_locally(
         pool_hash = serve_state.get_service_hash(pool)
         if pool_hash is None:  # Taken down since _launch checked it.
             _raise_pool_refused(pool, False, None)
+    submission_request_id = (common_utils.get_current_request_id()
+                             if common_utils.is_in_request_context() else None)
     for _ in range(num_jobs):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
@@ -618,7 +624,8 @@ def _maybe_submit_job_locally(
                 parent_job_id=parent_job_id,
                 parent_task_id=parent_task_id,
                 root_job_id=root_job_id,
-                dynamic_task_index=dynamic_task_index))
+                dynamic_task_index=dynamic_task_index,
+                submission_request_id=submission_request_id))
         if depends_on:
             managed_job_state.set_job_dependencies(consolidation_mode_job_id,
                                                    depends_on)
@@ -2104,6 +2111,329 @@ def queue_v2(
     # A LIST payload comes from a controller that filters nothing itself, so
     # it carries no option list either; the caller falls back to its rows.
     return filtered_jobs, total, status_counts, total_no_filter, infra_options
+
+
+# Matches a generated restart suffix, e.g. the '-rerun-1a2b3c' in
+# 'train-rerun-1a2b3c', so restarting a restart does not stack suffixes.
+_RERUN_SUFFIX_RE = re.compile(r'-rerun-[0-9a-f]{6}$')
+
+
+def _generate_rerun_name(original_name: str) -> str:
+    """Returns '<original-name>-rerun-<random hex>' for a restarted job.
+
+    The random suffix keeps concurrent restarts of the same job from picking
+    the same name, so outputs keyed on the job name never collide.
+    """
+    base = _RERUN_SUFFIX_RE.sub('', original_name)
+    return f'{base}-rerun-{uuid.uuid4().hex[:6]}'
+
+
+def _resolve_job_to_restart(
+        job_id: Optional[int],
+        job_name: Optional[str]) -> List[responses.ManagedJobRecord]:
+    """Returns the task records of the single job named by id or name."""
+    # Metadata only: the job's spec, which holds its secrets, is read
+    # separately by _get_job_spec() and never goes through the queue.
+    fields = [
+        'job_id', 'task_id', 'job_name', 'status', 'pool', 'workspace',
+        'user_hash'
+    ]
+    if job_id is not None:
+        # All users: the caller may restart a job they can see but did not
+        # submit (the dashboard lists every user's jobs). Workspace access is
+        # still enforced by the queue. refresh=True starts a stopped jobs
+        # controller, as `sky jobs launch` does.
+        records, _, _, _, _ = queue_v2_api(refresh=True,
+                                           all_users=True,
+                                           job_ids=[job_id],
+                                           fields=fields)
+        if not records:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Managed job {job_id} not found.')
+        return records
+    assert job_name is not None
+    # By name, only the caller's own jobs: another user's job of the same
+    # name must not be picked, nor make the name ambiguous.
+    records, _, _, _, _ = queue_v2_api(refresh=True,
+                                       all_users=False,
+                                       name_match=job_name,
+                                       fields=fields)
+    # name_match is a substring match; restart needs the exact name.
+    records = [r for r in records if r.job_name == job_name]
+    job_ids = sorted({r.job_id for r in records if r.job_id is not None})
+    if not job_ids:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Managed job {job_name!r} not found.')
+    if len(job_ids) > 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Multiple managed jobs are named {job_name!r} (IDs: '
+                f'{", ".join(map(str, job_ids))}). Restart one by ID instead.')
+    return [r for r in records if r.job_id == job_ids[0]]
+
+
+def _get_job_spec(job_id: int) -> Optional[str]:
+    """Returns the DAG YAML a managed job was submitted with, or None.
+
+    The spec holds the job's secrets, so it is read here, for one job, and
+    never exposed through the queue. The caller must already have resolved
+    the job through the queue, which enforces workspace access.
+    """
+    if managed_job_utils.is_consolidation_mode():
+        return file_content_utils.get_job_dag_content(job_id)
+
+    # The controller is up: _resolve_job_to_restart() started it if needed.
+    handle = _maybe_restart_controller(refresh=True,
+                                       stopped_message='',
+                                       spinner_message='Reading job spec')
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_managed_job_spec(
+                        managed_jobsv1_pb2.GetJobSpecRequest(job_id=job_id)))
+            return (response.dag_yaml
+                    if response.HasField('dag_yaml') else None)
+        except exceptions.SkyletMethodNotImplementedError:
+            # A controller older than this server has no GetJobSpec yet; it
+            # picks up new skylet code on its next launch. Read the spec with
+            # generated code instead.
+            pass
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    code = managed_job_utils.ManagedJobCodeGen.get_job_spec(job_id)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False,
+                                                     separate_stderr=True)
+    if returncode != 0:
+        logger.debug(f'Failed to read the spec of managed job {job_id}: '
+                     f'{stderr}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'The jobs controller runs a SkyPilot version that cannot read '
+                f'the spec of managed job {job_id}. It is upgraded on the next '
+                '`sky jobs launch`; retry the restart after that.')
+    return message_utils.decode_payload(stdout)
+
+
+def _assert_restartable(dag: 'sky.Dag', job_id: int) -> None:
+    """Rejects jobs whose local files can no longer be re-mounted.
+
+    A restart re-submits the compiled DAG. A local workdir or local
+    file_mounts were copied for that one run, and the copy is removed when
+    the job finishes, so the DAG points at files that are gone:
+
+    - Uploaded to cloud storage (a temporary bucket, or a per-run path under
+      `jobs.bucket`): a non-persistent storage mount.
+    - Staged on a separate jobs controller when no storage cloud is enabled
+      (two-hop): a file mount from a controller path.
+    - Kept on the API server in consolidation mode: a local workdir or file
+      mount from the uploaded blob, which is reclaimed once the job is done.
+
+    Jobs that use a git workdir, cloud bucket file mounts or persistent
+    storage restart cleanly.
+    """
+    for task in dag.tasks:
+        staged = []
+        if isinstance(task.workdir, str):
+            staged.append('the workdir')
+        staged += [
+            repr(dst)
+            for dst, src in (task.file_mounts or {}).items()
+            if not data_utils.is_cloud_store_url(src)
+        ]
+        staged += [
+            repr(dst)
+            for dst, storage in (task.storage_mounts or {}).items()
+            if storage is not None and not storage.persistent
+        ]
+        if staged:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'Managed job {job_id} cannot be restarted: its local '
+                    f'files (mounted at {", ".join(staged)}) were copied for '
+                    'that run only and removed when it finished. Restart '
+                    'works for jobs that use a git workdir, cloud bucket file '
+                    'mounts or persistent storage. Launch the job again from '
+                    'its source directory with `sky jobs launch`.')
+
+
+def _resources_override_from_wire(
+        resources_override: Dict[str, Any]) -> Dict[str, Any]:
+    """Turns a JSON resources override back into Resources.copy() kwargs."""
+    override = dict(resources_override)
+    if override.get('cloud') is not None:
+        override['cloud'] = registry.CLOUD_REGISTRY.from_str(override['cloud'])
+    if override.get('ports') is not None:
+        override['ports'] = tuple(override['ports'])
+    return override
+
+
+@usage_lib.entrypoint
+def restart(
+    job_id: Optional[int] = None,
+    job_name: Optional[str] = None,
+    name: Optional[str] = None,
+    pool: Optional[str] = None,
+    resources_override: Optional[Dict[str, Any]] = None,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+    num_nodes: Optional[int] = None,
+) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Launches a finished managed job again, as a new managed job.
+
+    Behaves like running `sky jobs launch` again with the job's YAML and
+    flags: the stored spec goes through launch() as a new job, with the same
+    admin policy, permission checks and validation. A git workdir is cloned
+    at the ref the job named (a branch resolves to its current head, as on
+    a new launch). Overrides are applied on top, as for `sky jobs launch`.
+    Jobs whose local workdir or file mounts were uploaded for that run
+    cannot be restarted: the upload is removed when the job finishes.
+
+    Like `sky jobs cancel`, it needs write access to the workspace the job
+    ran in, also when the new job goes to another workspace. A job with
+    secrets can only be restarted by its owner. Envs are not secret: they
+    are carried over for whoever restarts the job, so put credentials in
+    secrets. A member of a job group is restarted on its own, as a
+    standalone job.
+
+    Args:
+        job_id: ID of the managed job to restart. Exactly one of job_id and
+            job_name must be set.
+        job_name: Name of the managed job to restart; must match one job.
+        name: Name of the new job. Defaults to
+            ``<original-name>-rerun-<random suffix>``.
+        pool: Pool to submit to. Defaults to the original job's pool.
+        resources_override: Resource fields to override, as accepted by
+            ``Resources.copy()`` (with ``cloud`` as a string). Single-task
+            jobs only.
+        env_overrides: Environment variables to set on every task.
+        secrets_overrides: Secrets to set on every task.
+        num_nodes: Number of nodes for the task. Single-task jobs only.
+
+    Returns:
+        Same as :func:`launch`: the new job ID(s) and the controller handle.
+
+    Raises:
+        ValueError: the job does not exist, is ambiguous, is not finished, or
+            an override does not apply to it.
+        sky.exceptions.NotSupportedError: the job cannot be restarted.
+    """
+    if (job_id is None) == (job_name is None):
+        raise ValueError('Specify exactly one of job_id and job_name.')
+    records = _resolve_job_to_restart(job_id, job_name)
+    job_id = records[0].job_id
+    assert job_id is not None
+
+    # Every task must be done: restarting a job that still runs would leave
+    # two copies running side by side.
+    for record in records:
+        status = record.status
+        if isinstance(status, str):
+            status = managed_job_state.ManagedJobStatus(status)
+        if status is None or not status.is_terminal():
+            status_str = status.value if status is not None else 'unknown'
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Managed job {job_id} is still {status_str}. Only '
+                    'finished jobs can be restarted; cancel it first with '
+                    f'`sky jobs cancel {job_id}`.')
+
+    # Acting on a job needs write access to the workspace it ran in, as
+    # `sky jobs cancel` does; seeing it (read access) is not enough. This holds
+    # with `--workspace` too: the executor only authorized the workspace the
+    # new job goes to. Checked before the spec, with its envs, is read.
+    original_workspace = (records[0].workspace or
+                          skylet_constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if original_workspace != skypilot_config.get_active_workspace():
+        label = workspaces_core.workspace_label_for_caller(original_workspace)
+        try:
+            workspaces_core.check_workspace_permission(
+                common_utils.get_current_user(),
+                original_workspace,
+                action=workspace_constants.WORKSPACE_ACTION_WRITE,
+                workspace_ref=label)
+        except exceptions.PermissionDeniedError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.PermissionDeniedError(
+                    f'Managed job {job_id} ran in workspace {label!r}. '
+                    'Restarting it needs write access to that workspace, as '
+                    f'cancelling it does: {e}') from e
+
+    dag_yaml = _get_job_spec(job_id)
+    if not dag_yaml:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'The spec of managed job {job_id} is not available, so it '
+                'cannot be restarted. Launch it again with `sky jobs launch`.')
+
+    dag = dag_utils.load_dag_from_yaml_str(dag_yaml)
+    _assert_restartable(dag, job_id)
+
+    for task_ in dag.tasks:
+        # The original launch minted an API token for the job and revoked it
+        # when the job finished; drop it so launch() mints a fresh one.
+        task_._secrets.pop(  # pylint: disable=protected-access
+            skylet_constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR, None)
+    # The stored secrets belong to the job's owner. Seeing a job (a viewer of
+    # its workspace) must not let anyone else run with them, in whichever
+    # workspace the new job goes. Jobs without secrets carry nothing a viewer
+    # cannot already read from the job's YAML.
+    owner = records[0].user_hash
+    if (owner != common_utils.get_user_hash() and
+            any(task_.secrets for task_ in dag.tasks)):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.PermissionDeniedError(
+                f'Managed job {job_id} has secrets that belong to its owner, '
+                'so only its owner can restart it. Launch it yourself with '
+                '`sky jobs launch` and your own secrets instead.')
+
+    for task_ in dag.tasks:
+        task_.update_envs(env_overrides or [])
+        task_.update_secrets(secrets_overrides or [])
+
+    if resources_override or num_nodes is not None:
+        if len(dag.tasks) > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Managed job {job_id} has {len(dag.tasks)} tasks; '
+                    'resource and --num-nodes overrides only apply to '
+                    'single-task jobs. Only --env and --secret can be '
+                    'overridden.')
+        task_ = dag.tasks[0]
+        if resources_override:
+            task_.set_resources_override(
+                _resources_override_from_wire(resources_override))
+        if num_nodes is not None:
+            task_.num_nodes = num_nodes
+
+    original_name = records[0].job_name or dag.name or f'job-{job_id}'
+    if name is None:
+        name = _generate_rerun_name(original_name)
+    # launch() only fills in a missing DAG name; it does not rename.
+    dag.name = name
+    if len(dag.tasks) == 1:
+        dag.tasks[0].name = name
+    if pool is None:
+        pool = records[0].pool
+
+    # The new job runs where the original ran unless the request named a
+    # workspace (the executor authorized that one; the original workspace was
+    # checked above).
+    workspace_ctx: Any = contextlib.nullcontext()
+    if (original_workspace != skypilot_config.get_active_workspace() and
+            not _client_set_workspace()):
+        workspace_ctx = skypilot_config.local_active_workspace_ctx(
+            original_workspace)
+
+    logger.info(f'Restarting managed job {job_id} ({original_name!r}) as '
+                f'{name!r}.')
+    with workspace_ctx:
+        return launch(dag, name=name, pool=pool)
 
 
 @usage_lib.entrypoint
