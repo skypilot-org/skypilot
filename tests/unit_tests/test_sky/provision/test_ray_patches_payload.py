@@ -7,6 +7,7 @@ whose patches target an unrelated Ray version.
 """
 import base64
 import gzip
+import importlib.metadata
 import io
 import os
 import re
@@ -20,6 +21,7 @@ import pytest
 
 from sky.provision import instance_setup
 from sky.skylet import constants
+from sky.skylet import ray_patches
 from sky.skylet.ray_patches import apply_patches
 
 RAY_PATCHES_DIR = os.path.dirname(os.path.abspath(apply_patches.__file__))
@@ -232,6 +234,22 @@ def test_the_applier_patches_every_registered_file(monkeypatch):
     assert sorted(name for _, name, _ in seen) == sorted(
         patch_file for _, patch_file in apply_patches._PATCHES)  # pylint: disable=protected-access
     assert {version for _, _, version in seen} == {'9.9.9'}
+
+
+@pytest.mark.parametrize('installed, expected', [
+    (constants.SKY_REMOTE_RAY_VERSION, [constants.SKY_REMOTE_RAY_VERSION]),
+    ('2.9.3', []),
+])
+def test_patch_skips_a_ray_it_was_not_generated_for(monkeypatch, installed,
+                                                    expected):
+    """Older API servers run patch() from a newer PyPI release."""
+    applied = []
+    monkeypatch.setattr(importlib.metadata, 'version', lambda name: installed)
+    monkeypatch.setattr(apply_patches, 'apply_patches', applied.append)
+
+    ray_patches.patch()
+
+    assert applied == expected
 
 
 def test_the_applier_propagates_a_failure(monkeypatch):

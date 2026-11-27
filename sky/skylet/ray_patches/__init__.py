@@ -26,6 +26,8 @@ Example workflow, against the Ray this SkyPilot pins:
 
   >> # Inspect command_runner.py.patch, then add it to apply_patches._PATCHES.
 """
+import importlib.metadata
+
 from sky.skylet import constants
 from sky.skylet.ray_patches import apply_patches
 
@@ -34,4 +36,12 @@ def patch() -> None:
     # Patch the buggy ray files. This should only be called from an isolated
     # python process, because once imported the python module would persist in
     # the memory.
+    # API servers older than 0.14.0 call this from the newest SkyPilot on PyPI
+    # after installing their own pinned Ray, so the two can differ. Patching a
+    # different Ray corrupts it, and failing here takes the pod down.
+    installed = importlib.metadata.version('ray')
+    if installed != constants.SKY_REMOTE_RAY_VERSION:
+        print(f'Ray {installed} is installed, but SkyPilot\'s patches are for '
+              f'Ray {constants.SKY_REMOTE_RAY_VERSION}; skipping them.')
+        return
     apply_patches.apply_patches(constants.SKY_REMOTE_RAY_VERSION)
