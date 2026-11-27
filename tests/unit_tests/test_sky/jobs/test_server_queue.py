@@ -439,6 +439,21 @@ class TestQueue:
         assert len(filtered) == 0
         assert total_no_filter == 0
 
+    def test_queue_no_match_without_counts(self, monkeypatch):
+        self._patch_backend_and_utils(monkeypatch, [_make_job(1)])
+        monkeypatch.setattr(jobs_core.global_user_state,
+                            'get_user_by_name_match', lambda pattern: [])
+        assert jobs_core.queue_v2(refresh=False,
+                                  all_users=True,
+                                  user_match='nobody',
+                                  include_counts=False) == ([], None, None,
+                                                            None, None)
+        assert jobs_core.queue_v2(refresh=False,
+                                  all_users=True,
+                                  workspace_match='no-such-workspace',
+                                  include_counts=False) == ([], None, None,
+                                                            None, None)
+
     def test_queue_pagination(self, monkeypatch):
         jobs = [_make_job(i, workspace='ws') for i in range(1, 31)]
         self._patch_backend_and_utils(monkeypatch, jobs)

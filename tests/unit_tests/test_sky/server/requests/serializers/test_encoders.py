@@ -4,6 +4,7 @@ import pickle
 
 from sky import resources as resources_lib
 from sky.backends import cloud_vm_ray_backend
+from sky.jobs import state as managed_job_state
 from sky.schemas.api import responses
 from sky.server.requests.serializers import encoders
 from sky.utils import status_lib
@@ -134,10 +135,10 @@ class TestEncodeJobsQueue:
 
     def test_encode_jobs_queue_v2_without_counts(self):
         """A tuple whose counts were skipped still encodes as the dict."""
-        from sky.jobs import state as managed_jobs
-
         job = responses.ManagedJobRecord(
-            job_id=1, task_id=0, status=managed_jobs.ManagedJobStatus.RUNNING)
+            job_id=1,
+            task_id=0,
+            status=managed_job_state.ManagedJobStatus.RUNNING)
         result = encoders.encode_jobs_queue_v2(([job], None, None, None, None))
         assert result['jobs'][0]['job_id'] == 1
         assert [

@@ -1912,6 +1912,11 @@ def queue_v2(
                                            'managed jobs')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
+    no_jobs: Tuple[List[Dict[str, Any]], Optional[int],
+                   Optional[Dict[str, int]], Optional[int],
+                   Optional[List[str]]] = (([], 0, {}, 0,
+                                            []) if include_counts else
+                                           ([], None, None, None, None))
 
     user_hashes: Optional[List[Optional[str]]] = None
     show_jobs_without_user_hash = False
@@ -1924,7 +1929,7 @@ def queue_v2(
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
-            return [], 0, {}, 0, []
+            return no_jobs
         user_hashes = [user.id for user in users]
 
     # Visibility, not usability: read-only workspaces' jobs must be listed. See
@@ -1941,7 +1946,7 @@ def queue_v2(
         # Controllers older than MANAGED_JOBS_VERSION 12 read an empty list as
         # no workspace filter at all.
         if not accessible_workspaces:
-            return [], 0, {}, 0, []
+            return no_jobs
 
     if handle.is_grpc_enabled_with_flag:
         try:
