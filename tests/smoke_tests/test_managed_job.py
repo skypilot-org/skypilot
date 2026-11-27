@@ -429,9 +429,11 @@ def test_managed_jobs_restart(generic_cloud: str):
 
     # A shared remote API server's controller serves other tests too.
     wait_controller_stopped = 'echo "Shared API server: controller left up"'
-    if generic_cloud in ('kubernetes', 'runpod'):
+    controller_cloud = (smoke_tests_utils.pytest_controller_cloud() or
+                        generic_cloud).lower()
+    if controller_cloud in ('kubernetes', 'runpod'):
         wait_controller_stopped = (
-            f'echo "Controller on {generic_cloud} does not autostop"')
+            f'echo "Controller on {controller_cloud} does not autostop"')
     elif not smoke_tests_utils.is_non_docker_remote_api_server():
         wait_controller_stopped = (
             'c=$(sky status -u | awk \'/^sky-jobs-controller-/ '
