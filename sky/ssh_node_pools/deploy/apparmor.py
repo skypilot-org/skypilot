@@ -136,8 +136,14 @@ def install_profile_cmd(askpass_block: str) -> str:
                 echo {SKIPPED_MARKER}
                 exit 0
             fi
-            sudo -A cp "$tmp" {PROFILE_PATH} &&
+            # Copy within the destination directory, then rename into place:
+            # the rename is atomic on the same filesystem, so a failed or
+            # truncated copy can never leave a half-written profile behind
+            # (a later run would treat that as a custom profile and never
+            # repair it).
+            sudo -A cp "$tmp" {PROFILE_PATH}.skypilot-new &&
             sudo -A rm -f "$tmp" &&
+            sudo -A mv -f {PROFILE_PATH}.skypilot-new {PROFILE_PATH} &&
             sudo -A apparmor_parser -r {PROFILE_PATH} &&
             echo {INSTALLED_MARKER}
         fi

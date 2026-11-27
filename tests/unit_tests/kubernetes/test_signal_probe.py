@@ -7,6 +7,9 @@ that a denied probe fails the launch with a message that names the fix, that
 a failed probe is tolerated so the check cannot break healthy clusters, and
 that the two message variants point at the right fix for their context.
 """
+import os
+import subprocess
+import tempfile
 from unittest import mock
 
 import pytest
@@ -198,3 +201,70 @@ def test_install_command_matches_the_signal_rule_not_ptrace():
         apparmor.STACKED_PEER_SIGNAL_RULE + ',', '', 1)
     assert apparmor.STACKED_PEER_SIGNAL_RULE not in without_signal
     assert '//&unconfined' in without_signal  # the ptrace rule is still there
+
+
+def test_install_command_branch_decisions():
+    """Runs the installer's branch logic for each kind of existing profile.
+
+    Guards (sysctl, parser lookup) read host state and would no-op the
+    command in CI, so the test strips them and executes the body with
+    stubbed ``sudo`` and ``apparmor_parser``. Pins the four outcomes:
+    install, reload-ours, leave an admin fix alone, warn on custom."""
+    cmd = apparmor.install_profile_cmd('')
+    # Body after the guard `if ...; then`, before its closing `fi`.
+    body = cmd.split('then', 1)[1].rsplit('fi', 1)[0]
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, apparmor.PROFILE_NAME)
+        # sudo shim: drop the -A and exec the rest.
+        with open(os.path.join(d, 'sudo'), 'w') as f:
+            f.write('#!/bin/bash\n[ "$1" = "-A" ] && shift\nexec "$@"\n')
+        os.chmod(os.path.join(d, 'sudo'), 0o755)
+        # Parser shim records the reload in a marker file (stdout is what
+        # the assertions compare against).
+        with open(os.path.join(d, 'apparmor_parser'), 'w') as f:
+            f.write(f'#!/bin/bash\ntouch {d}/parser-ran\n')
+        os.chmod(os.path.join(d, 'apparmor_parser'), 0o755)
+        parser_marker = os.path.join(d, 'parser-ran')
+        env = dict(os.environ, PATH=f'{d}:/usr/bin:/bin')
+
+        def run(existing):
+            if existing is not None:
+                with open(path, 'w') as f:
+                    f.write(existing)
+            for stale in (path + '.skypilot-new', parser_marker):
+                if os.path.exists(stale):
+                    os.unlink(stale)
+            r = subprocess.run(
+                ['bash', '-c',
+                 body.replace(apparmor.PROFILE_PATH, path)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True)
+            return (r.stdout.strip(), os.path.exists(path + '.skypilot-new'),
+                    os.path.exists(parser_marker))
+
+        out, leftover, parsed = run(None)
+        assert (apparmor.INSTALLED_MARKER, False,
+                True) == (out, leftover,
+                          parsed), 'missing profile must install and load'
+        with open(path) as f:
+            assert f.read() == apparmor.PROFILE
+
+        out, _, parsed = run(apparmor.PROFILE)
+        assert (apparmor.INSTALLED_MARKER in out,
+                True) == (True, parsed), ('identical profile must reload')
+
+        admin_fixed = apparmor.PROFILE.replace(
+            '# allow processes', f'  {apparmor.STACKED_PEER_SIGNAL_RULE},\n'
+            '  # allow processes')
+        out, _, parsed = run(admin_fixed)
+        assert (out, parsed) == ('', False), (
+            'admin-fixed profile must be left alone silently')
+
+        ptrace_only = apparmor.PROFILE.replace(
+            apparmor.STACKED_PEER_SIGNAL_RULE + ',', '', 1)
+        out, _, parsed = run(ptrace_only)
+        assert (apparmor.SKIPPED_MARKER in out, False) == (True, parsed), (
+            'profile without the signal rule must be skipped with a warning')
