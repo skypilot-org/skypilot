@@ -14,12 +14,16 @@ import zipfile
 
 import fastapi
 from fastapi import testclient
+import filelock
 import prometheus_client as prom
 import pytest
+import sqlalchemy
+from sqlalchemy.ext import asyncio as sqlalchemy_asyncio
 import uvicorn
 
 from sky import core
 from sky import models
+from sky.jobs import state as managed_job_state
 from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -803,6 +807,73 @@ async def test_cleanup_blobs_blob_of_live_service_not_deleted(tmp_path):
             await server.cleanup_unreferenced_file_mounts()
 
     assert blob_path.exists(), 'Blob of a live service should not be deleted'
+
+
+@pytest.fixture
+def _jobs_db(tmp_path, monkeypatch):
+    """An isolated SQLite managed-jobs DB (as in jobs/test_state.py)."""
+    db_path = tmp_path / 'managed_jobs_testing.db'
+    engine = sqlalchemy.create_engine(f'sqlite:///{db_path}')
+    async_engine = sqlalchemy_asyncio.create_async_engine(
+        f'sqlite+aiosqlite:///{db_path}', connect_args={'timeout': 30})
+
+    @contextlib.contextmanager
+    def _tmp_db_lock(_section: str):
+        with filelock.FileLock(str(tmp_path / f'.{_section}.lock'), timeout=10):
+            yield
+
+    monkeypatch.setattr(managed_job_state.migration_utils, 'db_lock',
+                        _tmp_db_lock)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine', engine)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine_async',
+                        async_engine)
+    managed_job_state.create_table(engine)
+    yield engine
+
+
+def _add_pending_job(blob_id):
+    job_id = managed_job_state.set_job_info_without_job_id(
+        name='j',
+        workspace='default',
+        entrypoint='sky jobs launch',
+        pool=None,
+        pool_hash=None,
+        user_hash='userA',
+        file_mounts_blob_id=blob_id)
+    managed_job_state.set_pending(job_id, 0, 'task', 'r', '{}', None,
+                                  time.time())
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_live_job_pins_only_the_blob_it_recorded(
+        tmp_path, _jobs_db):
+    """A live job whose sources were staged to a bucket records no blob, so its
+    upload is reclaimed after the grace period. A live job that still reads
+    its blob keeps it."""
+    clients_dir = tmp_path / 'clients'
+    blobs_dir = _make_blobs_dir(clients_dir, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    staged_blob_id = 'c' * 64
+    read_blob = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+    staged_blob = _create_blob(blobs_dir, staged_blob_id, old_mtime)
+    _add_pending_job(_BLOB_HEX)
+    _add_pending_job(None)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           clients_dir), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('sky.serve.serve_state.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert read_blob.exists(), 'Blob a live job reads should not be deleted'
+    assert not staged_blob.exists(), (
+        'Blob of a job staged to a bucket should be deleted')
 
 
 # --- Tests for _resolve_dynamic_route ---

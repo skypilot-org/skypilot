@@ -48,6 +48,7 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server import common as server_common
 from sky.server import plugin_hooks
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
@@ -1343,6 +1344,13 @@ def _launch(
         submitted_dag = copy.deepcopy(dag)
         submitted_dag.pool = pool
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
+    # The job row's blob id keeps the blob from the API server's GC for the
+    # job's whole life. Once staging has rewritten every source to a cloud URL,
+    # recovery reads the bucket and never the blob, so do not record it.
+    recorded_file_mounts_blob_id = file_mounts_blob_id
+    if (file_mounts_blob_id is not None and
+            not server_common.dag_requires_local_file_mounts(dag)):
+        recorded_file_mounts_blob_id = None
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     controller_name = controller.value.cluster_name
     prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
@@ -1355,14 +1363,15 @@ def _launch(
     # need to serialize the pool name in the dag. The dag object will be
     # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
     dag.pool = pool
-    job_ids = _maybe_submit_job_locally(prefix,
-                                        dag,
-                                        num_jobs,
-                                        file_mounts_blob_id=file_mounts_blob_id,
-                                        parent_job_id=parent_job_id,
-                                        parent_task_id=parent_task_id,
-                                        root_job_id=root_job_id,
-                                        depends_on=depends_on)
+    job_ids = _maybe_submit_job_locally(
+        prefix,
+        dag,
+        num_jobs,
+        file_mounts_blob_id=recorded_file_mounts_blob_id,
+        parent_job_id=parent_job_id,
+        parent_task_id=parent_task_id,
+        root_job_id=root_job_id,
+        depends_on=depends_on)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)
