@@ -18,6 +18,15 @@ from sky.utils import yaml_utils
 logger = sky_logging.init_logger(__name__)
 
 
+def _lowercase_or_none(value: Optional[str]) -> Optional[str]:
+    """Normalizes a case-insensitive enum value to its lowercase form.
+
+    The schema accepts `load_balancing_policy` and `spot_placer` in any case,
+    but the policy and placer registries are keyed by lowercase names.
+    """
+    return None if value is None else value.lower()
+
+
 class SkyServiceSpec:
     """SkyServe service specification."""
 
@@ -360,14 +369,14 @@ class SkyServiceSpec:
                     'base_ondemand_fallback_replicas', None)
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
-            service_config['spot_placer'] = policy_section.get(
-                'spot_placer', None)
+            service_config['spot_placer'] = _lowercase_or_none(
+                policy_section.get('spot_placer', None))
 
         # Set queue_length_threshold from pool config
         service_config['queue_length_threshold'] = queue_length_threshold
 
-        service_config['load_balancing_policy'] = config.get(
-            'load_balancing_policy', None)
+        service_config['load_balancing_policy'] = _lowercase_or_none(
+            config.get('load_balancing_policy', None))
 
         # Validate instance-aware settings
         target_qps_per_replica = service_config['target_qps_per_replica']

@@ -5,6 +5,7 @@ import pytest
 
 from sky.serve import constants as serve_constants
 from sky.serve import service_spec
+from sky.serve import spot_placer
 
 
 class TestPoolConfiguration:
@@ -214,6 +215,7 @@ class TestReadinessProbeConfiguration:
 
 
 class TestLoadBalancerConfiguration:
+    """Test load balancer configuration in SkyServiceSpec."""
 
     def test_default_load_balancer_settings(self):
         spec = service_spec.SkyServiceSpec.from_yaml_config({})
@@ -266,3 +268,66 @@ class TestLoadBalancerConfiguration:
         assert (config['readiness_probe']
                 ['consecutive_failure_threshold_timeout'] == 45)
         assert config['load_balancer']['stream_timeout_seconds'] == 240
+
+
+class TestPolicyNameCaseNormalization:
+    """`load_balancing_policy` and `spot_placer` are validated by the schema
+    without regard to case, so the spec must normalize them before they are
+    looked up in the (lowercase-keyed) policy and placer registries."""
+
+    @staticmethod
+    def _config(**overrides):
+        config = {
+            'readiness_probe': '/',
+            'replica_policy': {
+                'min_replicas': 1,
+                'max_replicas': 2,
+                'target_qps_per_replica': 5,
+            },
+        }
+        config.update(overrides)
+        return config
+
+    @pytest.mark.parametrize('name', ['round_robin', 'ROUND_ROBIN'])
+    def test_load_balancing_policy_name_is_case_insensitive(self, name):
+        spec = service_spec.SkyServiceSpec.from_yaml_config(
+            self._config(load_balancing_policy=name))
+        assert spec.load_balancing_policy == 'round_robin'
+
+    def test_instance_aware_policy_name_is_case_insensitive(self):
+        config = self._config(load_balancing_policy='Instance_Aware_Least_Load')
+        config['replica_policy']['target_qps_per_replica'] = {'H100': 5}
+        spec = service_spec.SkyServiceSpec.from_yaml_config(config)
+        assert spec.load_balancing_policy == 'instance_aware_least_load'
+
+    @pytest.mark.parametrize('name', ['dynamic_fallback', 'DYNAMIC_FALLBACK'])
+    def test_spot_placer_name_is_case_insensitive(self, name):
+        config = self._config()
+        config['replica_policy']['spot_placer'] = name
+        spec = service_spec.SkyServiceSpec.from_yaml_config(config)
+        assert spec.spot_placer == 'dynamic_fallback'
+        # The controller indexes the registry with this exact value.
+        assert spec.spot_placer in spot_placer.SPOT_PLACERS
+
+    def test_normalized_names_round_trip_through_yaml_config(self):
+        config = self._config(load_balancing_policy='LEAST_LOAD')
+        config['replica_policy']['spot_placer'] = 'DYNAMIC_FALLBACK'
+        spec = service_spec.SkyServiceSpec.from_yaml_config(config)
+        yaml_config = spec.to_yaml_config()
+        assert yaml_config['load_balancing_policy'] == 'least_load'
+        assert yaml_config['replica_policy']['spot_placer'] == (
+            'dynamic_fallback')
+
+    def test_unset_names_keep_their_defaults(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config(self._config())
+        assert spec.load_balancing_policy == 'least_load'
+        assert spec.spot_placer is None
+
+    def test_unknown_names_are_still_rejected(self):
+        with pytest.raises(ValueError):
+            service_spec.SkyServiceSpec.from_yaml_config(
+                self._config(load_balancing_policy='not_a_policy'))
+        config = self._config()
+        config['replica_policy']['spot_placer'] = 'not_a_placer'
+        with pytest.raises(ValueError):
+            service_spec.SkyServiceSpec.from_yaml_config(config)
