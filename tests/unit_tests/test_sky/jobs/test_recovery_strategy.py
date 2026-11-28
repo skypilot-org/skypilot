@@ -5,12 +5,14 @@ import inspect
 import pickle
 import types
 from unittest import mock
+import urllib.parse
 
 import pytest
 
 from sky import exceptions
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
+from sky.provision import common as provision_common
 from sky.skylet import constants
 
 
@@ -373,6 +375,53 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     patches.set_restarting.assert_awaited_once_with(1, 0, False)
     # Parking must NOT tear down the (partially provisioned) cluster.
     executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider_name,provider_config,label', [
+    ('gcp', {
+        'project_id': 'my-proj'
+    }, 'GCP Instances'),
+    ('aws', {
+        'region': 'us-east-1'
+    }, 'AWS Instances'),
+])
+async def test_launch_instance_links_filter_on_cluster_name_on_cloud(
+        monkeypatch, provider_name, provider_config, label):
+    """The stored instance link filters on the cluster's name on the cloud.
+
+    The provisioner tags the VMs with handle.cluster_name_on_cloud, which is
+    truncated and hashed when the job's cluster name is long. A link that
+    filters on the display name matches no VM (#11515).
+    """
+    display_name = 'alice-train-myrun-20261126-b1-16'
+    name_on_cloud = 'alice-train-myrun-20261-3s-e0d13ad7'
+    executor = _make_launch_executor()
+    executor.cluster_name = display_name
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    handle = types.SimpleNamespace(
+        cluster_name=display_name,
+        cluster_name_on_cloud=name_on_cloud,
+        cached_cluster_info=provision_common.ClusterInfo(
+            instances={},
+            head_instance_id=None,
+            provider_name=provider_name,
+            provider_config=provider_config))
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda name: handle)
+    update_links = mock.AsyncMock()
+    monkeypatch.setattr(recovery_strategy.state, 'update_links_async',
+                        update_links)
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    update_links.assert_awaited_once()
+    links = update_links.await_args.args[2]
+    url = urllib.parse.unquote(urllib.parse.unquote(links[label]))
+    assert name_on_cloud in url
+    assert display_name not in url
 
 
 @pytest.mark.asyncio

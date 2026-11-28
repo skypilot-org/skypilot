@@ -14,7 +14,7 @@ logger = sky_logging.init_logger(__name__)
 #   {subscription_id} - Azure subscription ID
 #   {resource_group} - Azure resource group
 #   {tag_key} - Tag key used to identify cluster instances
-#   {cluster_name} - Name of the cluster
+#   {cluster_name} - Name of the cluster on the cloud
 
 AWS_INSTANCES_URL = ('https://{region}.console.aws.amazon.com/ec2/v2/home'
                      '?region={region}#Instances:tag:{tag_key}={cluster_name}')
@@ -83,7 +83,10 @@ def generate_instance_links(
 
     Args:
         cluster_info: ClusterInfo object containing instance information.
-        cluster_name: Cluster name for tag-based filtering.
+        cluster_name: The cluster's name on the cloud
+            (`handle.cluster_name_on_cloud`), which is the value the
+            provisioner tags the instances with. It can differ from the
+            display name, which is truncated and hashed when it is too long.
 
     Returns:
         Dictionary mapping link labels to URLs. Empty dict if links cannot be
