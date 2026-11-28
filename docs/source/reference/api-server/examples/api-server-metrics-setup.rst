@@ -94,6 +94,50 @@ Additional lifecycle metrics:
 * ``sky_apiserver_start_time_seconds`` — Unix timestamp of the API server's
   start; ``time() - sky_apiserver_start_time_seconds`` is the server uptime.
 
+Managed job admission
+---------------------
+
+In consolidation mode, use these instant queries to see who is waiting and
+where. Select one healthy API server instance for the installation. Each
+replica exports counts from the same jobs database.
+
+.. code-block:: promql
+
+   sum by (reason, user) (sky_managed_jobs_waiting_for_controller{instance="$instance"})
+   sum by (stage, user) (sky_managed_job_tasks_launching{instance="$instance"})
+
+The first gauge counts each job in the controller queue once, regardless of
+its task count. ``dependency`` means an upstream job is unfinished.
+``batch_pool`` means a batch coordinator is waiting behind another in its pool.
+``reattachment`` means a controller needs to reclaim a job with a previously
+launched live task. ``user_limit`` means the per-user launch cap holds the job.
+``controller_claim`` is the remaining queue from which the controller claims jobs
+in priority order.
+
+The second gauge counts individual tasks on claimed jobs. ``starting`` and
+``recovering`` cover startup and recovery. ``reported_queue`` means a launch
+reports PENDING during startup or has parked with that override. ``parked``
+means the launch request paused without a queue signal. ``retry_pending``
+means the task last went pending for a retry. A task can keep its last
+reported reason until a launch slot opens and the attempt resumes.
+``unknown_pending`` includes tasks whose latest pending event has no
+recognized code or has expired. Future serial pipeline steps are excluded.
+
+Both gauges use the existing workspace and user labels. An empty stage emits
+zero with empty workspace and user labels. Check
+``sky_apiserver_metrics_collector_active{collector="ManagedJobAdmissionCollector"}``
+for snapshot freshness.
+
+For capacity, compare gauges on the same controller process (instance and
+``pid``). ``sky_managed_jobs_controller_cost_units / sky_managed_jobs_controller_max_cost_units``
+shows the share of its held-job budget in use.
+``sky_managed_jobs_controller_running_count / sky_managed_jobs_controller_hard_job_limit``
+shows the fraction of its hard job cap in use.
+``sky_managed_jobs_controller_starting_count / sky_managed_jobs_limit_launches_per_worker``
+shows launch-slot utilization. ``sky_managed_jobs_controller_launch_slot_waiters``
+counts claimed jobs currently blocked on a local slot. This count can overlap
+the task stages above.
+
 Availability tracking
 ---------------------
 

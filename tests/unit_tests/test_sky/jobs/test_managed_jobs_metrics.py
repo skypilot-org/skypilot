@@ -1,6 +1,10 @@
 """Unit tests for managed jobs Prometheus metrics."""
 from unittest.mock import patch
 
+import pytest
+import sqlalchemy
+
+from sky.jobs import state
 from sky.metrics import utils as metrics_utils
 from sky.server import metrics
 
@@ -152,3 +156,127 @@ class TestManagedJobsLimitMetrics:
         # In non-multiprocess mode we can read the labeled child directly.
         val = gauge.labels(pid='12345')._value.get()
         assert val == 8.0
+
+
+@pytest.fixture
+def admission_db(monkeypatch):
+    engine = sqlalchemy.create_engine('sqlite://')
+    state.Base.metadata.create_all(engine)
+    monkeypatch.setattr(state._db_manager, 'get_engine', lambda: engine)
+    with engine.connect() as conn:
+        yield conn
+    engine.dispose()
+
+
+def _job(conn, job_id, schedule_state, **kwargs):
+    conn.execute(state.job_info_table.insert().values(
+        spot_job_id=job_id, schedule_state=schedule_state, **kwargs))
+
+
+def _task(conn, job_id, task_id, status, **kwargs):
+    conn.execute(state.spot_table.insert().values(spot_job_id=job_id,
+                                                  task_id=task_id,
+                                                  status=status,
+                                                  **kwargs))
+
+
+def _pending_event(conn, job_id, task_id, code):
+    conn.execute(state.job_events_table.insert().values(spot_job_id=job_id,
+                                                        task_id=task_id,
+                                                        new_status='PENDING',
+                                                        code=code))
+
+
+def test_controller_wait_counts(admission_db):
+    db = admission_db
+    _job(db, 1, 'LAUNCHING', user_hash='a')
+    _task(db, 1, 0, 'STARTING', submitted_at=1)
+    _job(db, 2, 'WAITING', user_hash='a')
+    _task(db, 2, 0, 'PENDING')
+    _task(db, 2, 1, 'PENDING')  # One claim for both tasks.
+    _job(db, 3, 'WAITING', user_hash='a')
+    _task(db, 3, 0, 'RUNNING', submitted_at=1)  # Controller restart.
+    _job(db, 4, 'WAITING', user_hash='a')
+    _job(db, 5, 'DONE', user_hash='b')
+    _job(db, 6, 'WAITING', user_hash='b')
+    for child, parent in [(4, 1), (4, 2), (6, 5)]:
+        db.execute(state.job_dependencies_table.insert().values(
+            spot_job_id=child, depends_on_job_id=parent))
+    _job(db, 7, 'INACTIVE')
+    _job(db, 8, None)
+    _job(db, 9, 'ALIVE', pool='p', is_batch=True)
+    _job(db, 10, 'WAITING', pool='p', is_batch=True, user_hash='b')
+    db.commit()
+
+    assert set(state.get_controller_wait_counts(1)) == {
+        (None, 'b', 'batch_pool', 1), (None, 'a', 'dependency', 1),
+        (None, 'a', 'user_limit', 1), (None, 'a', 'reattachment', 1),
+        (None, 'b', 'controller_claim', 1)
+    }
+    assert (None, 'a', 'controller_claim',
+            1) in (state.get_controller_wait_counts(None))
+
+
+def test_launch_stages_are_per_active_task(admission_db):
+    db = admission_db
+    _job(db, 1, 'LAUNCHING', execution='parallel')
+    _task(db, 1, 0, 'STARTING', status_override='PENDING')
+    _task(db, 1, 1, 'PENDING', submitted_at=1, status_override='PENDING')
+    _pending_event(db, 1, 1, 'launch_parked')
+    _task(db, 1, 2, 'PENDING', submitted_at=1, status_override='PENDING')
+    _pending_event(db, 1, 2, 'launch_parked')
+    _pending_event(db, 1, 2, 'launch_retry:no_resources')
+    _task(db, 1, 3, 'PENDING', submitted_at=1)
+    _pending_event(db, 1, 3, 'launch_parked')  # A lock can park a launch.
+    _task(db, 1, 4, 'PENDING', submitted_at=1)
+    _pending_event(db, 1, 4, 'launch_retry:old_attempt')
+    _pending_event(db, 1, 4, None)  # Latest reason unavailable.
+    _task(db, 1, 5, 'PENDING')  # Parallel group member can start now.
+    _task(db, 1, 6, 'RUNNING', status_override='PENDING')
+    _task(db, 1, 7, 'CANCELLED', status_override='PENDING')
+    _job(db, 2, 'ALIVE')
+    _task(db, 2, 0, 'RECOVERING', status_override='PENDING')
+    _task(db, 2, 1, 'PENDING')  # Future pipeline step, even on older rows.
+    _job(db, 3, 'ALIVE')
+    _task(db, 3, 1, 'PENDING', eligible_at=1)  # After pipeline handoff.
+    _job(db, 4, 'LAUNCHING')
+    _task(db, 4, 0, 'PENDING', submitted_at=1)  # Event retention or old DB.
+    _job(db, 5, 'WAITING')
+    _task(db, 5, 0, 'STARTING', status_override='PENDING')
+    _job(db, 6, 'DONE')
+    _task(db, 6, 0, 'PENDING')
+    db.commit()
+
+    assert set(state.get_launch_stage_counts()) == {
+        (None, None, 'reported_queue', 2), (None, None, 'retry_pending', 1),
+        (None, None, 'parked', 1), (None, None, 'unknown_pending', 2),
+        (None, None, 'starting', 2), (None, None, 'recovering', 1)
+    }
+
+
+def test_admission_scrape_drops_drained_accounts_and_reports_zero(admission_db):
+    db = admission_db
+    _job(db, 1, 'WAITING', workspace='default', user_hash='a')
+    _job(db, 2, 'WAITING', user_hash='a')
+    db.commit()
+    collector = metrics.ManagedJobAdmissionCollector()
+    waiting, launching = collector.collect()
+    assert [f.name for f in collector.describe()] == [
+        'sky_managed_jobs_waiting_for_controller',
+        'sky_managed_job_tasks_launching'
+    ]
+    sample, = [s for s in waiting.samples if s.value]
+    assert sample.labels == {
+        'workspace': 'default',
+        'user': 'a',
+        'reason': 'controller_claim'
+    }
+    assert sample.value == 2
+    assert len(launching.samples) == 6
+    assert all(s.value == 0 for s in launching.samples)
+
+    db.execute(state.job_info_table.update().values(schedule_state='DONE'))
+    db.commit()
+    waiting, _ = collector.collect()
+    assert len(waiting.samples) == 5
+    assert all(s.value == 0 and s.labels['user'] == '' for s in waiting.samples)

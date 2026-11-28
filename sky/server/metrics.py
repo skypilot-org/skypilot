@@ -2,6 +2,7 @@
 
 import asyncio
 import atexit
+import collections
 import glob
 import multiprocessing
 import os
@@ -1096,6 +1097,53 @@ _EMERGENCY_ATTEMPTS_HELP = (
     'non-terminal; capped at 100 series, highest attempt counts kept.')
 
 
+class ManagedJobAdmissionCollector:
+    """Current queue depth. Each replica sees the same managed jobs DB."""
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_waiting_for_controller',
+            'Jobs awaiting a controller claim, grouped by the recorded gate.',
+            labels=['workspace', 'user', 'reason'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_job_tasks_launching',
+            'Tasks on claimed jobs by recorded launch stage. reported_queue '
+            'means the launch reports PENDING during startup or while parked.',
+            labels=['workspace', 'user', 'stage'])
+
+    def collect(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import state
+        from sky.jobs import utils as job_utils
+
+        waiting, launching = self.describe()
+        for metric, rows, stages in (
+            (waiting,
+             state.get_controller_wait_counts(
+                 job_utils.get_max_launching_jobs_per_user()),
+             ('dependency', 'batch_pool', 'reattachment', 'user_limit',
+              'controller_claim')),
+            (launching, state.get_launch_stage_counts(),
+             ('starting', 'reported_queue', 'parked', 'retry_pending',
+              'recovering', 'unknown_pending')),
+        ):
+            # Fold legacy NULL and empty labels into the same buckets as the
+            # raw status gauge. A successful scan reports an explicit zero
+            # for each empty stage without retaining inactive users.
+            counts: collections.Counter = collections.Counter()
+            observed = set()
+            for workspace, user, stage, count in rows:
+                counts[(_label_or_default(workspace, _NULL_WORKSPACE_LABEL),
+                        _label_or_default(user, _NULL_LABEL), stage)] += count
+                observed.add(stage)
+            for labels, count in counts.items():
+                metric.add_metric(labels, count)
+            for stage in stages:
+                if stage not in observed:
+                    metric.add_metric(['', '', stage], 0)
+            yield metric
+
+
 class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
@@ -1657,6 +1705,7 @@ except ValueError:
     pass
 
 _MANAGED_JOBS_COLLECTOR: Optional[ResilientCollector] = None
+_MANAGED_JOB_ADMISSION_COLLECTOR: Optional[ResilientCollector] = None
 _MANAGED_JOBS_STALL_COLLECTOR: Optional[ResilientCollector] = None
 
 
@@ -1677,6 +1726,13 @@ def maybe_register_managed_jobs_collector():
     _MANAGED_JOBS_COLLECTOR = _wrap_collector(ManagedJobsCollector())
     try:
         prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
+    except ValueError:
+        pass
+    global _MANAGED_JOB_ADMISSION_COLLECTOR
+    _MANAGED_JOB_ADMISSION_COLLECTOR = _wrap_collector(
+        ManagedJobAdmissionCollector())
+    try:
+        prom.REGISTRY.register(_MANAGED_JOB_ADMISSION_COLLECTOR)
     except ValueError:
         pass
     # Registered alongside rather than inside, so a wedged stall scan cannot
@@ -1714,6 +1770,8 @@ def metrics() -> fastapi.Response:
         registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
+        if _MANAGED_JOB_ADMISSION_COLLECTOR is not None:
+            registry.register(_MANAGED_JOB_ADMISSION_COLLECTOR)
         if _MANAGED_JOBS_STALL_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_STALL_COLLECTOR)
         for c in _plugin_collectors:
