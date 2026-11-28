@@ -1093,6 +1093,11 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     terminate_head_cmd = f'{_get_job_pods} | head -1 | xargs kubectl delete pod'
     terminate_worker_cmd = (
         f'{_get_job_pods} | tail -1 | xargs kubectl delete pod')
+    # Time for the controller to notice the lost pod (interval, job status
+    # check and cluster status check; it should discover the termination
+    # immediately, well within the retries of a transient error) plus the
+    # time to bring the job back.
+    recovery_timeout = managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3 + 200
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_kubernetes',
         [
@@ -1107,16 +1112,12 @@ def test_managed_jobs_recovery_kubernetes_multinode():
             # Terminate the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(name,
                                                        cmd=terminate_head_cmd),
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=name,
-                job_status=[sky.ManagedJobStatus.RECOVERING],
-                # This involves interval, job status check and cluster status
-                # check, but should be significantly shorter than the timeout of
-                # a transient error retries, as the controller should discover
-                # the cluster termination immediately.
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
-                gap_seconds=2),
+            # Wait for the recovery count, not for the RECOVERING status: here
+            # the status can last only a few seconds and come and go between
+            # two polls of the queue, which failed this test although the job
+            # had recovered.
+            lambda: smoke_tests_utils.wait_for_managed_job_recovery_count(
+                name, min_recovery_count=1, timeout=recovery_timeout),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -1125,12 +1126,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, cmd=terminate_worker_cmd),
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=name,
-                job_status=[sky.ManagedJobStatus.RECOVERING],
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
-                gap_seconds=2),
+            lambda: smoke_tests_utils.wait_for_managed_job_recovery_count(
+                name, min_recovery_count=2, timeout=recovery_timeout),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
