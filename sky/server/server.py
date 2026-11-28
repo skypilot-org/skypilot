@@ -4890,13 +4890,14 @@ if __name__ == '__main__':
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.
     managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
-    # Pre-load plugin RBAC rules + viewer allowlist before initializing
-    # the permission service. The permission service reads both during
-    # _maybe_initialize_policies (blocklist seeded into Casbin; viewer
-    # allowlist built into an in-memory structure).
-    logger.info('Pre-loading plugin RBAC rules + viewer allowlist')
+    # Pre-load plugin RBAC rules, viewer allowlist and workspace-read endpoints
+    # before initializing the permission service, which reads them (blocklist
+    # seeded into Casbin; the allowlists built into in-memory structures).
+    logger.info('Pre-loading plugin RBAC rules, viewer allowlist and '
+                'workspace-read endpoints')
     plugins.load_plugin_rbac_rules()
     plugins.load_plugin_viewer_allowlist()
+    plugins.load_plugin_workspace_read_endpoints()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')

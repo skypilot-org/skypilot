@@ -1,6 +1,7 @@
 """RBAC (Role-Based Access Control) functionality for SkyPilot API Server."""
 
 import enum
+import re
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -566,32 +567,69 @@ def get_viewer_allowlist(
     return combined
 
 
+# Plugin `workspace_read_endpoints` may only classify plugin routes. Paths are
+# Casbin `keyMatch2` patterns, which become regular expressions without
+# escaping, so only plain path characters are accepted (`|`, `(` or `.` would
+# let a pattern match outside `/plugins/`). The first two segments after
+# `/plugins/` must be literal, so one declaration cannot cover the routes of
+# every plugin (e.g. `/plugins/*` or `/plugins/api/*`).
+_PLUGIN_PATH_PREFIX = '/plugins/'
+_PLUGIN_WORKSPACE_READ_PATH = re.compile(
+    r'/plugins/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+(/[A-Za-z0-9_:*-]*)*)?')
+
+
+def _plugin_workspace_read_entry(rule: Any) -> Optional[Dict[str, str]]:
+    """Validated `{path, method}` for a plugin workspace-read rule, or None."""
+    path = rule.get('path') if isinstance(rule, dict) else None
+    method = rule.get('method') if isinstance(rule, dict) else None
+    if (isinstance(path, str) and isinstance(method, str) and
+            _PLUGIN_WORKSPACE_READ_PATH.fullmatch(path)):
+        return {'path': path, 'method': method.upper()}
+    logger.warning(f'Ignoring workspace_read_endpoints entry {rule!r}: only '
+                   f'plugin endpoints ({_PLUGIN_PATH_PREFIX}<name>/...) with '
+                   f'plain path characters are allowed.')
+    return None
+
+
 def get_read_only_endpoints(
-    plugin_allowlist: Optional[List[Dict[str, str]]] = None
+    plugin_allowlist: Optional[List[Dict[str, str]]] = None,
+    plugin_workspace_read: Optional[List[Dict[str, str]]] = None,
 ) -> List[Dict[str, str]]:
     """Get the endpoints that only read, for workspace-access purposes.
 
     This is the viewer role's allowlist (OSS defaults + operator config +
     plugin ``BasePlugin.viewer_allowlist``) plus
-    `_WORKSPACE_READ_EXTRA_ENDPOINTS`. The viewer allowlist is exactly "the
-    endpoints a strictly-read-only role may call", so reusing it avoids
-    maintaining a second read/write classification of the same endpoints —
-    and it is the only declaration that plugins already populate for their
-    own endpoints.
+    `_WORKSPACE_READ_EXTRA_ENDPOINTS` plus plugin
+    ``BasePlugin.workspace_read_endpoints``. The viewer allowlist is exactly
+    "the endpoints a strictly-read-only role may call", so reusing it avoids
+    maintaining a second read/write classification of the same endpoints.
+    Plugin ``workspace_read_endpoints`` add endpoints that need only read on
+    the active workspace without being on the viewer allowlist: an operation
+    that acts outside the caller's active workspace is not a read for a
+    viewer, yet needs no membership. Only plain ``/plugins/<name>/...`` paths
+    are taken from it (see `_PLUGIN_WORKSPACE_READ_PATH`), so a plugin cannot
+    relax core endpoints, or every plugin's routes, this way.
 
-    An endpoint deliberately kept *off* the viewer allowlist is therefore
-    treated as a write here. That errs on the strict side, which is the safe
-    direction for a workspace the caller can only read.
+    Any other endpoint is treated as a write here. That errs on the strict
+    side, which is the safe direction for a workspace the caller can only
+    read.
 
     Args:
         plugin_allowlist: Optional list of `{path, method}` records
             collected from loaded plugins.
+        plugin_workspace_read: Optional list of `{path, method}` records
+            from plugins' `workspace_read_endpoints`.
 
     Returns:
         Combined list of `{path, method}` records, Casbin `keyMatch2` syntax.
     """
     combined = get_viewer_allowlist(plugin_allowlist=plugin_allowlist)
-    for rule in _WORKSPACE_READ_EXTRA_ENDPOINTS:
+    plugin_read = []
+    for rule in plugin_workspace_read or []:
+        entry = _plugin_workspace_read_entry(rule)
+        if entry is not None:
+            plugin_read.append(entry)
+    for rule in list(_WORKSPACE_READ_EXTRA_ENDPOINTS) + plugin_read:
         entry = {'path': rule['path'], 'method': rule['method']}
         if entry not in combined:
             combined.append(entry)
@@ -603,10 +641,10 @@ def get_read_only_endpoints(
     for entry in combined:
         if is_always_write_endpoint(entry['path'], entry['method']):
             logger.warning(
-                f'Viewer allowlist declares {entry["method"]} '
-                f'{entry["path"]} as read-only, but it is an always-write '
-                f'(create) endpoint; it will still require active-workspace '
-                f'write.')
+                f'{entry["method"]} {entry["path"]} is declared read-only '
+                f'(viewer allowlist or workspace_read_endpoints), but it is an '
+                f'always-write (create) endpoint; it will still require '
+                f'active-workspace write.')
     return combined
 
 

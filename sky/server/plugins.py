@@ -302,7 +302,9 @@ class BasePlugin(abc.ABC):
         list one that creates or mutates a workspace-scoped resource, or a
         non-member could reach it. Endpoints omitted here default to requiring
         active-workspace *write* (the fail-safe direction), so a plugin's
-        mutating endpoints need no extra declaration to be gated.
+        mutating endpoints need no extra declaration to be gated. To make an
+        endpoint need only read on the active workspace without opening it to
+        viewers, declare it in `workspace_read_endpoints` instead.
 
         Path patterns use the same Casbin `keyMatch2` syntax as
         `rbac_rules` (e.g. `/plugins/api/foo/*`, `/plugins/api/foo/:id`).
@@ -320,6 +322,50 @@ class BasePlugin(abc.ABC):
                     RBACRule(path='/plugins/api/foo/list',
                              method='GET'),
                     RBACRule(path='/plugins/api/foo/status',
+                             method='POST'),
+                ]
+        """
+        return []
+
+    @property
+    def workspace_read_endpoints(self) -> List['RBACRule']:
+        """Endpoints that need only *read* on the caller's active workspace.
+
+        For endpoints that do not act on the caller's active workspace (for
+        example, an operation on shared infrastructure that the plugin
+        authorizes itself) but must not be opened to the viewer role. Each
+        request runs in the caller's active workspace, and an endpoint not
+        classified as read-only needs *write* there, i.e. membership. List an
+        endpoint here to classify it as read-only for workspace access without
+        adding it to `viewer_allowlist`, so viewers stay denied.
+
+        What *read* changes, beyond the check itself: the active workspace is
+        then resolved as for a read, so it can be a workspace the caller can
+        only read (when they have no writable one, or several and no
+        preference), and the request runs with that workspace's settings. So
+        only declare endpoints that create or change nothing in the active
+        workspace and do not depend on its settings. A caller who can read no
+        workspace at all is still refused. Endpoints that always need write
+        (such as cluster and job launches) keep needing it even if declared
+        here.
+
+        Only plain plugin paths are honored: under ``/plugins/``, the first
+        two segments after it literal (no wildcard covering other plugins'
+        routes), and only letters, digits, ``_``, ``-`` plus the ``:param``
+        and ``*`` wildcards. Other entries are ignored with a warning, so the
+        endpoint keeps needing write.
+
+        Path patterns use the same Casbin `keyMatch2` syntax as `rbac_rules`.
+
+        Returns:
+            List of `RBACRule` instances; the rule is interpreted as "this
+            (path, method) needs only read on the active workspace".
+
+        Example:
+            @property
+            def workspace_read_endpoints(self):
+                return [
+                    RBACRule(path='/plugins/api/foo/infra-action',
                              method='POST'),
                 ]
         """
@@ -735,6 +781,60 @@ def load_plugin_viewer_allowlist() -> List[Dict[str, str]]:
 def get_plugin_viewer_allowlist() -> List[Dict[str, str]]:
     """Return the cached viewer-allowlist entries collected from plugins."""
     return _PLUGIN_VIEWER_ALLOWLIST
+
+
+_PLUGIN_WORKSPACE_READ_ENDPOINTS: List[Dict[str, str]] = []
+
+
+def load_plugin_workspace_read_endpoints() -> List[Dict[str, str]]:
+    """Load `workspace_read_endpoints` from plugins without calling install().
+
+    Mirrors `load_plugin_viewer_allowlist`. Side-effect-free.
+
+    Returns:
+        Flat list of `{path, method}` records that need only read on the
+        caller's active workspace.
+    """
+    global _PLUGIN_WORKSPACE_READ_ENDPOINTS
+
+    config = _load_plugin_config()
+    if not config:
+        return []
+
+    endpoints: List[Dict[str, str]] = []
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+
+            for rule in plugin.workspace_read_endpoints:
+                endpoints.append({
+                    'path': rule.path,
+                    'method': rule.method,
+                })
+                logger.debug(f'Collected workspace-read endpoint from '
+                             f'{class_path}: {rule.method} {rule.path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load workspace-read endpoints from '
+                           f'{class_path}: {e}')
+
+    _PLUGIN_WORKSPACE_READ_ENDPOINTS = endpoints
+    return endpoints
+
+
+def get_plugin_workspace_read_endpoints() -> List[Dict[str, str]]:
+    """Return the cached workspace-read endpoints collected from plugins."""
+    return _PLUGIN_WORKSPACE_READ_ENDPOINTS
 
 
 def get_extension_context() -> Optional[ExtensionContext]:
