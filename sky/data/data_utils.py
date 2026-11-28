@@ -362,7 +362,7 @@ def get_az_storage_account_key(
         storage_account_name: Name of the storage account
         resource_group_name: Name of the resource group the
             passed storage account belongs to.
-        storage_clent: Client object facing Storage
+        storage_client: Client object facing Storage
         resource_client: Client object facing Resource
 
     Returns:

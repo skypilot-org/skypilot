@@ -109,7 +109,6 @@ def client(service_name: str, region):
 
     Args:
         service_name: CLOUDFLARE service name (e.g., 's3').
-        kwargs: Other options.
     """
     # Need to use the client retrieved from the per-thread session
     # to avoid thread-safety issues (Directly creating the client
@@ -214,9 +213,6 @@ def r2_profile_in_aws_cred() -> bool:
 def get_credential_file_mounts() -> Dict[str, str]:
     """Checks if aws credential file is set and update if not
        Updates file containing account ID information
-
-    Args:
-        file_mounts: stores path to credential files of clouds
     """
 
     r2_credential_mounts = {

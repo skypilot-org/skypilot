@@ -50,7 +50,7 @@ def format_storage_table(storages: List[responses.StorageRecord],
     """Format the storage table for display.
 
     Args:
-        storage_table (dict): The storage table.
+        storages: The storage records to format.
 
     Returns:
         str: The formatted storage table.
@@ -379,7 +379,7 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
     """Format the volume table for display.
 
     Args:
-        volume_table (dict): The volume table.
+        volumes: The volume records to format.
 
     Returns:
         str: The formatted volume table.
