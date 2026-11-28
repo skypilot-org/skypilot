@@ -116,12 +116,41 @@ Spot VMs
 --------
 
 Set ``resources.use_spot: true`` to explicitly accept the current Nebius spot
-price. SkyPilot launches price-taking VMs; no pricing policy is required.
-Prices can change while a VM runs, and SkyPilot does not set a maximum bid.
-Displayed costs are estimates; ``max_hourly_cost`` filters estimated costs
-and does not enforce a running price limit.
+price. By default, SkyPilot launches price-taking VMs; no pricing policy is
+required. Prices can change while a VM runs, and the spot price can be higher
+than the on-demand price. Displayed costs are estimates; ``max_hourly_cost``
+filters estimated costs and does not enforce a running price limit.
 
 Use ``sky jobs launch task.yaml`` for managed recovery after preemption.
+
+Capping the spot price
+~~~~~~~~~~~~~~~~~~~~~~
+
+To cap what a spot VM pays, create a Nebius `pricing policy
+<https://docs.nebius.com/signup-billing/manage-pricing-policy>`_ with a max price
+per GPU-hour and point SkyPilot at it by name. A policy belongs to one project
+(one region) and covers one platform, so create one per platform in every
+project you launch spot VMs in, under a name that includes the platform, e.g.
+``spot-max-gpu-h100-sxm``. Then set:
+
+.. code-block:: yaml
+
+    nebius:
+      spot_pricing_policy_name: spot-max-{platform}
+
+SkyPilot replaces ``{platform}`` with the VM's platform and looks the policy up
+in the project of the region it launches in:
+
+- If it finds the policy, the VM references it and is preempted rather than pay
+  more than the max price.
+- If the policy is blocking new VMs (the spot price is above its max price),
+  SkyPilot fails over to the next region, as for a capacity error. Managed jobs
+  therefore run where the spot price is still below your cap.
+- If there is no such policy in that project, SkyPilot logs a warning and
+  launches the VM at the current spot price, without a cap.
+
+See :ref:`nebius.spot_pricing_policy_name <config-yaml-nebius-spot-pricing-policy-name>`
+for details.
 
 Migrating existing preemptible VMs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

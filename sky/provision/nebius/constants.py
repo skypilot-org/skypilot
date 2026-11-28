@@ -9,6 +9,19 @@ VERSION = 'v1'
 # unique per cluster within a project.
 SECURITY_GROUP_TEMPLATE = 'sky-sg-{}'
 
+# Placeholder in `nebius.spot_pricing_policy_name` that is replaced with the
+# instance's compute platform (e.g. `gpu-h100-sxm`). A Nebius pricing policy
+# covers a single platform and its name is unique within a project, so a
+# project needs one policy per platform.
+SPOT_PRICING_POLICY_PLATFORM_PLACEHOLDER = '{platform}'
+
+
+def get_spot_pricing_policy_name(name_template: str, platform: str) -> str:
+    """Resolves the pricing policy name to look up for a platform."""
+    return name_template.replace(SPOT_PRICING_POLICY_PLATFORM_PLACEHOLDER,
+                                 platform)
+
+
 # Nebius requires disk sizes to be a multiple of 93 GiB
 # (99857989632 bytes = 93 * 1024^3).
 NEBIUS_DISK_SIZE_STEP_GIB = 93
