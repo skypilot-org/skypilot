@@ -919,7 +919,10 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
                         'process id.')
                 return False
 
-        return process.is_running()
+        # A zombie has exited, but is_running() is true for it until its
+        # parent collects it.
+        return (process.is_running() and
+                process.status() != psutil.STATUS_ZOMBIE)
 
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
             OSError) as e:
@@ -1126,6 +1129,12 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = 'Controller process is dead'
 
         # At this point, either pid is None or process is dead.
+
+        if os.path.exists(managed_job_constants.CONTROLLERS_DRAINING_PATH):
+            # This host's API server is shutting down and stops its
+            # controllers itself (scheduler.stop_local_job_controllers); the
+            # next server recovers their jobs.
+            return
 
         # The controller process for this managed job is not running: it must
         # have exited abnormally, and we should set the job status to

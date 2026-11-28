@@ -1,9 +1,12 @@
 """Unit tests for sky.jobs.utils functions."""
 import re
+import subprocess
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import MagicMock
 
+import psutil
 import pytest
 
 from sky import exceptions
@@ -857,6 +860,9 @@ class TestControllerProcessAlive:
             def is_running(self):
                 return True
 
+            def status(self):
+                return psutil.STATUS_RUNNING
+
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(
             pid=expected_pid, started_at=expected_start)
@@ -909,6 +915,9 @@ class TestControllerProcessAlive:
             def is_running(self):
                 return True
 
+            def status(self):
+                return psutil.STATUS_RUNNING
+
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _KeywordProcess)
         record = managed_job_state.ControllerPidRecord(pid=expected_pid,
                                                        started_at=None)
@@ -923,6 +932,72 @@ class TestControllerProcessAlive:
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _NoKeywordProcess)
         assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
                 False)
+
+    def test_controller_process_alive_zombie(self):
+        """A killed process is dead before its parent has collected it."""
+        process = subprocess.Popen(
+            [sys.executable, '-c', 'import time; time.sleep(600)'])
+        try:
+            record = managed_job_state.ControllerPidRecord(
+                pid=process.pid,
+                started_at=psutil.Process(process.pid).create_time())
+            assert jobs_utils.controller_process_alive(record)
+
+            process.kill()
+            deadline = time.time() + 10
+            while psutil.Process(process.pid).status() != psutil.STATUS_ZOMBIE:
+                assert time.time() < deadline
+                time.sleep(0.01)
+
+            assert jobs_utils.controller_process_alive(record) is False
+        finally:
+            process.kill()
+            process.wait()
+
+
+class TestUpdateManagedJobsStatusesWhileDraining:
+    """A job whose controller is dead is failed and its cluster torn down,
+    unless this host's API server is shutting down: it stops its controllers
+    itself, and the next server recovers their jobs."""
+
+    @pytest.mark.parametrize('is_draining', [False, True])
+    def test_job_of_a_dead_controller(self, monkeypatch, tmp_path, is_draining):
+        draining = tmp_path / 'job_controllers_draining'
+        if is_draining:
+            draining.touch()
+        monkeypatch.setattr(managed_job_constants, 'CONTROLLERS_DRAINING_PATH',
+                            str(draining))
+        monkeypatch.setattr(jobs_utils.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restarting_signal'))
+        alive = managed_job_state.ManagedJobScheduleState.ALIVE
+        task = {
+            'schedule_state': alive,
+            'controller_pid': 4242,
+            'controller_pid_started_at': 1.0,
+            'status': managed_job_state.ManagedJobStatus.RUNNING,
+            'pool': None,
+            'job_name': 'train',
+        }
+        monkeypatch.setattr(managed_job_state, 'get_jobs_to_check_status',
+                            lambda job_id: [7])
+        monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                            lambda job_id: [task])
+        monkeypatch.setattr(managed_job_state, 'get_job_schedule_state',
+                            lambda job_id: alive)
+        monkeypatch.setattr(jobs_utils, 'controller_process_alive',
+                            lambda *_a, **_k: False)
+        cluster_lookup = MagicMock(return_value=None)
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name', cluster_lookup)
+        set_failed = MagicMock()
+        monkeypatch.setattr(managed_job_state, 'set_failed', set_failed)
+        monkeypatch.setattr(jobs_utils.scheduler, 'job_done', MagicMock())
+
+        jobs_utils.update_managed_jobs_statuses()
+
+        assert cluster_lookup.called is not is_draining
+        assert set_failed.called is not is_draining
 
 
 class TestStreamLogsByIdTaskFiltering:

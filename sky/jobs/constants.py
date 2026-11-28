@@ -31,6 +31,14 @@ JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 CONSOLIDATED_SIGNAL_PATH = runtime_utils.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 
+# Present while the API server that runs this host's job controllers shuts
+# down: they keep their jobs but claim no new ones, so waiting jobs go to the
+# next server's controllers rather than to a process about to be killed.
+# Host-local like the controller PID file; cleared when a server starts the
+# pool.
+CONTROLLERS_DRAINING_PATH = runtime_utils.expanduser(
+    '~/.sky/job_controllers_draining')
+
 # The consolidation mode lock ensures that if multiple API servers are running
 # at the same time (e.g. during a rolling update), recovery can only happen once
 # the previous API server has exited.
