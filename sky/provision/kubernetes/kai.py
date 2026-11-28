@@ -5,12 +5,13 @@ schedules its pods as a gang.
 """
 import datetime
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from sky import exceptions
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 SCHEDULER_NAME = 'kai-scheduler'
@@ -20,7 +21,14 @@ POD_GROUP_ANNOTATION = 'pod-group-name'
 
 _KAI_GROUP = 'scheduling.run.ai'
 POD_GROUP_API = (_KAI_GROUP, 'v2alpha2')
-_TOPOLOGY_API = ('kai.scheduler', 'v1alpha1')
+_POD_GROUPS = reads.Resource(group=POD_GROUP_API[0],
+                             version=POD_GROUP_API[1],
+                             plural='podgroups',
+                             namespaced=True)
+_TOPOLOGIES = reads.Resource(group='kai.scheduler',
+                             version='v1alpha1',
+                             plural='topologies',
+                             namespaced=False)
 # provider_config key -> PodGroup topologyConstraint field.
 _TOPOLOGY_LEVEL_FIELDS = (
     ('kai_required_topology_level', 'requiredTopologyLevel'),
@@ -138,7 +146,10 @@ def ensure_pod_group(context: Optional[str], namespace: str,
                 f'or namespace {namespace!r} does not exist.') from e
         if e.status != 409 or not live_pods:
             raise
-        existing = _get_pod_group(context, namespace, cluster_name_on_cloud)
+        existing = _get_pod_group(context,
+                                  namespace,
+                                  cluster_name_on_cloud,
+                                  consistency=reads.FRESH)
         if existing is None:
             raise
         # The running pods keep their settings, so the gang cannot change them.
@@ -167,7 +178,7 @@ def _check_topology_constraint(context: Optional[str],
             the required one.
     """
     name = constraint['topology']
-    topology = _get_cluster_object(context, _TOPOLOGY_API, 'topologies', name)
+    topology = _get_cluster_object(context, _TOPOLOGIES, name)
     if topology is None:
         raise exceptions.ProvisionUnsupportedError(
             f'KAI Topology {name!r} does not exist.')
@@ -196,40 +207,40 @@ def _check_topology_constraint(context: Optional[str],
             f'required level {constraint["requiredTopologyLevel"]!r}.')
 
 
-def _get_cluster_object(context: Optional[str], api: Tuple[str, str],
-                        plural: str, name: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_object(context: Optional[str], resource: reads.Resource,
+                        name: str) -> Optional[Dict[str, Any]]:
     """A cluster-scoped KAI object, or None if it does not exist.
 
     Raises:
         exceptions.ProvisionUnsupportedError: SkyPilot may not read it.
+        exceptions.KubeAPIUnreachableError: The read failed otherwise.
     """
     try:
-        return kubernetes.custom_objects_api(context).get_cluster_custom_object(
-            *api, plural, name, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            return None
-        if e.status == 403:
+        items = reads.get_object(context,
+                                 resource,
+                                 name,
+                                 consistency=reads.FRESH,
+                                 attempts=1).items
+    except exceptions.KubeAPIUnreachableError as e:
+        if reads.http_status(e) == 403:
             raise exceptions.ProvisionUnsupportedError(
-                f'SkyPilot needs permission to get {plural}.{api[0]} on '
+                f'SkyPilot needs permission to get '
+                f'{resource.plural}.{resource.group} on '
                 f'context {context!r}.') from e
         raise
+    return next(iter(items), None)
 
 
-def _get_pod_group(context: Optional[str], namespace: str,
-                   name: str) -> Optional[Dict[str, Any]]:
-    try:
-        return kubernetes.custom_objects_api(
-            context).get_namespaced_custom_object(
-                *POD_GROUP_API,
-                namespace,
-                'podgroups',
-                name,
-                _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            return None
-        raise
+def _get_pod_group(context: Optional[str], namespace: str, name: str, *,
+                   consistency: reads.Consistency) -> Optional[Dict[str, Any]]:
+    """The PodGroup, or None if it does not exist; must not be modified."""
+    items = reads.get_object(context,
+                             _POD_GROUPS,
+                             name,
+                             namespace=namespace,
+                             consistency=consistency,
+                             attempts=1).items
+    return next(iter(items), None)
 
 
 def eviction_reason(context: Optional[str], namespace: str, pod_name: str,
@@ -245,10 +256,13 @@ def eviction_reason(context: Optional[str], namespace: str, pod_name: str,
     pod_ref = re.compile(rf'(?<![\w.-]){re.escape(f"{namespace}/{pod_name}")}'
                          r'(?![\w-]|\.[\w-])')
     try:
-        events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
+        events = reads.list_objects(
+            context,
+            reads.EVENTS,
+            namespace=namespace,
             field_selector='involvedObject.kind=PodGroup,reason=Evict',
-            _request_timeout=kubernetes.API_TIMEOUT).items
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
+            attempts=1).items
         for event in kubernetes_utils.events_since(events, since):
             # The first line names the pod; a reclaim adds lines describing
             # the queues.
@@ -257,8 +271,10 @@ def eviction_reason(context: Optional[str], namespace: str, pod_name: str,
                 continue
             # A PodGroup of the same name from an earlier launch has its own
             # UID, and its evictions are not this pod's.
-            pod_group = _get_pod_group(context, namespace,
-                                       event.involved_object.name)
+            pod_group = _get_pod_group(context,
+                                       namespace,
+                                       event.involved_object.name,
+                                       consistency=reads.CACHED)
             if (pod_group is None or
                     pod_group['metadata']['uid'] != event.involved_object.uid):
                 continue
@@ -269,6 +285,6 @@ def eviction_reason(context: Optional[str], namespace: str, pod_name: str,
             label = (f'KAI evicted the pod ({action})'
                      if action else 'KAI evicted the pod')
             return f'{label}: {summary.rstrip(".")}'
-    except (kubernetes.api_exception(), kubernetes.urllib3_http_error()):
+    except exceptions.KubeAPIUnreachableError:
         return None
     return None

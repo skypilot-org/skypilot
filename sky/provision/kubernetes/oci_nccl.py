@@ -9,7 +9,6 @@ import re
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import sky_logging
-from sky.adaptors import kubernetes
 from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
@@ -255,21 +254,22 @@ def _read_configmap(context: Optional[str], namespaces: List[str],
     name = configmap_name(shape)
     for namespace in namespaces:
         try:
-            cm = kubernetes.core_api(context).read_namespaced_config_map(
-                name=name,
-                namespace=namespace,
-                _request_timeout=kubernetes.API_TIMEOUT)
-        except kubernetes.api_exception() as e:
-            if e.status in (403, 404):
-                continue
-            logger.warning(f'Failed to read ConfigMap {namespace}/{name}: '
-                           f'{e}')
-            return None
+            found = reads.get_object(context,
+                                     reads.CONFIG_MAPS,
+                                     name,
+                                     namespace=namespace,
+                                     attempts=1,
+                                     consistency=reads.FRESH).items
         except Exception as e:  # pylint: disable=broad-except
+            if reads.http_status(e) == 403:
+                continue
             logger.warning(f'Failed to read ConfigMap {namespace}/{name}: '
                            f'{common_utils.format_exception(e)}')
             return None
-        params = parse_nccl_conf((cm.data or {}).get(_CONFIGMAP_KEY) or '')
+        if not found:
+            continue
+        data = found[0].get('data') or {}
+        params = parse_nccl_conf(data.get(_CONFIGMAP_KEY) or '')
         if not params:
             # An empty or placeholder ConfigMap must not wipe the tuning.
             logger.warning(f'ConfigMap {namespace}/{name} has no NCCL '

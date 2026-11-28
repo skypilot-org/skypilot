@@ -3,6 +3,8 @@
 from concurrent import futures
 import io
 import json
+import pathlib
+import re
 import threading
 from unittest import mock
 
@@ -350,6 +352,15 @@ def test_list_of_an_unserved_resource_raises(api):
         reads.list_objects('ctx', queues)
 
 
+def test_core_list_404_reports_the_status(api):
+    api(_api_error(404))
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError) as raised:
+        reads.list_objects('ctx', reads.PODS, namespace='ns')
+
+    assert reads.http_status(raised.value) == 404
+
+
 def test_list_of_a_core_resource_answering_404_is_unreachable(api):
     api(_api_error(404))
 
@@ -526,3 +537,102 @@ def test_in_flight_shares_the_error():
     with pytest.raises(RuntimeError, match='boom'):
         in_flight.do('key', fn)
     assert in_flight.do('key', lambda: 'next') == 'next'
+
+
+def test_limit_and_timeout_reach_the_api_server(api):
+    client = api(_POD_LIST)
+
+    reads.list_objects('ctx',
+                       reads.PODS,
+                       namespace='ns',
+                       consistency=reads.FRESH,
+                       timeout=(5, 30),
+                       limit=1)
+
+    _, _, kwargs = client.calls[0]
+    assert kwargs['query_params'] == [('limit', '1')]
+    assert kwargs['_request_timeout'] == (5, 30)
+
+
+def test_cached_list_is_cut_to_the_limit(api):
+    client = api(_POD_LIST)
+    plugin_extensions.ClusterStateSource.register(
+        lambda query: plugin_extensions.CachedObjects(items=[{
+            'metadata': {
+                'name': name
+            }
+        } for name in 'abc'],
+                                                      resource_version='7',
+                                                      staleness_seconds=0))
+
+    result = reads.list_objects('ctx', reads.PODS, limit=2)
+
+    assert [item['metadata']['name'] for item in result.items] == ['a', 'b']
+    assert not client.calls
+
+
+@pytest.mark.parametrize('answer,status', [
+    (_api_error(403), 403),
+    (_api_error(500), 500),
+    (kubernetes.max_retry_error()(None, '/api/v1/pods'), None),
+])
+def test_http_status_of_a_failed_read(api, answer, status):
+    api(answer)
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError) as raised:
+        reads.list_objects('ctx', reads.PODS, attempts=1)
+
+    assert reads.http_status(raised.value) == status
+
+
+def test_http_status_of_a_known_unreachable_context(api):
+    api(_POD_LIST)
+    kubernetes_utils.register_context_unreachable_check(lambda context: 'down')
+
+    with pytest.raises(exceptions.KubeAPIUnreachableError) as raised:
+        reads.list_objects('ctx', reads.PODS)
+
+    assert reads.http_status(raised.value) is None
+
+
+def test_subresource_is_read_from_the_api_server(api, metrics):
+    client = api({'metadata': {'name': 'd', 'resourceVersion': '3'}})
+    queries = []
+    plugin_extensions.ClusterStateSource.register(queries.append)
+
+    result = reads.get_object('ctx',
+                              reads.DEPLOYMENTS,
+                              'd',
+                              namespace='ns',
+                              subresource='status')
+
+    assert result.reason == reads.REASON_SUBRESOURCE
+    assert not queries
+    path, _, _ = client.calls[0]
+    assert path == '/apis/apps/v1/namespaces/ns/deployments/d/status'
+
+
+def test_object_converter_rejects_an_unknown_model():
+    with pytest.raises(ValueError, match='V1Event'):
+        kubernetes_utils.k8s_object_converter('V1Event')
+
+
+def test_every_converted_model_exists():
+    """A wrong model name fails only once an object is read, so check them."""
+    root = pathlib.Path(kubernetes_utils.__file__).parents[2]
+    names = set()
+    for path in root.rglob('*.py'):
+        names.update(
+            re.findall(r"k8s_object_converter\(\s*'(\w+)'", path.read_text()))
+    assert names
+    for name in names:
+        kubernetes_utils.k8s_object_converter(name)
+
+
+def test_object_converter_is_shared_per_type():
+    convert = kubernetes_utils.k8s_object_converter('V1ConfigMap')
+
+    config_map = convert({'metadata': {'name': 'cm'}, 'data': {'k': 'v'}})
+
+    assert convert is kubernetes_utils.k8s_object_converter('V1ConfigMap')
+    assert (config_map.metadata.name, config_map.data) == ('cm', {'k': 'v'})

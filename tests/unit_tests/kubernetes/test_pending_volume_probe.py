@@ -12,9 +12,11 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.provision import constants as prov_constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
+from sky.provision.kubernetes import reads
 
 _PODS_CREATED_AT = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
 _CLOCK_START = 1000.0
@@ -34,6 +36,13 @@ _CSI_IN_PROGRESS_MESSAGE = ('rpc error: code = DeadlineExceeded desc = Volume '
 # report one. All that can be said about it is how long it lasts.
 _OPAQUE_MESSAGE = ('failed to provision volume with StorageClass "slow": the '
                    'provisioner is unhappy')
+
+
+def _read_result(items):
+    return reads.ReadResult(items=items,
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=reads.REASON_FRESH)
 
 
 def _at(offset: float) -> datetime.datetime:
@@ -145,24 +154,25 @@ class _Cluster:
                    last=max(since, self.elapsed))
         ]
 
-    def read_pvc(self, name, namespace, **kwargs):
-        del namespace, kwargs  # unused
+    def get_object(self, context, resource, name, **kwargs):
+        """reads.get_object() of a PVC; 'unreadable' fails to read."""
+        del context, kwargs  # unused
+        assert resource == reads.PERSISTENT_VOLUME_CLAIMS
         self.pvc_reads += 1
-        if name not in self.phases:
-            raise ValueError(f'no such PVC: {name}')
-        pvc = mock.MagicMock()
-        pvc.status.phase = self.phases[name]
-        return pvc
+        if name == 'unreadable':
+            raise exceptions.KubeAPIUnreachableError('read failed')
+        items = []
+        if name in self.phases:
+            pvc = mock.MagicMock()
+            pvc.status.phase = self.phases[name]
+            items.append(pvc)
+        return _read_result(items)
 
 
 @pytest.fixture(name='cluster')
 def cluster_fixture(monkeypatch):
     cluster = _Cluster()
-    core_api = mock.MagicMock()
-    core_api.read_namespaced_persistent_volume_claim.side_effect = (
-        cluster.read_pvc)
-    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                        lambda *a, **kw: core_api)
+    monkeypatch.setattr(reads, 'get_object', cluster.get_object)
     monkeypatch.setattr(instance.kubernetes_utils,
                         'get_pvc_events',
                         lambda context, namespace, pvc_name, reverse=True:
@@ -323,6 +333,9 @@ class TestGetPendingPvcs:
 
     def test_an_unreadable_claim_is_not_reported(self, cluster):
         """Fail open: a transient API error must not fail the launch."""
+        assert instance._get_pending_pvcs('ns', 'ctx', ['unreadable']) == []
+
+    def test_an_absent_claim_is_not_reported(self, cluster):
         assert instance._get_pending_pvcs('ns', 'ctx', ['missing']) == []
 
 
@@ -653,13 +666,12 @@ class TestSchedulingLoopFailsOnABrokenVolume:
         self.pod = _pod(['vol'])
         cluster.keep_failing('vol', since=5, message=_CSI_MESSAGE)
 
-        core_api = mock.MagicMock()
-        core_api.list_namespaced_pod.return_value = mock.MagicMock(
-            items=[self.pod])
-        core_api.read_namespaced_persistent_volume_claim.side_effect = (
-            cluster.read_pvc)
-        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                            lambda *a, **kw: core_api)
+        def list_objects(context, resource, **kwargs):
+            del context, kwargs  # unused
+            assert resource == reads.PODS
+            return _read_result([self.pod])
+
+        monkeypatch.setattr(reads, 'list_objects', list_objects)
 
         monkeypatch.setattr(
             'sky.skypilot_config.get_effective_region_config',

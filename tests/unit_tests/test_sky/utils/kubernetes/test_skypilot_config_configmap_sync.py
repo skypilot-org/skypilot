@@ -4,8 +4,17 @@ import tempfile
 import unittest
 from unittest import mock
 
+from sky import exceptions
+from sky.provision.kubernetes import reads
 from sky.utils import config_utils
 from sky.utils.kubernetes import config_map_utils
+
+
+def _read_result(items):
+    return reads.ReadResult(items=items,
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=reads.REASON_FRESH)
 
 
 class TestConfigMapSync(unittest.TestCase):
@@ -226,23 +235,66 @@ class TestConfigMapSync(unittest.TestCase):
         mock_core_api = mock.MagicMock()
         mock_k8s.core_api.return_value = mock_core_api
 
-        # Create a simple exception that has status = 404
-        class SimpleApiException(Exception):
-            status = 404
-
-        mock_k8s.kubernetes.client.rest.ApiException = SimpleApiException
-        mock_core_api.read_namespaced_config_map.side_effect = (
-            SimpleApiException())
-
         # Mock successful creation
         mock_core_api.create_namespaced_config_map.return_value = None
 
-        config_map_utils.initialize_configmap_sync_on_startup(config_path)
+        with mock.patch('sky.provision.kubernetes.reads.get_object',
+                        return_value=_read_result([])) as mock_get:
+            config_map_utils.initialize_configmap_sync_on_startup(config_path)
 
+        mock_get.assert_called_once_with(None,
+                                         reads.CONFIG_MAPS,
+                                         'test-configmap',
+                                         namespace='test-namespace',
+                                         consistency=reads.FRESH,
+                                         attempts=1,
+                                         timeout=reads.LONG_READ_TIMEOUT)
         # Verify ConfigMap creation was called
         mock_core_api.create_namespaced_config_map.assert_called_once()
 
         os.unlink(config_path)
+
+    def _sync_with_read(self, **get_object_kwargs):
+        """Runs the startup sync with the ConfigMap read patched."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            f.write('test:\n  value: 123\n')
+            config_path = f.name
+        try:
+            with mock.patch.object(config_map_utils,
+                                   'is_running_in_kubernetes',
+                                   return_value=True), \
+                 mock.patch.object(config_map_utils,
+                                   '_get_kubernetes_namespace',
+                                   return_value='test-namespace'), \
+                 mock.patch('sky.provision.kubernetes.reads.get_object',
+                            **get_object_kwargs), \
+                 mock.patch.object(config_map_utils.logger,
+                                   'warning') as mock_warning:
+                config_map_utils.initialize_configmap_sync_on_startup(
+                    config_path)
+        finally:
+            os.unlink(config_path)
+        return mock_warning
+
+    @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
+    def test_initialize_configmap_sync_keeps_existing_configmap(self, mock_k8s):
+        mock_warning = self._sync_with_read(return_value=_read_result([{
+            'metadata': {
+                'name': 'skypilot-config'
+            }
+        }]))
+        create = mock_k8s.core_api.return_value.create_namespaced_config_map
+        create.assert_not_called()
+        mock_warning.assert_not_called()
+
+    @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
+    def test_initialize_configmap_sync_read_failure_skips_create(
+            self, mock_k8s):
+        mock_warning = self._sync_with_read(
+            side_effect=exceptions.KubeAPIUnreachableError('HTTP 403'))
+        create = mock_k8s.core_api.return_value.create_namespaced_config_map
+        create.assert_not_called()
+        mock_warning.assert_called_once()
 
     @mock.patch('sky.utils.kubernetes.config_map_utils.'
                 'is_running_in_kubernetes')

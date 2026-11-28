@@ -23,6 +23,7 @@ from sky import models
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils
 from sky.skylet import constants
 from sky.utils import annotations
@@ -2930,18 +2931,16 @@ def test_combine_pod_config_fields_and_metadata_uses_correct_cloud():
 def test_filter_pods_sorts_by_name(unsorted_pod_names,
                                    expected_sorted_pod_names):
     """Test that filter_pods returns pods sorted correctly"""
-    mock_pod_list = mock.MagicMock()
-    mock_pod_list.items = []
+    mock_pods = []
     for pod_name in unsorted_pod_names:
         mock_pod = mock.MagicMock()
         mock_pod.metadata.name = pod_name
         mock_pod.metadata.deletion_timestamp = None
-        mock_pod_list.items.append(mock_pod)
+        mock_pods.append(mock_pod)
 
-    with patch('sky.provision.kubernetes.utils.kubernetes.core_api'
-              ) as mock_core_api:
-        mock_core_api.return_value.list_namespaced_pod.return_value = mock_pod_list
-
+    with patch.object(utils.reads,
+                      'list_objects',
+                      return_value=_read_result(mock_pods)) as mock_list:
         result = utils.filter_pods(namespace='test-namespace',
                                    context='test-context',
                                    tag_filters={'test-label': 'test-value'})
@@ -2949,6 +2948,24 @@ def test_filter_pods_sorts_by_name(unsorted_pod_names,
         # Verify the pods are returned in sorted order
         pod_names = list(result.keys())
         assert pod_names == expected_sorted_pod_names
+        _, kwargs = mock_list.call_args
+        assert kwargs['namespace'] == 'test-namespace'
+        assert kwargs['label_selector'] == 'test-label=test-value'
+        assert kwargs['consistency'] == reads.FRESH
+
+
+def test_filter_pods_drops_pods_being_deleted():
+    live = mock.MagicMock()
+    live.metadata.name = 'c-head'
+    live.metadata.deletion_timestamp = None
+    deleting = mock.MagicMock()
+    deleting.metadata.name = 'c-worker1'
+    deleting.metadata.deletion_timestamp = datetime.datetime(2025, 1, 1)
+    with patch.object(utils.reads,
+                      'list_objects',
+                      return_value=_read_result([live, deleting])):
+        result = utils.filter_pods('ns', 'ctx', {'app': 'c'}, ['Running'])
+    assert list(result) == ['c-head']
 
 
 class TestCheckInstanceFits:
@@ -5108,7 +5125,9 @@ class TestCheckCredentials:
         configure them; everything else is short-circuited.
         """
         patches = [
-            patch('sky.provision.kubernetes.utils.kubernetes.core_api'),
+            patch.object(utils.reads,
+                         'list_objects',
+                         return_value=_read_result([])),
             patch('sky.provision.kubernetes.utils.get_kubernetes_nodes'),
             patch('sky.provision.kubernetes.utils.get_kubeconfig_paths',
                   return_value=['~/.kube/config']),
@@ -5129,7 +5148,7 @@ class TestCheckCredentials:
         as broken by ``sky check``.
         """
         mocks, patches = self._patch_common()
-        mock_core_api = mocks[0]
+        mock_list = mocks[0]
         try:
             mock_get_namespace.return_value = 'team-a'
 
@@ -5139,9 +5158,12 @@ class TestCheckCredentials:
             assert reason is None
             mock_get_namespace.assert_called_once_with(context='shared-ctx',
                                                        cloud='kubernetes')
-            mock_core_api.return_value.list_namespaced_pod.assert_called_once()
-            args, _ = (mock_core_api.return_value.list_namespaced_pod.call_args)
-            assert args[0] == 'team-a'
+            mock_list.assert_called_once()
+            args, kwargs = mock_list.call_args
+            assert args == ('shared-ctx', reads.PODS)
+            assert kwargs['namespace'] == 'team-a'
+            assert kwargs['consistency'] == reads.FRESH
+            assert kwargs['limit'] == 1
         finally:
             self._stop(patches)
 
@@ -5155,15 +5177,15 @@ class TestCheckCredentials:
         same probe target as before.
         """
         mocks, patches = self._patch_common()
-        mock_core_api = mocks[0]
+        mock_list = mocks[0]
         try:
             mock_get_namespace.return_value = 'kubeconfig-default'
 
             ok, _ = utils.check_credentials(context='shared-ctx')
 
             assert ok is True
-            args, _ = (mock_core_api.return_value.list_namespaced_pod.call_args)
-            assert args[0] == 'kubeconfig-default'
+            _, kwargs = mock_list.call_args
+            assert kwargs['namespace'] == 'kubeconfig-default'
         finally:
             self._stop(patches)
 
@@ -5183,6 +5205,36 @@ class TestCheckCredentials:
 
             mock_get_namespace.assert_called_once_with(context='ssh-cluster',
                                                        cloud='ssh')
+        finally:
+            self._stop(patches)
+
+    @pytest.mark.parametrize('cause,expected', [
+        (kubernetes.client.rest.ApiException(status=401),
+         'Invalid credentials - do you have permission to access the '
+         'cluster?'),
+        (kubernetes.client.rest.ApiException(status=403, reason='Forbidden'),
+         'Failed to communicate with the cluster: (403)'),
+        (kubernetes.config.config_exception.ConfigException('bad file'),
+         'Invalid configuration file: bad file'),
+        (kubernetes_adaptor.max_retry_error()(
+            None, '/api'), 'Failed to communicate with the cluster - timeout.'),
+        (None, 'Failed to communicate with the cluster: unreachable'),
+    ],
+                             ids=['401', '403', 'config', 'timeout', 'known'])
+    @patch('sky.provision.kubernetes.utils.get_namespace',
+           return_value='default')
+    def test_probe_failures(self, _, cause, expected):
+        error = exceptions.KubeAPIUnreachableError('unreachable')
+        error.__cause__ = cause
+        mocks, patches = self._patch_common()
+        try:
+            mocks[0].side_effect = error
+
+            ok, reason = utils.check_credentials(context='ctx')
+
+            assert ok is False
+            assert reason.startswith(expected)
+            mocks[1].assert_not_called()
         finally:
             self._stop(patches)
 
@@ -5902,12 +5954,28 @@ def test_pod_terminated_abnormally_status_none():
     assert utils.pod_terminated_abnormally(pod) is False
 
 
+def _read_result(items):
+    return reads.ReadResult(items=items,
+                            resource_version='',
+                            staleness_seconds=0,
+                            reason=reads.REASON_FRESH)
+
+
 def _patch_read_pod(monkeypatch, pod=None, side_effect=None):
+    """Serves pod to diagnose_terminated_pod; it is absent when pod is None.
+
+    Returns the CoreV1Api fake that serves container logs.
+    """
+
+    def get_object(context, resource, name, **kwargs):
+        del context, name, kwargs
+        assert resource == reads.PODS
+        if side_effect is not None:
+            raise side_effect
+        return _read_result([] if pod is None else [pod])
+
+    monkeypatch.setattr(utils.reads, 'get_object', get_object)
     core_api = mock.MagicMock()
-    if side_effect is not None:
-        core_api.read_namespaced_pod.side_effect = side_effect
-    else:
-        core_api.read_namespaced_pod.return_value = pod
     monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
     return core_api
 
@@ -6238,19 +6306,28 @@ def test_the_last_event_is_offered_as_context():
     ]) is None
 
 
-def _patch_pod_events(monkeypatch, core_api, events):
-    core_api.list_namespaced_event.return_value = mock.MagicMock(items=events)
-    monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
+def _patch_pod_events(monkeypatch, events, error=None):
+    """Serves events as the events of pod mypod; no other events exist."""
+
+    def list_objects(context, resource, *, field_selector, **kwargs):
+        del context, kwargs
+        assert resource == reads.EVENTS
+        if field_selector != ('involvedObject.kind=Pod,'
+                              'involvedObject.name=mypod'):
+            return _read_result([])
+        if error is not None:
+            raise error
+        return _read_result(events)
+
+    monkeypatch.setattr(utils.reads, 'list_objects', list_objects)
 
 
 def test_diagnose_terminated_pod_deleted_pod_reports_its_events(monkeypatch):
     """The runtime-setup path shares the gap this change is about: a pod that
     something else deleted reads back as a 404, and the diagnosis used to
     return nothing at all. Its events outlive it and say who did it."""
-    core_api = _patch_read_pod(monkeypatch,
-                               side_effect=kubernetes.client.rest.ApiException(
-                                   status=404, reason='Not Found'))
-    _patch_pod_events(monkeypatch, core_api, [
+    _patch_read_pod(monkeypatch)
+    _patch_pod_events(monkeypatch, [
         _make_pod_event('Stopped', 'Exceeded the PodsReady timeout default/wl')
     ])
     msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
@@ -6259,10 +6336,8 @@ def test_diagnose_terminated_pod_deleted_pod_reports_its_events(monkeypatch):
 
 
 def test_diagnose_terminated_pod_deleted_pod_keeps_its_hint(monkeypatch):
-    core_api = _patch_read_pod(monkeypatch,
-                               side_effect=kubernetes.client.rest.ApiException(
-                                   status=404, reason='Not Found'))
-    _patch_pod_events(monkeypatch, core_api, [
+    _patch_read_pod(monkeypatch)
+    _patch_pod_events(monkeypatch, [
         _make_pod_event('Evicted',
                         'The node was low on resource: ephemeral-storage.',
                         type_='Warning')
@@ -6277,18 +6352,24 @@ def test_diagnose_terminated_pod_deleted_pod_keeps_its_hint(monkeypatch):
 def test_diagnose_terminated_pod_deleted_pod_with_nothing_to_say(monkeypatch):
     """Every `sky down` leaves a pod that reads back as a 404; only one whose
     events name a cause is worth reporting."""
-    core_api = _patch_read_pod(monkeypatch,
-                               side_effect=kubernetes.client.rest.ApiException(
-                                   status=404, reason='Not Found'))
-    _patch_pod_events(monkeypatch, core_api,
+    _patch_read_pod(monkeypatch)
+    _patch_pod_events(monkeypatch,
                       [_make_pod_event('Killing', 'Stopping container ray')])
     assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
 
 
+def test_diagnose_terminated_pod_deleted_pod_events_unreadable(monkeypatch):
+    _patch_read_pod(monkeypatch)
+    _patch_pod_events(monkeypatch, [],
+                      error=exceptions.KubeAPIUnreachableError('timed out'))
+    assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
+
+
 def test_diagnose_terminated_pod_other_api_error_returns_none(monkeypatch):
-    _patch_read_pod(monkeypatch,
-                    side_effect=kubernetes.client.rest.ApiException(
-                        status=500, reason='Internal Server Error'))
+    error = exceptions.KubeAPIUnreachableError('HTTP 500')
+    error.__cause__ = kubernetes.client.rest.ApiException(
+        status=500, reason='Internal Server Error')
+    _patch_read_pod(monkeypatch, side_effect=error)
     assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
 
 
@@ -6861,59 +6942,73 @@ def test_set_execution_context_ignores_none():
     assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
 
 
-def _namespace_with_uid(uid):
-    namespace = mock.MagicMock()
-    namespace.metadata.uid = uid
-    return namespace
+class _NamespaceReads:
+    """Fakes reads.get_object for the kube-system namespace."""
+
+    def __init__(self, uid=None, error=None):
+        self.uid = uid
+        self.error = error
+        self.calls = []
+
+    def __call__(self, context, resource, name, **kwargs):
+        self.calls.append((context, resource, name, kwargs))
+        if self.error is not None:
+            raise self.error
+        if self.uid is None:
+            return _read_result([])
+        return _read_result([{'metadata': {'uid': self.uid}}])
 
 
 def test_get_cluster_uid_caches_reads(monkeypatch):
     monkeypatch.setattr(utils, '_cluster_uid_cache', {})
-    core = mock.MagicMock()
-    core.read_namespace.return_value = _namespace_with_uid('uid-a')
-    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
-               return_value=core) as mock_core_api:
-        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
-        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
-        assert core.read_namespace.call_count == 1
-        mock_core_api.assert_called_once_with('ctx-a')
-        core.read_namespace.assert_called_with('kube-system',
-                                               _request_timeout=mock.ANY)
+    fake = _NamespaceReads(uid='uid-a')
+    monkeypatch.setattr(utils.reads, 'get_object', fake)
+    assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+    assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+    assert len(fake.calls) == 1
+    context, resource, name, kwargs = fake.calls[0]
+    assert (context, resource, name) == ('ctx-a', reads.NAMESPACES,
+                                         'kube-system')
+    assert kwargs['attempts'] == 1
+    assert kwargs['timeout'] == utils._CLUSTER_UID_READ_TIMEOUT_SECONDS  # pylint: disable=protected-access
 
-        # An uncached read refreshes the cache for later reads.
-        core.read_namespace.return_value = _namespace_with_uid('uid-b')
-        assert utils.get_cluster_uid('ctx-a', use_cache=False) == 'uid-b'
-        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
-        assert core.read_namespace.call_count == 2
+    # An uncached read refreshes the cache for later reads.
+    fake.uid = 'uid-b'
+    assert utils.get_cluster_uid('ctx-a', use_cache=False) == 'uid-b'
+    assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+    assert len(fake.calls) == 2
 
 
 def test_get_cluster_uid_failure_is_none_and_retried(monkeypatch):
     monkeypatch.setattr(utils, '_cluster_uid_cache', {})
-    core = mock.MagicMock()
-    core.read_namespace.side_effect = kubernetes.client.rest.ApiException(
-        status=403)
-    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
-               return_value=core):
-        assert utils.get_cluster_uid('ctx-a') is None
-        # Failures are cached for a shorter time than successful reads.
-        expiry = utils._cluster_uid_cache['ctx-a'][2]  # pylint: disable=protected-access
-        with patch('sky.provision.kubernetes.utils.time.monotonic',
-                   return_value=expiry + 1):
-            core.read_namespace.side_effect = None
-            core.read_namespace.return_value = _namespace_with_uid('uid-a')
-            assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+    error = exceptions.KubeAPIUnreachableError('HTTP 403')
+    error.__cause__ = kubernetes.client.rest.ApiException(status=403)
+    fake = _NamespaceReads(error=error)
+    monkeypatch.setattr(utils.reads, 'get_object', fake)
+    assert utils.get_cluster_uid('ctx-a') is None
+    # Failures are cached for a shorter time than successful reads.
+    expiry = utils._cluster_uid_cache['ctx-a'][2]  # pylint: disable=protected-access
+    with patch('sky.provision.kubernetes.utils.time.monotonic',
+               return_value=expiry + 1):
+        fake.error = None
+        fake.uid = 'uid-a'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+
+
+def test_get_cluster_uid_absent_namespace_is_none(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    monkeypatch.setattr(utils.reads, 'get_object', _NamespaceReads())
+    assert utils.get_cluster_uid('ctx-a') is None
 
 
 def test_get_cluster_uid_in_cluster_never_falls_back_to_kubeconfig(monkeypatch):
     """None would fall back to the kubeconfig current-context."""
     monkeypatch.setattr(utils, '_cluster_uid_cache', {})
-    core = mock.MagicMock()
-    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    fake = _NamespaceReads(uid='uid-a')
+    monkeypatch.setattr(utils.reads, 'get_object', fake)
     in_cluster = kubernetes_adaptor.in_cluster_context_name()
-    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
-               return_value=core) as mock_core_api:
-        assert utils.get_cluster_uid(in_cluster) == 'uid-a'
-        mock_core_api.assert_called_once_with(in_cluster)
+    assert utils.get_cluster_uid(in_cluster) == 'uid-a'
+    assert fake.calls[0][0] == in_cluster
 
 
 def test_get_cluster_uid_rereads_after_kubeconfig_changes(
@@ -6923,17 +7018,124 @@ def test_get_cluster_uid_rereads_after_kubeconfig_changes(
     kubeconfig = tmp_path / 'config'
     kubeconfig.write_text('a')
     monkeypatch.setenv('KUBECONFIG', str(kubeconfig))
-    core = mock.MagicMock()
-    core.read_namespace.return_value = _namespace_with_uid('uid-a')
-    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
-               return_value=core):
-        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
-        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
-        assert core.read_namespace.call_count == 1
+    fake = _NamespaceReads(uid='uid-a')
+    monkeypatch.setattr(utils.reads, 'get_object', fake)
+    assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+    assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+    assert len(fake.calls) == 1
 
-        core.read_namespace.return_value = _namespace_with_uid('uid-b')
-        replacement = tmp_path / 'config.new'
-        replacement.write_text('bb')
-        os.replace(replacement, kubeconfig)
-        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
-        assert core.read_namespace.call_count == 2
+    fake.uid = 'uid-b'
+    replacement = tmp_path / 'config.new'
+    replacement.write_text('bb')
+    os.replace(replacement, kubeconfig)
+    assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+    assert len(fake.calls) == 2
+
+
+def _unreachable(status):
+    error = exceptions.KubeAPIUnreachableError(f'HTTP {status}')
+    error.__cause__ = kubernetes.client.rest.ApiException(status=status)
+    return error
+
+
+def test_get_port_reads_the_node_port(monkeypatch):
+    get_object = mock.Mock(return_value=_read_result([{
+        'spec': {
+            'ports': [{
+                'nodePort': 30022
+            }]
+        }
+    }]))
+    monkeypatch.setattr(utils.reads, 'get_object', get_object)
+    assert utils.get_port('c-head-ssh', 'ns', 'ctx') == 30022
+    get_object.assert_called_once_with('ctx',
+                                       reads.SERVICES,
+                                       'c-head-ssh',
+                                       namespace='ns',
+                                       consistency=reads.FRESH,
+                                       attempts=1,
+                                       timeout=reads.LONG_READ_TIMEOUT)
+
+
+def test_get_port_missing_service_raises(monkeypatch):
+    monkeypatch.setattr(utils.reads, 'get_object',
+                        mock.Mock(return_value=_read_result([])))
+    with pytest.raises(ValueError, match='c-head-ssh'):
+        utils.get_port('c-head-ssh', 'ns', 'ctx')
+
+
+@pytest.mark.parametrize('items,expected', [([{
+    'metadata': {
+        'name': 's'
+    }
+}], True), ([], False)])
+def test_check_secret_exists(monkeypatch, items, expected):
+    get_object = mock.Mock(return_value=_read_result(items))
+    monkeypatch.setattr(utils.reads, 'get_object', get_object)
+    assert utils.check_secret_exists('s', 'ns', 'ctx') is expected
+    assert get_object.call_args.kwargs['consistency'] == reads.FRESH
+
+
+def test_check_secret_exists_raises_other_errors(monkeypatch):
+    monkeypatch.setattr(utils.reads, 'get_object',
+                        mock.Mock(side_effect=_unreachable(403)))
+    with pytest.raises(exceptions.KubeAPIUnreachableError):
+        utils.check_secret_exists('s', 'ns', 'ctx')
+
+
+def test_create_namespace_skips_an_existing_namespace(monkeypatch):
+    monkeypatch.setattr(
+        utils.reads, 'get_object',
+        mock.Mock(return_value=_read_result([{
+            'metadata': {
+                'name': 'ns'
+            }
+        }])))
+    core_api = mock.MagicMock()
+    monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
+    utils.create_namespace('ns', 'ctx')
+    core_api.create_namespace.assert_not_called()
+
+
+def test_create_namespace_creates_an_absent_namespace(monkeypatch):
+    get_object = mock.Mock(return_value=_read_result([]))
+    monkeypatch.setattr(utils.reads, 'get_object', get_object)
+    monkeypatch.setattr(utils, 'merge_custom_metadata', lambda *args: None)
+    core_api = mock.MagicMock()
+    monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
+    utils.create_namespace('ns', 'ctx')
+    get_object.assert_called_once_with('ctx',
+                                       reads.NAMESPACES,
+                                       'ns',
+                                       consistency=reads.FRESH,
+                                       attempts=1,
+                                       timeout=reads.LONG_READ_TIMEOUT)
+    core_api.create_namespace.assert_called_once()
+
+
+def test_create_namespace_read_failure_raises(monkeypatch):
+    monkeypatch.setattr(utils.reads, 'get_object',
+                        mock.Mock(side_effect=_unreachable(403)))
+    core_api = mock.MagicMock()
+    monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
+    with pytest.raises(exceptions.KubeAPIUnreachableError):
+        utils.create_namespace('ns', 'ctx')
+    core_api.create_namespace.assert_not_called()
+
+
+def test_get_pvc_events_sorted_newest_first(monkeypatch):
+    older = _make_pod_event('Provisioning', 'started', at=1)
+    newer = _make_pod_event('ProvisioningFailed', 'failed', at=2)
+    list_objects = mock.Mock(return_value=_read_result([older, newer]))
+    monkeypatch.setattr(utils.reads, 'list_objects', list_objects)
+    assert utils.get_pvc_events('ctx', 'ns', 'pvc') == [newer, older]
+    _, kwargs = list_objects.call_args
+    assert kwargs['field_selector'] == (
+        'involvedObject.name=pvc,involvedObject.kind=PersistentVolumeClaim')
+    assert kwargs['consistency'] == reads.FRESH
+
+
+def test_get_pvc_events_read_failure_is_empty(monkeypatch):
+    monkeypatch.setattr(utils.reads, 'list_objects',
+                        mock.Mock(side_effect=_unreachable(500)))
+    assert utils.get_pvc_events('ctx', 'ns', 'pvc') == []

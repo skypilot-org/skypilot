@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import directory_utils
 from sky.utils import kubernetes_enums
@@ -157,17 +158,15 @@ def create_or_replace_namespaced_ingress(
     """Creates an ingress resource for the specified service."""
     networking_api = kubernetes.networking_api(context)
 
-    try:
-        networking_api.read_namespaced_ingress(
-            ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.kubernetes.client.ApiException as e:
-        if e.status == 404:
-            networking_api.create_namespaced_ingress(
-                namespace,
-                ingress_spec,
-                _request_timeout=kubernetes.API_TIMEOUT)
-            return
-        raise e
+    if not reads.get_object(context,
+                            reads.INGRESSES,
+                            ingress_name,
+                            namespace=namespace,
+                            consistency=reads.FRESH,
+                            attempts=1).items:
+        networking_api.create_namespaced_ingress(
+            namespace, ingress_spec, _request_timeout=kubernetes.API_TIMEOUT)
+        return
 
     networking_api.replace_namespaced_ingress(
         ingress_name,
@@ -196,17 +195,15 @@ def create_or_replace_namespaced_service(
     """Creates a service resource for the specified service."""
     core_api = kubernetes.core_api(context)
 
-    try:
-        core_api.read_namespaced_service(
-            service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.kubernetes.client.ApiException as e:
-        if e.status == 404:
-            core_api.create_namespaced_service(
-                namespace,
-                service_spec,
-                _request_timeout=kubernetes.API_TIMEOUT)
-            return
-        raise e
+    if not reads.get_object(context,
+                            reads.SERVICES,
+                            service_name,
+                            namespace=namespace,
+                            consistency=reads.FRESH,
+                            attempts=1).items:
+        core_api.create_namespaced_service(
+            namespace, service_spec, _request_timeout=kubernetes.API_TIMEOUT)
+        return
 
     core_api.replace_namespaced_service(service_name,
                                         namespace,
@@ -232,12 +229,15 @@ def delete_namespaced_service(context: Optional[str], namespace: str,
 def ingress_controller_exists(context: Optional[str],
                               ingress_class_name: str = 'nginx') -> bool:
     """Checks if an ingress controller exists in the cluster."""
-    networking_api = kubernetes.networking_api(context)
-    ingress_classes = networking_api.list_ingress_class(
-        _request_timeout=kubernetes.API_TIMEOUT).items
-    return any(
-        map(lambda item: item.metadata.name == ingress_class_name,
-            ingress_classes))
+    try:
+        ingress_classes = reads.list_objects(context,
+                                             reads.INGRESS_CLASSES,
+                                             attempts=1,
+                                             consistency=reads.FRESH).items
+    except exceptions.KubernetesResourceNotServedError:
+        return False
+    return any(item['metadata']['name'] == ingress_class_name
+               for item in ingress_classes)
 
 
 def get_ingress_external_ip_and_ports(
@@ -245,10 +245,13 @@ def get_ingress_external_ip_and_ports(
     namespace: str = 'ingress-nginx'
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
-    core_api = kubernetes.core_api(context)
     ingress_services = [
-        item for item in core_api.list_namespaced_service(
-            namespace, _request_timeout=kubernetes.API_TIMEOUT).items
+        item for item in reads.list_objects(
+            context,
+            reads.SERVICES,
+            namespace=namespace,
+            convert=kubernetes_utils.k8s_object_converter('V1Service'),
+            attempts=1).items
         if item.metadata.name == 'ingress-nginx-controller'
     ]
     if not ingress_services:
@@ -283,16 +286,26 @@ def get_loadbalancer_ip(context: Optional[str],
                         namespace: str,
                         service_name: str,
                         timeout: int = 0) -> Optional[str]:
-    """Returns the IP address of the load balancer."""
-    core_api = kubernetes.core_api(context)
+    """Returns the IP address of the load balancer.
 
+    None if the service does not exist or has no address within timeout.
+    """
     ip = None
 
     start_time = time.time()
     retry_cnt = 0
     while ip is None and (retry_cnt == 0 or time.time() - start_time < timeout):
-        service = core_api.read_namespaced_service(
-            service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        services = reads.get_object(
+            context,
+            reads.SERVICES,
+            service_name,
+            namespace=namespace,
+            consistency=reads.FRESH,
+            convert=kubernetes_utils.k8s_object_converter('V1Service'),
+            attempts=1).items
+        if not services:
+            return None
+        service = services[0]
         if service.status.load_balancer.ingress is not None:
             ip = (service.status.load_balancer.ingress[0].ip or
                   service.status.load_balancer.ingress[0].hostname)
@@ -307,10 +320,13 @@ def get_loadbalancer_ip(context: Optional[str],
 
 def get_pod_ip(context: Optional[str], namespace: str,
                pod_name: str) -> Optional[str]:
-    """Returns the IP address of the pod."""
-    core_api = kubernetes.core_api(context)
-    pod = core_api.read_namespaced_pod(pod_name,
-                                       namespace,
-                                       _request_timeout=kubernetes.API_TIMEOUT)
-
-    return pod.status.pod_ip if pod.status.pod_ip is not None else None
+    """Returns the IP address of the pod; None if it has none or is absent."""
+    pods = reads.get_object(context,
+                            reads.PODS,
+                            pod_name,
+                            namespace=namespace,
+                            attempts=1,
+                            consistency=reads.FRESH).items
+    if not pods:
+        return None
+    return (pods[0].get('status') or {}).get('podIP')

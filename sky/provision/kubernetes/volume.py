@@ -6,6 +6,7 @@ import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -14,6 +15,7 @@ from sky.provision import constants
 from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import volume as volume_lib
 
@@ -116,12 +118,19 @@ def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
     return PvcFailure.UNKNOWN
 
 
-# Namespace-constrained users on multi-tenant clusters often lack the
-# cluster-scoped `list`/`get` perms on `storageclasses` that the pre-flight
-# checks require, but they can still create PVCs in their namespace and rely
-# on K8s admission to bind. Don't block them just because we can't validate up
-# front.
 _is_rbac_permission_error = api_errors.is_rbac_denial
+
+
+def _is_rbac_denied_read(e: Exception) -> bool:
+    """Whether a failed read was a 401/403 denial.
+
+    Namespace-constrained users on multi-tenant clusters often lack the
+    cluster-scoped `list`/`get` perms on `storageclasses` that the pre-flight
+    checks require, but they can still create PVCs in their namespace and
+    rely on K8s admission to bind. Don't block them just because we can't
+    validate up front.
+    """
+    return reads.http_status(e) in (401, 403)
 
 
 def _resolve_context_for_new_volume() -> Optional[str]:
@@ -213,12 +222,19 @@ def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
         pvc_name = volume.get('persistentVolumeClaim', {}).get('claimName')
         if not pvc_name:
             continue
-        pvc = kubernetes.core_api(
-            context).read_namespaced_persistent_volume_claim(
-                name=pvc_name,
-                namespace=namespace,
-                _request_timeout=kubernetes.API_TIMEOUT)
-        access_mode = pvc.spec.access_modes[0]
+        result = reads.get_object(context,
+                                  reads.PERSISTENT_VOLUME_CLAIMS,
+                                  pvc_name,
+                                  namespace=namespace,
+                                  consistency=reads.FRESH,
+                                  convert=kubernetes_utils.k8s_object_converter(
+                                      'V1PersistentVolumeClaim'),
+                                  attempts=1)
+        if not result.items:
+            raise config_lib.KubernetesError(
+                f'PVC {pvc_name} not found in namespace {namespace!r} on '
+                f'context {context!r}.')
+        access_mode = result.items[0].spec.access_modes[0]
         if access_mode not in once_modes:
             continue
         usedby_pods, _ = _get_volume_usedby(context, namespace, pvc_name)
@@ -245,14 +261,24 @@ def _check_cluster_has_default_storage_class(context: Optional[str]) -> None:
     instead.
 
     Skips the check (logs a warning) on 401/403 — see
-    `_is_rbac_permission_error`. The PVC create may still succeed if a
+    `_is_rbac_denied_read`. The PVC create may still succeed if a
     default actually exists.
     """
     try:
-        sc_list = kubernetes.storage_api(context).list_storage_class(
-            _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if _is_rbac_permission_error(e):
+        sc_list = reads.list_objects(
+            context,
+            reads.STORAGE_CLASSES,
+            consistency=reads.FRESH,
+            convert=kubernetes_utils.k8s_object_converter('V1StorageClass'),
+            attempts=1)
+    except exceptions.KubernetesResourceNotServedError as e:
+        raise config_lib.KubernetesError(
+            f'Failed to list storage classes in context {context!r} '
+            f'while checking for a default StorageClass: {e}') from e
+    except exceptions.KubeAPIUnreachableError as e:
+        if reads.http_status(e) is None:
+            raise
+        if _is_rbac_denied_read(e):
             logger.warning(
                 f'Cannot list storage classes in context {context!r} '
                 f'({e}). Proceeding with PVC creation; if no default '
@@ -262,7 +288,7 @@ def _check_cluster_has_default_storage_class(context: Optional[str]) -> None:
             return
         raise config_lib.KubernetesError(
             f'Failed to list storage classes in context {context!r} '
-            f'while checking for a default StorageClass: {e}')
+            f'while checking for a default StorageClass: {e}') from e
     for sc in sc_list.items:
         if kubernetes_utils.is_default_storage_class(sc):
             return
@@ -279,14 +305,19 @@ def _validate_explicit_storage_class(context: Optional[str],
     """Verifies the named StorageClass exists on the cluster.
 
     Skips validation (logs a warning) on 401/403 — see
-    `_is_rbac_permission_error`. K8s admission will surface a binding
+    `_is_rbac_denied_read`. K8s admission will surface a binding
     error at PVC-create time if the name is actually wrong.
     """
     try:
-        kubernetes.storage_api(context).read_storage_class(
-            name=storage_class_name, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if _is_rbac_permission_error(e):
+        result = reads.get_object(context,
+                                  reads.STORAGE_CLASSES,
+                                  storage_class_name,
+                                  consistency=reads.FRESH,
+                                  attempts=1)
+    except exceptions.KubeAPIUnreachableError as e:
+        if reads.http_status(e) is None:
+            raise
+        if _is_rbac_denied_read(e):
             logger.warning(
                 f'Cannot validate storage class {storage_class_name!r} '
                 f'in context {context!r} ({e}). Proceeding with PVC '
@@ -294,7 +325,11 @@ def _validate_explicit_storage_class(context: Optional[str],
                 f'surface a binding error.')
             return
         raise config_lib.KubernetesError(
-            f'Check storage class {storage_class_name} error: {e}')
+            f'Check storage class {storage_class_name} error: {e}') from e
+    if not result.items:
+        raise config_lib.KubernetesError(
+            f'Check storage class {storage_class_name} error: storage class '
+            f'{storage_class_name!r} not found in context {context!r}.')
 
 
 def _apply_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
@@ -488,16 +523,22 @@ def _wait_for_daemonset_ready(context: Optional[str],
     start = time_module.time()
     while time_module.time() - start < timeout:
         try:
-            ds = kubernetes.apps_api(context).read_namespaced_daemon_set(
-                name=ds_name,
-                namespace=namespace,
-                _request_timeout=kubernetes.API_TIMEOUT)
-            desired = ds.status.desired_number_scheduled or 0
-            ready = ds.status.number_ready or 0
+            result = reads.get_object(context,
+                                      reads.DAEMON_SETS,
+                                      ds_name,
+                                      namespace=namespace,
+                                      consistency=reads.FRESH,
+                                      attempts=1)
+        except exceptions.KubeAPIUnreachableError as e:
+            if reads.http_status(e) is None:
+                raise
+            result = None
+        if result is not None and result.items:
+            status = result.items[0].get('status') or {}
+            desired = status.get('desiredNumberScheduled') or 0
+            ready = status.get('numberReady') or 0
             if desired > 0 and ready >= desired:
                 return
-        except kubernetes.api_exception():
-            pass
         time_module.sleep(5)
     logger.warning(f'Timed out waiting for DaemonSet {ds_name} to be ready. '
                    f'Some nodes may not have been cleaned up.')
@@ -532,10 +573,13 @@ def _get_volume_usedby(
     ])
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
-    pods = kubernetes.core_api(context).list_namespaced_pod(
-        namespace=namespace,
-        field_selector=field_selector,
-        _request_timeout=kubernetes.API_TIMEOUT)
+    pods = reads.list_objects(context,
+                              reads.PODS,
+                              namespace=namespace,
+                              field_selector=field_selector,
+                              consistency=reads.FRESH,
+                              convert=kubernetes_utils.k8s_pod_from_dict,
+                              attempts=1)
     for pod in pods.items:
         if pod.spec.volumes is None:
             continue
@@ -659,11 +703,15 @@ def get_all_volumes_usedby(
             used_by_pods[context][namespace] = {}
             used_by_clusters[context][namespace] = {}
             try:
-                pods = kubernetes.core_api(context).list_namespaced_pod(
+                pods = reads.list_objects(
+                    context,
+                    reads.PODS,
                     namespace=namespace,
-                    field_selector=field_selector,
                     label_selector=label_selector,
-                    _request_timeout=kubernetes.API_TIMEOUT)
+                    field_selector=field_selector,
+                    consistency=reads.CACHED,
+                    convert=kubernetes_utils.k8s_pod_from_dict,
+                    attempts=1)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get pods in namespace {namespace} '
                              f'in context {context}: {e}')
@@ -837,11 +885,15 @@ def get_all_volumes_state(
     for (context, namespace), configs_by_pvc in configs_by_location.items():
         try:
             # List all PVCs in the namespace with the skypilot label
-            pvcs = kubernetes.core_api(
-                context).list_namespaced_persistent_volume_claim(
-                    namespace=namespace,
-                    label_selector='parent=skypilot',
-                    _request_timeout=kubernetes.API_TIMEOUT)
+            pvcs = reads.list_objects(
+                context,
+                reads.PERSISTENT_VOLUME_CLAIMS,
+                namespace=namespace,
+                label_selector='parent=skypilot',
+                consistency=reads.CACHED,
+                convert=kubernetes_utils.k8s_object_converter(
+                    'V1PersistentVolumeClaim'),
+                attempts=1)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get PVCs in namespace {namespace} '
                          f'in context {context}: {e}')
@@ -868,28 +920,28 @@ def get_all_volumes_state(
             if pvc_name in seen_pvc_names:
                 continue
             try:
-                pvc = kubernetes.core_api(
-                    context).read_namespaced_persistent_volume_claim(
-                        name=pvc_name,
-                        namespace=namespace,
-                        _request_timeout=kubernetes.API_TIMEOUT)
-            except kubernetes.api_exception() as e:
-                if e.status == 404:
-                    volume_errors[vol_config.name] = (
-                        f'PVC {pvc_name} no longer exists in namespace '
-                        f'{namespace}. It may have been deleted outside '
-                        f'SkyPilot. Recreate the volume, or run `sky volumes '
-                        f'delete {vol_config.name}` to deregister it.')
-                else:
-                    logger.debug(f'Failed to read PVC {pvc_name} in namespace '
-                                 f'{namespace} in context {context}: {e}')
-                    failed_volume_names.add(vol_config.name)
-                continue
+                result = reads.get_object(
+                    context,
+                    reads.PERSISTENT_VOLUME_CLAIMS,
+                    pvc_name,
+                    namespace=namespace,
+                    consistency=reads.FRESH,
+                    convert=kubernetes_utils.k8s_object_converter(
+                        'V1PersistentVolumeClaim'),
+                    attempts=1)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to read PVC {pvc_name} in namespace '
                              f'{namespace} in context {context}: {e}')
                 failed_volume_names.add(vol_config.name)
                 continue
+            if not result.items:
+                volume_errors[vol_config.name] = (
+                    f'PVC {pvc_name} no longer exists in namespace '
+                    f'{namespace}. It may have been deleted outside '
+                    f'SkyPilot. Recreate the volume, or run `sky volumes '
+                    f'delete {vol_config.name}` to deregister it.')
+                continue
+            pvc = result.items[0]
             volume_errors[vol_config.name] = _get_pvc_error(
                 context, namespace, pvc)
             observed[vol_config.name] = _observed_volume_state(pvc)
@@ -913,12 +965,18 @@ def _check_storage_class_volume_binding_mode(context: Optional[str],
     if not storage_class_name:
         return None
     try:
-        storage_class = kubernetes.storage_api(context).read_storage_class(
-            name=storage_class_name, _request_timeout=kubernetes.API_TIMEOUT)
-        return storage_class.volume_binding_mode
+        result = reads.get_object(context,
+                                  reads.STORAGE_CLASSES,
+                                  storage_class_name,
+                                  consistency=reads.CACHED,
+                                  attempts=1)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to read storage class {storage_class_name}: {e}')
         return None
+    if not result.items:
+        logger.debug(f'Storage class {storage_class_name} not found')
+        return None
+    return result.items[0].get('volumeBindingMode')
 
 
 def _check_pvc_access_mode_error(context: Optional[str],
@@ -941,8 +999,12 @@ def _check_pvc_access_mode_error(context: Optional[str],
 
     # Try to find available PVs and check their access modes
     try:
-        pvs = kubernetes.core_api(context).list_persistent_volume(
-            _request_timeout=kubernetes.API_TIMEOUT)
+        pvs = reads.list_objects(
+            context,
+            reads.PERSISTENT_VOLUMES,
+            consistency=reads.CACHED,
+            convert=kubernetes_utils.k8s_object_converter('V1PersistentVolume'),
+            attempts=1)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to list PVs: {e}')
         return None
@@ -1179,24 +1241,27 @@ def _find_pvc_by_name_or_label(context: Optional[str], namespace: str,
         PVC object if found, None otherwise
     """
     # Try by exact PVC name first (backward compatibility for user-created PVCs)
-    try:
-        pvc = kubernetes.core_api(
-            context).read_namespaced_persistent_volume_claim(
-                name=volume_name,
-                namespace=namespace,
-                _request_timeout=kubernetes.API_TIMEOUT)
-        return pvc
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            raise
+    result = reads.get_object(context,
+                              reads.PERSISTENT_VOLUME_CLAIMS,
+                              volume_name,
+                              namespace=namespace,
+                              consistency=reads.FRESH,
+                              convert=kubernetes_utils.k8s_object_converter(
+                                  'V1PersistentVolumeClaim'),
+                              attempts=1)
+    if result.items:
+        return result.items[0]
 
     # Try by skypilot-name label (for PVCs created by SkyPilot with UUID suffix)
     try:
-        pvcs = kubernetes.core_api(
-            context).list_namespaced_persistent_volume_claim(
-                namespace=namespace,
-                label_selector=f'skypilot-name={volume_name}',
-                _request_timeout=kubernetes.API_TIMEOUT)
+        pvcs = reads.list_objects(context,
+                                  reads.PERSISTENT_VOLUME_CLAIMS,
+                                  namespace=namespace,
+                                  label_selector=f'skypilot-name={volume_name}',
+                                  consistency=reads.FRESH,
+                                  convert=kubernetes_utils.k8s_object_converter(
+                                      'V1PersistentVolumeClaim'),
+                                  attempts=1)
         if pvcs.items:
             if len(pvcs.items) > 1:
                 pvc_names = [p.metadata.name for p in pvcs.items]
@@ -1205,7 +1270,9 @@ def _find_pvc_by_name_or_label(context: Optional[str], namespace: str,
                     f'{volume_name}: {pvc_names}. Please delete the duplicate'
                     f' PVCs or specify the exact PVC name.')
             return pvcs.items[0]
-    except kubernetes.api_exception() as e:
+    except exceptions.KubeAPIUnreachableError as e:
+        if reads.http_status(e) is None:
+            raise
         logger.debug(f'Failed to list PVCs by label: {e}')
 
     return None
@@ -1227,7 +1294,9 @@ def create_persistent_volume_claim(
         volume_name = config.name  # User-specified name
         try:
             pvc = _find_pvc_by_name_or_label(context, namespace, volume_name)
-        except kubernetes.api_exception() as e:
+        except exceptions.KubeAPIUnreachableError as e:
+            if reads.http_status(e) is None:
+                raise
             raise ValueError(f'Failed to search for PVC with name or label '
                              f'skypilot-name={volume_name}: {e}') from e
         if pvc is not None:
@@ -1249,19 +1318,19 @@ def create_persistent_volume_claim(
             f'name it explicitly with `--infra k8s/<context>`.')
 
     # Try to read PVC by name_on_cloud (for non-use_existing case)
-    try:
-        pvc = kubernetes.core_api(
-            context).read_namespaced_persistent_volume_claim(
-                name=pvc_name,
-                namespace=namespace,
-                _request_timeout=kubernetes.API_TIMEOUT)
+    result = reads.get_object(context,
+                              reads.PERSISTENT_VOLUME_CLAIMS,
+                              pvc_name,
+                              namespace=namespace,
+                              consistency=reads.FRESH,
+                              convert=kubernetes_utils.k8s_object_converter(
+                                  'V1PersistentVolumeClaim'),
+                              attempts=1)
+    if result.items:
         if config is not None:
-            _populate_config_from_pvc(config, pvc)
+            _populate_config_from_pvc(config, result.items[0])
         logger.debug(f'PVC {pvc_name} already exists')
         return
-    except kubernetes.api_exception() as e:
-        if e.status != 404:  # Not found
-            raise
 
     # Create new PVC
     pvc = kubernetes.core_api(

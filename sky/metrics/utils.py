@@ -1481,13 +1481,13 @@ def _get_prometheus_target() -> Tuple[str, str, int]:
     return namespace, service, port
 
 
-def _read_cluster_identity_uid(core) -> Optional[str]:
-    """Reads the kube-system namespace UID through the given CoreV1Api."""
+def _read_cluster_identity_uid(context: Optional[str]) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given context."""
     # Import lazily to avoid circular import (metrics -> provision ->
     # clouds -> metrics).
     # pylint: disable=import-outside-toplevel
     from sky.provision.kubernetes import utils as kubernetes_utils
-    return kubernetes_utils.read_cluster_uid(core,
+    return kubernetes_utils.read_cluster_uid(context,
                                              _NAMESPACE_PROBE_TIMEOUT_SECONDS)
 
 
@@ -1510,7 +1510,9 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
     # Import lazily to avoid circular import (metrics -> provision ->
     # clouds -> metrics).
     # pylint: disable=import-outside-toplevel
+    from sky import exceptions
     from sky.adaptors import kubernetes as kubernetes_adaptors
+    from sky.provision.kubernetes import reads
 
     def _log_failure(message: str) -> None:
         # WARNING once per state change, DEBUG on repeats: a persistent
@@ -1526,9 +1528,8 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
             logger.debug(message)
 
     try:
-        core = kubernetes_adaptors.core_api(
+        uid = _read_cluster_identity_uid(
             kubernetes_adaptors.in_cluster_context_name())
-        uid = _read_cluster_identity_uid(core)
         if not uid:
             _record_anchor_read('no_uid')
             logger.debug(
@@ -1537,15 +1538,15 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
                 f'local-context detection is disabled until the next '
                 f'attempt.')
             return None
-    except kubernetes_adaptors.config_exception():
-        # Not running inside a Kubernetes pod: there are no in-cluster
-        # credentials, hence no local cluster to detect.
-        _record_anchor_read('no_credentials')
-        logger.debug('No in-cluster credentials; local-context detection '
-                     'is disabled.')
-        return None
-    except kubernetes_adaptors.api_exception() as e:
-        status = getattr(e, 'status', None)
+    except exceptions.KubeAPIUnreachableError as e:
+        if isinstance(e.__cause__, kubernetes_adaptors.config_exception()):
+            # Not running inside a Kubernetes pod: there are no in-cluster
+            # credentials, hence no local cluster to detect.
+            _record_anchor_read('no_credentials')
+            logger.debug('No in-cluster credentials; local-context '
+                         'detection is disabled.')
+            return None
+        status = reads.http_status(e)
         if status in (401, 403):
             _record_anchor_read('unauthorized')
             _log_failure(
@@ -1627,6 +1628,7 @@ def is_local_context(context: str) -> bool:
     # clouds -> metrics).
     # pylint: disable=import-outside-toplevel
     from sky.adaptors import kubernetes as kubernetes_adaptors
+    from sky.provision.kubernetes import reads
     if context == kubernetes_adaptors.in_cluster_context_name():
         return True
     now = time.time()
@@ -1642,12 +1644,11 @@ def is_local_context(context: str) -> bool:
     own_uid = _get_in_cluster_identity_uid()
     if own_uid is not None:
         try:
-            core = kubernetes_adaptors.core_api(context)
-            probed_uid = _read_cluster_identity_uid(core)
+            probed_uid = _read_cluster_identity_uid(context)
             conclusive = bool(probed_uid)
             is_local = conclusive and probed_uid == own_uid
         except Exception as e:  # pylint: disable=broad-except
-            status = getattr(e, 'status', None)
+            status = reads.http_status(e)
             status_str = f' (status={status})' if status is not None else ''
             logger.warning(
                 f'Failed to probe the {_CLUSTER_IDENTITY_NAMESPACE!r} '

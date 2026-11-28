@@ -2,21 +2,21 @@
 import os
 import random
 import shlex
-import subprocess
 import tempfile
 import textwrap
 from typing import Optional, Tuple
 
 from sky import check as sky_check
+from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
+from sky.provision.kubernetes import reads
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import log_utils
 from sky.utils import rich_utils
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -206,44 +206,41 @@ def deploy_local_cluster(name: Optional[str],
                                    clouds=['kubernetes'])
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
-        # Get number of CPUs
-        p = subprocess_utils.run(
-            'kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'',
-            capture_output=True)
-        num_cpus = int(p.stdout.decode('utf-8'))
+        nodes = reads.list_objects(context_name,
+                                   reads.NODES,
+                                   consistency=reads.FRESH,
+                                   attempts=1).items
+        num_cpus = int(nodes[0]['status']['capacity']['cpu'])
 
         # GPU count/type parsing
         gpu_message = ''
         gpu_hint = ''
         if gpus:
             # Get GPU model by querying the node labels
-            label_name_escaped = 'skypilot.co/accelerator'.replace('.', '\\.')
-            gpu_type_cmd = f'kubectl get node {name}-control-plane -o jsonpath=\"{{.metadata.labels[\'{label_name_escaped}\']}}\"'  # pylint: disable=line-too-long
+            control_plane_name = f'{name}-control-plane'
+            gpu_type_str = ''
             try:
-                # Run the command and capture the output
-                gpu_count_output = subprocess.check_output(gpu_type_cmd,
-                                                           shell=True,
-                                                           text=True)
-                gpu_type_str = gpu_count_output.strip() + ' '
-            except subprocess.CalledProcessError as e:
-                output = str(e.output.decode('utf-8'))
-                logger.warning(f'Failed to get GPU type: {output}')
-                gpu_type_str = ''
+                control_plane = reads.get_object(context_name,
+                                                 reads.NODES,
+                                                 control_plane_name,
+                                                 consistency=reads.FRESH,
+                                                 attempts=1).items
+            except exceptions.KubeAPIUnreachableError as e:
+                logger.warning(f'Failed to get GPU type: {e}')
+            else:
+                if control_plane:
+                    labels = control_plane[0]['metadata'].get('labels') or {}
+                    gpu_type_str = labels.get('skypilot.co/accelerator',
+                                              '').strip() + ' '
+                else:
+                    logger.warning('Failed to get GPU type: node '
+                                   f'{control_plane_name} not found.')
 
             # Get number of GPUs (sum of nvidia.com/gpu resources)
-            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{\"\\n\"}{end}\' | awk \'{sum += $1} END {print sum}\''  # pylint: disable=line-too-long
-            try:
-                # Run the command and capture the output
-                gpu_count_output = subprocess.check_output(gpu_count_command,
-                                                           shell=True,
-                                                           text=True)
-                gpu_count = gpu_count_output.strip(
-                )  # Remove any extra whitespace
-                gpu_message = f' and {gpu_count} {gpu_type_str}GPUs'
-            except subprocess.CalledProcessError as e:
-                output = str(e.output.decode('utf-8'))
-                logger.warning(f'Failed to get GPU count: {output}')
-                gpu_message = f' with {gpu_type_str}GPU support'
+            gpu_count = sum(
+                int((node['status'].get('allocatable') or {}
+                    ).get('nvidia.com/gpu', 0)) for node in nodes)
+            gpu_message = f' and {gpu_count} {gpu_type_str}GPUs'
 
             gpu_hint = (
                 '\nHint: To see the list of GPUs in the cluster, '

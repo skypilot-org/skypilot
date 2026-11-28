@@ -297,16 +297,24 @@ def is_high_availability_cluster_by_kubectl(
     `cluster_name`.
     """
     try:
-        deployment_list = kubernetes.apps_api(
-            context).list_namespaced_deployment(
-                namespace,
-                label_selector=
-                f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
-    except kubernetes.api_exception():
+        deployments = reads.list_objects(
+            context,
+            reads.DEPLOYMENTS,
+            namespace=namespace,
+            label_selector=(
+                f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}'),
+            consistency=reads.FRESH,
+            attempts=1,
+            timeout=reads.LONG_READ_TIMEOUT).items
+    except exceptions.KubernetesResourceNotServedError:
+        return False
+    except exceptions.KubeAPIUnreachableError as e:
+        if reads.http_status(e) is None:
+            raise
         return False
     # It is a high availability cluster if there is at least one deployment
     # matching the label selector.
-    return bool(deployment_list.items)
+    return bool(deployments)
 
 
 def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
@@ -510,12 +518,19 @@ def _get_pending_pvcs(
     pending_pvcs: List[PendingPvc] = []
     for pvc_name in pvc_names:
         try:
-            pvc = kubernetes.core_api(
-                context).read_namespaced_persistent_volume_claim(
-                    name=pvc_name,
-                    namespace=namespace,
-                    _request_timeout=kubernetes.API_TIMEOUT)
-            if pvc.status.phase != 'Pending':
+            pvcs = reads.get_object(
+                context,
+                reads.PERSISTENT_VOLUME_CLAIMS,
+                pvc_name,
+                namespace=namespace,
+                consistency=reads.FRESH,
+                convert=kubernetes_utils.k8s_object_converter(
+                    'V1PersistentVolumeClaim'),
+                attempts=1).items
+            if not pvcs:
+                logger.debug(f'PVC {pvc_name} not found.')
+                continue
+            if pvcs[0].status.phase != 'Pending':
                 continue
             # Get events for the PVC to understand why it's pending
             sorted_events = kubernetes_utils.get_pvc_events(context,
@@ -774,19 +789,20 @@ def _raise_pod_scheduling_errors(
     events_since = _pod_events_since(new_nodes, pods_created_at)
     for new_node in new_nodes:
         expected_pod_name = new_node.metadata.name
-        try:
-            pod = kubernetes.core_api(context).read_namespaced_pod(
-                expected_pod_name,
-                namespace,
-                _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
-        except kubernetes.api_exception() as e:
-            if e.status != 404:
-                raise
+        pods = reads.get_object(context,
+                                reads.PODS,
+                                expected_pod_name,
+                                namespace=namespace,
+                                consistency=reads.FRESH,
+                                convert=kubernetes_utils.k8s_pod_from_dict,
+                                attempts=1,
+                                timeout=_POD_POLL_REQUEST_TIMEOUT).items
+        if not pods:
             # The pod no longer exists, so it has no status and no scheduler
             # events to report -- it was deleted while we waited for it to be
-            # scheduled. Letting the 404 propagate would get wrapped by the
-            # caller into 'An error occurred while trying to fetch the reason
-            # for pod scheduling failure', which hides the one thing that did
+            # scheduled. Say so: the caller wraps any other error into 'An
+            # error occurred while trying to fetch the reason for pod
+            # scheduling failure', which would hide the one thing that did
             # happen.
             deleted_pods: Dict[str, Optional[Any]] = {
                 expected_pod_name: (last_seen_pods or {}).get(expected_pod_name)
@@ -795,7 +811,8 @@ def _raise_pod_scheduling_errors(
                                       namespace=namespace,
                                       cluster_name=cluster_name,
                                       deleted_pods=deleted_pods,
-                                      since=events_since) from None
+                                      since=events_since)
+        pod = pods[0]
         if pod.metadata.deletion_timestamp is not None:
             # A pod that is being deleted is just as lost as one that is
             # already unreadable -- it is never going to be scheduled -- and
@@ -815,18 +832,21 @@ def _raise_pod_scheduling_errors(
         if pod_status != 'Pending':
             continue
         pod_name = pod._metadata._name  # pylint: disable=protected-access
-        events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
+        events = reads.list_objects(
+            context,
+            reads.EVENTS,
+            namespace=namespace,
             field_selector=(f'involvedObject.name={pod_name},'
                             'involvedObject.kind=Pod'),
-            _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
+            consistency=reads.CACHED,
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
+            attempts=1,
+            timeout=_POD_POLL_REQUEST_TIMEOUT).items
         # Events created in the past hours are kept by
         # Kubernetes python client and we want to surface
         # the latest event message
         events_desc_by_time = sorted(
-            events.items,
-            key=lambda e: e.metadata.creation_timestamp,
-            reverse=True)
+            events, key=lambda e: e.metadata.creation_timestamp, reverse=True)
 
         event_message = None
         for event in events_desc_by_time:
@@ -972,11 +992,16 @@ def _detect_cluster_event_reason_occurred(namespace, context, search_start,
             return event.metadata.creation_timestamp
         return None
 
-    events = kubernetes.core_api(context).list_namespaced_event(
+    events = reads.list_objects(
+        context,
+        reads.EVENTS,
         namespace=namespace,
         field_selector=f'reason={reason}',
-        _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
-    for event in events.items:
+        consistency=reads.FRESH,
+        convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
+        attempts=1,
+        timeout=_POD_POLL_REQUEST_TIMEOUT).items
+    for event in events:
         ts = _get_event_timestamp(event)
         if ts and _convert_to_utc(ts) > search_start:
             return True
@@ -1049,8 +1074,33 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
 
 @timeline.event
 def _is_transport_error(e: Exception) -> bool:
-    """See api_errors.is_transport_error."""
+    """Whether a call failed without an answer from the API server.
+
+    A read error carries what the API server answered (see reads.http_status);
+    any other error is classified by api_errors.is_transport_error.
+    """
+    if isinstance(e, exceptions.KubeAPIUnreachableError):
+        return reads.http_status(e) is None
     return api_errors.is_transport_error(e)
+
+
+def _poll_cluster_pods(context: Optional[str], namespace: str,
+                       cluster_name_on_cloud: str) -> List[Any]:
+    """One poll of the cluster's pods, read from the API server.
+
+    Raises:
+        exceptions.KubeAPIUnreachableError: The read failed.
+    """
+    return reads.list_objects(
+        context,
+        reads.PODS,
+        namespace=namespace,
+        label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                        f'{cluster_name_on_cloud}'),
+        consistency=reads.FRESH,
+        convert=kubernetes_utils.k8s_pod_from_dict,
+        attempts=1,
+        timeout=_POD_POLL_REQUEST_TIMEOUT).items
 
 
 def _count_transport_error(e: Exception, first_error_time: Optional[float],
@@ -1205,14 +1255,9 @@ def _wait_for_pods_to_schedule(namespace,
         cluster_name_on_cloud = new_nodes[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
         try:
-            pods = kubernetes.core_api(context).list_namespaced_pod(
-                namespace,
-                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
-                                f'{cluster_name_on_cloud}'),
-                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            pods = _poll_cluster_pods(context, namespace, cluster_name_on_cloud)
             transport_error_since = None
-        except (kubernetes.api_exception(),
-                kubernetes.urllib3_http_error()) as e:
+        except exceptions.KubeAPIUnreachableError as e:
             # Treat a transport failure as a missed poll and retry within
             # the deadline above; see _POD_POLL_REQUEST_TIMEOUT for why the
             # call must be bounded rather than left to block indefinitely.
@@ -1736,14 +1781,10 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         cluster_name_on_cloud = new_pods[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
         try:
-            all_pods = kubernetes.core_api(context).list_namespaced_pod(
-                namespace,
-                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
-                                f'{cluster_name_on_cloud}'),
-                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            all_pods = _poll_cluster_pods(context, namespace,
+                                          cluster_name_on_cloud)
             transport_error_since = None
-        except (kubernetes.api_exception(),
-                kubernetes.urllib3_http_error()) as e:
+        except exceptions.KubeAPIUnreachableError as e:
             # Same missed-poll treatment as in _wait_for_pods_to_schedule.
             # This loop has no deadline, so the transport-error grace window
             # is what keeps a persistently unreachable API server from
@@ -2056,20 +2097,30 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
     """
     finalizers: List[str] = []
     try:
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            pod_name, namespace)
+        pods = reads.get_object(context,
+                                reads.PODS,
+                                pod_name,
+                                namespace=namespace,
+                                consistency=reads.FRESH,
+                                convert=kubernetes_utils.k8s_pod_from_dict,
+                                attempts=1,
+                                timeout=reads.LONG_READ_TIMEOUT).items
+    except exceptions.KubeAPIUnreachableError as e:
+        if _is_transport_error(e):
+            raise
+        # Best-effort: log and still attempt the force-delete below.
+        logger.warning(f'Failed to read terminating pod {pod_name}: {e}')
+    else:
+        if not pods:
+            # Pod already gone (the goal).
+            return
+        pod = pods[0]
         # Only reached from the 409 "object is being deleted" branch, so the pod
         # must be terminating; assert to catch misuse from any future caller.
         assert pod.metadata.deletion_timestamp is not None, (
             f'_force_remove_terminating_pod called on non-terminating pod '
             f'{pod_name}')
         finalizers = pod.metadata.finalizers or []
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            # Pod already gone (the goal).
-            return
-        # Best-effort: log and still attempt the force-delete below.
-        logger.warning(f'Failed to read terminating pod {pod_name}: {e}')
     if k8s_constants.KUEUE_MANAGED_FINALIZER in finalizers:
         remaining = [
             f for f in finalizers if f != k8s_constants.KUEUE_MANAGED_FINALIZER
@@ -2317,15 +2368,33 @@ def _wait_for_deployment_pod(context,
     start_time = time.time()
     while time.time() - start_time < timeout:
         # Refresh the deployment status
-        deployment = kubernetes.apps_api(
-            context).read_namespaced_deployment_status(deployment_name,
-                                                       namespace)
+        deployments = reads.get_object(
+            context,
+            reads.DEPLOYMENTS,
+            deployment_name,
+            namespace=namespace,
+            consistency=reads.FRESH,
+            convert=kubernetes_utils.k8s_object_converter('V1Deployment'),
+            attempts=1,
+            timeout=reads.LONG_READ_TIMEOUT,
+            subresource='status').items
+        if not deployments:
+            raise config_lib.KubernetesError(
+                f'Deployment {deployment_name!r} no longer exists in '
+                f'namespace {namespace!r}.')
+        deployment = deployments[0]
         if (deployment.status and
                 deployment.status.ready_replicas is not None and
                 deployment.status.ready_replicas >= target_replicas):
-            pods = kubernetes.core_api(context).list_namespaced_pod(
-                namespace, label_selector=label_selector).items
-            return pods
+            return reads.list_objects(
+                context,
+                reads.PODS,
+                namespace=namespace,
+                label_selector=label_selector,
+                consistency=reads.FRESH,
+                convert=kubernetes_utils.k8s_pod_from_dict,
+                attempts=1,
+                timeout=reads.LONG_READ_TIMEOUT).items
 
         ready_replicas = (deployment.status.ready_replicas
                           if deployment.status is not None else 0)
@@ -2569,7 +2638,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     try:
         nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class(
             context=context)
-    except kubernetes.kubernetes.client.ApiException as e:
+    except exceptions.KubeAPIUnreachableError as e:
+        if reads.http_status(e) is None:
+            raise
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
                        f'{common_utils.format_exception(e)}'
@@ -2915,7 +2986,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     """Runs instances for the given cluster."""
     try:
         return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
-    except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
+    except (kubernetes.api_exception(), exceptions.KubeAPIUnreachableError,
+            config_lib.KubernetesError) as e:
         e_msg = common_utils.format_exception(e)
         logger.warning('run_instances: Error occurred when creating pods:\n'
                        f'{e_msg}')
@@ -3031,11 +3103,16 @@ def _wait_for_pod_gone(namespace: str, context: Optional[str],
     start_time = time.time()
     while time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION:
         try:
-            kubernetes.core_api(context).read_namespaced_pod(
-                pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-        except kubernetes.api_exception() as e:
-            if e.status == 404:
+            if not reads.get_object(context,
+                                    reads.PODS,
+                                    pod_name,
+                                    namespace=namespace,
+                                    consistency=reads.FRESH,
+                                    attempts=1).items:
                 return True
+        except exceptions.KubeAPIUnreachableError as e:
+            if _is_transport_error(e):
+                raise
             # A transient API error should not short-circuit the wait into a
             # force delete; keep polling until the timeout.
             logger.debug(f'Error while waiting for pod {pod_name} to '
@@ -3243,14 +3320,18 @@ def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
     the change, returns None and the caller allocates.
     """
     name = host_network_probe.ray_ports_configmap_name(cluster_name_on_cloud)
-    try:
-        cm = kubernetes.core_api(context).read_namespaced_config_map(
-            name=name, namespace=namespace)
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            raise
+    cms = reads.get_object(
+        context,
+        reads.CONFIG_MAPS,
+        name,
+        namespace=namespace,
+        consistency=reads.FRESH,
+        convert=kubernetes_utils.k8s_object_converter('V1ConfigMap'),
+        attempts=1,
+        timeout=reads.LONG_READ_TIMEOUT).items
+    if not cms:
         return None
-    data = cm.data or {}
+    data = cms[0].data or {}
     block: Dict[str, int] = {}
     for port_name in _CONFIGMAP_PORT_NAMES:
         key = (f'{host_network_probe.SSHD_KEY_PREFIX}{head_name}'
@@ -3284,14 +3365,16 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
     deadline = time.monotonic() + _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S
     while True:
         out: Dict[str, int] = {}
-        try:
-            cm = kubernetes.core_api(context).read_namespaced_config_map(
-                name=name, namespace=namespace)
-        except kubernetes.api_exception() as e:
-            if e.status != 404:
-                raise
-            cm = None
-        data = (cm.data or {}) if cm is not None else {}
+        cms = reads.get_object(
+            context,
+            reads.CONFIG_MAPS,
+            name,
+            namespace=namespace,
+            consistency=reads.FRESH,
+            convert=kubernetes_utils.k8s_object_converter('V1ConfigMap'),
+            attempts=1,
+            timeout=reads.LONG_READ_TIMEOUT).items
+        data = (cms[0].data or {}) if cms else {}
         for key, value in data.items():
             if not key.startswith(host_network_probe.SSHD_KEY_PREFIX):
                 continue
@@ -3413,9 +3496,12 @@ def _tpu_slice_pods_by_node_pool(
     label_selector = (
         f'{kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY} in '
         f'({",".join(sorted(topologies))})')
-    nodes = kubernetes.core_api(context).list_node(
-        label_selector=label_selector,
-        _request_timeout=kubernetes.API_TIMEOUT).items
+    nodes = reads.list_objects(context,
+                               reads.NODES,
+                               label_selector=label_selector,
+                               consistency=reads.FRESH,
+                               convert=kubernetes_utils.k8s_node_from_dict,
+                               attempts=1).items
     node_pool_by_name = {
         node.metadata.name: (node.metadata.labels or
                              {}).get(kubernetes_utils.GKE_NODEPOOL_LABEL_KEY,
@@ -4223,13 +4309,21 @@ def _condensed_pod_reason(pod: 'V1Pod') -> str:
 
 def _get_pod_events(context: Optional[str], namespace: str,
                     pod_name: str) -> List[Any]:
-    """Get the events for a pod, sorted by timestamp, most recent first."""
+    """Get the events for a pod, sorted by timestamp, most recent first.
+
+    Read from the API server: the pod wait loops classify a pending pod by
+    them.
+    """
     pod_field_selector = (
         f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
-    pod_events = kubernetes.core_api(context).list_namespaced_event(
-        namespace,
+    pod_events = reads.list_objects(
+        context,
+        reads.EVENTS,
+        namespace=namespace,
         field_selector=pod_field_selector,
-        _request_timeout=kubernetes.API_TIMEOUT).items
+        consistency=reads.FRESH,
+        convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
+        attempts=1).items
     return sorted(
         pod_events,
         key=lambda event: event.metadata.creation_timestamp,
@@ -4302,10 +4396,18 @@ def _get_pod_failure_reason_from_status(context: Optional[str], namespace: str,
     the live status or this fallback caught it), else None. Never raises.
     """
     try:
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        pods = reads.get_object(context,
+                                reads.PODS,
+                                pod_name,
+                                namespace=namespace,
+                                consistency=reads.CACHED,
+                                convert=kubernetes_utils.k8s_pod_from_dict,
+                                attempts=1).items
     except Exception:  # pylint: disable=broad-except
         return None
+    if not pods:
+        return None
+    pod = pods[0]
     if not kubernetes_utils.pod_terminated_abnormally(pod):
         return None
     return (f'{pod_name} is not ready '
@@ -4449,10 +4551,14 @@ def get_cluster_autostop_event(
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
         context = kubernetes_utils.get_control_context_from_config(
             provider_config)
-        events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
+        events = reads.list_objects(
+            context,
+            reads.EVENTS,
+            namespace=namespace,
             field_selector=f'reason={AUTOSTOP_EVENT_REASON}',
-            _request_timeout=kubernetes.API_TIMEOUT).items
+            consistency=reads.FRESH,
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
+            attempts=1).items
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to read autodown event for '
                      f'{cluster_name_on_cloud}: {e}')
@@ -4789,10 +4895,14 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
     if last_scheduled_node is not None:
         node_field_selector = ('involvedObject.kind=Node,'
                                f'involvedObject.name={last_scheduled_node}')
-        node_events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
+        node_events = reads.list_objects(
+            context,
+            reads.EVENTS,
+            namespace=namespace,
             field_selector=node_field_selector,
-            _request_timeout=kubernetes.API_TIMEOUT).items
+            consistency=reads.CACHED,
+            convert=kubernetes_utils.k8s_object_converter('CoreV1Event'),
+            attempts=1).items
         node_events = sorted(
             kubernetes_utils.events_since(node_events, since),
             key=lambda event: event.metadata.creation_timestamp,

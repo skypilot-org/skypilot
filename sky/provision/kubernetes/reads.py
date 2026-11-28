@@ -51,6 +51,8 @@ REASON_NO_SOURCE = 'no_source'
 # context=None, which the API client resolves in-cluster first; a source
 # serves named contexts only.
 REASON_UNNAMED_CONTEXT = 'unnamed_context'
+# A subresource, e.g. a Deployment's status; a source serves objects only.
+REASON_SUBRESOURCE = 'subresource'
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,6 +89,76 @@ class Resource:
 
 NODES = Resource(group='', version='v1', plural='nodes', namespaced=False)
 PODS = Resource(group='', version='v1', plural='pods', namespaced=True)
+EVENTS = Resource(group='', version='v1', plural='events', namespaced=True)
+CONFIG_MAPS = Resource(group='',
+                       version='v1',
+                       plural='configmaps',
+                       namespaced=True)
+SECRETS = Resource(group='', version='v1', plural='secrets', namespaced=True)
+SERVICES = Resource(group='', version='v1', plural='services', namespaced=True)
+SERVICE_ACCOUNTS = Resource(group='',
+                            version='v1',
+                            plural='serviceaccounts',
+                            namespaced=True)
+PERSISTENT_VOLUME_CLAIMS = Resource(group='',
+                                    version='v1',
+                                    plural='persistentvolumeclaims',
+                                    namespaced=True)
+PERSISTENT_VOLUMES = Resource(group='',
+                              version='v1',
+                              plural='persistentvolumes',
+                              namespaced=False)
+NAMESPACES = Resource(group='',
+                      version='v1',
+                      plural='namespaces',
+                      namespaced=False)
+DEPLOYMENTS = Resource(group='apps',
+                       version='v1',
+                       plural='deployments',
+                       namespaced=True)
+DAEMON_SETS = Resource(group='apps',
+                       version='v1',
+                       plural='daemonsets',
+                       namespaced=True)
+INGRESSES = Resource(group='networking.k8s.io',
+                     version='v1',
+                     plural='ingresses',
+                     namespaced=True)
+INGRESS_CLASSES = Resource(group='networking.k8s.io',
+                           version='v1',
+                           plural='ingressclasses',
+                           namespaced=False)
+STORAGE_CLASSES = Resource(group='storage.k8s.io',
+                           version='v1',
+                           plural='storageclasses',
+                           namespaced=False)
+RUNTIME_CLASSES = Resource(group='node.k8s.io',
+                           version='v1',
+                           plural='runtimeclasses',
+                           namespaced=False)
+ROLES = Resource(group='rbac.authorization.k8s.io',
+                 version='v1',
+                 plural='roles',
+                 namespaced=True)
+ROLE_BINDINGS = Resource(group='rbac.authorization.k8s.io',
+                         version='v1',
+                         plural='rolebindings',
+                         namespaced=True)
+CLUSTER_ROLES = Resource(group='rbac.authorization.k8s.io',
+                         version='v1',
+                         plural='clusterroles',
+                         namespaced=False)
+CLUSTER_ROLE_BINDINGS = Resource(group='rbac.authorization.k8s.io',
+                                 version='v1',
+                                 plural='clusterrolebindings',
+                                 namespaced=False)
+
+# A connect timeout and a read timeout, or one timeout for the whole request,
+# in seconds.
+Timeout = Union[float, Tuple[float, float]]
+# For reads whose response may be large or slow: the read timeout bounds each
+# socket read, not the whole response.
+LONG_READ_TIMEOUT: Timeout = (5, 30)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,6 +223,8 @@ def list_objects(
     consistency: Consistency = CACHED,
     convert: Optional[Callable[[Dict[str, Any]], Any]] = None,
     attempts: Optional[int] = None,
+    timeout: Optional[Timeout] = None,
+    limit: Optional[int] = None,
 ) -> ReadResult:
     """List the objects of a resource type.
 
@@ -170,16 +244,19 @@ def list_objects(
             the objects as JSON at once.
         attempts: How many times to try the API server; None for the
             default retries.
+        timeout: Timeout of each request to the API server; None for
+            kubernetes.API_TIMEOUT.
+        limit: Return at most this many objects.
 
     Raises:
         exceptions.KubeAPIUnreachableError: The API server was needed and is
             known to be unreachable, failed after retries, or answered 404 to
-            a list of a core resource.
+            a list of a core resource. http_status() tells what it answered.
         exceptions.KubernetesResourceNotServedError: The API server does not
             serve the resource, which is not in the core group.
     """
-    return _read(context, resource, namespace, None, label_selector,
-                 field_selector, consistency, convert, attempts)
+    return _read(context, resource, namespace, None, None, label_selector,
+                 field_selector, consistency, convert, attempts, timeout, limit)
 
 
 def get_object(
@@ -191,6 +268,8 @@ def get_object(
     consistency: Consistency = CACHED,
     convert: Optional[Callable[[Dict[str, Any]], Any]] = None,
     attempts: Optional[int] = None,
+    timeout: Optional[Timeout] = None,
+    subresource: Optional[str] = None,
 ) -> ReadResult:
     """Get one object; its items hold the object, or nothing if it is absent.
 
@@ -207,27 +286,52 @@ def get_object(
         convert: Applied to the object; items then holds what it returns.
         attempts: How many times to try the API server; None for the
             default retries.
+        timeout: Timeout of each request to the API server; None for
+            kubernetes.API_TIMEOUT.
+        subresource: Get this subresource of the object instead, e.g.
+            'status', which RBAC authorizes on its own. It is always read
+            from the API server.
 
     Raises:
         exceptions.KubeAPIUnreachableError: The API server was needed and is
-            known to be unreachable, or failed after retries.
+            known to be unreachable, or failed after retries. http_status()
+            tells what it answered.
     """
     if resource.namespaced and namespace is None:
         raise ValueError(f'Getting a {resource.label} needs a namespace.')
-    return _read(context, resource, namespace, name, None, None, consistency,
-                 convert, attempts)
+    return _read(context, resource, namespace, name, subresource, None, None,
+                 consistency, convert, attempts, timeout, None)
+
+
+def http_status(error: BaseException) -> Optional[int]:
+    """The HTTP status the API server answered with, for a read's error.
+
+    None when no answer arrived: the API server was unreachable, timed out,
+    or is known to be unreachable.
+    """
+    seen = set()
+    cause: Optional[BaseException] = error
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, kubernetes.api_exception()) and cause.status:
+            return cause.status
+        cause = cause.__cause__
+    return None
 
 
 def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
-          name: Optional[str], label_selector: Optional[str],
-          field_selector: Optional[str], consistency: Consistency,
-          convert: Optional[Callable[[Dict[str, Any]], Any]],
-          attempts: Optional[int]) -> ReadResult:
+          name: Optional[str], subresource: Optional[str],
+          label_selector: Optional[str], field_selector: Optional[str],
+          consistency: Consistency, convert: Optional[Callable[[Dict[str, Any]],
+                                                               Any]],
+          attempts: Optional[int], timeout: Optional[Timeout],
+          limit: Optional[int]) -> ReadResult:
     if namespace is not None and not resource.namespaced:
         raise ValueError(f'{resource.label} is cluster-scoped; got namespace '
                          f'{namespace!r}.')
     served = None
-    if isinstance(consistency, Cached) and context is not None:
+    if (isinstance(consistency, Cached) and context is not None and
+            subresource is None):
         object_query = plugin_extensions.ObjectQuery(
             context=context,
             group=resource.group,
@@ -250,7 +354,7 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
             resource_version = served.resource_version
         else:
             resource_version = _object_version(served.items)
-        items = served.items
+        items = served.items[:limit]
         if convert is not None:
             items = [convert(item) for item in items]
         return ReadResult(items=items,
@@ -263,6 +367,8 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                      f'API server: {served.reason} {served.message}')
     elif isinstance(consistency, Fresh):
         reason = REASON_FRESH
+    elif subresource is not None:
+        reason = REASON_SUBRESOURCE
     elif context is None:
         reason = REASON_UNNAMED_CONTEXT
     else:
@@ -271,27 +377,36 @@ def _read(context: Optional[str], resource: Resource, namespace: Optional[str],
                                   reason)
 
     path = resource.path(namespace, name)
-    query = tuple((key, value)
-                  for key, value in (('labelSelector', label_selector),
-                                     ('fieldSelector', field_selector))
-                  if value)
+    if subresource is not None:
+        path += f'/{parse.quote(subresource, safe="")}'
+    query = tuple(
+        (key, value)
+        for key, value in (('labelSelector', label_selector), ('fieldSelector',
+                                                               field_selector),
+                           ('limit', None if limit is None else str(limit)))
+        if value)
+    if timeout is None:
+        timeout = kubernetes.API_TIMEOUT
     # Each request may carry its own KUBECONFIG.
     kubeconfig = os.environ.get('KUBECONFIG')
-    got = _IN_FLIGHT.do((context, kubeconfig, path, query, convert),
-                        lambda: _get(attempts,
-                                     resource.plural[:-1],
-                                     context=context,
-                                     resource_label=resource.label,
-                                     path=path,
-                                     query=query,
-                                     convert=convert,
-                                     is_list=name is None))
+    got = _IN_FLIGHT.do(
+        (context, kubeconfig, path, query, convert, attempts, timeout),
+        lambda: _get(attempts,
+                     resource.plural[:-1],
+                     context=context,
+                     resource_label=resource.label,
+                     path=path,
+                     query=query,
+                     convert=convert,
+                     timeout=timeout,
+                     is_list=name is None))
     if got is None:
         if name is None and not resource.group:
             # Every API server serves the core group.
             raise exceptions.KubeAPIUnreachableError(
                 f'Kubernetes context {context!r} answered 404 to a '
-                f'{resource.label} list.')
+                f'{resource.label} list.') from kubernetes.api_exception()(
+                    status=404, reason='Not Found')
         if name is None:
             raise exceptions.KubernetesResourceNotServedError(
                 f'Kubernetes context {context!r} does not serve '
@@ -317,9 +432,9 @@ def _get(attempts: Optional[int], resource_type: str,
 
 
 def _get_once(*, context: Optional[str], resource_label: str, path: str,
-              query: Tuple[Tuple[str, str],
-                           ...], convert: Optional[Callable[[Dict[str, Any]],
-                                                            Any]],
+              query: Tuple[Tuple[str, str], ...],
+              convert: Optional[Callable[[Dict[str, Any]],
+                                         Any]], timeout: Timeout,
               is_list: bool) -> Optional[Tuple[List[Any], str]]:
     """One GET of path: (items, resourceVersion), or None on 404."""
     start = time.monotonic()
@@ -333,7 +448,7 @@ def _get_once(*, context: Optional[str], resource_label: str, path: str,
             auth_settings=['BearerToken'],
             _return_http_data_only=True,
             _preload_content=False,
-            _request_timeout=kubernetes.API_TIMEOUT)
+            _request_timeout=timeout)
         try:
             if is_list:
                 got = _parse_list(response, convert)

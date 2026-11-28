@@ -2,7 +2,10 @@
 from unittest import mock
 from unittest.mock import patch
 
+from sky import exceptions
+from sky.adaptors import kubernetes
 from sky.provision.kubernetes import oci_nccl
+from sky.provision.kubernetes import reads as reads_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 
@@ -10,11 +13,11 @@ def _eq(actual, expected):
     assert actual == expected, (actual, expected)
 
 
-class _FakeApiException(Exception):
-
-    def __init__(self, status):
-        super().__init__(f'HTTP {status}')
-        self.status = status
+def _http_error(status):
+    """A failed read that the API server answered with status."""
+    error = exceptions.KubeAPIUnreachableError(f'HTTP {status}')
+    error.__cause__ = kubernetes.api_exception()(status=status)
+    return error
 
 
 class TestGetEnvVars:
@@ -87,26 +90,29 @@ class TestGetEnvVars:
         """Runs get_oci_nccl_env_vars against fake ConfigMaps.
 
         configmaps maps (namespace, name) to the nccl.conf text, or to an
-        exception to raise for that read. Anything absent is a 404.
+        exception to raise for that read. Anything absent does not exist.
         """
         configmaps = configmaps or {}
         reads = []
 
-        def read(name, namespace, **kwargs):
-            # A hung API server must not hang the launch.
-            assert kwargs.get('_request_timeout') is not None
+        def get_object(context, resource, name, *, namespace, **kwargs):
+            del context
+            assert resource == reads_lib.CONFIG_MAPS
+            # A tuning hint is not worth retrying a failing API server.
+            assert kwargs.get('attempts') == 1
             reads.append((namespace, name))
-            entry = configmaps.get((namespace, name), _FakeApiException(404))
+            entry = configmaps.get((namespace, name))
             if isinstance(entry, Exception):
                 raise entry
-            return mock.MagicMock(data={'nccl.conf': entry})
+            items = [] if entry is None else [{'data': {'nccl.conf': entry}}]
+            return reads_lib.ReadResult(items=items,
+                                        resource_version='',
+                                        staleness_seconds=0,
+                                        reason=None)
 
-        core = mock.MagicMock()
-        core.read_namespaced_config_map.side_effect = read
-        with mock.patch.object(oci_nccl.kubernetes, 'core_api',
-                               return_value=core), \
-             mock.patch.object(oci_nccl.kubernetes, 'api_exception',
-                               return_value=_FakeApiException):
+        with mock.patch.object(oci_nccl.reads,
+                               'get_object',
+                               side_effect=get_object):
             env = oci_nccl.get_env_vars('ctx',
                                         namespace,
                                         set(shapes),
@@ -215,7 +221,7 @@ class TestGetEnvVars:
         assert env['NCCL_IB_HCA'] == 'pod-ns'
         assert reads == [('skypilot', name)]
         env, _ = self._env({'BM.GPU.B300.8'}, {
-            ('skypilot', name): _FakeApiException(403),
+            ('skypilot', name): _http_error(403),
             ('default', name): 'NCCL_IB_HCA=default-ns',
         })
         assert env['NCCL_IB_HCA'] == 'default-ns'
@@ -224,7 +230,8 @@ class TestGetEnvVars:
         """No ConfigMap readable is never a launch failure."""
         name = 'oci-nccl-parameters-bm-gpu-b200-8'
         table = self._env({'BM.GPU.B200.8'})[0]
-        for error in (_FakeApiException(403), _FakeApiException(500),
+        for error in (_http_error(403), _http_error(500),
+                      exceptions.KubeAPIUnreachableError('timed out'),
                       RuntimeError('connection reset')):
             cms = {(ns, name): error for ns in ('skypilot', 'default')}
             env, _ = self._env({'BM.GPU.B200.8'}, cms)
