@@ -2530,6 +2530,200 @@ class TestUserJobFailureRecoveryEventReason:
                                         None, None)
 
 
+class TestJobFailureExternalDiagnosis:
+    """A failed user job on an UP cluster is checked against the external
+    failure source before it is blamed on the user program.
+
+    An infrastructure failure can kill the user program before the cluster
+    status reflects it. When the external failure source reports one, the job
+    is recovered like any other infrastructure failure, and the user's
+    max_restarts_on_errors budget is left alone.
+    """
+
+    class _StopLoop(Exception):
+        """Sentinel raised from recover() to end the monitoring loop."""
+
+    _FAILURE = {
+        'cluster_hash': 'hash-1',
+        'failure_mode': 'NODE_HARDWARE_FAILURE',
+        'failure_reason': 'Hardware error on node node-1',
+        'cleared_at': None,
+    }
+
+    def _make_controller(self):
+        controller = JobController.__new__(JobController)
+        controller._job_id = 42
+        controller._pool = None
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = MagicMock()
+        controller._get_cluster_job_exit_codes = AsyncMock(return_value=[1])
+        controller._cleanup_cluster = AsyncMock()
+        return controller
+
+    def _make_executor(self, should_restart=False):
+        executor = MagicMock()
+        executor.should_restart_on_failure.return_value = should_restart
+        executor.max_restarts_on_errors = 0
+        executor.restart_cnt_on_failure = 0
+        executor.recover_on_exit_codes = None
+        executor.recover = AsyncMock(side_effect=self._StopLoop())
+        return executor
+
+    @contextlib.contextmanager
+    def _monitoring(self,
+                    diagnosis,
+                    job_status=job_lib.JobStatus.FAILED,
+                    cluster_status=status_lib.ClusterStatus.UP):
+        """Patch one monitoring iteration; yields the mocks to assert on."""
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+        state = controller_module.managed_job_state
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.backends.backend_utils.async_check_network_connection',
+                   new=AsyncMock()), \
+             patch('sky.jobs.utils.get_job_status',
+                   new=AsyncMock(return_value=(job_status, None))), \
+             patch('sky.jobs.utils.try_to_get_job_end_time',
+                   return_value=12345.0), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   return_value=(cluster_status, handle)), \
+             patch.object(controller_module.global_user_state,
+                          'get_cluster_events', return_value=[]), \
+             patch.object(controller_module.ExternalFailureSource,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.ExternalFailureSource,
+                          'diagnose_job_failure',
+                          side_effect=diagnosis) as mock_diagnose, \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_failed_async',
+                          new=AsyncMock()) as mock_set_failed, \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock()) as mock_set_recovering:
+            yield mock_diagnose, mock_set_failed, mock_set_recovering
+
+    async def _monitor(self, controller, executor):
+        mock_task = MagicMock()
+        mock_task.name = 'test-task'
+        mock_task.num_nodes = 1
+        return await controller._monitor_one_task(
+            task_id=0,
+            task=mock_task,
+            cluster_name='test-cluster',
+            executor=executor,
+            callback_func=MagicMock(),
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('job_status', [
+        job_lib.JobStatus.FAILED,
+        job_lib.JobStatus.FAILED_SETUP,
+        job_lib.JobStatus.FAILED_DRIVER,
+    ])
+    async def test_infrastructure_failure_recovers_the_job(self, job_status):
+        controller = self._make_controller()
+        executor = self._make_executor()
+        with self._monitoring(lambda _: [self._FAILURE],
+                              job_status=job_status) as (mock_diagnose,
+                                                         mock_set_failed,
+                                                         mock_set_recovering):
+            with pytest.raises(self._StopLoop):
+                await self._monitor(controller, executor)
+
+        mock_diagnose.assert_called_once_with('test-cluster')
+        mock_set_failed.assert_not_called()
+        mock_set_recovering.assert_awaited_once()
+        kwargs = mock_set_recovering.await_args.kwargs
+        # The RECOVERING event names the infrastructure failure, not the
+        # user program.
+        assert [(f.code, f.reason) for f in kwargs['external_failures']
+               ] == [('NODE_HARDWARE_FAILURE', 'Hardware error on node node-1')]
+        assert kwargs['user_job_failure_reason'] is None
+        assert (kwargs['recovery_source'] ==
+                managed_job_state.RecoverySource.FAILURE)
+        executor.recover.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_infrastructure_failure_keeps_the_restart_budget(self):
+        """should_restart_on_failure() counts a restart when called."""
+        controller = self._make_controller()
+        executor = self._make_executor(should_restart=True)
+        with self._monitoring(lambda _: [self._FAILURE]):
+            with pytest.raises(self._StopLoop):
+                await self._monitor(controller, executor)
+
+        executor.should_restart_on_failure.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_user_logs_are_fetched_before_the_diagnosis(self):
+        """The diagnosis may block while the nodes are taken out of service,
+        so the failed run's logs are downloaded first."""
+        controller = self._make_controller()
+        executor = self._make_executor()
+        order = []
+        controller.download_log_and_stream.side_effect = (
+            lambda *_args, **_kwargs: order.append('logs'))
+
+        def _diagnose(_cluster_name):
+            order.append('diagnosis')
+            return [self._FAILURE]
+
+        with self._monitoring(_diagnose):
+            with pytest.raises(self._StopLoop):
+                await self._monitor(controller, executor)
+
+        assert order == ['logs', 'diagnosis']
+
+    @pytest.mark.asyncio
+    async def test_no_infrastructure_failure_is_a_user_failure(self):
+        controller = self._make_controller()
+        executor = self._make_executor()
+        with self._monitoring(lambda _: []) as (mock_diagnose, mock_set_failed,
+                                                mock_set_recovering):
+            succeeded = await self._monitor(controller, executor)
+
+        assert succeeded is False
+        mock_diagnose.assert_called_once_with('test-cluster')
+        executor.should_restart_on_failure.assert_called_once()
+        mock_set_recovering.assert_not_called()
+        mock_set_failed.assert_awaited_once()
+        kwargs = mock_set_failed.await_args.kwargs
+        assert kwargs[
+            'failure_type'] == managed_job_state.ManagedJobStatus.FAILED
+        assert 'user program failure' in kwargs['failure_reason']
+
+    @pytest.mark.asyncio
+    async def test_no_infrastructure_failure_still_restarts_on_errors(self):
+        controller = self._make_controller()
+        executor = self._make_executor(should_restart=True)
+        executor.max_restarts_on_errors = 3
+        executor.restart_cnt_on_failure = 1
+        with self._monitoring(lambda _: []) as (_, mock_set_failed,
+                                                mock_set_recovering):
+            with pytest.raises(self._StopLoop):
+                await self._monitor(controller, executor)
+
+        mock_set_failed.assert_not_called()
+        kwargs = mock_set_recovering.await_args.kwargs
+        assert kwargs['external_failures'] is None
+        assert 'restart 1 of 3' in kwargs['user_job_failure_reason']
+
+    @pytest.mark.asyncio
+    async def test_not_asked_when_the_cluster_is_not_up(self):
+        """A cluster that is not UP already recovers; get() covers it."""
+        controller = self._make_controller()
+        executor = self._make_executor()
+        with self._monitoring(lambda _: [self._FAILURE],
+                              cluster_status=status_lib.ClusterStatus.INIT) as (
+                                  mock_diagnose, _, mock_set_recovering):
+            with pytest.raises(self._StopLoop):
+                await self._monitor(controller, executor)
+
+        mock_diagnose.assert_not_called()
+        mock_set_recovering.assert_awaited_once()
+
+
 class TestDunderMainDispatchesToImportedModule:
     """Regression: running this file as `__main__` must dispatch into the
     IMPORTED `sky.jobs.controller` module, not into a second copy of it.

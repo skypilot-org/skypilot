@@ -2062,18 +2062,39 @@ class JobController:
                             exit_code_desc = ('Job exited with exit codes '
                                               f'{exit_codes}')
 
+                    # An infrastructure failure can kill the user program
+                    # before it shows in the cluster status. Ask the external
+                    # failure source before blaming the user program.
+                    if runtime_recovery is None:
+                        job_failure_causes = await asyncio.to_thread(
+                            ExternalFailureSource.diagnose_job_failure,
+                            cluster_name)
+                        if job_failure_causes:
+                            external_failures = (
+                                ExternalClusterFailure.from_failure_list(
+                                    job_failure_causes))
+
                     if managed_job_runtime.is_registered():
                         # Runtime retries since launch count toward the
                         # max_restarts_on_errors budget.
                         executor.runtime_restart_cnt_on_failure = await (
                             managed_job_state.get_runtime_user_restarts_async(
                                 self._job_id, task_id))
+                    # An infrastructure failure does not consume the
+                    # max_restarts_on_errors budget.
                     should_restart_on_failure = (
+                        not external_failures and
                         not (runtime_recovery is not None and
                              runtime_recovery.handles_user_retries) and
                         executor.should_restart_on_failure(
                             exit_codes=exit_codes))
-                    if should_restart_on_failure:
+                    if external_failures:
+                        logger.info(
+                            f'Task {task_id} failed ({job_status}) on a '
+                            'cluster with an infrastructure failure: '
+                            f'{external_failures}. Recovering...')
+                        # Fall through to recovery
+                    elif should_restart_on_failure:
                         max_restarts = executor.max_restarts_on_errors
                         exit_code_msg = (
                             '(Retry the job as '
