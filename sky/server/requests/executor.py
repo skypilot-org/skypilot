@@ -1069,6 +1069,8 @@ def override_request_env_and_config(
                 _, user = global_user_state.add_or_update_user(user,
                                                                return_user=True)
                 _seed_role_if_missing(user.id)
+            else:
+                user = global_user_state.get_user(user.id) or user
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -1126,9 +1128,6 @@ def override_request_env_and_config(
                              workspace_constants.WORKSPACE_ACTION_WRITE)
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
-                    if authenticated:
-                        # The resolver reads the preferred workspace.
-                        user = global_user_state.get_user(user.id) or user
                     resolution = workspaces_core.resolve_workspace_for_user(
                         user,
                         action=ws_action,
