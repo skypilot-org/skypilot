@@ -168,6 +168,8 @@ def fake_aws_credentials(monkeypatch):
     monkeypatch.setenv('AWS_ACCESS_KEY_ID', 'testing')
     monkeypatch.setenv('AWS_SECRET_ACCESS_KEY', 'testing')
     monkeypatch.delenv('AWS_PROFILE', raising=False)
+    monkeypatch.delenv('AWS_DEFAULT_PROFILE', raising=False)
+    monkeypatch.setattr(aws, 'get_workspace_profile', lambda: None)
     aws.session.cache_clear()
     yield
     aws.session.cache_clear()
