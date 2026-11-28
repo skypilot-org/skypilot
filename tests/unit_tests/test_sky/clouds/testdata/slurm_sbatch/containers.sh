@@ -7,6 +7,8 @@
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=4
+# Use the compute node's resource limits, not the login node's.
+#SBATCH --propagate=NONE
 #SBATCH --mem=16384M
 #SBATCH --gres=gpu:A100:2
 #SBATCH --time=7-00:00:00

@@ -1274,8 +1274,9 @@ class SlurmClient:
         # prints a marker so we can distinguish "command ran and /dev/fuse
         # is missing" from "srun itself failed to allocate".
         srun_cmd = [
-            'srun', '--immediate=10', '--time=00:00:30', '--chdir=/tmp', 'bash',
-            '-c', 'test -e /dev/fuse && echo FUSE_OK || echo FUSE_MISSING'
+            'srun', '--propagate=NONE', '--immediate=10', '--time=00:00:30',
+            '--chdir=/tmp', 'bash', '-c',
+            'test -e /dev/fuse && echo FUSE_OK || echo FUSE_MISSING'
         ]
         rc, stdout, _ = self._run_slurm_cmd(srun_cmd)
         stdout = stdout.strip()

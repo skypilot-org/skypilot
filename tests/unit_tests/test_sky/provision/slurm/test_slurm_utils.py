@@ -1,4 +1,5 @@
 """Unit tests for sky.provision.slurm.utils."""
+import shlex
 from unittest import mock
 
 import pytest
@@ -824,3 +825,11 @@ class TestRunOnLoginNode:
         assert utils.run_on_login_node('hpc', 'curl x',
                                        timeout=9) == (0, 'out\n', '')
         client.run_command.assert_called_once_with('curl x', timeout=9)
+
+
+@pytest.mark.parametrize('is_container_image', [False, True])
+def test_srun_sshd_command_does_not_propagate_login_limits(is_container_image):
+    argv = shlex.split(
+        utils.srun_sshd_command('123', 'node1', 'alice', 'cluster',
+                                is_container_image))
+    assert argv[:2] == ['srun', '--propagate=NONE']
