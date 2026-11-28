@@ -11,6 +11,7 @@ To update snapshots when intentional changes are made:
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -227,6 +228,24 @@ def test_slurm_codegen_with_container():
     assert_codegen_matches_snapshot('slurm_codegen_with_container',
                                     result,
                                     testdata_dir=SLURM_TESTDATA_DIR)
+
+
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason='Escaped writers are only handled on Linux.')
+def test_inlined_log_functions_return_when_escaped_process_holds_output(
+        tmp_path):
+    """The generated code must define everything the log functions call."""
+    codegen = task_codegen.RayCodeGen()
+    codegen._add_common_imports()  # pylint: disable=protected-access
+    codegen._add_skylet_imports()  # pylint: disable=protected-access
+    codegen._add_logging_functions()  # pylint: disable=protected-access
+    namespace: dict = {'__name__': 'generated_task'}
+    exec('\n'.join(codegen._code), namespace)  # pylint: disable=exec-used,protected-access
+    namespace['_ESCAPED_WRITER_GRACE_SECONDS'] = 1
+
+    returncode = namespace['run_bash_command_with_log'](
+        'setsid sleep 300 & exit 3', str(tmp_path / 'run.log'), with_ray=True)
+    assert returncode == 3
 
 
 class TestRcloneFlushScript:

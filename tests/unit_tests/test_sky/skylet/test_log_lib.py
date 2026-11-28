@@ -1,9 +1,15 @@
 """Unit tests for skylet log_lib."""
 
 from io import StringIO
+import os
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
+
+import psutil
 
 from sky.skylet import log_lib
 
@@ -164,6 +170,153 @@ class TestRunWithLogTimeout(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(returncode, 0)
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), 'Requires /proc.')
+@mock.patch.object(log_lib, '_ESCAPED_WRITER_GRACE_SECONDS', 1)
+class TestRunWithLogEscapedWriters(unittest.TestCase):
+    """Test run_with_log when processes outlive the command."""
+
+    def test_returns_when_escaped_process_holds_output(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            start = time.monotonic()
+            returncode, stdout, _ = log_lib.run_with_log(
+                'setsid sleep 300 & echo $!; exit 3',
+                f.name,
+                shell=True,
+                reap_escaped_writers=True,
+                require_outputs=True,
+            )
+        self.assertEqual(returncode, 3)
+        self.assertLess(time.monotonic() - start, 30)
+        escaped_pid = int(stdout.split()[0])
+        self.assertFalse(
+            psutil.pid_exists(escaped_pid) and
+            psutil.Process(escaped_pid).status() != psutil.STATUS_ZOMBIE)
+
+    def test_retries_escaped_process_after_failed_signal(self):
+        terminate = psutil.Process.terminate
+        calls = []
+
+        def flaky_terminate(holder):
+            calls.append(holder.pid)
+            if len(calls) == 1:
+                raise psutil.AccessDenied(holder.pid)
+            terminate(holder)
+
+        with tempfile.NamedTemporaryFile(suffix='.log') as f, \
+                mock.patch.object(psutil.Process, 'terminate',
+                                  flaky_terminate):
+            returncode = log_lib.run_with_log(
+                'setsid sleep 300 & exit 0',
+                f.name,
+                shell=True,
+                reap_escaped_writers=True,
+            )
+        self.assertEqual(returncode, 0)
+        self.assertEqual(len(calls), 2)
+
+    def test_timeout_does_not_fail_command_that_exited(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f, \
+                mock.patch.object(log_lib, '_ESCAPED_WRITER_GRACE_SECONDS', 8):
+            returncode = log_lib.run_with_log(
+                'setsid sleep 300 & exit 0',
+                f.name,
+                shell=True,
+                reap_escaped_writers=True,
+                timeout=4,
+            )
+        self.assertEqual(returncode, 0)
+
+    def test_redirected_background_process_does_not_delay_cleanup(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            start = time.monotonic()
+            returncode = log_lib.run_with_log(
+                'sleep 300 >/dev/null 2>&1 & setsid sleep 300 & exit 0',
+                f.name,
+                shell=True,
+                reap_escaped_writers=True,
+            )
+        self.assertEqual(returncode, 0)
+        self.assertLess(time.monotonic() - start, 30)
+
+    def test_waits_for_background_process_in_own_group(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            # GNU timeout moves itself to a new process group but stays in
+            # the command's session.
+            returncode, stdout, _ = log_lib.run_with_log(
+                "timeout 60 bash -c 'sleep 4; echo done' & exit 0",
+                f.name,
+                shell=True,
+                reap_escaped_writers=True,
+                require_outputs=True,
+            )
+        self.assertEqual(returncode, 0)
+        self.assertIn('done', stdout)
+
+    def test_waits_for_background_process_in_same_session(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            # The sleep before exit lets the subprocess daemon record the
+            # background child, so the test fails if the command is reaped
+            # while its output is still streaming.
+            returncode, stdout, _ = log_lib.run_with_log(
+                '(sleep 6; echo done) & sleep 3; exit 0',
+                f.name,
+                shell=True,
+                reap_escaped_writers=True,
+                require_outputs=True,
+            )
+        self.assertEqual(returncode, 0)
+        self.assertIn('done', stdout)
+
+    @unittest.skipIf(os.geteuid() == 0, 'Root can read every fd.')
+    def test_timeout_applies_while_unreadable_member_holds_output(self):
+        # PR_SET_DUMPABLE=0 makes /proc/<pid>/fd unreadable to the same
+        # non-root user, as for a background `sudo cmd &`.
+        hidden_writer = ('python3 -c "import ctypes, time; '
+                         'ctypes.CDLL(None).prctl(4, 0); time.sleep(6)"')
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                log_lib.run_with_log(f'{hidden_writer} & exit 0',
+                                     f.name,
+                                     shell=True,
+                                     timeout=3,
+                                     reap_escaped_writers=True)
+
+    def test_escaped_process_kept_without_opt_in(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            start = time.monotonic()
+            returncode = log_lib.run_with_log(
+                'setsid sleep 4 & exit 3',
+                f.name,
+                shell=True,
+            )
+        self.assertEqual(returncode, 3)
+        self.assertGreaterEqual(time.monotonic() - start, 3)
+
+    def test_bash_command_opts_in(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f, \
+                mock.patch.object(log_lib, 'run_with_log',
+                                  return_value=0) as run_with_log:
+            log_lib.run_bash_command_with_log('true', f.name)
+        self.assertTrue(run_with_log.call_args.kwargs['reap_escaped_writers'])
+
+    def test_pipe_writers_ignores_read_end_holders(self):
+        read_fd, write_fd = os.pipe()
+        procs = [
+            subprocess.Popen(['sleep', '30'], pass_fds=(fd,))
+            for fd in (read_fd, write_fd)
+        ]
+        try:
+            pipe_link = f'pipe:[{os.fstat(read_fd).st_ino}]'
+            writers = log_lib._pipe_writers({pipe_link}, [p.pid for p in procs])
+            self.assertEqual(writers, [procs[1].pid])
+        finally:
+            for p in procs:
+                p.kill()
+                p.wait()
+            os.close(read_fd)
+            os.close(write_fd)
 
 
 if __name__ == '__main__':
