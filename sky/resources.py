@@ -282,8 +282,9 @@ class Resources:
             assigning metadata that may be used by external tools.
             Implementation depends on the chosen cloud - On AWS, labels map to
             instance tags. On GCP, labels map to instance labels. On
-            Kubernetes, labels map to pod labels. On other clouds, labels are
-            not supported and will be ignored.
+            Kubernetes, labels map to pod labels. On Nebius, labels map to the
+            labels of the instance and its boot disk. On other clouds, labels
+            are not supported and will be ignored.
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
           priority: the priority for this resource configuration. Must be an

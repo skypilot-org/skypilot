@@ -562,7 +562,8 @@ def launch(cluster_name_on_cloud: str,
            use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None,
-           security_group_ids: Optional[List[str]] = None) -> str:
+           security_group_ids: Optional[List[str]] = None,
+           labels: Optional[Dict[str, str]] = None) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -672,6 +673,7 @@ def launch(cluster_name_on_cloud: str,
                 metadata=nebius.nebius_common().ResourceMetadata(
                     parent_id=project_id,
                     name=instance_name,
+                    labels=labels or None,
                 ),
                 spec=nebius.compute().InstanceSpec(
                     gpu_cluster=nebius.compute().InstanceGpuClusterSpec(
@@ -682,6 +684,7 @@ def launch(cluster_name_on_cloud: str,
                         managed_disk=nebius.compute().ManagedDisk(
                             spec=disk_spec,
                             name=disk_name,
+                            labels=labels or None,
                         )),
                     cloud_init_user_data=user_data,
                     resources=nebius.compute().ResourcesSpec(platform=platform,
