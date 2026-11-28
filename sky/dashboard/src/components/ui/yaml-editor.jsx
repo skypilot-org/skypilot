@@ -10,6 +10,7 @@ import { search } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
 import { getNonce } from '@/utils/csp';
 import { THEME_DARK, useTheme } from '@/hooks/useTheme';
+import { usePluginComponents } from '@/plugins/PluginProvider';
 
 // Dock the search panel at the top of the editor (like the browser's find bar
 // and most code editors) instead of CodeMirror's default bottom placement.
@@ -222,7 +223,17 @@ export const yamlSearchPanelTheme = EditorView.theme({
  * YAML Editor component with syntax highlighting.
  * Drop-in replacement for Textarea when editing YAML content.
  */
-export function YamlEditor({
+// A component registered for the `ui.yaml-editor` slot replaces this editor.
+export function YamlEditor(props) {
+  const [registered] = usePluginComponents('ui.yaml-editor');
+  if (registered) {
+    const Editor = registered.component;
+    return <Editor {...props} />;
+  }
+  return <DefaultYamlEditor {...props} />;
+}
+
+function DefaultYamlEditor({
   value,
   onChange,
   className,
