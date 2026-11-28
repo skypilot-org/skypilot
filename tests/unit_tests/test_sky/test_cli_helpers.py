@@ -22,7 +22,6 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common as sky_common
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 
@@ -305,8 +304,7 @@ def test_handle_jobs_queue_request_runtime_error_controller_stopped():
     # Verify error handling
     assert num_jobs is None
     # Should show the controller's default hint
-    controller = controller_utils.Controllers.JOBS_CONTROLLER.value
-    assert controller.default_hint_if_non_existent in msg
+    assert msg == 'No in-progress managed jobs owned by you.'
 
 
 def test_handle_jobs_queue_request_runtime_error_no_records():
@@ -332,8 +330,7 @@ def test_handle_jobs_queue_request_runtime_error_no_records():
     # Verify error handling
     assert num_jobs is None
     # Should show the controller's default hint
-    controller = controller_utils.Controllers.JOBS_CONTROLLER.value
-    assert controller.default_hint_if_non_existent in msg
+    assert msg == 'No in-progress managed jobs owned by you.'
 
 
 def test_handle_jobs_queue_request_runtime_error_fallback():

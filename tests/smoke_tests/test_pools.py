@@ -1650,7 +1650,7 @@ def check_pool_not_in_status(pool_name: str,
     """Check that a pool does not appear in `sky jobs pool status`.
 
     Only a successful status query that shows the pool is gone counts: either
-    "No existing pools." or a pool table without the pool. Anything else (e.g.
+    "No existing pools accessible to you." or a pool table without the pool. Anything else (e.g.
     a controller-unavailable message, which also lacks the pool name) keeps
     polling, so a transient controller error cannot pass as a completed
     teardown.
@@ -1673,7 +1673,7 @@ def check_pool_not_in_status(pool_name: str,
         'fi; '
         'if s=$(sky jobs pool status); then '
         '  echo "$s"; '
-        '  if echo "$s" | grep -q "No existing pools." || '
+        '  if echo "$s" | grep -q "No existing pools accessible to you." || '
         '     { echo "$s" | grep -qE "^NAME +VERSION" && '
         f'       ! echo "$s" | grep -qF "{pool_name}"; }}; then '
         f'    echo "Pool {pool_name} correctly removed from pool status"; '

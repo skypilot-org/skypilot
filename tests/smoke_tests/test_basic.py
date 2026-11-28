@@ -3453,10 +3453,10 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
         [
             # Without consolidation mode, loopback access should be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && {smoke_tests_utils.SKY_API_RESTART}',
-            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',
+            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Your clusters"',
             # With consolidation mode, loopback access should be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
-            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',
+            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Your clusters"',
             f'sky jobs launch -y -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(

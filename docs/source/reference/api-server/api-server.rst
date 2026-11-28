@@ -137,7 +137,7 @@ To verify that the API server is working, run ``sky api info``:
    Troubleshooting <api-server-troubleshooting>
    Helm Chart Reference <helm-values-spec>
 
-By default, each user connected to the API server will only see their own resources.
+By default, ``sky status`` shows your clusters and managed jobs, along with pools and services you have access to regardless of ownership.
 
 
 To see other users' clusters and the job/serve controllers, use the ``-u`` flag.
@@ -146,7 +146,7 @@ To see other users' clusters and the job/serve controllers, use the ``-u`` flag.
     :emphasize-lines: 5,7,14
 
     $ sky status -u
-    Clusters
+    All users' clusters
     NAME                          USER        LAUNCHED      INFRA                 RESOURCES                                  STATUS   AUTOSTOP
     my-cluster-2                  my-user     2 hrs ago     GCP (us-central1-a)   1x(cpus=8, mem=32, n2-standard-8, ...)     STOPPED  -
     other-cluster                 other-user  1 week ago    AWS (us-east-1)       1x(cpus=64, mem=256, m6i.16xlarge, ...)    UP       -
@@ -155,7 +155,7 @@ To see other users' clusters and the job/serve controllers, use the ``-u`` flag.
 
     $ sky jobs queue -u
     Fetching managed job statuses...
-    Managed jobs
+    All users' managed jobs
     ID  TASK  NAME       USER        REQUESTED  SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
     3   -     job-2      my-user     1x[CPU:2]  2 days ago  2m 10s         1m 14s        0            CANCELLED
     2   -     other-job  other-user  1x[CPU:2]  2 days ago  11m 54s        10m 52s       0            CANCELLED

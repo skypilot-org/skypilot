@@ -373,7 +373,7 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 .. code-block:: console
 
     $ sky status api-server
-    Clusters
+    Accessible clusters
     NAME        LAUNCHED     RESOURCES                                                                  STATUS  AUTOSTOP  COMMAND
     api-server  41 mins ago  1x AWS(c6i.2xlarge, image_id={'us-east-1': 'docker:berkeleyskypilot/sk...  UP      -         sky exec api-server pip i...
 

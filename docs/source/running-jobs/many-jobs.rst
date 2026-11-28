@@ -307,7 +307,7 @@ Job statuses can be checked via ``sky jobs queue``:
   $ sky jobs queue
 
   Fetching managed jobs...
-  Managed jobs
+  Your managed jobs
   In progress tasks: 10 RUNNING
   ID  TASK  NAME        REQUESTED   SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
   10  -     train-job10 1x[V100:4]  5 mins ago   5m 5s          1m 12s        0            RUNNING
