@@ -12,6 +12,20 @@ from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 
 
+@pytest.fixture(autouse=True)
+def _no_orphan_watchdog(monkeypatch):
+    """Keep stream_logs_by_id from starting the orphan watchdog thread.
+
+    Outside a request context, stream_logs_by_id starts a daemon thread that
+    calls time.sleep in a loop and never exits on its own. Left running, it
+    outlives the test, and once a later test in the same process mocks
+    time.sleep, the thread calls that mock in a tight loop and breaks the
+    later test's assertions on it.
+    """
+    monkeypatch.setattr(jobs_utils.log_lib, 'start_orphan_watchdog',
+                        lambda: None)
+
+
 class TestClusterHandleNotRequired:
 
     def test_returns_true_when_no_cluster_handle_fields(self):
@@ -1209,8 +1223,6 @@ class TestStreamLogsByIdFinishedTaskInRunningJob:
         mock_state.get_task_name.return_value = 'trainer'
         monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
         monkeypatch.setattr(jobs_utils.managed_job_runtime, '_runtimes', [])
-        monkeypatch.setattr(jobs_utils.log_lib, 'start_orphan_watchdog',
-                            lambda: None)
         mock_logs = MagicMock()
         mock_logs.get_log_reader.return_value = None
         monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
@@ -1301,8 +1313,6 @@ class TestStreamLogsByIdFinishedTaskInRunningJob:
             'Completed task must replay saved logs without live polling')
         monkeypatch.setattr(jobs_utils, 'managed_job_state', state)
         monkeypatch.setattr(jobs_utils.managed_job_runtime, '_runtimes', [])
-        monkeypatch.setattr(jobs_utils.log_lib, 'start_orphan_watchdog',
-                            lambda: None)
         reader = MagicMock() if storage == 'external' else None
         if reader is not None:
             reader.read_cluster_job_logs.return_value = 0
