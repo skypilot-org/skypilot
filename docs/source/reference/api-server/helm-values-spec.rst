@@ -79,7 +79,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`sidecarContainers <helm-values-apiService-sidecarContainers>`: null
     :ref:`logs <helm-values-apiService-logs>`:
       :ref:`retention <helm-values-apiService-logs-retention>`:
-        :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
+        :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: true
         :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
     :ref:`imagePullPolicy <helm-values-apiService-imagePullPolicy>`: Always
 
@@ -920,9 +920,15 @@ Configuration for log retention settings.
 ``apiService.logs.retention.enabled``
 ''''''''''''''''''''''''''''''''''''''
 
-Whether to enable log retention for the API server. When enabled, logs will be automatically rotated and managed according to the specified size limit.
+Whether to enable log retention for API server and SkyServe controller logs. When enabled, logs will be automatically rotated and managed according to the specified size limit.
 
-Default: ``false``
+API server logs rotate only when normal local file logging is enabled outside developer mode. SkyServe controller logs rotate whenever retention is enabled.
+
+Rotation copies the active log before truncating it, so rotation needs
+free space for that copy; enabling retention cannot recover an already-full volume.
+``sky serve logs --controller`` reads the active log only, not retained archives.
+
+Default: ``true``
 
 .. code-block:: yaml
 

@@ -481,8 +481,22 @@ spec:
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
-      {{- if and .Values.apiService.serveServerLog .Values.apiService.logs.retention.enabled }}
+      {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
+        {{- if .Values.apiService.devMode.enabled }}
+        securityContext:
+          runAsNonRoot: false
+          runAsUser: 0
+          capabilities:
+            drop:
+            - ALL
+          allowPrivilegeEscalation: false
+        {{- else }}
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- end }}
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         # Warn if logrotate is missing in the image and keep the sidecar running
@@ -495,8 +509,17 @@ spec:
             done
           fi
           set -x
-          cat > /etc/logrotate.conf <<EOF
+          cat > /var/lib/logrotate/logrotate.conf <<EOF
+          {{- if and .Values.apiService.serveServerLog (not .Values.apiService.devMode.enabled) }}
           /root/.sky/api_server/server.log {
+              size {{ .Values.apiService.logs.retention.size }}
+              rotate 1
+              missingok
+              notifempty
+              copytruncate
+          }
+          {{- end }}
+          /root/.sky/serve/*/controller.log {
               size {{ .Values.apiService.logs.retention.size }}
               rotate 1
               missingok
@@ -505,10 +528,12 @@ spec:
           }
           EOF
           while true; do
-            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf
+            logrotate -s /var/lib/logrotate/status /var/lib/logrotate/logrotate.conf
             sleep 60;
           done
         volumeMounts:
+        - name: logrotate-state
+          mountPath: /var/lib/logrotate
         {{- if and $statePersist (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         - name: sky-ephemeral
           mountPath: /root/.sky
@@ -815,6 +840,10 @@ spec:
       {{- end }}
       {{- else }}
       - name: state-volume
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.apiService.logs.retention.enabled }}
+      - name: logrotate-state
         emptyDir: {}
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}
