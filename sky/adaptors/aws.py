@@ -35,6 +35,7 @@ import time
 import typing
 from typing import Any, Callable, Dict, Literal, Optional, TypeVar
 
+from sky import __version__
 from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
@@ -80,6 +81,28 @@ _MAX_ATTEMPT_FOR_CREATION = 5
 def _assert_kwargs_builtin_type(kwargs):
     assert all(isinstance(v, (int, float, str)) for v in kwargs.values()), (
         f'kwargs should not contain none built-in types: {kwargs}')
+
+
+def _add_user_agent(kwargs: Dict[str, Any], is_resource: bool = False) -> None:
+    """Append SkyPilot's user agent to the botocore config in kwargs.
+
+    The suffix is appended to the default boto3 user agent and to any
+    user_agent_extra already set by the caller. Other config options and the
+    endpoint_url kwarg are left untouched.
+    """
+    existing = kwargs.get('config')
+    extras = []
+    if existing is not None and existing.user_agent_extra:
+        extras.append(existing.user_agent_extra)
+    elif is_resource:
+        # boto3 adds its Resource marker only when user_agent_extra is unset.
+        extras.append('Resource')
+    extras.append(f'skypilot/{__version__}')
+    ua_config = botocore_config().Config(user_agent_extra=' '.join(extras))
+    if existing is not None:
+        kwargs['config'] = existing.merge(ua_config)
+    else:
+        kwargs['config'] = ua_config
 
 
 def _create_aws_object(creation_fn_or_cls: Callable[[], T],
@@ -226,6 +249,8 @@ def resource(service_name: str, **kwargs):
     check_credentials = kwargs.pop('check_credentials', True)
     profile = get_workspace_profile()
 
+    _add_user_agent(kwargs, is_resource=True)
+
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
@@ -281,6 +306,8 @@ def client(service_name: str, **kwargs):
         kwargs['config'] = botocore_config().Config(**config_kwargs)
 
     profile = get_workspace_profile()
+
+    _add_user_agent(kwargs)
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is

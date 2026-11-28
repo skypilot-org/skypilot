@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from sky import __version__
 from sky.adaptors import aws
 
 
@@ -137,3 +138,72 @@ def test_loader_per_data_path(monkeypatch, tmp_path):
 
     assert custom_loader is not default_loader
     assert custom_loader.search_paths[0] == str(tmp_path)
+
+
+class _CapturedRequest(Exception):
+
+    def __init__(self, request):
+        super().__init__()
+        self.request = request
+
+
+def _sent_user_agent(boto_client) -> str:
+    """Return the User-Agent header boto_client would send for ListBuckets."""
+
+    def _capture(request, **kwargs):
+        del kwargs
+        raise _CapturedRequest(request)
+
+    boto_client.meta.events.register('before-send', _capture)
+    with pytest.raises(_CapturedRequest) as exc_info:
+        boto_client.list_buckets()
+    user_agent = exc_info.value.request.headers['User-Agent']
+    if isinstance(user_agent, bytes):
+        user_agent = user_agent.decode()
+    return user_agent
+
+
+@pytest.fixture
+def fake_aws_credentials(monkeypatch):
+    monkeypatch.setenv('AWS_ACCESS_KEY_ID', 'testing')
+    monkeypatch.setenv('AWS_SECRET_ACCESS_KEY', 'testing')
+    monkeypatch.delenv('AWS_PROFILE', raising=False)
+    monkeypatch.delenv('AWS_DEFAULT_PROFILE', raising=False)
+    monkeypatch.setattr(aws, 'get_workspace_profile', lambda: None)
+    aws.session.cache_clear()
+    yield
+    aws.session.cache_clear()
+
+
+@pytest.mark.usefixtures('fake_aws_credentials')
+def test_client_user_agent_includes_skypilot():
+    token = f'skypilot/{__version__}'
+    s3 = aws.client('s3', region_name='us-east-1', read_timeout=10)
+    assert s3.meta.config.user_agent_extra == token
+    assert s3.meta.config.read_timeout == 10
+    user_agent = _sent_user_agent(s3)
+    assert 'Boto3/' in user_agent
+    assert token in user_agent
+
+
+@pytest.mark.usefixtures('fake_aws_credentials')
+def test_resource_user_agent_keeps_boto3_resource_marker():
+    token = f'skypilot/{__version__}'
+    s3 = aws.resource('s3', region_name='us-east-1', max_attempts=3)
+    config = s3.meta.client.meta.config
+    assert config.user_agent_extra == f'Resource {token}'
+    assert config.retries['total_max_attempts'] == 4
+    user_agent = _sent_user_agent(s3.meta.client)
+    assert user_agent.endswith(f'Resource {token}')
+
+
+def test_add_user_agent_appends_to_existing_extra():
+    kwargs = {
+        'config': aws.botocore_config().Config(user_agent_extra='caller/1.0',
+                                               connect_timeout=5)
+    }
+    # pylint: disable-next=protected-access
+    aws._add_user_agent(kwargs, is_resource=True)
+    config = kwargs['config']
+    assert config.user_agent_extra.startswith('caller/1.0 skypilot/')
+    assert config.connect_timeout == 5
