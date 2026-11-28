@@ -298,7 +298,7 @@ echo $ENDPOINT
 
 ### Backward compatibility guidelines
 
-SkyPilot adopts a client-server achitecture and maintains backward compatibility between client and server to ensure smooth upgrades for users. Starting from `0.10.0`, SkyPilot guarantees compatibility between adjacent minor versions. That is:
+SkyPilot adopts a client-server architecture and maintains backward compatibility between client and server to ensure smooth upgrades for users. Starting from `0.10.0`, SkyPilot guarantees compatibility between adjacent minor versions. That is:
 
 - Changes should always be added in a backward compatible manner, otherwise the compatibility for the previous minor version will be broken.
 - It is an opportunity to remove legacy compatibility code when a new minor version is released, e.g. when we release `0.12.0`, we can [remove the legacy compatibility code](#removing-compatibility-code) for `0.10.0` in our codebase.
@@ -472,7 +472,7 @@ To reduce the maintenance burden, the SkyPilot CI pipeline automatically updates
 The SkyPilot CLI/SDK or API server will raise an error if the remote peer runs in an API version lower than `MIN_COMPATIBLE_API_VERSION`.
 Therefore, compatible code below this version can be safely removed in our codebase.
 
-For example, if we have added the example changes metioned in [Refactoring existing APIs](#refactoring-existing-apis) and now the `MIN_COMPATIBLE_API_VERSION` is bumped to 13 by the CI pipeline (which means we can drop compatibility for API version 12), then the following codes can be removed:
+For example, if we have added the example changes mentioned in [Refactoring existing APIs](#refactoring-existing-apis) and now the `MIN_COMPATIBLE_API_VERSION` is bumped to 13 by the CI pipeline (which means we can drop compatibility for API version 12), then the following codes can be removed:
 
 ```diff
 # sdk.py
