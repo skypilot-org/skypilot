@@ -1,4 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
+import contextlib
 import copy
 import dataclasses
 import enum
@@ -40,6 +41,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
+from sky.backends import cluster_name as cluster_name_lib
 from sky.backends import task_codegen
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
@@ -1147,136 +1149,154 @@ class RetryingVmProvisioner(object):
 
             for failover_overrides in to_provision.cloud.yield_cloud_specific_failover_overrides(
                     region=to_provision.region):
-                try:
-                    config_dict = backend_utils.write_cluster_config(
-                        to_provision,
-                        num_nodes,
-                        template,
+                with contextlib.ExitStack() as name_reservation:
+                    try:
+                        candidates = cluster_name_lib.candidates(
+                            cluster_name, to_provision.cloud)
+                        for candidate in candidates:
+                            try:
+                                config_dict = backend_utils.write_cluster_config(
+                                    to_provision,
+                                    num_nodes,
+                                    template,
+                                    cluster_name,
+                                    self._local_wheel_path,
+                                    self._wheel_hash,
+                                    region=region,
+                                    zones=zones,
+                                    dryrun=dryrun,
+                                    keep_launch_fields_in_existing_config=
+                                    cluster_exists,
+                                    volume_mounts=volume_mounts,
+                                    storage_mounts=(task.storage_mounts if task
+                                                    is not None else None),
+                                    cloud_specific_failover_overrides=
+                                    failover_overrides,
+                                    extra_template_variables=extra_vars,
+                                    name_reservation=name_reservation,
+                                    cloud_user_identity=cloud_user_identity,
+                                    cluster_name_on_cloud=candidate,
+                                )
+                                break
+                            except exceptions.ClusterNameCollisionError:
+                                # Re-render name-derived resources before auth.
+                                # Existing mappings are never reassigned.
+                                if cluster_exists or candidate == candidates[-1]:
+                                    raise
+                    except exceptions.ResourcesUnavailableError as e:
+                        # Failed due to catalog issue, e.g. image not found, or
+                        # GPUs are requested in a Kubernetes cluster but the cluster
+                        # does not have nodes labeled with GPU types.
+                        logger.info(f'{e}')
+                        continue
+                    except exceptions.InvalidCloudCredentials as e:
+                        # Failed due to invalid cloud credentials.
+                        logger.warning(f'{common_utils.format_exception(e)}')
+                        # We should block the entire cloud for invalid cloud credentials
+                        _add_to_blocked_resources(
+                            self._blocked_resources,
+                            to_provision.copy(region=None, zone=None))
+                        raise exceptions.ResourcesUnavailableError(
+                            f'Failed to provision on cloud {to_provision.cloud} due to '
+                            f'invalid cloud credentials: '
+                            f'{common_utils.format_exception(e)}')
+                    except exceptions.InvalidCloudConfigs as e:
+                        # Failed due to invalid user configs in ~/.sky/config.yaml.
+                        logger.warning(f'{common_utils.format_exception(e)}')
+                        # We should block the entire cloud if the user config is
+                        # invalid.
+                        _add_to_blocked_resources(
+                            self._blocked_resources,
+                            to_provision.copy(region=None, zone=None))
+                        raise exceptions.ResourcesUnavailableError(
+                            f'Failed to provision on cloud {to_provision.cloud} due to '
+                            f'invalid cloud config: {common_utils.format_exception(e)}'
+                        )
+
+                    if ('config_hash' in config_dict and
+                            skip_if_config_hash_matches
+                            == config_dict['config_hash']):
+                        logger.debug(
+                            'Skipping provisioning of cluster with matching '
+                            'config hash.')
+                        config_dict['provisioning_skipped'] = True
+                        return config_dict
+                    config_dict['provisioning_skipped'] = False
+
+                    if dryrun:
+                        return config_dict
+
+                    cluster_config_file = config_dict['ray']
+
+                    launched_resources = to_provision.copy(region=region.name)
+                    if zones and len(zones) == 1:
+                        launched_resources = launched_resources.copy(
+                            zone=zones[0].name)
+                    if isinstance(to_provision.cloud, clouds.Kubernetes):
+                        # Record what the pods received at launch for autodown.
+                        provider = global_user_state.get_cluster_yaml_dict(
+                            cluster_config_file).get('provider', {})
+                        launched_resources.set_remote_identity_none_at_launch(
+                            bool(provider.get('remote_identity_none', False)))
+
+                    prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None,
+                                                                           None,
+                                                                           None)
+                    if prev_handle is not None:
+                        prev_cluster_ips = prev_handle.stable_internal_external_ips
+                        prev_ssh_ports = prev_handle.stable_ssh_ports
+                        prev_cluster_info = prev_handle.cached_cluster_info
+                    # Record early, so if anything goes wrong, 'sky status' will show
+                    # the cluster name and users can appropriately 'sky down'.  It also
+                    # means a second 'sky launch -c <name>' will attempt to reuse.
+                    handle = CloudVmRayResourceHandle(
+                        cluster_name=cluster_name,
+                        # Backward compatibility will be guaranteed by the underlying
+                        # backend_utils.write_cluster_config, which gets the cluster
+                        # name on cloud from the ray yaml file, if the previous cluster
+                        # exists.
+                        cluster_name_on_cloud=config_dict[
+                            'cluster_name_on_cloud'],
+                        cluster_yaml=cluster_config_file,
+                        launched_nodes=num_nodes,
+                        # OK for this to be shown in CLI as status == INIT.
+                        launched_resources=launched_resources,
+                        # Use the previous cluster's IPs and ports if available to
+                        # optimize the case where the cluster is restarted, i.e., no
+                        # need to query IPs and ports from the cloud provider.
+                        stable_internal_external_ips=prev_cluster_ips,
+                        stable_ssh_ports=prev_ssh_ports,
+                        cluster_info=prev_cluster_info,
+                    )
+                    usage_lib.messages.usage.update_final_cluster_status(
+                        status_lib.ClusterStatus.INIT)
+
+                    # Capture the task YAML.
+                    user_specified_task_config = None
+                    if task is not None:
+                        user_specified_task_config = task.to_yaml_config(
+                            use_user_specified_yaml=True)
+
+                    # This sets the status to INIT (even for a normal, UP cluster).
+                    global_user_state.add_or_update_cluster(
                         cluster_name,
-                        self._local_wheel_path,
-                        self._wheel_hash,
-                        region=region,
-                        zones=zones,
-                        dryrun=dryrun,
-                        keep_launch_fields_in_existing_config=cluster_exists,
-                        volume_mounts=volume_mounts,
-                        storage_mounts=task.storage_mounts,
-                        cloud_specific_failover_overrides=failover_overrides,
-                        extra_template_variables=extra_vars,
-                    )
-                except exceptions.ResourcesUnavailableError as e:
-                    # Failed due to catalog issue, e.g. image not found, or
-                    # GPUs are requested in a Kubernetes cluster but the cluster
-                    # does not have nodes labeled with GPU types.
-                    logger.info(f'{e}')
-                    continue
-                except exceptions.InvalidCloudCredentials as e:
-                    # Failed due to invalid cloud credentials.
-                    logger.warning(f'{common_utils.format_exception(e)}')
-                    # We should block the entire cloud for invalid cloud credentials
-                    _add_to_blocked_resources(
-                        self._blocked_resources,
-                        to_provision.copy(region=None, zone=None))
-                    raise exceptions.ResourcesUnavailableError(
-                        f'Failed to provision on cloud {to_provision.cloud} due to '
-                        f'invalid cloud credentials: '
-                        f'{common_utils.format_exception(e)}')
-                except exceptions.InvalidCloudConfigs as e:
-                    # Failed due to invalid user configs in ~/.sky/config.yaml.
-                    logger.warning(f'{common_utils.format_exception(e)}')
-                    # We should block the entire cloud if the user config is
-                    # invalid.
-                    _add_to_blocked_resources(
-                        self._blocked_resources,
-                        to_provision.copy(region=None, zone=None))
-                    raise exceptions.ResourcesUnavailableError(
-                        f'Failed to provision on cloud {to_provision.cloud} due to '
-                        f'invalid cloud config: {common_utils.format_exception(e)}'
+                        cluster_handle=handle,
+                        requested_resources=requested_resources,
+                        ready=False,
+                        is_managed=self._is_managed,
+                        provision_log_path=log_abs_path,
+                        task_config=user_specified_task_config,
                     )
 
-                if ('config_hash' in config_dict and skip_if_config_hash_matches
-                        == config_dict['config_hash']):
-                    logger.debug(
-                        'Skipping provisioning of cluster with matching '
-                        'config hash.')
-                    config_dict['provisioning_skipped'] = True
-                    return config_dict
-                config_dict['provisioning_skipped'] = False
+                    # Add cluster event for actual provisioning start.
+                    global_user_state.add_cluster_event(
+                        cluster_name, status_lib.ClusterStatus.INIT,
+                        f'Provisioning on {to_provision.cloud.display_name()} '
+                        + f'in {to_provision.region}',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
 
-                if dryrun:
-                    return config_dict
-
-                cluster_config_file = config_dict['ray']
-
-                launched_resources = to_provision.copy(region=region.name)
-                if zones and len(zones) == 1:
-                    launched_resources = launched_resources.copy(
-                        zone=zones[0].name)
-                if isinstance(to_provision.cloud, clouds.Kubernetes):
-                    # What the pods actually got, so later autodown checks on
-                    # this cluster do not depend on today's config.
-                    provider = global_user_state.get_cluster_yaml_dict(
-                        cluster_config_file).get('provider', {})
-                    launched_resources.set_remote_identity_none_at_launch(
-                        bool(provider.get('remote_identity_none', False)))
-
-                prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None,
-                                                                       None,
-                                                                       None)
-                if prev_handle is not None:
-                    prev_cluster_ips = prev_handle.stable_internal_external_ips
-                    prev_ssh_ports = prev_handle.stable_ssh_ports
-                    prev_cluster_info = prev_handle.cached_cluster_info
-                # Record early, so if anything goes wrong, 'sky status' will show
-                # the cluster name and users can appropriately 'sky down'.  It also
-                # means a second 'sky launch -c <name>' will attempt to reuse.
-                handle = CloudVmRayResourceHandle(
-                    cluster_name=cluster_name,
-                    # Backward compatibility will be guaranteed by the underlying
-                    # backend_utils.write_cluster_config, which gets the cluster
-                    # name on cloud from the ray yaml file, if the previous cluster
-                    # exists.
-                    cluster_name_on_cloud=config_dict['cluster_name_on_cloud'],
-                    cluster_yaml=cluster_config_file,
-                    launched_nodes=num_nodes,
-                    # OK for this to be shown in CLI as status == INIT.
-                    launched_resources=launched_resources,
-                    # Use the previous cluster's IPs and ports if available to
-                    # optimize the case where the cluster is restarted, i.e., no
-                    # need to query IPs and ports from the cloud provider.
-                    stable_internal_external_ips=prev_cluster_ips,
-                    stable_ssh_ports=prev_ssh_ports,
-                    cluster_info=prev_cluster_info,
-                )
-                usage_lib.messages.usage.update_final_cluster_status(
-                    status_lib.ClusterStatus.INIT)
-
-                # Capture the task YAML.
-                user_specified_task_config = None
-                if task is not None:
-                    user_specified_task_config = task.to_yaml_config(
-                        use_user_specified_yaml=True)
-
-                # This sets the status to INIT (even for a normal, UP cluster).
-                global_user_state.add_or_update_cluster(
-                    cluster_name,
-                    cluster_handle=handle,
-                    requested_resources=requested_resources,
-                    ready=False,
-                    is_managed=self._is_managed,
-                    provision_log_path=log_abs_path,
-                    task_config=user_specified_task_config,
-                )
-
-                # Add cluster event for actual provisioning start.
-                global_user_state.add_cluster_event(
-                    cluster_name, status_lib.ClusterStatus.INIT,
-                    f'Provisioning on {to_provision.cloud.display_name()} ' +
-                    f'in {to_provision.region}',
-                    global_user_state.ClusterEventType.STATUS_CHANGE)
-
-                global_user_state.set_owner_identity_for_cluster(
-                    cluster_name, cloud_user_identity)
+                    global_user_state.set_owner_identity_for_cluster(
+                        cluster_name, cloud_user_identity)
 
                 if (to_provision.cloud.PROVISIONER_VERSION ==
                         clouds.ProvisionerVersion.SKYPILOT):
@@ -5658,6 +5678,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        if terminate:
+            cluster_name_lib.check_kubernetes_teardown(handle)
         try:
             handle.close_skylet_ssh_tunnel()
         except Exception as e:  # pylint: disable=broad-except
@@ -5907,6 +5929,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
         """
+        if terminate:
+            cluster_name_lib.check_kubernetes_teardown(handle)
+
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         cloud = handle.launched_resources.cloud
 

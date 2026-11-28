@@ -59,6 +59,7 @@ logger = sky_logging.init_logger(__name__)
 # FAILED_PRECHECKS when raise_on_failure is True; recovery fails the job only on
 # TERMINAL_PRECHECK_FAILURES and retries the rest.
 PRECHECK_FAILURES = (
+    exceptions.ClusterNameCollisionError,
     exceptions.InvalidClusterNameError,
     exceptions.NoCloudAccessError,
     exceptions.ResourcesMismatchError,
@@ -73,6 +74,7 @@ PRECHECK_FAILURES = (
 # will succeed. Recovery keeps retrying the others, which can clear on their
 # own (a failed upload, expired cloud credentials, a volume not ready yet).
 TERMINAL_PRECHECK_FAILURES = (
+    exceptions.ClusterNameCollisionError,
     exceptions.InvalidClusterNameError,
     exceptions.ResourcesMismatchError,
     exceptions.StorageSpecError,
