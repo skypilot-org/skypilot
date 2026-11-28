@@ -339,6 +339,15 @@ def test_gpu_capacity_includes_tpu_neuron_and_unknown_types():
     assert sum(counts.values()) == 30
 
 
+def test_gpu_capacity_skips_virtual_node_placeholder():
+    """Serverless virtual nodes advertise placeholder capacity; skip them."""
+    counts = usage_lib._gpu_capacity_from_nodes(
+        _fake_nodes_info(_fake_node('RTX5090D', 1),
+                         _fake_node('RTX5090D', 20000), _fake_node(None, 20000),
+                         _fake_node('H100', 8), _fake_node('TRAINIUM2', 64)))
+    assert counts == {'RTX5090D': 1, 'H100': 8, 'TRAINIUM2': 64}
+
+
 def test_heartbeat_unions_workspaces(monkeypatch, capacity_store):
     """Exercise the sender and serialized payload, without a network send."""
     _reset_module_state()
