@@ -48,9 +48,9 @@ export const applyResolvedTheme = (resolved) => {
 };
 
 // Runs in <head> before first paint so a dark user never sees a light flash.
-// Mirrors resolveTheme/applyResolvedTheme above. Light is the default: only a
-// stored Dark, or a stored System on a dark OS, goes dark. Any failure (e.g.
-// storage blocked) falls back to light.
-export const NO_FLASH_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
+// Mirrors resolveTheme/applyResolvedTheme above. System is the default: a
+// stored Dark goes dark, a stored Light stays light, and anything else
+// (nothing stored, or storage blocked) follows the OS.
+export const NO_FLASH_SCRIPT = `(function(){try{var t=null;try{t=localStorage.getItem(${JSON.stringify(
   THEME_STORAGE_KEY
-)});var d=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;r.classList.toggle('dark',d);r.dataset.theme=d?'dark':'light';}catch(e){}})();`;
+)})}catch(e){}var d=t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;r.classList.toggle('dark',d);r.dataset.theme=d?'dark':'light';}catch(e){}})();`;

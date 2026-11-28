@@ -45,11 +45,15 @@ describe('resolveTheme', () => {
 });
 
 describe('ThemeProvider', () => {
-  test('defaults to light, even on a dark system', () => {
+  test('defaults to system', () => {
     systemDark = true;
     renderWithToggle();
-    expect(document.documentElement.classList.contains('dark')).toBe(false);
-    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(screen.getByRole('tab', { name: 'System' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
   });
 
   test('system follows prefers-color-scheme live once chosen', () => {
@@ -95,7 +99,7 @@ describe('ThemeProvider', () => {
         <Probe />
       </ThemeProvider>
     );
-    expect(screen.getByText('light')).toBeInTheDocument();
+    expect(screen.getByText('system')).toBeInTheDocument();
   });
 });
 
@@ -112,7 +116,7 @@ describe('ThemeMenu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }));
     expect(
-      screen.getByRole('menuitemradio', { name: 'Light' })
+      screen.getByRole('menuitemradio', { name: 'System' })
     ).toHaveAttribute('aria-checked', 'true');
     await userEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
@@ -143,10 +147,10 @@ describe('NO_FLASH_SCRIPT', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
-  test('stays light when nothing is stored, even on a dark system', () => {
+  test('follows the system when nothing is stored', () => {
     systemDark = true;
     run();
-    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
   });
 
   test('follows the system when System is stored', () => {
