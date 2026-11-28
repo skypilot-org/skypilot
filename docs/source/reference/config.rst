@@ -3656,6 +3656,7 @@ Valid daemon names are:
 - ``skypilot-status-refresh-daemon``
 - ``skypilot-volume-status-refresh-daemon``
 - ``managed-job-status-refresh-daemon``
+- ``idle-detection-daemon``
 
 ``log_level``
     Log level to set for the daemon. Valid values are ``DEBUG``, ``INFO`` and ``WARNING``.
@@ -3706,6 +3707,88 @@ By default, SkyPilot federates from the Prometheus deployed by the SkyPilot Helm
 .. note::
 
     When a kubeconfig context points back at the cluster the API server itself runs in, SkyPilot auto-detects this (by comparing the UID of the ``kube-system`` namespace as seen through the context's credentials with the UID seen through the in-cluster credentials) and skips that context during federation: the central Prometheus (the one deployed next to the API server, e.g. by the SkyPilot Helm chart) already scrapes the local cluster's exporters directly, so federating it again would only duplicate the series. The dashboard queries the local cluster's series by their missing ``cluster`` label instead of a context name. If detection fails (e.g. the context's credentials cannot ``get`` the ``kube-system`` namespace), the context is treated as remote and federated over port-forward — the previous behavior for every context.
+
+.. _config-yaml-idle-detection:
+
+``idle_detection``
+~~~~~~~~~~~~~~~~~~
+
+Idle detection from an external metrics source (optional). Not applicable to client side config.
+
+When set, the API server asks the source whether each ``UP`` cluster has been idle for the whole ``window`` and notifies a webhook about the ones that have. See :ref:`auto-stop-idle-detection` for the behavior. Adding this section takes effect on the next API server restart; removing it takes effect immediately.
+
+``window``
+    How long a cluster must be idle, e.g. ``6h``. A cluster is first checked once the API server has seen it ``UP`` for this long.
+
+``source``
+    Where idleness comes from. Exactly one of ``prometheus`` and ``http``.
+
+``source.prometheus``
+    Any server that implements the Prometheus instant query API.
+
+    ``url``
+        The query endpoint, e.g. ``https://prometheus.example.com/api/v1/query``.
+
+    ``query``
+        A PromQL expression, sent once per cluster with the placeholders below filled in. The cluster is idle if the result has at least one series and every series is below ``threshold``. An empty result, an error or a timeout counts as active.
+
+        The query defines what idle means, including how much data is enough: ``avg_over_time`` averages whatever samples exist, so an exporter that only started reporting a minute ago can make a busy cluster look idle. To require data from the start of the window, add ``and <metric>{...} offset {window}``, which returns nothing when there was no sample one window ago.
+
+        - ``{cluster}``: cluster name.
+        - ``{cluster_on_cloud}``: cluster name on the cloud. On Kubernetes, pods are named ``{cluster_on_cloud}-head`` and ``{cluster_on_cloud}-worker<N>``.
+        - ``{user}``: name of the user who owns the cluster.
+        - ``{workspace}``: workspace of the cluster.
+        - ``{instance_ids}``, ``{node_names}``, ``{node_ips}``: instance IDs (pod names on Kubernetes), node names and internal IPs of the cluster's nodes, as a regular expression alternation for use with ``=~``.
+        - ``{window}``: ``window`` as a PromQL duration.
+
+    ``threshold``
+        A number. See ``query``.
+
+    ``headers_file``
+        Path to a file of HTTP headers to send, one ``Name: value`` per line, e.g. ``Authorization: Bearer <token>`` (optional).
+
+``source.http``
+    An endpoint of your own that decides idleness, for anything that does not speak PromQL.
+
+    ``url``
+        Receives a ``POST`` with a JSON body of ``cluster``, ``cluster_on_cloud``, ``user``, ``workspace``, ``instance_ids``, ``node_names``, ``node_ips`` and ``window_seconds``. The cluster is idle if the response is ``{"idle": true}``; an optional ``reason`` string is passed on in the notification. Any other response counts as active.
+
+    ``headers_file``
+        Same as for ``source.prometheus`` (optional).
+
+``notify.webhook``
+    URL that receives a ``POST`` for each idle cluster, with a JSON body of ``event`` (``idle_warning``), ``cluster``, ``user``, ``workspace``, ``reason``, ``action`` (``notify``), ``idle_since`` (Unix time) and ``deadline`` (``null``). Sent again once per ``window`` while the cluster stays idle.
+
+The check runs every 15 minutes; set ``daemons.idle-detection-daemon.interval_seconds`` to change that. With several API servers, the source is still asked once per interval.
+
+Example with GPU utilization from the NVIDIA DCGM exporter on Kubernetes:
+
+.. code-block:: yaml
+
+  idle_detection:
+    window: 6h
+    source:
+      prometheus:
+        url: https://prometheus.example.com/api/v1/query
+        headers_file: ~/.sky/idle_detection_headers
+        query: avg_over_time(DCGM_FI_DEV_GPU_UTIL{pod=~"{cluster_on_cloud}-.*"}[{window}])
+        threshold: 5
+    notify:
+      webhook: https://example.com/idle-clusters
+
+Example with CPU usage from the node exporter on VMs:
+
+.. code-block:: yaml
+
+  idle_detection:
+    window: 6h
+    source:
+      prometheus:
+        url: https://prometheus.example.com/api/v1/query
+        query: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle", instance=~"({node_ips}):9100"}[{window}])))
+        threshold: 5
+    notify:
+      webhook: https://example.com/idle-clusters
 
 .. _config-yaml-dashboard:
 

@@ -740,6 +740,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('db',),
     ('daemons',),
     ('metrics',),
+    ('idle_detection',),
     # Logging sinks are server-owned; a client must not redirect where the
     # server ships its logs.
     (

@@ -1246,6 +1246,29 @@ def test_redact_sensitive_values() -> None:
     assert config == original
 
 
+def test_redact_idle_detection_webhook() -> None:
+    """A chat webhook URL is a credential; the metrics URL is not."""
+    config = {
+        'idle_detection': {
+            'source': {
+                'http': {
+                    'url': 'https://idle.example.com/check'
+                }
+            },
+            'notify': {
+                'webhook': 'https://hooks.example.com/services/T0/B0/secret'
+            },
+        }
+    }
+
+    redacted = config_utils.redact_sensitive_values(config)
+
+    assert redacted['idle_detection']['notify'][
+        'webhook'] == config_utils.REDACTED_VALUE
+    assert redacted['idle_detection']['source']['http'][
+        'url'] == 'https://idle.example.com/check'
+
+
 def test_redact_sensitive_values_docker_login_lists() -> None:
     """A docker login password is hidden inside any_of / ordered entries."""
     config = {

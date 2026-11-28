@@ -1279,6 +1279,43 @@ def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
                                           None) == 'server_policy.ServerPolicy'
 
 
+def test_client_cannot_override_idle_detection(monkeypatch, tmp_path):
+    """A client override must not point idle detection at another source."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        idle_detection:
+            window: 6h
+            source:
+                http:
+                    url: https://server.example.com/idle
+            notify:
+                webhook: https://server.example.com/hook
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config({
+            'idle_detection': {
+                'window': '1s',
+                'source': {
+                    'http': {
+                        'url': 'https://client.example.com/idle'
+                    }
+                },
+                'notify': {
+                    'webhook': 'https://client.example.com/hook'
+                },
+            }
+    }):
+        assert skypilot_config.get_nested(
+            ('idle_detection', 'source', 'http', 'url'),
+            None) == 'https://server.example.com/idle'
+        assert skypilot_config.get_nested(('idle_detection', 'window'),
+                                          None) == '6h'
+
+
 def test_client_cannot_override_logs(monkeypatch, tmp_path):
     """A client override must not redirect where the server ships its logs."""
     os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)

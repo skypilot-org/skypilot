@@ -149,3 +149,34 @@ code, sync W&B runs, or push checkpoints to persistent storage), use a task
 ``events: [down]`` if you use ``autostop: {down: true}`` / autodown, since
 the outcome is teardown). The same mechanism also covers preemption and
 ``sky down`` events.
+
+.. _auto-stop-idle-detection:
+
+Detecting idle clusters from metrics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Autostop runs on the cluster and only sees SkyPilot jobs and SSH sessions, so a cluster with a hung job or an idle notebook never looks idle to it. Administrators who already collect metrics (GPU, CPU, or anything else) can have the API server use them instead:
+
+.. code-block:: yaml
+
+  # API server config
+  idle_detection:
+    window: 6h
+    source:
+      prometheus:
+        url: https://prometheus.example.com/api/v1/query
+        query: avg_over_time(DCGM_FI_DEV_GPU_UTIL{pod=~"{cluster_on_cloud}-.*"}[{window}])
+        threshold: 5
+    notify:
+      webhook: https://example.com/idle-clusters
+
+Every 15 minutes the API server sends the query for each ``UP`` cluster. A cluster whose result stays below ``threshold`` for the whole ``window`` gets an event in ``sky status -v`` and a ``POST`` to the webhook naming the cluster and its owner, repeated once per ``window`` while it stays idle. A second event marks the end of the idle period. Clusters are not stopped.
+
+SkyPilot does not collect the metrics or know what they mean: the query is yours, and a source that is not PromQL-compatible can be put behind ``source.http``. See :ref:`idle_detection <config-yaml-idle-detection>` for all fields.
+
+- A cluster that cannot be measured (no data, an error from the source) counts as active.
+- The query decides how much data is enough. ``avg_over_time`` averages whatever samples exist; see :ref:`idle_detection <config-yaml-idle-detection>` for requiring data from the start of the window.
+- A cluster is first checked after the API server has seen it ``UP`` for a full ``window``, so nothing is reported for the first ``window`` after turning this on, or after ``sky start``.
+- Running jobs and SSH sessions do not exempt a cluster; only the source decides.
+- Controllers and clusters launched by managed jobs, services or pools are never checked.
+- To exempt a cluster, launch it with the label ``skypilot-idle-detection: skip`` under ``resources.labels``. Use an :ref:`admin policy <advanced-policy-config>` to require or forbid that label.

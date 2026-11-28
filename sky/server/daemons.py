@@ -523,6 +523,23 @@ def should_skip_launch_metrics() -> bool:
     return False
 
 
+def should_skip_idle_detection() -> bool:
+    """Skip unless the server config has an ``idle_detection`` section."""
+    return skypilot_config.get_nested(('idle_detection',), None) is None
+
+
+def idle_detection_event():
+    """Ask the configured metrics source which UP clusters are idle."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server import idle_detection
+
+    interval = skypilot_config.get_nested(
+        ('daemons', 'idle-detection-daemon', 'interval_seconds'),
+        server_constants.IDLE_DETECTION_DAEMON_INTERVAL_SECONDS)
+    idle_detection.run_pass(interval)
+    time.sleep(interval)
+
+
 def server_heartbeat_event():
     """Periodically send server-side fleet and plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -590,6 +607,11 @@ INTERNAL_REQUEST_DAEMONS = [
         name=request_names.RequestName.REQUEST_DAEMON_LAUNCH_METRICS,
         event_fn=launch_metrics_event,
         should_skip=should_skip_launch_metrics),
+    InternalRequestDaemon(
+        id='idle-detection-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_IDLE_DETECTION,
+        event_fn=idle_detection_event,
+        should_skip=should_skip_idle_detection),
 ]
 
 HIDDEN_REQUEST_NAMES = [

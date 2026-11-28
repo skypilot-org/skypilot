@@ -127,6 +127,8 @@ SENSITIVE_CONFIG_PATHS: List[Tuple[str, ...]] = [
     # A bearer token for the API server: whoever reads it holds the roles of
     # the service account it was minted for.
     ('api_server', 'service_account_token'),
+    # Chat webhooks carry their credential in the URL.
+    ('idle_detection', 'notify', 'webhook'),
 ]
 for _controller in ('jobs', 'serve'):
     for _resources_path in (('resources',), ('resources', 'any_of', '*'),
