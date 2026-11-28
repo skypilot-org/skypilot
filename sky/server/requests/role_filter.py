@@ -50,7 +50,9 @@ def request_owner_scope(request: fastapi.Request) -> Optional[str]:
     auth_user = getattr(request.state, 'auth_user', None)
     if auth_user is None:
         return None
-    # In-memory lookup (no DB roundtrip), matching `_is_viewer`.
+    # In-memory lookup (no DB roundtrip), matching `_is_viewer`. The /api
+    # handlers call this on the event loop, so it must not take the policy's
+    # lock either; `roles_in_memory` does not.
     roles = permission.permission_service.roles_in_memory(auth_user.id)
     if rbac.RoleName.ADMIN.value in roles:
         return None
