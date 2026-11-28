@@ -510,7 +510,6 @@ def test_managed_jobs_restart_needs_write_access_like_cancel(
     name = smoke_tests_utils.get_cluster_name()
     suffix = uuid.uuid4().hex[:8]
     ws = f'restart-ws-{suffix}'
-    base_url = smoke_tests_utils.ENDPOINT.rsplit('/api/health', 1)[0]
 
     def as_user(user):
         user_hash = hashlib.md5(
@@ -582,11 +581,10 @@ def test_managed_jobs_restart_needs_write_access_like_cancel(
         [
             f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
             f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
-            # First contact creates both users (see the test named above).
-            f'curl -sS -H "X-Auth-Request-Email: {owner}" '
-            f'{base_url}/users/me/workspace',
-            f'curl -sS -H "X-Auth-Request-Email: {viewer}" '
-            f'{base_url}/users/me/workspace',
+            # First contact creates both users as non-admins (see the test
+            # named above).
+            smoke_tests_utils.assert_header_user_role_cmd(owner, 'user'),
+            smoke_tests_utils.assert_header_user_role_cmd(viewer, 'user'),
             f'{as_owner}sky check {in_ws} {generic_cloud}',
             f'{as_viewer}sky check {generic_cloud}',
             submit(as_owner, 'done', f'{in_ws} -n {name}-done {task} '

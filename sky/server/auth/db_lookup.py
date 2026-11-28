@@ -219,6 +219,12 @@ def _mark(request: Optional[fastapi.Request], reason: str) -> None:
         middleware_utils.mark_rejection(request, reason)
 
 
+def _seed_login_role(user_id: str) -> None:
+    # A login is the only seed that may make the first admin; a bulk
+    # provisioner (SCIM) must not hand admin to whoever comes first.
+    permission.seed_new_user_role(user_id, bootstrap_admin=True)
+
+
 async def ensure_role_for_authenticated_user(
     user_id: str,
     newly_added: bool,
@@ -246,7 +252,7 @@ async def ensure_role_for_authenticated_user(
     """
     if newly_added:
         try:
-            await _call_on_request_pool(permission.seed_new_user_role, user_id)
+            await _call_on_request_pool(_seed_login_role, user_id)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             logger.error(f'Concurrent worker exhausted seeding a role for '
                          f'{user_id}: {e}')

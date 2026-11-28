@@ -287,7 +287,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       env: "-e YOUR_CUSTOM=YOUR_VAL"
 
   :ref:`rbac <config-yaml-rbac>`:
-    :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`default_role <config-yaml-rbac-default-role>`: user
     :ref:`allow_impersonation <config-yaml-rbac-allow-impersonation>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
@@ -3529,9 +3529,25 @@ RBAC configuration (optional).
 ``rbac.default_role``
 ~~~~~~~~~~~~~~~~~~~~~
 
-Default role for users (optional).  Either ``admin`` or ``user``.
+Default role for new users (optional).  Either ``admin`` or ``user``.
 
-If not specified, the default role is ``admin``.
+If not specified:
+
+- Users the API server authenticates (through SSO, an auth proxy or the API
+  server's own basic auth) and service accounts created without a role get
+  ``user``.
+- Requests that reach the API server without authentication, such as those to
+  an API server that only uses basic auth on its ingress, run as ``admin``.
+
+If specified, new users get this role instead. Existing users keep their roles.
+
+When it is unset and no user or service account that can still log in holds
+``admin``, the first new user who logs in through an auth proxy or OAuth2 proxy
+gets ``admin``, so a deployment without a usable administrator is not locked
+out. Admins that can no longer log in do not count: basic-auth users once
+the API server's basic auth is turned off, and service accounts whose tokens
+have all expired.
+This applies again if every admin is later removed.
 
 .. TODO(aylei): Refine this after unified authentication.
 

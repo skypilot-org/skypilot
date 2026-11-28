@@ -214,7 +214,11 @@ class TestPermissionService:
             'default': ['*'],
             'private-ws': ['user1', 'user2']
         }
-        mock_get_users.return_value = mock_users
+        # user1 logged in (typed); user2 and user3 only ever sent requests
+        # without authentication (type NULL).
+        mock_get_users.return_value = [
+            models.User(id='user1', name='Alice', user_type='sso')
+        ] + mock_users[1:]
 
         service = _service_over(policy_engine)
         service._maybe_initialize_policies()
@@ -227,11 +231,12 @@ class TestPermissionService:
             ('user1', 'private-ws', '*'),
             ('user2', 'private-ws', '*'),
         ])
-        # Every user gets the default role; the built-in system users get
+        # With `rbac.default_role` unset, an authenticated user gets user and
+        # a never-authenticated one admin; the built-in system users get
         # their own: SERVER_ID and the system user admin, the system viewer
         # viewer.
         assert _stored(policy_engine, 'g') == sorted(
-            [(user.id, rbac.get_default_role()) for user in mock_users] + [
+            [('user1', 'user'), ('user2', 'admin'), ('user3', 'admin')] + [
                 (common.SERVER_ID, rbac.RoleName.ADMIN.value),
                 (constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value),
                 (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
@@ -1039,10 +1044,12 @@ class TestPermissionServiceMultiProcess:
         ])
         # One role per user, plus the three built-in system users: SERVER_ID
         # and the system admin user with admin, the system viewer with viewer.
+        # The fixture users have no type, so they get the unauthenticated
+        # default.
         assert _stored(policy_engine, 'g') == sorted([
-            ('user1', rbac.get_default_role()),
-            ('user2', rbac.get_default_role()),
-            ('user3', rbac.get_default_role()),
+            ('user1', 'admin'),
+            ('user2', 'admin'),
+            ('user3', 'admin'),
             (common.SERVER_ID, 'admin'),
             (constants.SKYPILOT_SYSTEM_USER_ID, 'admin'),
             (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'),
@@ -1077,7 +1084,8 @@ class TestPermissionServiceMultiProcess:
         service._maybe_initialize_policies()
 
         # Each user holds exactly one role (3 mock users + 3 system users).
-        expected = [(user.id, rbac.get_default_role()) for user in mock_users]
+        # The fixture users have no type: the unauthenticated default.
+        expected = [(user.id, 'admin') for user in mock_users]
         expected += [(common.SERVER_ID, 'admin'),
                      (constants.SKYPILOT_SYSTEM_USER_ID, 'admin'),
                      (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer')]
@@ -1183,17 +1191,19 @@ class TestSeedNewUserRole:
         calls = []
         monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
                             lambda: calls.append('reload'))
-        monkeypatch.setattr(
-            permission.permission_service,
-            'add_user_if_not_exists',
-            lambda user_id, role=None: calls.append(f'add:{user_id}:{role}'))
+        monkeypatch.setattr(permission.permission_service,
+                            'add_user_if_not_exists',
+                            lambda user_id, role=None, bootstrap_admin=False:
+                            calls.append(f'add:{user_id}:{role}'))
         monkeypatch.setattr(permission.permission_service,
                             'resync_workspace_policies_for_new_user',
                             lambda user_id: calls.append(f'resync:{user_id}'))
+        monkeypatch.setattr(permission.global_user_state, 'get_user',
+                            lambda user_id: None)
 
         permission.seed_new_user_role('u1')
 
-        assert calls == ['reload', 'add:u1:None', 'resync:u1']
+        assert calls == ['reload', 'add:u1:user', 'resync:u1']
 
         # An explicit role overrides the default and is forwarded as-is.
         calls.clear()
@@ -1208,10 +1218,12 @@ class TestSeedNewUserRole:
         calls = []
         monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
                             lambda: calls.append('reload'))
-        monkeypatch.setattr(
-            permission.permission_service,
-            'add_user_if_not_exists',
-            lambda user_id, role=None: calls.append(f'add:{user_id}:{role}'))
+        monkeypatch.setattr(permission.permission_service,
+                            'add_user_if_not_exists',
+                            lambda user_id, role=None, bootstrap_admin=False:
+                            calls.append(f'add:{user_id}:{role}'))
+        monkeypatch.setattr(permission.global_user_state, 'get_user',
+                            lambda user_id: None)
 
         def _boom(user_id):
             raise RuntimeError('lock timeout')
@@ -1221,7 +1233,232 @@ class TestSeedNewUserRole:
 
         permission.seed_new_user_role('u1')  # Must not raise.
 
-        assert calls == ['reload', 'add:u1:None']
+        assert calls == ['reload', 'add:u1:user']
+
+    @pytest.mark.parametrize(
+        'row,configured,expected',
+        [
+            # Never authenticated (the executor's unauthenticated path).
+            (models.User(id='u', name='u'), None, 'admin'),
+            # Authenticated, or no row at all: the stricter default.
+            (models.User(id='u', name='u', user_type='sso'), None, 'user'),
+            (models.User(id='u', name='u', user_type='legacy'), None, 'user'),
+            (None, None, 'user'),
+            # A configured default applies to both.
+            (models.User(id='u', name='u'), 'user', 'user'),
+            (models.User(id='u', name='u', user_type='sso'), 'admin', 'admin'),
+        ])
+    def test_default_role_follows_user_type(self, monkeypatch, row, configured,
+                                            expected):
+        added = []
+        monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
+                            lambda: None)
+        monkeypatch.setattr(permission.rbac.skypilot_config,
+                            'get_nested',
+                            lambda keys, default_value=None: configured)
+        monkeypatch.setattr(permission.global_user_state, 'get_user',
+                            lambda user_id: row)
+        monkeypatch.setattr(
+            permission.permission_service,
+            'add_user_if_not_exists',
+            lambda user_id, role=None, bootstrap_admin=False: added.append(
+                (role, bootstrap_admin)))
+        monkeypatch.setattr(permission.permission_service,
+                            'resync_workspace_policies_for_new_user',
+                            lambda user_id: None)
+
+        permission.seed_new_user_role('u', bootstrap_admin=True)
+
+        assert added == [(expected, True)]
+
+    def test_explicit_role_never_bootstraps(self, monkeypatch):
+        added = []
+        monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
+                            lambda: None)
+        monkeypatch.setattr(
+            permission.permission_service,
+            'add_user_if_not_exists',
+            lambda user_id, role=None, bootstrap_admin=False: added.append(
+                (role, bootstrap_admin)))
+        monkeypatch.setattr(permission.permission_service,
+                            'resync_workspace_policies_for_new_user',
+                            lambda user_id: None)
+
+        permission.seed_new_user_role('sa', role='viewer', bootstrap_admin=True)
+
+        assert added == [('viewer', False)]
+
+
+class TestFirstAdminBootstrap:
+    """A login seed may make the first admin.
+
+    Only while `rbac.default_role` is unset and no person or service account
+    that can still log in holds admin, and only for a seed that opted in, so a
+    deployment without a usable admin is not locked out and a bulk provisioner
+    cannot hand admin to whoever comes first.
+    """
+
+    @pytest.fixture
+    def tokens(self, monkeypatch):
+        """Service account tokens, as `{sa id: expires_at}`."""
+        table = {}
+        monkeypatch.setattr(
+            permission.global_user_state, 'get_all_service_account_tokens',
+            lambda: [{
+                'service_account_user_id': sa,
+                'expires_at': expires_at
+            } for sa, expires_at in table.items()])
+        return table
+
+    @pytest.fixture
+    def users(self, monkeypatch, tokens):
+        """The users table, as `{id: type}`; tests add rows to it.
+
+        Basic auth and service accounts start enabled.
+        """
+        del tokens  # Installed so no test reads the real token table.
+        monkeypatch.setenv('ENABLE_BASIC_AUTH', 'true')
+        monkeypatch.setenv('ENABLE_SERVICE_ACCOUNTS', 'true')
+        monkeypatch.delenv('SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE',
+                           raising=False)
+        table = {}
+        monkeypatch.setattr(
+            permission.global_user_state, 'get_users', lambda ids: {
+                i: models.User(id=i, name=i, user_type=table[i])
+                for i in ids
+                if i in table
+            })
+        monkeypatch.setattr(permission.rbac.skypilot_config,
+                            'get_nested',
+                            lambda keys, default_value=None: None)
+        return table
+
+    @pytest.fixture
+    def service(self, policy_engine):
+        with mock.patch('sky.users.permission._policy_lock'):
+            yield _service_over(policy_engine)
+
+    def test_first_login_is_admin_the_next_is_user(self, users, service):
+        users.update(alice='sso', bob='sso')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        service.add_user_if_not_exists('bob', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service, 'alice') == ['admin']
+        assert _grouping_rows(service, 'bob') == ['user']
+
+    def test_without_opt_in_no_one_becomes_admin(self, users, service):
+        users.update(alice='sso')
+        service.add_user_if_not_exists('alice', 'user')
+        assert _grouping_rows(service, 'alice') == ['user']
+
+    def test_a_configured_default_is_never_overridden(self, users, service,
+                                                      monkeypatch):
+        # Before the bootstrap existed, a configured `default_role: user`
+        # never produced an admin; it still does not.
+        users.update(alice='sso')
+        monkeypatch.setattr(permission.rbac.skypilot_config,
+                            'get_nested',
+                            lambda keys, default_value=None: 'user')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service, 'alice') == ['user']
+
+    @pytest.mark.parametrize('admin_type', ['basic', 'sso', 'legacy', 'sa'])
+    def test_an_existing_human_admin_stops_it(self, users, tokens, service,
+                                              admin_type):
+        users.update(root=admin_type, alice='sso')
+        tokens['root'] = None  # Never expires; only an `sa` admin needs it.
+        service.update_role('root', 'admin')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service, 'alice') == ['user']
+
+    @pytest.mark.parametrize('admin_type', ['system', None])
+    def test_system_and_unauthenticated_admins_do_not_count(
+            self, users, service, admin_type):
+        # The server's own identities hold admin by design, and a type-NULL
+        # admin was seeded by a request without authentication.
+        users.update(server=admin_type, alice='sso')
+        service.update_role('server', 'admin')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service, 'alice') == ['admin']
+
+    @pytest.mark.parametrize(
+        'old_admin,stops',
+        [
+            (models.User(id='old-basic', name='old-basic',
+                         password='hash'), True),
+            # A client without authentication can claim an `sa-` id, but
+            # not a token: only a real service account has one.
+            (models.User(id='sa-forged', name='sa-forged'), False),
+            (models.User(id='sa-old', name='old-token'), True),
+        ])
+    def test_an_untyped_admin_counts_only_if_authenticated(
+            self, users, tokens, service, monkeypatch, old_admin, stops):
+        # A row from before user types existed has no type; a password or a
+        # token proves it was authenticated.
+        tokens['sa-old'] = None
+        rows = {
+            old_admin.id: old_admin,
+            'alice': models.User(id='alice', name='alice', user_type='sso'),
+        }
+        monkeypatch.setattr(permission.global_user_state, 'get_users',
+                            lambda ids: {i: rows[i] for i in ids if i in rows})
+        service.update_role(old_admin.id, 'admin')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service,
+                              'alice') == ['user' if stops else 'admin']
+
+    @pytest.mark.parametrize(
+        'admin,env,expires_in,stops',
+        [
+            # The deployment moved to SSO: basic auth is off.
+            ('basic', {
+                'ENABLE_BASIC_AUTH': 'false'
+            }, None, False),
+            ('untyped-password', {
+                'ENABLE_BASIC_AUTH': 'false'
+            }, None, False),
+            # A plugin serves basic auth instead of the middleware.
+            ('basic', {
+                'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE': 'true'
+            }, None, True),
+            ('sa', {}, -1, False),  # Every token expired.
+            ('sa', {}, 0, True),  # Expires this second: still accepted.
+            ('sa', {}, 'no token', False),
+            ('sa', {
+                'ENABLE_SERVICE_ACCOUNTS': 'false'
+            }, None, False),
+        ])
+    def test_only_an_admin_who_can_log_in_counts(self, users, tokens, service,
+                                                 monkeypatch, admin, env,
+                                                 expires_in, stops):
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(permission.time, 'time', lambda: 1000)
+        if expires_in != 'no token':
+            tokens['root'] = None if expires_in is None else 1000 + expires_in
+        rows = {
+            'root': (models.User(id='root', name='root', password='hash')
+                     if admin == 'untyped-password' else models.User(
+                         id='root', name='root', user_type=admin)),
+            'alice': models.User(id='alice', name='alice', user_type='sso'),
+        }
+        monkeypatch.setattr(permission.global_user_state, 'get_users',
+                            lambda ids: {i: rows[i] for i in ids if i in rows})
+        service.update_role('root', 'admin')
+        service.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+        assert _grouping_rows(service,
+                              'alice') == ['user' if stops else 'admin']
+
+    def test_a_second_worker_sees_the_first_admin(self, users, two_workers):
+        users.update(alice='sso', bob='sso')
+        worker_a, worker_b = two_workers
+        # B snapshots the empty policy before A's first login lands.
+        worker_b.enforcer.load_policy()
+        worker_a.add_user_if_not_exists('alice', 'user', bootstrap_admin=True)
+
+        worker_b.add_user_if_not_exists('bob', 'user', bootstrap_admin=True)
+
+        assert _grouping_rows(worker_a, 'alice') == ['admin']
+        assert _grouping_rows(worker_a, 'bob') == ['user']
 
 
 @pytest.mark.usefixtures("cleanup_env_vars")

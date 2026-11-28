@@ -347,14 +347,22 @@ class TestGetViewerAllowlist:
 
 class TestDefaultRoleConfig:
 
-    def test_default_role_falls_back_to_admin(self):
-        with mock.patch('sky.skypilot_config.get_nested', return_value='admin'):
-            assert rbac.get_default_role() == 'admin'
-
-    def test_default_role_can_be_viewer(self):
+    @pytest.mark.parametrize('configured', [None, ''])
+    def test_unset_is_user_unless_unauthenticated(self, configured):
         with mock.patch('sky.skypilot_config.get_nested',
-                        return_value='viewer'):
-            assert rbac.get_default_role() == 'viewer'
+                        return_value=configured):
+            assert rbac.get_default_role() == 'user'
+            assert rbac.get_default_role(authenticated=True) == 'user'
+            assert rbac.get_default_role(authenticated=False) == 'admin'
+
+    @pytest.mark.parametrize('configured,expected', [('admin', 'admin'),
+                                                     ('user', 'user'),
+                                                     ('Viewer', 'viewer')])
+    def test_configured_applies_to_everyone(self, configured, expected):
+        with mock.patch('sky.skypilot_config.get_nested',
+                        return_value=configured):
+            assert rbac.get_default_role(authenticated=True) == expected
+            assert rbac.get_default_role(authenticated=False) == expected
 
 
 class TestSSHNodePoolsBlocklist:

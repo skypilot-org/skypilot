@@ -457,6 +457,8 @@ def add_or_update_user(
                 update_values = {user_table.c.name: user.name}
                 if user.password:
                     update_values[user_table.c.password] = user.password
+                # Never clear a type: NULL marks a user who was never
+                # authenticated (see `permission.seed_new_user_role`).
                 if user.user_type:
                     update_values[user_table.c.type] = user.user_type
 
@@ -518,6 +520,7 @@ def add_or_update_user(
                 }
             else:
                 set_ = {user_table.c.name: user.name}
+            # Never clear a type; see the SQLite branch.
             if user.user_type:
                 set_[user_table.c.type] = user.user_type
             upsert_stmnt = insert_stmnt.on_conflict_do_update(

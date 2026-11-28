@@ -174,9 +174,9 @@ class TestCreateServiceAccountTokenRole:
 
 
 class TestDefaultRoleClamp:
-    """`rbac.default_role` falls back to admin; an SA can't out-rank its creator.
+    """`rbac.default_role` may be admin; an SA can't out-rank its creator.
 
-    Reachable whenever an operator leaves `rbac.default_role` unset and demotes
+    Reachable whenever an operator sets `rbac.default_role: admin` and demotes
     individual people -- omitting `role` would otherwise hand a non-admin an
     admin-scoped token.
     """
@@ -220,6 +220,17 @@ class TestDefaultRoleClamp:
                                                     caller_roles, expected):
         assert self._create_as(mock_perm, mock_token_service, mock_gus,
                                caller_roles) == expected
+
+    @mock.patch('sky.users.rbac.configured_default_role', return_value=None)
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.token_service')
+    @mock.patch('sky.users.server.permission')
+    def test_unset_default_is_user_even_for_an_admin(self, mock_perm,
+                                                     mock_token_service,
+                                                     mock_gus, _mock_unset):
+        """With `rbac.default_role` unset, a new SA is not an admin."""
+        assert self._create_as(mock_perm, mock_token_service, mock_gus,
+                               ['admin']) == 'user'
 
     @mock.patch('sky.users.rbac.get_default_role', return_value='admin')
     @mock.patch('sky.users.server.global_user_state')

@@ -2927,8 +2927,8 @@ function ServiceAccountTokensView({
         }
         const data = await response.json();
         if (!cancelled) {
-          // `rbac.default_role` falls back to admin, which a non-admin
-          // cannot grant, so start them on user instead.
+          // `rbac.default_role` may be admin, which a non-admin cannot
+          // grant, so start them on user instead.
           const grantable = grantableServiceAccountRoles(userRoleCache?.role);
           const role = grantable.includes(data.role) ? data.role : 'user';
           setNewToken((prev) => (prev.role ? prev : { ...prev, role }));

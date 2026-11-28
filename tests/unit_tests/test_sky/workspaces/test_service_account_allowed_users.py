@@ -8,8 +8,8 @@ by the ``sa-...`` id -- and the resolver maps them to their user id so
 the casbin workspace policy grants them access.
 
 IMPORTANT (the gotcha these tests pin down): a freshly-created service
-account is assigned the *default* role, which is ``admin`` unless the
-operator overrides ``rbac.default_role``. Admins bypass the workspace
+account is assigned the *default* role, which may be ``admin`` if the
+operator sets ``rbac.default_role``. Admins bypass the workspace
 permission check entirely, so listing an admin service account in
 ``allowed_users`` has no scoping effect -- it can already reach every
 workspace. To actually scope a service account to specific workspaces it

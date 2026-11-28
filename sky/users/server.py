@@ -86,9 +86,9 @@ def _check_role_grantable(role: str, caller_user_id: str) -> None:
 def _clamped_default_role(caller_user_id: str) -> str:
     """The default role to seed a service account with, capped at the caller's.
 
-    `rbac.default_role` falls back to `admin`, so an operator who leaves it
-    unset while demoting individual people to `user` would otherwise hand a
-    non-admin an admin-scoped token just by omitting `role` -- the same
+    `rbac.default_role` may be `admin`, so an operator who sets it while
+    demoting individual people to `user` would otherwise hand a non-admin an
+    admin-scoped token just by omitting `role` -- the same
     escalation `_check_role_grantable` blocks on the explicit path. A service
     account must not out-rank the identity that created it.
 

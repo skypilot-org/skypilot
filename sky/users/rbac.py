@@ -472,8 +472,8 @@ def outranks(role: str, other: str) -> bool:
             _ROLE_PRECEDENCE.index(least_privileged_role([other])))
 
 
-def get_default_role() -> str:
-    """The role a newly provisioned user is seeded with.
+def configured_default_role() -> Optional[str]:
+    """`rbac.default_role`, lowercased, or None when unset.
 
     Lowercased: the schema validates `default_role` with
     `case_insensitive_enum`, which validates without normalizing, so
@@ -483,9 +483,25 @@ def get_default_role() -> str:
     """
     configured = skypilot_config.get_nested(('rbac', 'default_role'),
                                             default_value=None)
-    # `or` rather than get_nested's default: an explicit `default_role:` with no
-    # value parses as None, and this runs on the login path.
-    return (configured or RoleName.ADMIN.value).lower()
+    # Falsy rather than get_nested's default: an explicit `default_role:` with
+    # no value parses as None, and this runs on the login path.
+    return configured.lower() if configured else None
+
+
+def get_default_role(authenticated: bool = True) -> str:
+    """The role a newly provisioned user is seeded with.
+
+    The configured `rbac.default_role` if set. Otherwise `user` for an
+    identity the server authenticated, and `admin` for one it did not: a
+    request without authentication (a local API server, a controller's own
+    API server) runs as its single user, which must keep admin-only actions.
+    """
+    configured = configured_default_role()
+    if configured is not None:
+        return configured
+    if authenticated:
+        return RoleName.USER.value
+    return RoleName.ADMIN.value
 
 
 def _get_config_roles() -> Dict[str, Any]:
