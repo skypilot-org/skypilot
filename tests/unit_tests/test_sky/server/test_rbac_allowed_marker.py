@@ -3,6 +3,7 @@
 import unittest.mock as mock
 
 import fastapi
+from fastapi import testclient
 import pytest
 
 from sky import models
@@ -65,3 +66,41 @@ async def test_allow_does_not_carry_over_to_another_path_or_method():
 
 def test_nothing_recorded_by_default():
     assert not middleware_utils.rbac_allowed(_request(), 'u-1')
+
+
+@pytest.mark.parametrize('path', ['/', '/dashboard', '/dashboard/'])
+def test_dashboard_entry_paths_redirect_and_render_for_restricted_user(
+        path, tmp_path, monkeypatch):
+    dashboard_dir = tmp_path / 'dashboard'
+    dashboard_dir.mkdir()
+    (dashboard_dir / 'index.html').write_text('<html>SkyPilot dashboard</html>')
+    monkeypatch.setattr(server.server_constants, 'DASHBOARD_DIR',
+                        str(dashboard_dir))
+    app = fastapi.FastAPI()
+    app.add_api_route('/', server.root)
+    app.add_api_route('/dashboard/{full_path:path}', server.serve_dashboard)
+    app.add_middleware(server.RBACMiddleware)
+
+    @app.middleware('http')
+    async def authenticate(request, call_next):
+        request.state.auth_user = models.User(id='u-1', name='viewer')
+        return await call_next(request)
+
+    with mock.patch('sky.users.permission.permission_service') as perm:
+        perm.check_endpoint_permission.return_value = True
+        with testclient.TestClient(app) as client:
+            response = client.get(path)
+        assert response.status_code == 200
+        assert 'SkyPilot dashboard' in response.text
+        assert response.url.path == '/dashboard/'
+        assert [r.status_code for r in response.history
+               ] == ([] if path == '/dashboard/' else [307])
+        perm.check_endpoint_permission.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'path', ['/dashboard_config', '/dashboard-other', '/users', '/status'])
+async def test_dashboard_exemption_does_not_bypass_api_permissions(path):
+    response = await _dispatch(_request(path=path), blocked=True)
+    assert response.status_code == 403
